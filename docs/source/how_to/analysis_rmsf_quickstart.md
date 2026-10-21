@@ -1,12 +1,17 @@
-# RMSF Analysis: Quick Start
+# Run RMSF analysis
 
-Run RMSF (Root Mean Square Fluctuation) in minutes and compare flexibility
-across conditions.
+Measure three quantities for each residue of each replicate:
 
-```{note}
-Need field-by-field settings, output schemas, plot options, or troubleshooting?
-Use {doc}`../reference/analysis_rmsf_reference`.
-```
+- the RMSF: how much the residue fluctuates about its mean position;
+- the offset: how far its mean position is from a reference structure;
+- `rmsd_per_residue`: its root mean square deviation from the reference over
+  the frames.
+
+Then compare the conditions, with one value per replicate.
+
+For what RMSF can and cannot show, see
+{doc}`../explanation/analysis_rmsf_best_practices`. For the choice of
+reference, see {doc}`../explanation/analysis_reference_selection`.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -21,205 +26,204 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-## TL;DR
+## What is measured
+
+PolyzyMD superposes each production frame on a reference structure by the
+`alignment_selection` atoms. Then it measures these quantities for each atom
+of `selection`:
+
+| Quantity | Meaning | GROMACS equivalent |
+|---|---|---|
+| `rmsf` | The fluctuation about the mean position of the atom | `gmx rmsf -o` |
+| `offset` | The distance of the mean position from the reference | none |
+| `rmsd_per_residue` | The root mean square over frames of the distance from the reference | `gmx rmsf -od` |
+
+For each residue, `rmsd_per_residue² = rmsf² + offset²`. PolyzyMD gives each
+atom of a residue equal weight. GROMACS weights atoms by mass. The two give the
+same result for Cα-only selections. The values agree with `gmx rmsf` to the
+4 decimals in nm that GROMACS writes. See
+{doc}`../explanation/analysis_rmsf_verification`.
+
+`rmsd_per_residue` is one number per residue. `rmsd` is one number per frame.
+For the definitions, and for which quantity answers which question, see
+{ref}`Fluctuation, offset and deviation <rmsf-fluctuation-offset-deviation>`.
+
+## From the command line
+
+In a {term}`study`, give the study folder. The study names the conditions,
+the control and the equilibration window. The results go to
+`<study>/results/rmsf/`:
 
 ```bash
-# Run RMSF for conditions in comparison.yaml
-polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
-
-# Run all enabled analyses
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Force recompute and write machine-readable output
-polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns --recompute --format json
+polyzymd analyze rmsf --study my_study
 ```
 
-## Prerequisites
-
-Before you run RMSF, confirm you have:
-
-1. Completed production trajectories for at least one replicate
-2. A `comparison.yaml` with one or more conditions
-3. The original simulation `config.yaml` paths still valid
-
-Quick check:
+For a quick look without a study, give the `config.yaml` of each condition
+instead. The results then go to the current folder:
 
 ```bash
-ls $(polyzymd info -c config.yaml --scratch-dir)/production_*/
+polyzymd analyze rmsf -c noPoly/config.yaml -c SBMA50/config.yaml \
+  --label "No polymer" --label "SBMA 50%" --eq 200ns
 ```
 
-## What RMSF gives you
+The first `-c` is the control. One pass over each replicate gives all three
+quantities. By default, `polyzymd analyze rmsf` reports the core RMSF.
+`polyzymd analyze rmsd_per_residue` makes the same measurement, and by default
+it reports the core `rmsd_per_residue`. To report a different result, use
+`--run`:
 
-RMSF reports per-residue flexibility plus condition-level summary statistics.
+| `--run` | One value per replicate |
+|---|---|
+| `core_rmsf`, `core_offset`, `core_rmsd_per_residue` | Root of the mean square over the core residues (below) |
+| `<region>_rmsf`, `<region>_offset`, `<region>_rmsd_per_residue` | The same over one named region |
+| `mean_rmsf`, `mean_offset`, `mean_rmsd_per_residue` | Plain mean over every selected residue |
+| `rmsf`, `offset`, `rmsd_per_residue` | The per-residue profile, compared residue by residue |
 
-| Output | Use |
-|--------|-----|
-| Mean RMSF ± SEM | Compare overall flexibility between conditions |
-| Per-residue RMSF profile | Find flexible loops and rigid core regions |
-| Pairwise statistics | Quantify condition differences |
-| Ranking | Order conditions by stability (lower RMSF first) |
+PolyzyMD compares the results in two ways:
 
-## Set up `comparison.yaml`
+- A one-value result: PolyzyMD compares each condition with the control by
+  Welch's t test. It corrects the p values over the compared conditions with
+  the {term}`Benjamini-Hochberg` method.
+- A profile: PolyzyMD compares each residue. The correction family is every
+  residue of every compared condition.
 
-Use `plugins.rmsf` for RMSF-specific controls.
+For each condition, the text report gives the number of residues that are
+significantly lower and higher than in the control, and lists them. The JSON
+report keeps every per-residue row.
 
-```yaml
-# comparison.yaml
-name: "rmsf_quickstart"
-control: "No Polymer"
+Change what is measured and what it is measured against with `--set`:
 
-conditions:
-  - label: "No Polymer"
-    config: "configs/no_polymer.yaml"
-    replicates: [1, 2, 3]
-  - label: "With Polymer"
-    config: "configs/with_polymer.yaml"
-    replicates: [1, 2, 3]
+| Setting | Default | Meaning |
+|---|---|---|
+| `selection` | `protein and name CA` | Atoms measured |
+| `alignment_selection` | `protein and name CA` | Atoms superposed on the reference |
+| `reference_mode` | `external` if `reference_file` is set, else `centroid` | `centroid`, `average`, `frame` or `external` |
+| `reference_frame` | `1` | Production frame used by `frame` mode, counted from 1 after the equilibration window |
+| `reference_file` | none | Structure file used by `external` mode |
+| `core` | all selected residues | MDAnalysis selection of the residues combined into the `core_*` values |
+| `regions` | none | Mapping of region names to selections, each combined into `<region>_*` values |
+| `highlight_residues` | none | Residue IDs marked on the profile figures |
 
-defaults:
-  equilibration_time: "10ns"
-
-plugins:
-  rmsf:
-    selection: "protein and name CA"
-    reference_mode: "centroid"
-```
-
-## Run RMSF
+For example, to measure against a crystal structure, with the lid as its own
+region and the termini left out of the core:
 
 ```bash
-# RMSF only
-polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
-
-# RMSF + all other enabled plugins
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Generate plots in the same run
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns --plot
+polyzymd analyze rmsd_per_residue -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
+  --set reference_file=structures/1ISP.pdb \
+  --set "core=resid 10:170" \
+  --set "regions={lid: resid 70-90, termini: resid 1-9 or resid 171-181}"
 ```
 
-## Compare conditions
+Rules for `core` and `regions`:
 
-By default, `compare run rmsf` produces:
+- PolyzyMD intersects `core` and each region with `selection`.
+- Each must select at least one residue.
+- Each must select the same residues in every replicate.
+- `core` and `mean` cannot be region names.
 
-- Condition means with SEM
-- Pairwise tests and effect sizes
-- Ranking (lowest RMSF = most stable)
+The JSON report records the residues of the core and of each region, the
+reference mode used and every setting under `provenance.settings`.
 
-Example:
-
-```bash
-polyzymd compare run rmsf -f comparison.yaml --format table
+```{note}
+PolyzyMD superposes the frames by `alignment_selection`, not by the core. To
+measure motion within the core, fit on the core atoms. For the core above, add
+`--set "alignment_selection=name CA and resid 10:170"`. If you do not, a mobile
+terminus in the fit adds apparent motion to the core.
 ```
 
-For broader multi-plugin workflows, see {doc}`analysis_compare_conditions`.
-
-## Comparing Two Conditions
-
-Use this minimal two-condition template:
-
-```yaml
-name: "polymer_stabilization"
-control: "No Polymer"
-
-conditions:
-  - label: "No Polymer"
-    config: "../no_polymer/config.yaml"
-    replicates: [1, 2, 3]
-  - label: "With Polymer"
-    config: "../with_polymer/config.yaml"
-    replicates: [1, 2, 3]
-
-plugins:
-  rmsf:
-    selection: "protein and name CA"
-    reference_mode: "centroid"
+```{note}
+In `external` mode, the structure file must contain the atoms of `selection`
+and `alignment_selection`. PolyzyMD stops with an error if the atom counts of
+the trajectory and the file differ. PolyzyMD records the SHA-256 of the file
+with the result. If you edit the file, the next command measures the
+replicates again.
 ```
 
-Then run:
-
-```bash
-polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
+```{note}
+`rmsf` is always the fluctuation about the mean position of each atom. The
+deviation of a residue from a reference structure is `rmsd_per_residue`.
+`reference_frame` counts production frames from 1, after the equilibration
+window.
 ```
 
-## Common task patterns
+Useful options:
 
-### Change equilibration cutoff
+- `--format json` prints the full report.
+- `--replicates 1-3` uses only some replicates.
+- `--recompute` ignores stored results.
 
-```bash
-polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
-```
+For the line format and the verdict words, see
+{ref}`polyzymd analyze <cli-analyze>`.
 
-### Restrict analysis to a region
+## Figures
 
-```yaml
-plugins:
-  rmsf:
-    selection: "protein and name CA and resid 50-150"
-```
+`polyzymd analyze rmsf` and `rmsd_per_residue` write these figures to
+`<output-dir>/figures/<analysis>/`. Add `--no-plots` to skip them.
 
-### Trim flexible termini
+| Figure | What it shows |
+|---|---|
+| `rmsf_profile`, `offset_profile`, `rmsd_per_residue_profile` | The value of each replicate at each residue as a thin line, and the mean of each condition with its 95 % interval. The `highlight_residues` are marked |
+| `rms_decomposition` | One panel per condition, with its mean `rmsd_per_residue`, RMSF and offset at every residue |
+| `rmsf_difference`, `offset_difference`, `rmsd_per_residue_difference` | With several conditions, one panel per condition. Each panel shows the difference from the control at each residue, its 95 % interval, and a point on each significant residue |
+| `rmsf_comparison` | The three core values of every condition, with every replicate value |
 
-```yaml
-plugins:
-  rmsf:
-    selection: "protein and name CA and resid 5:175"
-```
+## From Python
 
-### Use an external reference structure
+`rms_decomposition` returns six rows per replicate. `RMS_PARTS` and `MS_PARTS`
+hold the names of the rows:
 
-```yaml
-plugins:
-  rmsf:
-    selection: "protein and name CA"
-    reference_mode: "external"
-    reference_file: "/path/to/crystal_structure.pdb"
-```
+- `rmsd_per_residue`, `rmsf` and `offset`, in Å;
+- `ms_deviation`, `msf` and `ms_offset`, in Å². Each is the mean over the atoms
+  of the residue of the squared deviation, RMSF or offset.
 
-### Re-run from scratch
-
-```bash
-polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns --recompute
-```
-
-### Save results for scripting
-
-```bash
-polyzymd compare run rmsf -f comparison.yaml --format json -o rmsf_result.json
-```
-
-## Python API (programmatic run)
+`parts=` gives each row its name, so `rows["rmsf"]` is one result.
 
 ```python
-from polyzymd.analyses.discovery import get_analysis
-from polyzymd.analyses.orchestrator import run_comparison
-from polyzymd.config.comparison import ComparisonConfig
+import polyzymd as pz
+from polyzymd.analyses.functions import MS_PARTS, RMS_PARTS, rms_decomposition
 
-config = ComparisonConfig.from_yaml("comparison.yaml")
-analysis = get_analysis("rmsf")()
-
-pipeline_result = run_comparison(
-    analysis,
-    config,
-    equilibration="10ns",
+study = pz.Study.from_configs(
+    {"No polymer": "noPoly/config.yaml", "SBMA 50%": "SBMA50/config.yaml"},
+    equilibration="200ns",
 )
+ca = "protein and name CA"
+rows = study.per_replicate(
+    rms_decomposition,
+    pz.select(ca),
+    pz.select(ca),
+    pz.reference("external", ca, file="structures/1ISP.pdb", alignment=ca),
+    unit="A",
+    labels=lambda u: u.select_atoms(ca).residues.resids,
+    parts=RMS_PARTS + MS_PARTS,
+    bounds=(0.0, None),
+)
+profile = rows["rmsf"]                    # one value per residue per replicate
+print(profile.compare(control="No polymer").to_agent_text())
 
-result = pipeline_result["comparison"]
-print(result.ranking)
-print(pipeline_result["comparison_path"])
+mean_rmsf = profile.over_labels("mean")   # plain mean over the residues
+lid = [r for r in profile.labels if 70 <= r <= 90]
+lid_rmsf = rows["msf"].over_labels(lambda v: float(v.mean() ** 0.5), "lid_rmsf", lid)
 ```
 
-## Where to find details
+A core or region value is the square root of the mean of a mean-square row
+over its residues. This keeps `rmsd_per_residue² = rmsf² + offset²` true for
+the whole set. `over_labels(how, metric, labels)` turns the profile of each
+replicate into one number. It uses every label, or only the labels you give.
+`polyzymd.analyses.functions.rmsf` and
+`polyzymd.analyses.functions.rmsd_per_residue` each return one profile.
 
-- Full settings tables: {doc}`../reference/analysis_rmsf_reference`
-- Output file tree and JSON schemas: {doc}`../reference/analysis_rmsf_reference`
-- Plot types and plot settings: {doc}`../reference/analysis_rmsf_reference`
-- CLI options and troubleshooting: {doc}`../reference/analysis_rmsf_reference`
-- Statistical interpretation: {doc}`../explanation/analysis_rmsf_best_practices`
-- Reference mode guidance: {doc}`../explanation/analysis_reference_selection`
+## Before interpreting the numbers
+
+A lower RMSF shows that a region moves less. It does not show that the protein
+is more stable. A replicate that partly unfolds contains two states. Its RMSF
+then depends on when the unfolding happened, not only on equilibrium
+fluctuation. For which claim each quantity supports, and how to choose the
+core, see {doc}`../explanation/analysis_rmsf_best_practices`.
 
 ## Next steps
 
-- Compare multiple plugins together: {doc}`analysis_compare_conditions`
-- Run RMSD alongside RMSF: {doc}`analysis_rmsd_quickstart`
-- Add distance checks: {doc}`analysis_distances_quickstart`
+- **Understand RMSF interpretation**: {doc}`../explanation/analysis_rmsf_best_practices`
+- **Choose a reference**: {doc}`../explanation/analysis_reference_selection`
+- **RMSD analysis**: {doc}`analysis_rmsd_quickstart`
+- **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
+- **Distance analysis**: {doc}`analysis_distances_quickstart`

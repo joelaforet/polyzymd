@@ -38,13 +38,13 @@ polymers: null  # No polymers in this simulation
 solvent:
   primary:
     type: "water"
-    model: "tip3p"  # Options: tip3p, spce, tip4pew, opc
+    model: "tip3p"  # The only supported water model
   
   co_solvents: []  # No co-solvents
   
   ions:
     neutralize: true  # Add counter-ions to neutralize charge
-    nacl_concentration: 0.1  # 100 mM NaCl-equivalent final ion concentration
+    nacl_concentration: 0.1  # 100 mM of NaCl pairs; neutralizing ions are added on top
   
   box:
     padding: 2.0  # nm from solute to box edge (2.0 recommended for PACKMOL convergence)
@@ -58,7 +58,7 @@ solvent:
 # Flat-bottom distance restraint to keep substrate near active site
 #
 # Selection syntax supports:
-#   resid N      - Residue number (1-indexed, matches PDB/PyMOL)
+#   resid N      - Residue number in the built topology (protein renumbered from 1)
 #   resname XXX  - Residue name (e.g., RBY, SER, LIG)
 #   name XXX     - Atom name (e.g., OG, CA, C1)
 #   index N      - Atom index (0-indexed, OpenMM internal)
@@ -148,11 +148,6 @@ output:
   
   # Naming template for run directories
   naming_template: "{enzyme}_{substrate}_{temperature}K_run{replicate}"
-  
-  # Output options
-  save_checkpoint: true
-  save_state_data: true
-  trajectory_format: "dcd"
 
 # ============================================================================
 # Force Field Selection

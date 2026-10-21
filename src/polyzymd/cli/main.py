@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -23,8 +24,17 @@ import yaml
 from pydantic import ValidationError
 
 from polyzymd.cli.colors import colored_echo, echo_logo, setup_colored_logging
-from polyzymd.cli.env_warnings import warn_if_wrong_pixi_env
-from polyzymd.core.branding import prepend_file_header
+from polyzymd.cli.config_errors import (
+    CONFIG_LOAD_ERRORS,
+    config_load_lines,
+    load_config_or_exit,
+    report_config_error,
+)
+from polyzymd.cli.env_warnings import (
+    polyzymd_import_path,
+    warn_if_user_site_install,
+    warn_if_wrong_pixi_env,
+)
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
 # time.  setup_colored_logging() replaces this handler when the CLI runs.
@@ -36,6 +46,15 @@ LOGGER = logging.getLogger("polyzymd")
 BUILD_PIXI_ENVS = ("build",)
 SIM_PIXI_ENVS = ("sim-cuda-12-0", "sim-cuda-12-4", "sim-cuda-12-6")
 KNOWN_SPLIT_PIXI_ENVS = (*BUILD_PIXI_ENVS, *SIM_PIXI_ENVS, "analysis", "test", "docs")
+
+
+def _shown(path: object) -> str:
+    """Return ``path`` without ``..`` parts, for printing.
+
+    The config keeps its output paths as written (``../../runs/...``), so
+    its hash does not change; only the printed path is shortened.
+    """
+    return os.path.normpath(str(path))
 
 
 def _echo_branding() -> None:
@@ -256,38 +275,6 @@ def _warn_for_submission_pixi_env(
     )
 
 
-def _generate_system_prefix(sim_config: object) -> str:
-    """Generate a system filename prefix from simulation config.
-
-    Replicates ``GromacsExporter._generate_prefix`` so CLI checks use the
-    same naming convention as build and submit workflows.
-
-    Parameters
-    ----------
-    sim_config : object
-        Simulation configuration object.
-
-    Returns
-    -------
-    str
-        System prefix (e.g. ``"CALB_SBMA-EGMA"``).
-    """
-    parts: list[str] = []
-
-    enzyme = getattr(sim_config, "enzyme", None)
-    enzyme_name = getattr(enzyme, "name", None)
-    if isinstance(enzyme_name, str) and enzyme_name:
-        parts.append(enzyme_name)
-
-    polymers = getattr(sim_config, "polymers", None)
-    polymers_enabled = getattr(polymers, "enabled", False)
-    polymer_prefix = getattr(polymers, "type_prefix", None)
-    if isinstance(polymers_enabled, bool) and polymers_enabled and isinstance(polymer_prefix, str):
-        parts.append(polymer_prefix)
-
-    return "_".join(parts) if parts else "system"
-
-
 def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     """Print missing referenced-file warnings for a loaded config.
 
@@ -317,6 +304,63 @@ def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     return True
 
 
+def _echo_box_plan(sim_config: "SimulationConfig", *, phase: str) -> None:
+    """Print the periodic box the build will make, sized from the enzyme PDB."""
+    import numpy as np
+
+    from polyzymd.builders.solvent import SolventBuilder
+    from polyzymd.utils.boxvectors import describe_box_plan, plan_box
+
+    box = sim_config.solvent.box
+    padding = box.padding
+    if sim_config.polymers and sim_config.polymers.enabled:
+        padding += sim_config.polymers.packing.padding
+    try:
+        with open(sim_config.enzyme.pdb_path) as stream:
+            positions = [
+                [float(line[30:38]), float(line[38:46]), float(line[46:54])]
+                for line in stream
+                if line.startswith(("ATOM", "HETATM"))
+            ]
+        plan = plan_box(
+            np.asarray(positions) / 10.0,
+            SolventBuilder._get_box_shape_matrix(box.shape.value),
+            padding_nm=padding,
+            margin_nm=box.tolerance / 10.0,
+        )
+    except Exception as exc:  # a diagnostic never stops the dry run
+        colored_echo(f"    Box: not estimated ({exc})", phase=phase, level=logging.WARNING)
+        return
+    source = " (from the enzyme PDB only; the substrate is not included)"
+    colored_echo(
+        f"    Box ({box.shape.value}): {describe_box_plan(plan)}"
+        f"{source if sim_config.substrate else ''}",
+        phase=phase,
+    )
+
+
+def _check_time_limit(value: str | None) -> str | None:
+    """Refuse a ``--time-limit`` SLURM does not read (minutes, M:SS, H:MM:SS, D-H[:MM[:SS]])."""
+    import re
+
+    if value is not None and not re.fullmatch(r"\d+(:\d{2}){0,2}|\d+-\d+(:\d{2}){0,2}", value):
+        raise click.BadParameter(
+            f"{value!r} is not a SLURM time; give minutes, M:SS, H:MM:SS or D-H:MM:SS "
+            "(for example 23:59:00)."
+        )
+    return value
+
+
+def _remove_empty_run_dir(run_dir: Path) -> None:
+    """Remove a run folder that holds nothing but its replicate lock file."""
+    try:
+        if {path.name for path in run_dir.iterdir()} <= {".polyzymd.lock"}:
+            (run_dir / ".polyzymd.lock").unlink(missing_ok=True)
+            run_dir.rmdir()
+    except OSError:
+        pass
+
+
 @click.group()
 @click.version_option(prog_name="polyzymd")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
@@ -331,13 +375,14 @@ def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     help="Disable colored output (also respects NO_COLOR env var)",
 )
 def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
-    """PolyzyMD: MD simulations for enzyme-polymer systems.
+    """PolyzyMD: MD simulations of proteins with polymers, ligands and co-solvents.
 
     A toolkit for building, running, and analyzing molecular dynamics
-    simulations of enzymes with co-polymers.
+    simulations of proteins alone or with polymers, ligands and co-solvents.
     """
     # Replace the bootstrap handler with the colored formatter
     setup_colored_logging(verbose=verbose, no_color=no_color)
+    warn_if_user_site_install()
 
     if openff_logs:
         enable_openff_logs()
@@ -391,10 +436,10 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     "--format",
     "export_format",
     default=None,
-    type=click.Choice(["gromacs", "lammps", "amber"], case_sensitive=False),
+    type=click.Choice(["gromacs"], case_sensitive=False),
     help=(
-        "Build-only export format: gromacs, lammps (planned), amber (planned). "
-        "Default: OpenMM build artifacts."
+        "Build-only export format: gromacs. Default: the config's engine (GROMACS "
+        "inputs for engine: gromacs, OpenMM build artifacts otherwise)."
     ),
 )
 def build(
@@ -415,7 +460,7 @@ def build(
     ``--format gromacs`` to export core GROMACS handoff files (``.gro``,
     ``.top``, ``.itp``). MDP files and a run script may also be generated as
     convenience defaults, but they are not required to continue outside
-    PolyzyMD. AMBER and LAMMPS export are not yet supported.
+    PolyzyMD.
 
     Use ``run --engine gromacs`` if you want PolyzyMD to build and then
     execute the full local GROMACS workflow. Use ``run --engine openmm`` for
@@ -423,8 +468,8 @@ def build(
     workflows.
 
     The ``--replicates`` option accepts range syntax (for example ``1-3`` or
-    ``1,3,5``). Each replicate is built independently with a different polymer
-    random seed.
+    ``1,3,5``). The replicate number seeds the build (Packmol and polymer
+    draws) and the dynamics of each replicate.
 
     \b
     Export Notes:
@@ -445,8 +490,11 @@ def build(
 
     colored_echo(f"Loading configuration from: {config}", phase="build")
 
+    # A run folder made by a build that then fails is removed if it is still
+    # empty, so a failed build leaves no empty folder behind.
+    new_run_dir: Path | None = None
     try:
-        sim_config = SimulationConfig.from_yaml(config)
+        sim_config = load_config_or_exit(config)
         colored_echo(f"Configuration validated: {sim_config.name}", phase="build")
 
         # Override directories if provided via CLI
@@ -454,6 +502,11 @@ def build(
             sim_config.output.scratch_directory = Path(scratch_dir)
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
+
+        # A config for GROMACS builds GROMACS inputs unless --format says otherwise.
+        if export_format is None and sim_config.engine == "gromacs":
+            export_format = "gromacs"
+        sim_config.require_buildable(export_format or "openmm")
 
         if dry_run:
             colored_echo("=" * 60, phase="build")
@@ -471,7 +524,13 @@ def build(
             colored_echo("Replicates:", phase="build")
             colored_echo(f"  Count: {len(replicate_list)}", phase="build")
             colored_echo(f"  IDs: {replicate_list}", phase="build")
-            colored_echo(f"  Polymer seeds: {replicate_list} (one per replicate)", phase="build")
+            polymer = bool(sim_config.polymers and sim_config.polymers.enabled)
+            what = "Packmol and polymer draws" if polymer else "Packmol"
+            colored_echo(
+                f"  Seeds: the replicate number seeds {what}, the velocities"
+                " and the thermostat noise",
+                phase="build",
+            )
             colored_echo(phase="build")
 
             colored_echo("System Components:", phase="build")
@@ -493,14 +552,28 @@ def build(
                         f"    Monomer: {monomer.label} ({monomer.probability * 100:.0f}%)",
                         phase="build",
                     )
-            else:
-                colored_echo("  Chain C (Polymer): none (no polymer)", phase="build")
-            colored_echo(f"  Chain D+ (Solvent): {sim_config.solvent.primary.model}", phase="build")
-            colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
             colored_echo(
-                f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M",
+                f"  Chain D+ (Solvent): {sim_config.solvent.primary.model.name}", phase="build"
+            )
+            colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
+            _echo_box_plan(sim_config, phase="build")
+            colored_echo(
+                f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M, "
+                f"neutralize: {sim_config.solvent.ions.neutralize}",
                 phase="build",
             )
+            for cs in sim_config.solvent.co_solvents:
+                if cs.count is not None:
+                    amount = f"{cs.count} molecules"
+                elif cs.concentration is not None:
+                    amount = f"{cs.concentration} M"
+                else:
+                    amount = f"{cs.mole_fraction * 100:g} mol%"
+                colored_echo(
+                    f"    Co-solvent {cs.name} ({cs.residue_name}): {amount}, "
+                    f"SMILES {cs.smiles}, charges {cs.charge_method.value}",
+                    phase="build",
+                )
             colored_echo(phase="build")
 
             colored_echo("Parameterization Plan:", phase="build")
@@ -508,7 +581,7 @@ def build(
             colored_echo(
                 f"  Small molecule FF: {sim_config.force_field.small_molecule}", phase="build"
             )
-            colored_echo(f"  Water model: {sim_config.solvent.primary.model}", phase="build")
+            colored_echo(f"  Water model: {sim_config.solvent.primary.model.name}", phase="build")
             colored_echo(phase="build")
 
             colored_echo("Thermodynamics:", phase="build")
@@ -533,7 +606,7 @@ def build(
                         ramp_info = ""
                     colored_echo(
                         f"    Stage {i}: {stage.resolved_duration:.6f} ns, "
-                        f"{stage.ensemble}{ramp_info}",
+                        f"{stage.ensemble.value}{ramp_info}",
                         phase="build",
                     )
             colored_echo(
@@ -547,9 +620,11 @@ def build(
             colored_echo(phase="build")
 
             colored_echo("Directories:", phase="build")
-            colored_echo(f"  Projects: {sim_config.output.projects_directory}", phase="build")
             colored_echo(
-                f"  Scratch: {sim_config.output.effective_scratch_directory}", phase="build"
+                f"  Projects: {_shown(sim_config.output.projects_directory)}", phase="build"
+            )
+            colored_echo(
+                f"  Scratch: {_shown(sim_config.output.effective_scratch_directory)}", phase="build"
             )
             colored_echo(phase="build")
 
@@ -557,10 +632,10 @@ def build(
             for rep in replicate_list:
                 working_dir = sim_config.get_working_directory(rep)
                 colored_echo(f"  Replicate {rep}:", phase="build")
-                colored_echo(f"    Working dir: {working_dir}", phase="build")
+                colored_echo(f"    Working dir: {_shown(working_dir)}", phase="build")
                 if export_format:
                     export_dir = sim_config.get_working_directory(rep) / export_format
-                    colored_echo(f"    Export dir:  {export_dir}", phase="build")
+                    colored_echo(f"    Export dir:  {_shown(export_dir)}", phase="build")
             colored_echo(phase="build")
 
             if export_format:
@@ -586,11 +661,6 @@ def build(
                     colored_echo(
                         "    - Optional run_*_gromacs.sh (convenience script)", phase="build"
                     )
-                elif export_format in ("lammps", "amber"):
-                    colored_echo(
-                        f"    ({export_format.upper()} export is not yet supported)",
-                        phase="build",
-                    )
             else:
                 colored_echo("Files to Generate (OpenMM):", phase="build")
                 colored_echo("  Per replicate:", phase="build")
@@ -612,12 +682,7 @@ def build(
             has_reference_warnings = _emit_reference_warnings(sim_config, phase="build")
 
             colored_echo("=" * 60, phase="build")
-            if export_format in ("lammps", "amber"):
-                colored_echo(
-                    f"Validation passed. {export_format.upper()} export is not yet implemented.",
-                    phase="build",
-                )
-            elif has_reference_warnings:
+            if has_reference_warnings:
                 colored_echo(
                     "Validation passed with referenced-file warnings. Ready to build after fixing references.",
                     phase="build",
@@ -631,6 +696,7 @@ def build(
         for rep in replicate_list:
             colored_echo(f"Building system for replicate {rep}...", phase="build")
             working_dir = sim_config.get_working_directory(rep)
+            made_run_dir = not working_dir.exists()
             from polyzymd.simulation.artifact_integrity import (
                 assert_rebuild_allowed,
                 replicate_lock,
@@ -638,6 +704,7 @@ def build(
 
             build_lock = replicate_lock(working_dir)
             build_lock.__enter__()
+            new_run_dir = working_dir if made_run_dir else None
             assert_rebuild_allowed(working_dir)
             builder = SystemBuilder.from_config(sim_config)
             interchange = builder.build_from_config(
@@ -660,10 +727,20 @@ def build(
                     output_dir=export_dir,
                     fmt=export_format,
                     component_info=builder.get_component_info(),
+                    replicate=rep,
+                )
+                from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
+
+                write_gromacs_build_manifest(
+                    working_dir,
+                    export_dir,
+                    sim_config,
+                    interchange.topology.n_atoms,
+                    builder.build_provenance,
                 )
 
                 colored_echo(f"{export_format.upper()} export successful!", phase="export")
-                colored_echo(f"Output directory: {export_dir}", phase="export")
+                colored_echo(f"Output directory: {_shown(export_dir)}", phase="export")
                 colored_echo("Files generated:", phase="export")
                 colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
                 colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
@@ -685,7 +762,7 @@ def build(
                 )
                 colored_echo(phase="export")
                 colored_echo(
-                    f"To run: cd {export_dir} && ./{export_result['run_script'].name}",
+                    f"To run: polyzymd run -c {config} -r {rep} --engine gromacs",
                     phase="export",
                 )
 
@@ -768,7 +845,7 @@ def build(
                 )
 
                 colored_echo("System built successfully!", phase="build")
-                colored_echo(f"Output directory: {working_dir}", phase="build")
+                colored_echo(f"Output directory: {_shown(working_dir)}", phase="build")
                 colored_echo("Files saved:", phase="build")
                 colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
                 colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
@@ -777,16 +854,14 @@ def build(
                     phase="build",
                 )
                 colored_echo(
-                    "or 'polyzymd run-segment' to run a single segment locally.",
+                    "or 'polyzymd run' to run it on this machine.",
                     phase="build",
                 )
             build_lock.__exit__(None, None, None)
+            new_run_dir = None
 
     except PydanticValidationError as e:
-        colored_echo("Configuration error:", err=True, level=logging.ERROR)
-        for error in e.errors():
-            loc = " → ".join(str(x) for x in error["loc"])
-            colored_echo(f"  {loc}: {error['msg']}", err=True, level=logging.ERROR)
+        report_config_error(e, config)
         sys.exit(1)
 
     except FileNotFoundError as e:
@@ -813,6 +888,10 @@ def build(
 
             traceback.print_exc()
         sys.exit(1)
+
+    finally:
+        if new_run_dir is not None:
+            _remove_empty_run_dir(new_run_dir)
 
 
 # =============================================================================
@@ -856,6 +935,7 @@ def _print_run_dry_run_report(
     colored_echo(f"  Engine: {engine}", phase=phase)
     if engine == "gromacs":
         colored_echo(f"  GROMACS executable: {gmx_path or 'gmx'}", phase=phase)
+    _echo_box_plan(sim_config, phase=phase)
     colored_echo(phase=phase)
 
     colored_echo("Replicates:", phase=phase)
@@ -867,10 +947,10 @@ def _print_run_dry_run_report(
     for rep in replicate_list:
         working_dir = sim_config.get_working_directory(rep)
         colored_echo(f"  Replicate {rep}:", phase=phase)
-        colored_echo(f"    Working dir: {working_dir}", phase=phase)
+        colored_echo(f"    Working dir: {_shown(working_dir)}", phase=phase)
         if engine == "gromacs":
             gromacs_dir = sim_config.get_working_directory(rep) / "gromacs"
-            colored_echo(f"    GROMACS dir: {gromacs_dir}", phase=phase)
+            colored_echo(f"    GROMACS dir: {_shown(gromacs_dir)}", phase=phase)
         else:
             colored_echo(
                 "    Workflow: build -> minimize -> equilibrate -> production", phase=phase
@@ -925,9 +1005,9 @@ def _print_run_dry_run_report(
 )
 @click.option(
     "--engine",
-    required=True,
+    default=None,
     type=click.Choice(["gromacs", "openmm"], case_sensitive=False),
-    help="Simulation engine to run locally",
+    help="Simulation engine to run locally. Default: the config's engine.",
 )
 @click.option(
     "--dry-run",
@@ -940,13 +1020,15 @@ def run(
     scratch_dir: str | None,
     projects_dir: str | None,
     gmx_path: str | None,
-    engine: str,
+    engine: str | None,
     dry_run: bool,
 ) -> None:
     """Build and run a simulation locally.
 
     For each replicate, this command builds the system and executes the full
-    local simulation workflow using the selected engine.
+    local simulation workflow using the selected engine. It reuses the build
+    of an earlier ``polyzymd build`` when one exists for the config, and logs
+    which build it uses.
 
     Use ``--dry-run`` to validate the configuration and preview planned output
     without building or running.
@@ -957,6 +1039,13 @@ def run(
         - ``--gmx-path`` is valid only with ``--engine gromacs``
         - ``--dry-run`` validates and previews without writing files
     """
+    if engine is None:
+        from polyzymd.config.schema import SimulationConfig
+
+        try:
+            engine = SimulationConfig.from_yaml(config).engine
+        except Exception:  # noqa: BLE001 - the full load below reports the problem
+            engine = "openmm"
     engine = engine.lower()
     if engine == "openmm":
         warn_if_wrong_pixi_env(
@@ -983,9 +1072,10 @@ def run(
     colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
     try:
-        sim_config = SimulationConfig.from_yaml(config)
+        sim_config = load_config_or_exit(config)
         colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
         colored_echo(f"Engine: {engine}", phase="simulation")
+        sim_config.require_buildable(engine)
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -1017,11 +1107,13 @@ def run(
                     sim_config=sim_config,
                     replicate=rep,
                     gmx_path=resolved_gmx_path,
+                    config_path=str(Path(config).resolve()),
                 )
             else:
                 _run_openmm_impl(
                     sim_config=sim_config,
                     replicate=rep,
+                    config_path=str(Path(config).resolve()),
                 )
 
             succeeded += 1
@@ -1032,10 +1124,7 @@ def run(
             )
 
     except PydanticValidationError as e:
-        colored_echo("Configuration error:", err=True, level=logging.ERROR)
-        for error in e.errors():
-            loc = " → ".join(str(x) for x in error["loc"])
-            colored_echo(f"  {loc}: {error['msg']}", err=True, level=logging.ERROR)
+        report_config_error(e, config)
         sys.exit(1)
 
     except FileNotFoundError as e:
@@ -1064,6 +1153,7 @@ def _run_gromacs_impl(
     sim_config: "SimulationConfig",
     replicate: int,
     gmx_path: str,
+    config_path: str = "",
 ) -> None:
     """Run simulation using GROMACS.
 
@@ -1075,7 +1165,12 @@ def _run_gromacs_impl(
         Replicate number.
     gmx_path : str
         Path to GROMACS executable.
+    config_path : str
+        The config file, recorded in ``gromacs/progress.json``.
     """
+    from datetime import datetime, timezone
+
+    from polyzymd.analyses.shared.gromacs import system_prefix
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
 
@@ -1083,54 +1178,77 @@ def _run_gromacs_impl(
     # Determine output directory for GROMACS files
     gromacs_dir = working_dir / "gromacs"
 
-    click.echo(f"Building system for replicate {replicate}...")
-    builder = SystemBuilder.from_config(sim_config)
-    interchange = builder.build_from_config(
-        config=sim_config,
-        working_dir=working_dir,
-        polymer_seed=replicate,
-    )
+    # Reuse the files of an earlier `polyzymd build --format gromacs`.
+    prefix = system_prefix(sim_config)
+    exported = (f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp")
+    if all((gromacs_dir / name).is_file() for name in exported):
+        colored_echo(f"Reusing the GROMACS files in {gromacs_dir}", phase="export")
+        eq_mdp_names = sorted(path.name for path in gromacs_dir.glob("eq_*.mdp"))
+    else:
+        from polyzymd.simulation.artifact_integrity import assert_rebuild_allowed
 
-    # Get component info for position restraints
-    component_info = builder.get_component_info()
+        assert_rebuild_allowed(working_dir)
+        click.echo(f"Building system for replicate {replicate}...")
+        builder = SystemBuilder.from_config(sim_config)
+        new_run_dir = not working_dir.exists()
+        try:
+            interchange = builder.build_from_config(
+                config=sim_config,
+                working_dir=working_dir,
+                polymer_seed=replicate,
+            )
+        except BaseException:
+            if new_run_dir:
+                _remove_empty_run_dir(working_dir)
+            raise
 
-    # Export to GROMACS format
-    colored_echo("Exporting to GROMACS format...", phase="export")
-    exporter = GromacsExporter(
-        interchange=interchange,
-        config=sim_config,
-        component_info=component_info,
-    )
-    export_result = exporter.export(
-        output_dir=gromacs_dir,
-        gmx_command=gmx_path,
-    )
+        # Get component info for position restraints
+        component_info = builder.get_component_info()
 
-    colored_echo(f"\nGROMACS files exported to: {gromacs_dir}", phase="export")
-    colored_echo("Files generated:", phase="export")
-    colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
-    colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
-    colored_echo("  - *.itp (molecule parameters)", phase="export")
-    colored_echo(f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export")
-    for eq_mdp in export_result["eq_mdps"]:
-        colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
-    colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
-    if export_result.get("posres_defines"):
-        colored_echo("Position restraints added to molecule ITP files:", phase="export")
-        for component, define in export_result["posres_defines"].items():
-            colored_echo(f"  - {component}: #ifdef {define}", phase="export")
-    colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
+        # Export to GROMACS format
+        colored_echo("Exporting to GROMACS format...", phase="export")
+        exporter = GromacsExporter(
+            interchange=interchange,
+            config=sim_config,
+            component_info=component_info,
+            replicate=replicate,
+        )
+        export_result = exporter.export(
+            output_dir=gromacs_dir,
+            gmx_command=gmx_path,
+        )
+        from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
+
+        write_gromacs_build_manifest(
+            working_dir,
+            gromacs_dir,
+            sim_config,
+            interchange.topology.n_atoms,
+            builder.build_provenance,
+        )
+
+        colored_echo(f"\nGROMACS files exported to: {gromacs_dir}", phase="export")
+        colored_echo("Files generated:", phase="export")
+        colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
+        colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
+        colored_echo("  - *.itp (molecule parameters)", phase="export")
+        colored_echo(f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export")
+        for eq_mdp in export_result["eq_mdps"]:
+            colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
+        colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
+        if export_result.get("posres_defines"):
+            colored_echo("Position restraints added to molecule ITP files:", phase="export")
+            for component, define in export_result["posres_defines"].items():
+                colored_echo(f"  - {component}: #ifdef {define}", phase="export")
+        colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
+        eq_mdp_names = [p.name for p in export_result["eq_mdps"]]
+        prefix = export_result["gro"].stem
 
     # Run GROMACS workflow
     colored_echo("\nStarting GROMACS simulation...", phase="export")
     colored_echo(f"Using GROMACS executable: {gmx_path}", phase="export")
 
-    # Get equilibration MDP filenames
-    eq_mdp_names = [p.name for p in export_result["eq_mdps"]]
-
-    # Generate prefix from export result
-    prefix = export_result["gro"].stem  # e.g., "lysozyme_PEG" from "lysozyme_PEG.gro"
-
+    run_start = datetime.now(timezone.utc).replace(microsecond=0)
     try:
         runner = GromacsRunner(
             working_dir=gromacs_dir,
@@ -1140,8 +1258,20 @@ def _run_gromacs_impl(
         )
         runner.run_full_workflow()
 
+        from polyzymd.engines import create_engine
+        from polyzymd.engines.gromacs.progress import record_run_provenance, started_since
+        from polyzymd.simulation.progress import save_progress
+
+        engine = create_engine(sim_config, override="gromacs", defer_binary=True)
+        progress = engine.load_or_scan_progress(gromacs_dir, replicate)
+        progress.config_path = config_path
+        record_run_provenance(
+            started_since([*progress.equilibration_stages, *progress.segments], run_start)
+        )
+        save_progress(gromacs_dir, progress)
+
         colored_echo("\nGROMACS simulation completed successfully!", phase="export")
-        colored_echo(f"Output directory: {gromacs_dir}", phase="export")
+        colored_echo(f"Output directory: {_shown(gromacs_dir)}", phase="export")
 
     except GromacsError as e:
         colored_echo(f"\nGROMACS simulation failed: {e}", err=True, level=logging.ERROR)
@@ -1161,6 +1291,7 @@ def _run_gromacs_impl(
 def _run_openmm_impl(
     sim_config: "SimulationConfig",
     replicate: int,
+    config_path: str = "",
 ) -> None:
     """Build and run a full local OpenMM simulation.
 
@@ -1170,33 +1301,114 @@ def _run_openmm_impl(
         Validated simulation configuration.
     replicate : int
         Replicate number.
+    config_path : str
+        The config file, recorded in ``progress.json``.
     """
-    from polyzymd.simulation.progress import calculate_report_interval
+    from polyzymd.simulation.artifact_integrity import (
+        ArtifactIntegrityError,
+        replicate_lock,
+        validate_build_bundle,
+    )
+    from polyzymd.simulation.progress import (
+        calculate_report_interval,
+        load_or_scan_progress,
+        save_progress,
+    )
+
+    sim_config.require_engine_barostats("openmm")
 
     production = sim_config.simulation_phases.production
     working_dir = sim_config.get_working_directory(replicate)
     total_steps = int(production.duration * 1e6 / production.time_step)
     report_interval = calculate_report_interval(total_steps, production.samples)
 
-    colored_echo(f"Building and running OpenMM in {working_dir}", phase="simulation")
-    _run_initial_segment(
-        sim_config=sim_config,
-        working_dir=working_dir,
-        replicate=replicate,
-        skip_build=False,
-        duration_ns=production.duration,
-        num_samples=production.samples,
-        timestep_fs=production.time_step,
-        report_interval=report_interval,
-        checkpoint_interval_s=production.checkpoint_interval,
-    )
+    # progress.json records each stage and segment, and the trajectory hash of
+    # each finished segment, as a run under SLURM does.
+    working_dir.mkdir(parents=True, exist_ok=True)
+    # The lock tells `status` and later jobs that this run is alive.
+    with replicate_lock(working_dir):
+        save_progress(
+            working_dir,
+            load_or_scan_progress(
+                working_dir=working_dir,
+                config_path=config_path,
+                total_steps=total_steps,
+                total_samples=production.samples,
+                timestep_fs=production.time_step,
+                replicate=replicate,
+            ),
+        )
+
+        # Reuse the build of an earlier `polyzymd build` when it matches this config.
+        try:
+            validate_build_bundle(working_dir, sim_config)
+            reuse_build = True
+        except ArtifactIntegrityError:
+            reuse_build = False
+        if reuse_build:
+            colored_echo(f"Reusing the build in {working_dir}", phase="simulation")
+        else:
+            colored_echo(f"Building the system in {working_dir}", phase="simulation")
+        _run_initial_segment(
+            sim_config=sim_config,
+            working_dir=working_dir,
+            replicate=replicate,
+            skip_build=reuse_build,
+            duration_ns=production.duration,
+            num_samples=production.samples,
+            timestep_fs=production.time_step,
+            report_interval=report_interval,
+            checkpoint_interval_s=production.checkpoint_interval,
+        )
     colored_echo("OpenMM simulation completed successfully.", phase="simulation")
-    colored_echo(f"Output directory: {working_dir}", phase="simulation")
+    colored_echo(f"Output directory: {_shown(working_dir)}", phase="simulation")
 
 
 # =============================================================================
 # Submit Command (SLURM)
 # =============================================================================
+
+
+def _warn_job_hardware(
+    sim_config: "SimulationConfig",
+    engine_name: str,
+    preset: str,
+    partition: str | None,
+    job_gpus: int,
+) -> None:
+    """Print dry-run warnings when the job's hardware does not fit its config.
+
+    Warns when an OpenMM config uses the CPU platform (generated OpenMM job
+    scripts need CUDA), when a job asks for no GPU on the preset's GPU
+    partition, and when a GROMACS config sets neither ``module_load`` nor
+    ``command_prefix`` (a container), so ``gmx`` may be missing on the node.
+    """
+    from polyzymd.workflow.slurm import SlurmConfig
+
+    preset_slurm = SlurmConfig.from_preset(preset)
+    platform = str(getattr(getattr(sim_config, "openmm", None), "platform", "") or "")
+    if engine_name == "openmm" and platform.upper().endswith("CPU"):
+        colored_echo(
+            "  warning: generated OpenMM job scripts need CUDA, but the config sets "
+            "openmm.platform: CPU. Set openmm.platform: CUDA, or run on a CPU with "
+            "`polyzymd run`.",
+            phase="workflow",
+        )
+    elif not job_gpus and not partition and preset_slurm.gpus:
+        colored_echo(
+            f"  warning: the job asks for no GPU, but preset {preset} is set up for GPU "
+            f"jobs on partition {preset_slurm.partition}; pass --partition with a "
+            "partition that has CPU nodes",
+            phase="workflow",
+        )
+    gromacs_cfg = getattr(sim_config, "gromacs", None)
+    if engine_name == "gromacs" and not (gromacs_cfg.module_load or gromacs_cfg.command_prefix):
+        colored_echo(
+            "  warning: neither gromacs.module_load nor gromacs.command_prefix is set; the "
+            "job runs the gmx on the node's PATH and fails if there is none. Set "
+            "gromacs.module_load, or command_prefix for a container.",
+            phase="workflow",
+        )
 
 
 def _print_gromacs_dry_run_details(
@@ -1307,13 +1519,14 @@ def _print_gromacs_dry_run_details(
         colored_echo(f"    Module load:    {gromacs_cfg.module_load}", phase=phase)
     colored_echo(phase=phase)
 
+    _warn_job_hardware(sim_config, "gromacs", preset, partition, effective.gpus)
     colored_echo("  Per-replicate output:", phase=phase)
     for rep in replicate_list:
         working_dir = sim_config.get_working_directory(rep) / "gromacs"
         script_dir = working_dir / "daisy_chain_scripts"
         script_name = f"run_rep{rep}.sh"
         colored_echo(f"    Rep {rep}:", phase=phase)
-        colored_echo(f"      Working dir: {working_dir}", phase=phase)
+        colored_echo(f"      Working dir: {_shown(working_dir)}", phase=phase)
         colored_echo(f"      Script:      {script_dir / script_name}", phase=phase)
 
 
@@ -1377,6 +1590,7 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--time-limit",
     default=None,
+    callback=lambda ctx, param, value: _check_time_limit(value),
     help="Override SLURM time limit (format: HH:MM:SS or M:SS)",
 )
 @click.option(
@@ -1388,8 +1602,8 @@ def _print_gromacs_dry_run_details(
     "--account",
     default=None,
     help=(
-        "Override SLURM account / allocation ID. Required for bridges2 "
-        "(find yours at https://www.psc.edu/resources/bridges-2/user-guide)."
+        "Override SLURM account / allocation ID. On bridges2, omit it to charge the "
+        "login's default allocation."
     ),
 )
 @click.option(
@@ -1439,7 +1653,8 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--skip-build",
     is_flag=True,
-    help="Skip system building in generated jobs (use pre-built system from 'polyzymd build')",
+    hidden=True,
+    help="No effect: jobs always load the build from 'polyzymd build'.",
 )
 @click.option(
     "--pixi-env",
@@ -1490,7 +1705,8 @@ def submit(
 
     Creates and optionally submits one self-resubmitting job per replicate.
     OpenMM submission uses the existing daisy-chain flow, while GROMACS
-    submission uses the engine submission interface.
+    submission uses the engine submission interface. Submit never builds:
+    each replicate needs a build from ``polyzymd build`` first.
 
     \b
     Directory structure:
@@ -1503,8 +1719,23 @@ def submit(
     if dry_run and generate_only:
         raise click.UsageError("Cannot use both --dry-run and --generate-only")
 
-    sim_config = SimulationConfig.from_yaml(config)
+    sim_config = load_config_or_exit(config)
     engine_name = _resolve_engine_name(sim_config, override=engine)
+    if time_limit and engine_name == "openmm":
+        from polyzymd.simulation.signals import WALLTIME_WARNING_SECONDS, slurm_time_limit_seconds
+
+        limit_s = slurm_time_limit_seconds(time_limit)
+        if limit_s is not None and limit_s <= WALLTIME_WARNING_SECONDS:
+            raise click.BadParameter(
+                f"{time_limit} is not longer than the {WALLTIME_WARNING_SECONDS // 60} minutes "
+                "before the limit at which SLURM tells the job to stop, so every job would "
+                "stop before it runs a step. Use a longer time limit.",
+                param_hint="--time-limit",
+            )
+    try:
+        sim_config.require_buildable(engine_name, inputs=False)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
     _warn_for_site_pixi_override(preset, engine_name, resolved_pixi_env, pixi_env)
     _warn_for_submission_pixi_env(
@@ -1537,8 +1768,7 @@ def submit(
             f"Excluded nodes override: {exclude_nodes or '(none)'}",
             phase="workflow",
         )
-    if skip_build:
-        colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
+    _ = skip_build
 
     if dry_run:
         replicate_list = _resolve_replicates_option(replicates)
@@ -1582,10 +1812,29 @@ def submit(
                 email=email,
             )
         else:
+            from polyzymd.workflow.slurm import SlurmConfig
+
             script_dir = (
                 Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
             )
             colored_echo(f"  Script dir:  {script_dir}", phase="workflow")
+            slurm = SlurmConfig.from_preset(preset)
+            for key, value in (
+                ("time_limit", time_limit),
+                ("memory", memory),
+                ("account", account),
+                ("partition", partition),
+                ("qos", qos),
+            ):
+                if value:
+                    setattr(slurm, key, value)
+            colored_echo(
+                f"  SLURM:       partition {slurm.partition}, qos {slurm.qos or '(none)'}, "
+                f"time {slurm.time_limit}, account {slurm.account or '(none)'}, "
+                f"GPUs {slurm.gpus}",
+                phase="workflow",
+            )
+            _warn_job_hardware(sim_config, engine_name, preset, partition, slurm.gpus)
 
         colored_echo(phase="workflow")
         colored_echo("Dry run complete. No files were written.", phase="workflow")
@@ -1596,6 +1845,16 @@ def submit(
         sim_config.output.scratch_directory = Path(scratch_dir)
     if projects_dir:
         sim_config.output.projects_directory = Path(projects_dir)
+
+    if not generate_only:
+        _refuse_if_stopped(
+            {
+                rep: Path(sim_config.get_working_directory(rep))
+                for rep in _resolve_replicates_option(replicates)
+            },
+            config,
+            "submit",
+        )
 
     if engine_name == "gromacs":
         from polyzymd.engines import create_engine
@@ -1616,6 +1875,7 @@ def submit(
 
         colored_echo("Using GROMACS submission backend", phase="workflow")
 
+        requests = []
         for rep in replicate_list:
             slurm_config = SlurmConfig.from_preset(preset)
             if email:
@@ -1643,7 +1903,9 @@ def submit(
             job_name = create_job_name(sim_config, rep)
 
             if not force:
-                existing = check_existing_slurm_jobs(job_name)
+                existing = check_existing_slurm_jobs(
+                    sim_config.get_working_directory(rep), job_name
+                )
                 if existing:
                     ids = ", ".join(existing)
                     colored_echo(
@@ -1655,27 +1917,33 @@ def submit(
                     )
                     continue
 
-            request = EngineSubmitRequest(
-                replicate=rep,
-                config_path=config_path_abs,
-                working_dir=working_dir,
-                slurm_config=slurm_config,
-                job_name=job_name,
-                extra={"pixi_env": resolved_pixi_env, "skip_build": skip_build},
+            requests.append(
+                EngineSubmitRequest(
+                    replicate=rep,
+                    config_path=config_path_abs,
+                    working_dir=working_dir,
+                    slurm_config=slurm_config,
+                    job_name=job_name,
+                    extra={"pixi_env": resolved_pixi_env},
+                )
             )
 
-            if generate_only:
-                script_path = engine_impl.prepare_submission(request)
-                colored_echo(f"  Rep {rep}: script at {script_path}", phase="workflow")
-            else:
-                result = engine_impl.submit(request)
-                if result.get("submitted"):
-                    colored_echo(f"  Rep {rep}: {result['stdout']}", phase="workflow")
-                else:
+        # Check every build before any script is written or submitted.
+        try:
+            for request in requests:
+                engine_impl.check_build(request)
+            for request in requests:
+                if generate_only:
+                    script_path = engine_impl.prepare_submission(request)
                     colored_echo(
-                        f"  Rep {rep}: script at {result['script_path']} (sbatch not available)",
-                        phase="workflow",
+                        f"  Rep {request.replicate}: script at {script_path}", phase="workflow"
                     )
+                else:
+                    result = engine_impl.submit(request)
+                    colored_echo(f"  Rep {request.replicate}: {result['stdout']}", phase="workflow")
+        except (FileNotFoundError, ValueError, RuntimeError) as e:
+            colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
 
         if not generate_only:
             colored_echo("\nGROMACS job submission complete!", phase="workflow")
@@ -1710,7 +1978,6 @@ def submit(
             nodelist=nodelist,
             exclude=exclude_nodes,
             openff_logs=submit_openff_logs,
-            skip_build=skip_build,
         )
 
         if not generate_only:
@@ -1800,11 +2067,7 @@ def run_segment(
 
     colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
-    try:
-        sim_config = SimulationConfig.from_yaml(config)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
-        colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
-        sys.exit(1)
+    sim_config = load_config_or_exit(config)
     engine_name = str(getattr(sim_config, "engine", "openmm") or "openmm").lower()
     if engine_name == "gromacs":
         warn_if_wrong_pixi_env(
@@ -1828,18 +2091,26 @@ def run_segment(
     working_dir.mkdir(parents=True, exist_ok=True)
     raise_if_interrupted()
 
+    # `status` and `recover` probe the lock for a moment; retry briefly so a
+    # probe is not mistaken for a concurrent run.
+    import time
+
     from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError, replicate_lock
     from polyzymd.simulation.signals import EXIT_CODE_CONCURRENT
 
-    run_lock = replicate_lock(working_dir)
-    try:
-        run_lock.__enter__()
-    except ArtifactIntegrityError as exc:
-        colored_echo(str(exc), phase="simulation", level=logging.WARNING)
-        sys.exit(EXIT_CODE_CONCURRENT)
+    for attempt in range(10):
+        run_lock = replicate_lock(working_dir)
+        try:
+            run_lock.__enter__()
+            break
+        except ArtifactIntegrityError as exc:
+            if attempt == 9:
+                colored_echo(str(exc), phase="simulation", level=logging.WARNING)
+                sys.exit(EXIT_CODE_CONCURRENT)
+            time.sleep(1)
 
     # The lock must be released on every exit path, including sys.exit() and
-    # unhandled exceptions: a leaked flock makes every later job in the chain
+    # unhandled exceptions: a leaked lock makes every later job in the chain
     # exit with EXIT_CODE_CONCURRENT and silently stops the run.
     try:
         _run_segment_locked(
@@ -1896,13 +2167,15 @@ def _run_segment_locked(
     )
     from polyzymd.simulation.signals import raise_if_interrupted
 
+    sim_config.require_engine_barostats("openmm")
+
     # Calculate total steps and samples from config
     prod = sim_config.simulation_phases.production
     timestep_fs = prod.time_step
     total_steps = int(prod.duration * 1e6 / timestep_fs)
     total_samples = prod.samples
 
-    colored_echo(f"Working directory: {working_dir}", phase="simulation")
+    colored_echo(f"Working directory: {_shown(working_dir)}", phase="simulation")
     colored_echo(f"Total production: {prod.duration} ns = {total_steps} steps", phase="simulation")
 
     # Load or create progress
@@ -1946,30 +2219,19 @@ def _run_segment_locked(
         )
         save_progress(working_dir, progress)
 
-    # ---- Handle RUNNING segments (concurrency guard) ----
-    # If any segment appears to still be executing (recent checkpoint),
-    # refuse to start a new segment to prevent concurrent execution and
-    # the associated data-loss / overlap bugs.  Exit with a dedicated
-    # code (EXIT_CODE_CONCURRENT = 2) so the SLURM bash wrapper knows
-    # this is a duplicate chain and terminates WITHOUT resubmitting.
-    #
-    # Previously this exited with code 0, which caused the resubmission
-    # logic to call check-progress (work remains → exit 1) and resubmit,
-    # creating an infinite submit-cancel-resubmit loop.
-    from polyzymd.simulation.signals import EXIT_CODE_CONCURRENT
-
-    running_segments = [s for s in progress.segments if s.status == SegmentStatus.RUNNING]
-    if running_segments:
-        indices = ", ".join(str(s.index) for s in running_segments)
-        colored_echo(
-            f"Segment(s) {indices} appear(s) to still be running "
-            f"(checkpoint written recently). Refusing to start a new "
-            f"segment to avoid concurrent execution — this duplicate "
-            f"chain will terminate without resubmitting.",
-            phase="simulation",
-            level=logging.WARNING,
-        )
-        sys.exit(EXIT_CODE_CONCURRENT)
+    # ---- Segments recorded as RUNNING ----
+    # This process holds the replicate lock, and every run holds it for as
+    # long as its process lives, so no other process is running a segment
+    # here: a RUNNING record was left by a job that was hard-killed.
+    for seg in progress.segments:
+        if seg.status == SegmentStatus.RUNNING:
+            colored_echo(
+                f"Segment {seg.index} is recorded as running but no process holds the "
+                f"replicate lock — it was hard-killed; treating it as interrupted.",
+                phase="simulation",
+                level=logging.WARNING,
+            )
+            seg.status = SegmentStatus.INTERRUPTED
 
     # ---- Handle hard-killed segments (no INTERRUPTED marker) ----
     # When SLURM preempts a job with SIGKILL (no grace period) the
@@ -2098,6 +2360,7 @@ def _run_segment_locked(
                 sim_config=sim_config,
                 working_dir=working_dir,
                 segment_index=seg_idx,
+                replicate=replicate,
                 duration_ns=duration_ns,
                 num_samples=samples_to_write,
                 timestep_fs=timestep_fs,
@@ -2190,7 +2453,7 @@ def _run_initial_segment(
     checkpoint_interval_s : float
         Wall-time interval in seconds between restart checkpoints.
     """
-    from polyzymd.simulation.runner import SimulationRunner
+    from polyzymd.simulation.runner import SimulationRunner, production_dynamics
 
     if report_interval <= 0:
         raise ValueError("report_interval must be a positive integer")
@@ -2232,7 +2495,14 @@ def _run_initial_segment(
 
         from polyzymd.simulation.artifact_integrity import publish_build_bundle
 
-        publish_build_bundle(working_dir, omm_topology, omm_system, omm_positions, sim_config)
+        publish_build_bundle(
+            working_dir,
+            omm_topology,
+            omm_system,
+            omm_positions,
+            sim_config,
+            provenance=builder.build_provenance,
+        )
     else:
         from openmm import XmlSerializer
         from openmm.app import PDBFile
@@ -2272,6 +2542,7 @@ def _run_initial_segment(
         platform=sim_config.openmm.platform,
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
+        replicate=replicate,
     )
 
     # ------------------------------------------------------------------
@@ -2311,6 +2582,7 @@ def _run_initial_segment(
                 segment_index=0,
                 report_interval=report_interval,
                 checkpoint_interval_s=checkpoint_interval_s,
+                **production_dynamics(sim_config.simulation_phases.production),
             )
             return
 
@@ -2334,40 +2606,12 @@ def _run_initial_segment(
     eq_result = runner.run_equilibration(temperature=temperature, config=phases)
 
     # Save equilibration progress so a resubmitted job knows eq is done
-    from datetime import datetime, timezone
+    from polyzymd.simulation.progress import load_progress as _load_progress
+    from polyzymd.simulation.progress import record_equilibration_stages
 
-    from polyzymd.simulation.progress import (
-        EquilibrationStageRecord,
-        SegmentStatus,
-        save_progress,
-    )
-    from polyzymd.simulation.progress import (
-        load_progress as _load_progress,
-    )
-
-    progress = _load_progress(working_dir)
-    if progress is not None:
-        eq_stages = []
-        if eq_result.get("type") == "staged_equilibration":
-            from polyzymd.utils.version import record_provenance
-
-            now_iso = datetime.now(timezone.utc).isoformat()
-            provenance = record_provenance()
-            for stage_info in eq_result.get("stages", []):
-                eq_stages.append(
-                    EquilibrationStageRecord(
-                        index=stage_info["stage_index"],
-                        name=stage_info["stage_name"],
-                        status=SegmentStatus.COMPLETED,
-                        duration_ns=stage_info["duration_ns"],
-                        ensemble=stage_info.get("ensemble", "NVT"),
-                        finished_at=now_iso,
-                        **provenance,
-                    )
-                )
-        progress.equilibration_stages = eq_stages
-        save_progress(working_dir, progress)
-        colored_echo(f"Saved equilibration progress ({len(eq_stages)} stages)", phase="simulation")
+    if _load_progress(working_dir) is not None:
+        count = record_equilibration_stages(working_dir, eq_result.get("stages", []))
+        colored_echo(f"Saved equilibration progress ({count} stages)", phase="simulation")
 
     # Run first production segment
     colored_echo(
@@ -2383,6 +2627,7 @@ def _run_initial_segment(
         segment_index=0,
         report_interval=report_interval,
         checkpoint_interval_s=checkpoint_interval_s,
+        **production_dynamics(sim_config.simulation_phases.production),
     )
 
 
@@ -2395,6 +2640,7 @@ def _run_continuation_segment(
     timestep_fs: float,
     report_interval: int,
     checkpoint_interval_s: float,
+    replicate: int | None = None,
 ) -> None:
     """Continue from the last completed segment.
 
@@ -2416,6 +2662,7 @@ def _run_continuation_segment(
         Wall-time interval in seconds between restart checkpoints.
     """
     from polyzymd.simulation.continuation import ContinuationManager
+    from polyzymd.simulation.runner import production_dynamics
 
     if report_interval <= 0:
         raise ValueError("report_interval must be a positive integer")
@@ -2429,8 +2676,25 @@ def _run_continuation_segment(
         platform=sim_config.openmm.platform,
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
+        replicate=replicate,
     )
     manager.load_previous_state()
+    saved = manager.saved_dynamics()
+    configured = production_dynamics(sim_config.simulation_phases.production)
+    if (saved["ensemble"], saved["thermostat"]) != (
+        configured["ensemble"],
+        configured["thermostat"],
+    ) or abs(saved["friction"] - configured["friction"]) > 1e-9 * configured["friction"]:
+        colored_echo(
+            f"warning: segment {segment_index} continues the dynamics the chain started with "
+            f"({saved['ensemble']}, {saved['thermostat']}, friction {saved['friction']:g}/ps), "
+            f"not the config's production ({configured['ensemble']}, "
+            f"{configured['thermostat']}, friction {configured['friction']:g}/ps). Start the "
+            "replicate again to run the config's dynamics.",
+            phase="simulation",
+            err=True,
+            level=logging.WARNING,
+        )
 
     colored_echo(
         f"Running segment {segment_index}: {duration_ns:.3f} ns, {num_samples} frames...",
@@ -2497,14 +2761,14 @@ def check_progress(
     """
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine
-    from polyzymd.simulation.progress import save_progress
+    from polyzymd.simulation.progress import (
+        PROGRESS_FILENAME,
+        save_progress,
+        unreadable_progress_reason,
+    )
     from polyzymd.simulation.signals import EXIT_CODE_CHECK_ERROR
 
-    try:
-        sim_config = SimulationConfig.from_yaml(config)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
-        colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
-        sys.exit(EXIT_CODE_CHECK_ERROR)
+    sim_config = load_config_or_exit(config, exit_code=EXIT_CODE_CHECK_ERROR)
 
     engine_name = _resolve_engine_name(sim_config, override=engine)
     engine_inst = create_engine(sim_config, override=engine_name, defer_binary=True)
@@ -2517,8 +2781,15 @@ def check_progress(
     prod = sim_config.simulation_phases.production
     timestep_fs = prod.time_step
     try:
+        corrupt = unreadable_progress_reason(working_dir)
+        if corrupt is not None:
+            raise ValueError(f"{corrupt}; fix or remove it by hand")
+        # Only the runner creates progress.json; a scan of a run without one
+        # (a legacy or downloaded run) is never written back.
+        has_record = (working_dir / PROGRESS_FILENAME).exists()
         progress = engine_inst.load_or_scan_progress(working_dir, replicate)
-        save_progress(working_dir, progress)
+        if has_record:
+            save_progress(working_dir, progress)
     except (FileNotFoundError, ValueError, OSError) as e:
         colored_echo(f"Failed to load progress: {e}", err=True, level=logging.ERROR)
         sys.exit(EXIT_CODE_CHECK_ERROR)
@@ -2569,6 +2840,28 @@ def stop_file_path(working_dir: Path) -> Path:
         ``<working_dir>/STOP``.
     """
     return Path(working_dir) / STOP_FILENAME
+
+
+def _refuse_if_stopped(replicate_dirs: dict[int, Path], config: str, command: str) -> None:
+    """Exit when a replicate still has the STOP file of ``polyzymd cancel``.
+
+    A job submitted while the file exists exits at once without running.
+    """
+    from polyzymd.cli.status_report import _stop_file_present
+
+    stopped = [rep for rep, run_dir in replicate_dirs.items() if _stop_file_present(run_dir)]
+    if not stopped:
+        return
+    reps = ",".join(map(str, stopped))
+    colored_echo(
+        f"Replicate(s) {reps} were stopped with `polyzymd cancel` (STOP file in the run "
+        f"directory); a job submitted now would exit at once. Remove the STOP file with "
+        f"`polyzymd cancel -c {config} -r {reps} --resume`, then run `polyzymd {command}` again.",
+        err=True,
+        phase="workflow",
+        level=logging.ERROR,
+    )
+    sys.exit(1)
 
 
 def write_stop_file(working_dir: Path, config_path: str, replicate: int) -> Path:
@@ -2670,8 +2963,8 @@ def cancel(
     exits 99, and the wrapper reads that as "interrupted, work remains" and
     queues a successor within seconds.  This command writes a STOP marker
     into each replicate's working directory first — the wrapper refuses to
-    submit a successor while it exists — and then cancels the matching
-    queued and running jobs by name.
+    submit a successor while it exists — and then cancels the queued and
+    running jobs that work in that directory.
 
     \b
     Examples:
@@ -2685,11 +2978,7 @@ def cancel(
         create_job_name,
     )
 
-    try:
-        sim_config = SimulationConfig.from_yaml(config)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as exc:
-        colored_echo(f"Failed to load config: {exc}", err=True, level=logging.ERROR)
-        sys.exit(1)
+    sim_config = load_config_or_exit(config)
 
     replicate_numbers = _resolve_replicates_option(replicates)
     config_path = str(Path(config).resolve())
@@ -2700,7 +2989,11 @@ def cancel(
         else:
             working_dir = Path(sim_config.get_working_directory(replicate))
         marker = stop_file_path(working_dir)
-        job_name = create_job_name(sim_config, replicate)
+        # A GROMACS job works in <replicate>/gromacs. Job scripts written
+        # before they also checked the replicate folder look only there.
+        gromacs_marker = (
+            stop_file_path(working_dir / "gromacs") if sim_config.engine == "gromacs" else None
+        )
 
         if resume:
             if dry_run:
@@ -2709,11 +3002,13 @@ def cancel(
                     phase="simulation",
                 )
                 continue
-            if marker.exists():
-                marker.unlink()
+            removed = [path for path in (marker, gromacs_marker) if path and path.exists()]
+            for path in removed:
+                path.unlink()
+            if removed:
                 colored_echo(
-                    f"Replicate {replicate}: removed {marker} — resubmit with "
-                    f"`polyzymd submit -c {config} -r {replicate}`",
+                    f"Replicate {replicate}: removed {', '.join(map(str, removed))} — "
+                    f"resubmit with `polyzymd submit -c {config} -r {replicate}`",
                     phase="simulation",
                 )
             else:
@@ -2724,13 +3019,24 @@ def cancel(
                 )
             continue
 
-        job_ids = [] if stop_only else check_existing_slurm_jobs(job_name)
+        job_ids = (
+            []
+            if stop_only and working_dir.exists()
+            else check_existing_slurm_jobs(working_dir, create_job_name(sim_config, replicate))
+        )
+        if not working_dir.exists() and not job_ids:
+            colored_echo(
+                f"Replicate {replicate}: {working_dir} does not exist and no job is queued "
+                f"for it — nothing to cancel",
+                phase="simulation",
+            )
+            continue
 
         if dry_run:
             queued = ", ".join(job_ids) if job_ids else "none"
             colored_echo(
                 f"[dry-run] replicate {replicate}: would write {marker} "
-                f"and cancel job(s) {queued} (name '{job_name}')",
+                f"and cancel job(s) {queued}",
                 phase="simulation",
             )
             continue
@@ -2739,10 +3045,13 @@ def cancel(
         # queued while scancel runs still sees it and exits without work.
         write_stop_file(working_dir, config_path, replicate)
         colored_echo(f"Replicate {replicate}: wrote {marker}", phase="simulation")
+        if gromacs_marker and gromacs_marker.parent.is_dir():
+            write_stop_file(gromacs_marker.parent, config_path, replicate)
+            colored_echo(f"Replicate {replicate}: wrote {gromacs_marker}", phase="simulation")
 
         if stop_only:
             colored_echo(
-                f"Replicate {replicate}: leaving job(s) named '{job_name}' running; "
+                f"Replicate {replicate}: leaving job(s) in {working_dir} running; "
                 f"the chain will stop after the current segment",
                 phase="simulation",
             )
@@ -2763,7 +3072,7 @@ def cancel(
             )
         else:
             colored_echo(
-                f"Replicate {replicate}: no queued or running job named '{job_name}'",
+                f"Replicate {replicate}: no queued or running job in {working_dir}",
                 phase="simulation",
             )
 
@@ -2835,7 +3144,7 @@ def status(
     for a single config. The ``agent`` format is built for scripted or LLM
     consumers: it accepts many configs, makes one ``squeue`` call, and prints
     one line per replicate with a fixed verdict vocabulary (COMPLETED,
-    RUNNING, QUEUED, DEAD, NOT_STARTED, NOT_FOUND), the live SLURM job,
+    RUNNING, QUEUED, DEAD, STOPPED, NOT_STARTED, NOT_FOUND, CORRUPT), the live SLURM job,
     throughput in ns/day, an ETA, and for DEAD chains the last FATAL line of
     the newest SLURM log plus a ready-to-run ``polyzymd submit`` command.
 
@@ -2888,14 +3197,12 @@ def _status_report(
         assign_actions,
         build_system_report,
         fill_end_states,
-        jobs_by_name,
         query_user_jobs,
         render_agent,
         render_json,
     )
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine
-    from polyzymd.simulation.progress import save_progress
 
     warn_if_wrong_pixi_env("status", "build", accepted=KNOWN_SPLIT_PIXI_ENVS)
     logging.getLogger("polyzymd.simulation.progress").setLevel(logging.ERROR)
@@ -2903,20 +3210,20 @@ def _status_report(
     now = datetime.now(timezone.utc)
     jobs = None if no_slurm else query_user_jobs()
     slurm_available = jobs is not None
-    jobs_index = jobs_by_name(jobs) if jobs is not None else None
 
     reports: list[SystemReport] = []
     for config_path in config_paths:
         try:
             sim_config = SimulationConfig.from_yaml(config_path)
-        except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
+        except CONFIG_LOAD_ERRORS as e:
+            first = config_load_lines(e, config_path)[0][1]
             reports.append(
                 SystemReport(
                     name=Path(config_path).parent.name,
                     config_path=config_path,
                     scratch_directory="",
                     replicates=[],
-                    error="failed to load config: " + str(e).splitlines()[0][:200],
+                    error="failed to load config: " + first[:200],
                 )
             )
             continue
@@ -2927,9 +3234,8 @@ def _status_report(
                 sim_config,
                 config_path,
                 engine_inst=engine_inst,
-                jobs_index=jobs_index,
+                jobs=jobs,
                 now=now,
-                save_progress_fn=save_progress,
             )
         )
 
@@ -2949,6 +3255,7 @@ def _status_report(
                 now=now,
                 slurm_available=slurm_available,
                 preset_hint=preset_hint,
+                slurm_queried=not no_slurm,
                 unfinished=unfinished,
             ),
             nl=False,
@@ -2958,19 +3265,16 @@ def _status_report(
 def _status_table(config: str) -> None:
     """Single-config progress-bar view (``--format table``, the default)."""
     from polyzymd.cli.colors import render_progress_bar
+    from polyzymd.cli.status_report import _run_started, _stop_file_present
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine
-    from polyzymd.simulation.progress import SimulationStatus, save_progress
+    from polyzymd.simulation.progress import SimulationStatus, unreadable_progress_reason
 
     warn_if_wrong_pixi_env("status", "build", accepted=KNOWN_SPLIT_PIXI_ENVS)
 
     logging.getLogger("polyzymd.simulation.progress").setLevel(logging.ERROR)
 
-    try:
-        sim_config = SimulationConfig.from_yaml(config)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
-        click.echo(click.style(f"Error: Failed to load config: {e}", fg="red"), err=True)
-        sys.exit(1)
+    sim_config = load_config_or_exit(config)
 
     engine_name = _resolve_engine_name(sim_config, override=None)
     engine_inst = create_engine(sim_config, override=engine_name, defer_binary=True)
@@ -3014,20 +3318,29 @@ def _status_table(config: str) -> None:
     need_attention = 0
     completed_count = 0
     running_count = 0
+    stopped_reps: list[int] = []
+    corrupt_count = 0
 
     for rep_num, rep_path in sorted(rep_map.items()):
         label = f"run{rep_num}"
+        corrupt = None
+        if rep_path is not None:
+            engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
+            corrupt = unreadable_progress_reason(engine_dir)
 
-        if rep_path is None:
+        if corrupt is not None:
+            frac = 0.0
+            completed_ns = 0.0
+            status_str = "failed"
+            status_display = f"corrupt: {corrupt}"
+        elif rep_path is None:
             # Directory not found on disk
             frac = 0.0
             completed_ns = 0.0
             status_str = "not_found"
             status_display = "not found"
         else:
-            engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
             progress = engine_inst.load_or_scan_progress(engine_dir, rep_num)
-            save_progress(engine_dir, progress)
 
             status_val = progress.status
             status_str = status_val.value
@@ -3046,22 +3359,33 @@ def _status_table(config: str) -> None:
             # Compute ns from displayed steps so interrupted/running/failed
             # rows show the latest known progress, not just completed segments.
             completed_ns = (steps_for_display * progress.timestep_fs) / 1e6
+            if status_str != "completed" and _stop_file_present(rep_path):
+                status_str = "stopped"
+                status_display = "stopped (STOP file)"
+                stopped_reps.append(rep_num)
+            elif status_str == "not_started" and _run_started(rep_path):
+                status_str = "interrupted"
+                status_display = "interrupted before production"
 
         bar = render_progress_bar(frac, status_str)
         pct = frac * 100
 
         # Count replicates by category
-        if status_str == "completed":
+        if corrupt is not None:
+            corrupt_count += 1
+        elif status_str == "completed":
             completed_count += 1
         elif status_str == "running":
             running_count += 1
-        else:
+        elif status_str != "stopped":
             need_attention += 1
 
         # Format: "  run1  ████░░░░  100.0%  100.0/100.0 ns  completed"
+        # Runs shorter than 1 ns are shown in ps.
+        scale, unit = (1000, "ps") if total_ns < 1.0 else (1, "ns")
         click.echo(
             f"  {label:<{label_width}}  {bar}  {pct:5.1f}%  "
-            f"{completed_ns:6.1f}/{total_ns:.1f} ns  {status_display}"
+            f"{completed_ns * scale:6.1f}/{total_ns * scale:.1f} {unit}  {status_display}"
         )
 
     click.echo()
@@ -3074,9 +3398,21 @@ def _status_table(config: str) -> None:
                 f"  {need_attention}/{total_reps} need attention "
                 f"(recover with: polyzymd recover -c {config} -r <N> --submit)"
             )
+        if stopped_reps:
+            reps = ",".join(map(str, stopped_reps))
+            click.echo(
+                f"  Stopped by polyzymd cancel: restart with "
+                f"`polyzymd cancel -c {config} -r {reps} --resume`, then `polyzymd submit`"
+            )
+        if corrupt_count > 0:
+            click.echo(
+                f"  {corrupt_count}/{total_reps} have an unreadable progress.json: inspect it, "
+                f"then fix it or move it aside. recover refuses to run until it can read "
+                f"the file or the file is gone."
+            )
         if running_count > 0:
             click.echo(f"  {completed_count}/{total_reps} completed, {running_count} still running")
-        if need_attention == 0 and running_count == 0:
+        if need_attention == 0 and running_count == 0 and corrupt_count == 0 and not stopped_reps:
             click.echo(f"  {completed_count}/{total_reps} completed")
     click.echo()
 
@@ -3108,6 +3444,7 @@ def validate(config: str) -> None:
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
+        sim_config.require_buildable()
 
         click.echo(click.style("Configuration is valid!", fg="green"))
         colored_echo()
@@ -3115,6 +3452,7 @@ def validate(config: str) -> None:
         colored_echo()
         colored_echo("Summary:")
         colored_echo(f"  Name: {sim_config.name}")
+        colored_echo(f"  Engine: {sim_config.engine}")
         colored_echo(f"  Enzyme: {sim_config.enzyme.name}")
 
         if sim_config.substrate:
@@ -3130,6 +3468,8 @@ def validate(config: str) -> None:
                 colored_echo(f"    Monomer {m.label}: {m.probability * 100:.1f}%")
         else:
             colored_echo("  Polymers: Disabled")
+        cosolvents = [cosolvent.name for cosolvent in sim_config.solvent.co_solvents]
+        colored_echo(f"  Co-solvents: {', '.join(cosolvents) or 'none'}")
 
         colored_echo(f"  Temperature: {sim_config.thermodynamics.temperature} K")
         colored_echo(f"  Pressure: {sim_config.thermodynamics.pressure} atm")
@@ -3164,120 +3504,8 @@ def validate(config: str) -> None:
                 status = "enabled" if r.enabled else "disabled"
                 colored_echo(f"  - {r.name} ({r.type.value}): {status}")
 
-    except FileNotFoundError as e:
-        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
-        sys.exit(1)
-    except (yaml.YAMLError, ValidationError, ValueError) as e:
-        click.echo(click.style(f"Validation failed: {e}", fg="red"), err=True)
-        sys.exit(1)
-
-
-# =============================================================================
-# Init Command
-# =============================================================================
-
-
-@cli.command()
-@click.option(
-    "-n",
-    "--name",
-    required=True,
-    help="Name of the project directory to create",
-)
-def init(name: str) -> None:
-    """Initialize a new PolyzyMD project directory.
-
-    Creates a scaffold with a template configuration file and placeholder
-    structure files to help new users get started.
-
-    \b
-    Example:
-        polyzymd init --name my_simulation
-
-    This creates:
-        my_simulation/
-        ├── config.yaml              <- Edit this file
-        ├── structures/              <- Add your PDB/SDF files
-        ├── job_scripts/
-        └── slurm_logs/
-    """
-    import shutil
-
-    from polyzymd.utils.templates import render_package_template
-
-    warn_if_wrong_pixi_env("init", "build")
-
-    project_dir = Path(name)
-
-    # Check if directory already exists
-    if project_dir.exists():
-        click.echo(
-            click.style(f"Error: Directory '{name}' already exists.", fg="red"),
-            err=True,
-        )
-        colored_echo("Choose a different name or remove the existing directory.")
-        sys.exit(1)
-
-    try:
-        # Create directory structure
-        _echo_branding()
-        colored_echo(f"Creating project directory: {name}/")
-        project_dir.mkdir(parents=True)
-        (project_dir / "structures").mkdir()
-        (project_dir / "job_scripts").mkdir()
-        (project_dir / "slurm_logs").mkdir()
-
-        # Render template configuration
-        config_content = render_package_template(
-            "polyzymd.templates",
-            "config_template.yaml",
-            {"project_name": name},
-        )
-        config_dest = project_dir / "config.yaml"
-        config_dest.write_text(prepend_file_header(config_content, comment_prefix="#"))
-
-        # Create placeholder files
-        protein_placeholder = project_dir / "structures" / "place_protein_here.placeholder.txt"
-        protein_content = render_package_template(
-            "polyzymd.templates",
-            "protein_placeholder.txt.jinja",
-        )
-        protein_placeholder.write_text(prepend_file_header(protein_content, comment_prefix="#"))
-
-        ligand_placeholder = project_dir / "structures" / "place_ligand_here.placeholder.txt"
-        ligand_content = render_package_template(
-            "polyzymd.templates",
-            "ligand_placeholder.txt.jinja",
-        )
-        ligand_placeholder.write_text(prepend_file_header(ligand_content, comment_prefix="#"))
-
-        # Success message
-        colored_echo()
-        click.echo(click.style("Project created successfully!", fg="green"))
-        colored_echo()
-        colored_echo("Directory structure:")
-        colored_echo(f"  {name}/")
-        colored_echo("  ├── config.yaml              <- Edit this file")
-        colored_echo("  ├── structures/              <- Add your PDB/SDF files")
-        colored_echo("  ├── job_scripts/")
-        colored_echo("  └── slurm_logs/")
-        colored_echo()
-        colored_echo("Next steps:")
-        colored_echo(f"  1. Add structure files to {name}/structures/")
-        colored_echo(f"  2. Edit {name}/config.yaml (uncomment and customize sections)")
-        colored_echo(f"  3. Validate: polyzymd validate -c {name}/config.yaml")
-        colored_echo(f"  4. Build:    polyzymd build -c {name}/config.yaml -r 1")
-        colored_echo()
-        colored_echo(
-            "Documentation: https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html"
-        )
-
-    except Exception as e:
-        # Broad catch is intentional — must clean up partially-created
-        # directory regardless of what went wrong
-        if project_dir.exists():
-            shutil.rmtree(project_dir)
-        click.echo(click.style(f"Error creating project: {e}", fg="red"), err=True)
+    except CONFIG_LOAD_ERRORS as e:
+        report_config_error(e, config)
         sys.exit(1)
 
 
@@ -3326,6 +3554,11 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     """
     warn_if_wrong_pixi_env("clean-pdb", "build")
 
+    # PDBFixer places hydrogens with an OpenMM context on the fastest platform.
+    # A GPU whose driver is older than the CUDA toolkit then fails
+    # (CUDA_ERROR_UNSUPPORTED_PTX_VERSION); the CPU is fast enough for this.
+    os.environ.setdefault("OPENMM_DEFAULT_PLATFORM", "CPU")
+
     from openmm.app import PDBFile
     from pdbfixer import PDBFixer
 
@@ -3338,7 +3571,12 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     colored_echo(f"Cleaning PDB: {input_file}")
     colored_echo(f"  pH: {ph}")
 
-    fixer = PDBFixer(filename=str(input_file))
+    try:
+        fixer = PDBFixer(filename=str(input_file))
+    except IndexError:  # OpenMM's PDB reader finds no model in a file without atoms
+        click.echo(click.style(f"error: {input_file} has no atoms", fg="red"), err=True)
+        click.echo("fix: give a PDB file with ATOM or HETATM records", err=True)
+        sys.exit(1)
 
     fixer.findNonstandardResidues()
     n_nonstandard = len(fixer.nonstandardResidues)
@@ -3359,6 +3597,17 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 # =============================================================================
 # Recover Command — resume a stalled simulation
 # =============================================================================
+
+
+def _print_recover_dry_run(script_path: Path, slurm_config) -> None:
+    """Print what ``recover --submit`` would write and submit, writing nothing."""
+    colored_echo("\n[DRY RUN] Would write and submit:", phase="workflow")
+    colored_echo(f"  sbatch {script_path}", phase="workflow")
+    colored_echo(
+        f"  SLURM: partition {slurm_config.partition}, qos {slurm_config.qos or '(none)'}, "
+        f"time {slurm_config.time_limit}, account {slurm_config.account or '(none)'}",
+        phase="workflow",
+    )
 
 
 @cli.command()
@@ -3448,6 +3697,7 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 @click.option(
     "--engine",
     default=None,
+    type=click.Choice(["gromacs", "openmm"], case_sensitive=False),
     help="Override simulation engine",
 )
 def recover(
@@ -3487,15 +3737,10 @@ def recover(
     """
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine
-    from polyzymd.simulation.progress import save_progress
 
     _echo_branding()
 
-    try:
-        sim_config = SimulationConfig.from_yaml(config)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
-        colored_echo(f"Failed to load config: {e}", err=True, phase="workflow", level=logging.ERROR)
-        sys.exit(1)
+    sim_config = load_config_or_exit(config)
 
     engine_name = _resolve_engine_name(sim_config, override=engine)
     engine_impl = create_engine(sim_config, override=engine_name, defer_binary=True)
@@ -3521,15 +3766,26 @@ def recover(
     prod = sim_config.simulation_phases.production
     timestep_fs = prod.time_step
 
+    from polyzymd.simulation.progress import unreadable_progress_reason
+
+    corrupt = unreadable_progress_reason(working_dir)
+    if corrupt is not None:
+        colored_echo(
+            f"{corrupt}. Fix or remove it by hand; recover does not overwrite it.",
+            err=True,
+            phase="workflow",
+            level=logging.ERROR,
+        )
+        sys.exit(1)
+
     # Load progress
     progress = engine_impl.load_or_scan_progress(working_dir, replicate)
-    save_progress(working_dir, progress)
 
     # Report status
     pct = progress.fraction_complete() * 100
     remaining_ns = (progress.steps_remaining * timestep_fs) / 1e6
 
-    colored_echo(f"Working directory: {working_dir}", phase="workflow")
+    colored_echo(f"Working directory: {_shown(working_dir)}", phase="workflow")
     colored_echo(
         f"Progress: {progress.total_steps_completed}/{progress.total_steps_requested} steps "
         f"({pct:.1f}%)",
@@ -3555,13 +3811,22 @@ def recover(
     )
 
     if not submit:
+        preset_given = (
+            click.get_current_context().get_parameter_source("preset")
+            != click.core.ParameterSource.DEFAULT
+        )
+        engine_flag = f" --engine {engine_name}" if engine else ""
         colored_echo(
             "\nTo resume, run:\n"
-            f"  polyzymd recover -c {config} -r {replicate} --submit --preset <preset>"
-            f" [engine={engine_name}]",
+            f"  polyzymd recover -c {config} -r {replicate} --submit "
+            f"--preset {preset if preset_given else 'PRESET'}{engine_flag}"
+            + ("" if preset_given else "\n(replace PRESET with your cluster preset)"),
             phase="workflow",
         )
         return
+
+    replicate_dir = working_dir.parent if engine_name == "gromacs" else working_dir
+    _refuse_if_stopped({replicate: replicate_dir}, config, "recover")
 
     # Generate and submit a self-resubmitting SLURM job
     from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs, create_job_name
@@ -3584,12 +3849,12 @@ def recover(
 
     # Best-effort duplicate guard
     if not force:
-        existing = check_existing_slurm_jobs(job_name)
+        existing = check_existing_slurm_jobs(working_dir, job_name)
         if existing:
             ids = ", ".join(existing)
             colored_echo(
                 f"Replicate {replicate} already has RUNNING/PENDING SLURM "
-                f"job(s): {ids} (job name '{job_name}'). "
+                f"job(s): {ids} (run directory {working_dir}). "
                 "Use --force to submit anyway.",
                 err=True,
                 phase="workflow",
@@ -3598,8 +3863,6 @@ def recover(
             sys.exit(1)
 
     if engine_name == "gromacs":
-        import shutil
-
         from polyzymd.engines import create_engine
         from polyzymd.engines.base import EngineSubmitRequest
 
@@ -3617,7 +3880,9 @@ def recover(
         if nodelist:
             slurm_config.nodelist = nodelist
 
-        prefix = _generate_system_prefix(sim_config)
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(sim_config)
         gromacs_inputs_exist = all(
             (working_dir / f).exists()
             for f in [f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp"]
@@ -3636,6 +3901,11 @@ def recover(
                     level=logging.WARNING,
                 )
 
+        recovery_path = working_dir / "recovery_scripts" / f"recover_rep{replicate}.sh"
+        if dry_run:
+            _print_recover_dry_run(recovery_path, slurm_config)
+            return
+
         config_path_abs = str(Path(config).resolve())
         request = EngineSubmitRequest(
             replicate=replicate,
@@ -3643,31 +3913,29 @@ def recover(
             working_dir=working_dir,
             slurm_config=slurm_config,
             job_name=job_name,
-            extra={"pixi_env": resolved_pixi_env, "skip_build": gromacs_inputs_exist},
+            extra={
+                "pixi_env": resolved_pixi_env,
+                # The live chain's daisy_chain_scripts/ script stays as submitted.
+                "script_path": recovery_path,
+            },
         )
 
         engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
-        script_path = engine_impl.prepare_submission(request)
-
-        recovery_dir = working_dir / "recovery_scripts"
-        recovery_dir.mkdir(exist_ok=True)
-        recovery_path = recovery_dir / f"recover_rep{replicate}.sh"
-        shutil.copy2(script_path, recovery_path)
-        recovery_path.chmod(0o755)
+        try:
+            recovery_path = engine_impl.prepare_submission(request)
+        except (FileNotFoundError, ValueError) as e:
+            colored_echo(f"Recovery failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
 
         colored_echo(f"Script: {recovery_path}", phase="workflow")
 
-        if dry_run:
-            colored_echo("\n[DRY RUN] Would submit:", phase="workflow")
-            colored_echo(f"  sbatch {recovery_path}", phase="workflow")
-            return
-
         from polyzymd.workflow.slurm_submit import run_sbatch
 
-        module_load = (
-            getattr(sim_config.gromacs, "module_load", None) if sim_config.gromacs else None
-        )
-        result = run_sbatch(recovery_path, module_load=module_load)
+        try:
+            result = run_sbatch(recovery_path)
+        except RuntimeError as e:
+            colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
         if result.returncode == 0:
             colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")
@@ -3711,8 +3979,8 @@ def recover(
             slurm_config, pixi_env=resolved_pixi_env, skip_build=system_already_built
         )
 
-        logs_subdir = sim_config.output.slurm_logs_subdir
-        output_file = f"{logs_subdir}/{job_name}.%j.out"
+        logs_dir = sim_config.output.get_slurm_logs_directory()
+        output_file = str(logs_dir / f"{job_name}.%j.out")
 
         config_path_abs = str(Path(config).resolve())
         script_content = generator.generate_job_script(
@@ -3723,23 +3991,24 @@ def recover(
             output_file=output_file,
         )
 
-        # Write script
         script_dir = working_dir / "recovery_scripts"
-        script_dir.mkdir(exist_ok=True)
         script_path = script_dir / f"recover_rep{replicate}.sh"
+        if dry_run:
+            _print_recover_dry_run(script_path, slurm_config)
+            return
+
+        script_dir.mkdir(exist_ok=True)
         script_path.write_text(script_content)
         script_path.chmod(0o755)
 
         colored_echo(f"Script: {script_path}", phase="workflow")
 
-        if dry_run:
-            colored_echo("\n[DRY RUN] Would submit:", phase="workflow")
-            colored_echo(f"  sbatch {script_path}", phase="workflow")
-            return
-
         # Submit
         import subprocess
 
+        from polyzymd.workflow.slurm_submit import make_log_folder
+
+        make_log_folder(script_path)
         result = subprocess.run(
             ["sbatch", str(script_path)],
             capture_output=True,
@@ -3759,38 +4028,6 @@ def recover(
             sys.exit(1)
 
 
-def _find_topology_pdb(working_dir: Path) -> Path:
-    """Find a suitable topology PDB in the working directory.
-
-    Parameters
-    ----------
-    working_dir : Path
-        Working directory to search.
-
-    Returns
-    -------
-    Path
-        Path to the PDB file.
-
-    Raises
-    ------
-    FileNotFoundError
-        If no suitable PDB is found.
-    """
-    allowed_paths = (
-        working_dir / "solvated_system.pdb",
-        working_dir / "production_0" / "production_0_topology.pdb",
-        working_dir / "production" / "production_topology.pdb",
-    )
-    for pdb_path in allowed_paths:
-        if pdb_path.exists():
-            return pdb_path
-
-    # Arbitrary recursive PDB discovery is disallowed to avoid selecting decoys or inputs
-
-    raise FileNotFoundError(f"Could not find topology PDB in {working_dir}")
-
-
 # =============================================================================
 # Info Command
 # =============================================================================
@@ -3802,8 +4039,12 @@ def info() -> None:
     from polyzymd import __version__
 
     _echo_branding()
-    colored_echo("PolyzyMD - Molecular Dynamics for Enzyme-Polymer Systems", phase="cli")
+    colored_echo(
+        "PolyzyMD - Molecular Dynamics of Proteins with Polymers, Ligands and Co-solvents",
+        phase="cli",
+    )
     colored_echo(f"Version: {__version__}", phase="cli")
+    colored_echo(f"Imported from: {polyzymd_import_path()}", phase="cli")
     colored_echo("", phase="cli")
 
     # Check dependencies
@@ -3837,140 +4078,14 @@ def info() -> None:
     except ImportError:
         colored_echo("  Pydantic: NOT INSTALLED", phase="cli")
 
+    import shutil
+
+    for program in ("packmol", "gmx"):
+        found = shutil.which(program)
+        colored_echo(f"  {program}: {found or 'NOT ON PATH'}", phase="cli")
+
     colored_echo("", phase="cli")
     colored_echo("Example configs: polyzymd/templates/examples/", phase="cli")
-
-
-# =============================================================================
-# Scaffold Command
-# =============================================================================
-
-
-@cli.command("new-analysis")
-@click.argument("name")
-@click.option(
-    "--class-name",
-    default=None,
-    help="PascalCase class prefix (default: auto-derived from NAME).",
-)
-@click.option(
-    "--style",
-    type=click.Choice(["dict"], case_sensitive=False),
-    default=None,
-    help="Advanced package style; only dict canonical artifacts are supported.",
-)
-@click.option(
-    "--advanced",
-    is_flag=True,
-    default=False,
-    help="Request the advanced MDAnalysis-native package scaffold.",
-)
-@click.option(
-    "--project-root",
-    type=click.Path(exists=True, file_okay=False, resolve_path=True),
-    default=None,
-    help="Repository root. Default: auto-detected from this file's location.",
-)
-@click.option(
-    "--force",
-    is_flag=True,
-    default=False,
-    help="Overwrite existing files.",
-)
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    default=False,
-    help="Print what would be created without writing files.",
-)
-def new_analysis(
-    name: str,
-    class_name: str | None,
-    style: str | None,
-    advanced: bool,
-    project_root: str | None,
-    force: bool,
-    dry_run: bool,
-) -> None:
-    """Scaffold an analysis plugin.
-
-    NAME is the snake_case plugin name (e.g. 'solvent_shell').
-
-    Default creates:
-
-    \b
-      src/polyzymd/analyses/<NAME>.py             — simple MDAnalysis-native plugin
-      tests/analyses/plugins/test_<NAME>.py       — contributor-focused tests
-
-    Advanced package scaffolds create:
-
-    \b
-      src/polyzymd/analyses/<NAME>/__init__.py     — plugin lifecycle wiring
-      src/polyzymd/analyses/<NAME>/_mda.py         — lazy AnalysisBase helper
-      tests/analyses/plugins/test_<NAME>.py        — generated plugin tests
-
-    Run the generated tests with:
-
-    \b
-      pixi run -e build pytest tests/analyses/plugins/test_<NAME>.py -v
-    """
-    from polyzymd.cli._scaffold.models import DEFAULT_STYLE
-    from polyzymd.cli.scaffold import generate_scaffold, validate_class_name, validate_name
-
-    # Force needs scaffold-level ownership checks before registered-name rejection
-    error = validate_name(name, check_existing=not force)
-    if error:
-        raise click.BadParameter(error, param_hint="'NAME'")
-
-    # Validate class name if provided
-    if class_name is not None:
-        cls_error = validate_class_name(class_name)
-        if cls_error:
-            raise click.BadParameter(cls_error, param_hint="'--class-name'")
-
-    # Resolve project root
-    if project_root is None:
-        # Walk up from this file to find pyproject.toml
-        root = Path(__file__).resolve().parent
-        for _ in range(10):
-            if (root / "pyproject.toml").exists():
-                break
-            root = root.parent
-        else:
-            raise click.UsageError(
-                "Could not auto-detect project root. Pass --project-root explicitly."
-            )
-    else:
-        root = Path(project_root)
-
-    try:
-        effective_style = style or DEFAULT_STYLE
-        created = generate_scaffold(
-            name,
-            root,
-            class_name=class_name,
-            style=effective_style,
-            advanced=advanced,
-            force=force,
-            dry_run=dry_run,
-        )
-    except (FileExistsError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    verb = "Would create" if dry_run else "Created"
-    for p in created:
-        try:
-            display = p.relative_to(root)
-        except ValueError:
-            display = p
-        colored_echo(f"  {verb}: {display}", phase="cli")
-
-    if not dry_run:
-        colored_echo(f"\nPlugin '{name}' scaffolded successfully!", phase="cli")
-        colored_echo(
-            f"Run tests: pixi run -e build pytest tests/analyses/plugins/test_{name}.py -v",
-            phase="cli",
-        )
 
 
 # =============================================================================
@@ -3980,9 +4095,21 @@ def new_analysis(
 
 def _register_optional_command_groups() -> None:
     """Register optional command groups when deps are importable."""
-    from polyzymd.cli.compare import compare
+    from polyzymd.cli.analysis_topology import analysis_topology_command
+    from polyzymd.cli.analyze import analyze_command
+    from polyzymd.cli.retired import init
+    from polyzymd.cli.study import study_group
 
-    cli.add_command(compare)
+    cli.add_command(init)
+    cli.add_command(analyze_command)
+    cli.add_command(study_group)
+    from polyzymd.cli.project import project_group
+
+    cli.add_command(project_group)
+    from polyzymd.cli.hashes import hash_trajectories_command
+
+    cli.add_command(hash_trajectories_command)
+    cli.add_command(analysis_topology_command)
 
 
 # =============================================================================
@@ -4013,11 +4140,17 @@ def _register_optional_command_groups() -> None:
     is_flag=True,
     help="Force completion status after post-processing",
 )
+@click.option(
+    "--since",
+    default="",
+    help="ISO time when the job started; records started since then ran in it",
+)
 def update_gromacs_progress_cmd(
     working_dir: str,
     config_path: str,
     replicate: int,
     mark_complete: bool,
+    since: str,
 ) -> None:
     """Update GROMACS progress.json from prod.log scan.
 
@@ -4031,6 +4164,7 @@ def update_gromacs_progress_cmd(
         config_path=config_path,
         replicate=replicate,
         mark_complete=mark_complete,
+        since=since,
     )
     pct = progress.fraction_complete() * 100
     click.echo(

@@ -1,240 +1,191 @@
-# Tutorial: Run Your First Analysis
+# Analyze the replicates of a study
 
-This tutorial walks you from finished trajectory files to your first analysis
-result. You will run RMSF analysis on a single simulation condition using the
-comparison pipeline, and see where the results end up on disk.
+In this tutorial you run two more replicates of the quickstart simulation and
+measure how much each residue of Trp-cage fluctuates (RMSF). You run the
+analysis on the {term}`study`, read the report, and find the stored results
+and figures. At the end you see when a quick look with `-c` is enough.
 
-## What You Will Learn
+You learn these steps:
 
-- How to create a comparison project for a single condition
-- How to run RMSF analysis using `polyzymd compare run`
-- How to read the output and find result files
+1. Run more replicates of a condition with `polyzymd run -r`.
+2. List an analysis in `project.yaml`.
+3. Run it on the study with `polyzymd analyze NAME --study`.
+4. Report another result of the same analysis with `--run`.
+5. Find the stored results and the figures.
 
-## Prerequisites
+## Before you start
 
-Before starting, make sure you have:
+Do {doc}`../get_started/quickstart` first. This tutorial continues in its
+project folder, `~/pz_quickstart`.
 
-- A completed production simulation with at least 1 replicate
-- The `config.yaml` file from that simulation
-- Trajectory files in the expected directory layout (see
-  {doc}`../reference/data_requirements`)
-- PolyzyMD installed in a pixi environment (see {doc}`../get_started/installation`)
+:::{admonition} Environment Setup
+:class: tip
 
-If you have not run a simulation yet, complete
-{doc}`../get_started/quickstart` first.
-
-```{important}
-**Resource requirements:** `polyzymd compare init`, `validate`, `status`, and
-`--help` are lightweight. Commands that load trajectories, such as
-`polyzymd compare run` and `run-all`, can require substantial RAM, CPU/GPU time,
-and scratch I/O. On shared HPC systems, run them inside an allocated job or
-interactive compute session, not on a login node. If an analysis is killed or
-runs out of memory, request more resources or use `polyzymd compare submit`.
-```
-
-## Step 1: Create a Comparison Project
-
-From the directory where you keep your simulation projects, run:
+Run every command of this tutorial in the `build` environment. It includes
+the analysis tools. From the repository root, activate it once:
 
 ```bash
-pixi run -e analysis polyzymd compare init -n my_first_analysis
-cd my_first_analysis
+pixi shell -e build
+```
+:::
+
+## Step 1: Run two more replicates
+
+A mean needs more than one replicate to have an interval. Run replicates 2
+and 3 of the `Water` condition:
+
+```bash
+cd ~/pz_quickstart
+polyzymd run -c trpcage/conditions/water/config.yaml -r 2-3
 ```
 
-This creates a small project scaffold:
+The replicate number seeds the starting structure, so each replicate is a
+different simulation. The two runs take about three minutes. The last line
+is:
 
-```text
-my_first_analysis/
-├── comparison.yaml    # Analysis configuration (you will edit this)
-├── comparison/        # Cross-condition comparison outputs
-├── figures/           # Where plots are saved
-└── structures/        # Optional shared structure files
+```
+All 2 replicate(s) completed successfully.
 ```
 
-The generated `comparison.yaml` is a template with placeholder values. You
-will replace them in the next step. Per-replicate and per-condition analysis
-artifacts are created under `analysis/` when you run an analysis.
+`runs/trpcage/water/` now holds `trpcage_300K_run1/`, `trpcage_300K_run2/`
+and `trpcage_300K_run3/`.
 
-## Step 2: Edit comparison.yaml
+## Step 2: List the analysis
 
-Open `comparison.yaml` in your editor and replace the contents with a minimal
-single-condition configuration:
+Open `project.yaml` and add `rmsf: {}` under `analyses:`:
 
 ```yaml
-name: "my_first_analysis"
-description: "First analysis run"
-control: null
-
-conditions:
-  - label: "My Simulation"
-    config: "/path/to/my_simulation/config.yaml"
-    replicates: [1]
-
-defaults:
-  equilibration_time: "10ns"
-
-plugins:
-  rmsf:
-    selection: "protein and name CA"
+analyses:
+  rg: {}
+  rmsf: {}
 ```
 
-Here is what each section does:
-
-- **`name`** and **`description`** --- identify this comparison project.
-- **`control`** --- the label of the control condition for statistical tests.
-  Set to `null` when you only have one condition.
-- **`conditions`** --- a list of simulation conditions to analyze. Each entry
-  needs a `label`, a path to that simulation's `config.yaml`, and which
-  `replicates` to include.
-- **`defaults.equilibration_time`** --- how much time at the start of each
-  trajectory to discard before analysis. Adjust to match your system's
-  equilibration period.
-- **`plugins.rmsf`** --- settings for the RMSF analysis plugin. The
-  `selection` field is an MDAnalysis atom selection string.
-
-```{important}
-The `config` path must point to the simulation project's `config.yaml`. This
-is how PolyzyMD locates your topology and trajectory files on disk. Relative
-paths are resolved from the directory containing `comparison.yaml`.
-```
-
-For the full list of configuration fields, see
-{doc}`../reference/analysis_comparison_reference`.
-
-## Step 3: Run RMSF Analysis
-
-Run the analysis with:
+`rmsf: {}` runs RMSF with its default settings in every study of the
+project. Commit the change:
 
 ```bash
-pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
+git add -A
+git commit -m "Add the rmsf analysis"
 ```
 
-```{note}
-The `--eq-time` flag overrides `defaults.equilibration_time` from your YAML
-file. If you omit `--eq-time`, the value from `comparison.yaml` is used. This
-is handy for quickly testing different equilibration cutoffs without editing the
-YAML each time.
+## Step 3: Run RMSF on the study
+
+```bash
+polyzymd analyze rmsf --study trpcage
 ```
 
-```{tip}
-**On an HPC cluster?** Use `polyzymd compare submit` instead of `compare run`
-to dispatch analysis as SLURM jobs. This is especially important for expensive
-analyses (SASA, contacts, hydrogen bonds) on large studies. See
-{doc}`../how_to/hpc_execution` for the full workflow.
+`--study` names the study folder. The study gives the conditions, the
+control, the replicates and the equilibration window. The project gives the
+settings of `rmsf`. The analysis superposes every production frame on a
+reference frame of its replicate. Then it measures how far each C-alpha atom
+moves about its mean position. The output is:
+
+```
+log: /home/me/pz_quickstart/trpcage/logs/polyzymd-analyze-20261006-205942-pid12810.log
+# polyzymd analyze rmsf  metric core_rmsf  unit A  run core_rmsf  eq 0ns  conditions 1  replicates 3  protocol rmsf/2
+Water  n 3  mean 0.3463  sem 0.01661  ci95 0.2748 to 0.4178  values 0.3669, 0.3585, 0.3134
+verdict: Water core_rmsf 0.3463 A (95% CI 0.2748 to 0.4178, n 3)
 ```
 
-You should see output similar to:
+Your values differ a little, because the CPU threads add up the forces in a
+different order on each run.
+
+Read the report in this order:
+
+1. The header line starts with `#`. It names the analysis, the result
+   (`core_rmsf`), its unit, the equilibration window (`eq 0ns`) and the
+   number of replicates.
+2. The `Water` line gives the number of replicates (`n 3`), their mean, the
+   standard error (`sem`), the 95 % confidence interval (`ci95`) and the
+   value of each replicate.
+3. `verdict:` gives the result in one line.
+
+`core_rmsf` is one number for each replicate: the root of the mean square
+fluctuation of the residues. The simulations are only picoseconds long, so
+the values are small. They show the steps, not the physics of Trp-cage.
+
+## Step 4: Report another result
+
+RMSF has several results. To see the value of each residue, report the
+`rmsf` result:
+
+```bash
+polyzymd analyze rmsf --study trpcage --run rmsf
+```
+
+The output has one line for each residue, starting with the residue number.
+These are the first lines and the end:
+
+```
+# polyzymd analyze rmsf  metric rmsf  unit A  run rmsf  eq 0ns  conditions 1  replicates 3  protocol rmsf/2
+1  Water  n 3  mean 0.4587  sem 0.0461  ci95 0.2604 to 0.6571  values 0.4763, 0.3716, 0.5283
+2  Water  n 3  mean 0.3254  sem 0.05403  ci95 0.0929 to 0.5578  values 0.4322, 0.2581, 0.2858
+...
+20  Water  n 3  mean 0.5097  sem 0.05915  ci95 0.2552 to 0.7643  values 0.5066, 0.6137, 0.4089
+warning: the 95 percent interval of condition Water at 8 extends past the bounds 0 to inf of rmsf, where a t interval is not reliable
+warning: the 95 percent interval of condition Water at 16 extends past the bounds 0 to inf of rmsf, where a t interval is not reliable
+verdict: Water rmsf over 20 labels, label means from 0.2236 to 0.5097 A
+```
+
+The `warning:` lines are part of the result. With three replicates, the
+interval of some residues, here 8 and 16, reaches below 0, which an RMSF
+cannot be.
+
+This command takes a few seconds. It does not read the trajectories again. It
+reuses the values that step 3 stored, because the inputs and the settings are
+the same.
+
+## Step 5: Find the results
+
+The results of the study are in `trpcage/results/rmsf/`:
 
 ```text
-Comparison: my_first_analysis
-Plugin: rmsf
-Conditions: 1
-Equilibration: 10ns
-
-[My Simulation] Computing replicate 1...
-  Loading trajectory (skipping first 10 ns)...
-  RMSF computed (142 residues, 490 frames)
-[My Simulation] Aggregating 1 replicate...
-
-RMSF Comparison Complete
-  My Simulation: mean RMSF = 0.621 Å
-  SEM: n/a (single replicate)
-  Statistical comparisons: not testable until each condition has at least 2 replicates
-```
-
-```{tip}
-If you see `RMSF Comparison Complete` with a mean value, the analysis succeeded.
-If you see an error about a missing working directory or trajectory, check that
-the `config` path in `comparison.yaml` is correct and that your trajectory
-files exist on disk. See {doc}`../how_to/troubleshooting` for common fixes.
-```
-
-## Step 4: Find Your Results
-
-After the run completes, your project directory looks like this:
-
-```text
-my_first_analysis/
-├── comparison.yaml
-├── analysis/
-│   └── My_Simulation/
-│       └── rmsf/
-│           ├── run_1/
-│           │   └── result.json                # ReplicateArtifact
-│           └── aggregated/
-│               └── result.json                # ConditionArtifact
-├── comparison/
-│   └── rmsf/
-│       └── result.json                        # Comparison artifact/summary
+trpcage/results/rmsf/
+├── report.json                    # the full report of the last command
 ├── figures/
-└── structures/
+│   └── rmsf/
+│       ├── rmsf_profile.png       # the RMSF of each residue
+│       ├── offset_profile.png
+│       ├── rmsd_per_residue_profile.png
+│       ├── rms_decomposition.png
+│       └── rmsf_comparison.png
+└── polyzymd_results/
+    └── rms_decomposition/
+        └── Water/
+            ├── replicate_1/
+            │   ├── record.json    # what was measured, on which inputs, with which settings
+            │   ├── parts.json
+            │   └── values.npz     # the values of this replicate
+            ├── replicate_2/
+            └── replicate_3/
 ```
 
-The key files are:
+`record.json` holds the function and the hash of its code, the settings, the
+hash of the config, the size and SHA-256 of the topology and of each
+trajectory file, the frames used and the software versions. For every field
+of the report, see {doc}`../reference/analysis_protocol_report`.
 
-- **`analysis/My_Simulation/rmsf/run_1/result.json`** --- a
-  `ReplicateArtifact` for replicate 1, including per-replicate RMSF values for
-  every residue in the selection after discarding the first 10 ns.
-- **`analysis/My_Simulation/rmsf/aggregated/result.json`** --- a
-  `ConditionArtifact` with statistics across replicates. With one replicate,
-  the values closely mirror the replicate artifact.
-- **`comparison/rmsf/result.json`** --- the comparison artifact/summary with mean
-  RMSF and ranking information. Singleton SEM is unavailable and suppressed
-  until at least 2 replicates contribute to a condition.
+## When a quick look with `-c` is enough
 
-```{note}
-PolyzyMD artifacts are more than bare result values. They also carry metadata,
-provenance, warnings, and references to sidecar files when an analysis needs to
-store larger tables or arrays outside the main JSON file.
-```
-
-```{note}
-This tutorial intentionally uses one replicate so you can complete the workflow
-quickly. RMSF supports this smoke-test mode, but a single replicate cannot
-estimate between-replicate uncertainty. SEM is unavailable, and condition-level
-statistical comparisons are not testable until each condition has at least 2
-replicates.
-```
-
-## Step 5: Add Plotting (Optional)
-
-To generate figures alongside the analysis, re-run with the `--plot` flag on
-the `run-all` command:
+You can also give a config instead of a study:
 
 ```bash
-pixi run -e analysis polyzymd compare run-all -f comparison.yaml --eq-time 10ns --plot
+mkdir ~/quick_look
+cd ~/quick_look
+polyzymd analyze rmsf -c ~/pz_quickstart/trpcage/conditions/water/config.yaml --label Water --eq 0ns
 ```
 
-Or generate plots separately after the analysis has already been cached:
+It prints the same report. The results go into the current folder, in
+`polyzymd_results/` and `figures/`. No study records them.
 
-```bash
-pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
-```
+Use `-c` for a quick look: to check one simulation while it runs, or to try a
+setting before you add it to a study. Use `--study` or `--project` for the
+results that you keep. The study then holds the conditions, the control, the
+window, the settings and the results together, and `polyzymd project freeze`
+can publish them.
 
-Figures are saved to the `figures/` directory:
+## What you did
 
-```text
-figures/
-└── rmsf/
-    ├── rmsf_comparison.png
-    └── rmsf_profile.png
-```
-
-With a single condition, the comparison chart is a simple one-bar summary and
-the profile plot shows per-residue RMSF values. Error bars and statistical
-comparisons become more useful when you add additional conditions and
-replicates.
-
-## What's Next
-
-Now that you have run one analysis on one condition, here are some natural next
-steps:
-
-- {doc}`../how_to/analysis_compare_conditions` --- Add a second condition
-  and run a statistical comparison
-- {doc}`analysis_complete_workflow` --- Full multi-condition workflow with
-  multiple analysis types
-- {doc}`../how_to/analysis_rmsf_quickstart` --- RMSF-specific options
-  (reference modes, selections, troubleshooting)
-- {doc}`../reference/data_requirements` --- Directory layout reference and
-  path resolution rules
+You ran three replicates of one condition, measured their RMSF on the study,
+read the report and found the stored results. Next, compare two conditions in
+{doc}`analysis_complete_workflow`.

@@ -1,256 +1,257 @@
 # Analysis System Concepts
 
-Your simulations are done. You have trajectories on disk and you want to
-measure something — RMSF, contacts, distances, whatever. This page explains how
-PolyzyMD's analysis system is put together so that when you run a command or
-read an output file, you know what happened and where to look.
+PolyzyMD analyzes finished trajectories in four steps, for its shipped
+analyses and for your own functions. This page explains the steps, the terms
+of the output, and the reasons behind the choices.
 
 ## The analysis pipeline
 
-Every analysis in PolyzyMD follows the same four-stage pipeline:
+Every analysis in PolyzyMD runs on the study API, in the same four steps:
 
 ```text
-replicate stage  →  aggregate  →  compare  →  plot
+load replicates  →  measure  →  reduce per replicate  →  summarise or compare
 ```
 
-Here is what each stage does:
+| Step | Scope | What it does |
+|------|-------|--------------|
+| **load replicates** | Every replicate of every condition | `Study.from_configs` finds the replicates of each simulation `config.yaml`, loads each one as an MDAnalysis `Universe` with its production segments in order, and removes the equilibration window |
+| **measure** | One replicate | `study.timeseries` runs a per-frame function on every production frame; `study.per_replicate` runs a function once on the replicate's production frames. Each replicate's result is written to `polyzymd_results/<name>/<condition>/replicate_<n>/` with a `record.json` of how it was made |
+| **reduce per replicate** | One replicate | A time series becomes one number per replicate, for example its mean or the fraction of frames that pass a test |
+| **summarise or compare** | All conditions | The replicate values give each condition's mean, standard error and 95 percent Student t interval, and each condition is compared with the control |
 
-| Stage | Scope | What it produces |
-|-------|-------|------------------|
-| **replicate stage** | One replicate of one condition | `ReplicateArtifact` at `analysis/<condition_label>/<plugin_name>/run_<N>/result.json` |
-| **aggregate** | All replicates of one condition | `ConditionArtifact` at `analysis/<condition_label>/<plugin_name>/aggregated/result.json` |
-| **compare** | All conditions together | `ComparisonArtifact` or active custom comparison result at `comparison/<plugin_name>/result.json` |
-| **plot** | All conditions together | Figures saved in the configured format, with `png` as the default and `pdf` or `svg` also supported |
+`polyzymd analyze NAME -c A/config.yaml -c B/config.yaml` runs these steps for
+a shipped analysis and prints a report in which every number states its unit,
+its uncertainty and its sample size. The first `-c` config is the control. The
+same steps are open to your own functions in Python; see
+{doc}`../how_to/study_api`.
 
-Each artifact stores a validated payload plus metadata, provenance, warnings,
-and references to sidecar files when an analysis needs large tables or arrays
-outside the main JSON document.
+Figures are drawn from the stored values into `figures/<name>/`. They do not
+reload trajectories or rerun the measurement.
 
-Trajectory-native plugins generally create `MDAAnalysisJob` objects for their
-per-replicate computation. The corresponding collectors translate completed
-jobs into `ReplicateArtifact` objects. PolyzyMD then owns the surrounding
-workflow: condition aggregation, cross-condition comparison, artifact storage,
-and plot orchestration.
+## Conditions, replicates and the control
 
-Plots are deliberately downstream of this artifact layer. They read cached
-artifacts and sidecars only; they do not reload trajectories or rerun the
-analysis calculation.
+A **condition** is one simulation setup, such as "No polymer", "SBMA 100%"
+or "Urea 2 M". Each condition has its own `config.yaml`, which defines the
+system: the protein, the polymer or co-solvent, the force field and the
+temperature.
 
-You don't call these stages yourself. When you run `polyzymd compare run`, the
-CLI walks through the pipeline automatically. But knowing the stages helps when
-you need to debug ("Which stage failed?") or interpret output ("Is this a
-per-replicate file or an aggregated file?").
+A **replicate** is one independent simulation of a condition. Replicates
+have the numbers 1, 2, 3 and so on, and use the same `config.yaml`. The
+replicate number seeds the starting structure, the starting velocities and
+the thermostat noise, so each replicate starts differently. These choices
+separate the trajectories, but they do not make them statistically independent by
+themselves. Independence also depends on equilibration, stationarity and
+whether the simulated time is long enough for the process that you measure.
 
-## `comparison.yaml` — the control file
+The replicate is the sampling unit: every interval and test uses one value
+per replicate. With 2 conditions of 3 replicates each, a comparison rests on
+3 values against 3 values, whatever the number of frames.
 
-The `comparison.yaml` file is the single input that defines an analysis run. It
-tells PolyzyMD what simulations to analyze, what to measure, and how to compare
-the results.
+`polyzymd analyze` takes one `-c config.yaml` per condition. `--label` gives
+each condition the name of the reports and figures. The default label is the
+name of the folder of the config. `--replicates 1-3` selects the replicates;
+the default is every replicate found. `--eq 10ns` sets the equilibration
+window, removed from the start of the production trajectory of every
+replicate. The first condition is the control. PolyzyMD compares every other
+condition with it.
 
-Here is a minimal example:
+In Python the same inputs go to `Study.from_configs`:
 
-```yaml
-name: "polymer_stability_study"
+```python
+import polyzymd as pz
 
-conditions:
-  - label: "No Polymer"
-    config: "../no_polymer/config.yaml"
-    replicates: [1, 2, 3]
-  - label: "100% SBMA"
-    config: "../sbma_100/config.yaml"
-    replicates: [1, 2, 3]
-
-control: "No Polymer"
-
-defaults:
-  equilibration_time: "10ns"
-
-plugins:
-  rmsf:
-    selection: "protein and name CA"
-  contacts: {}
+study = pz.Study.from_configs(
+    {"No polymer": "no_polymer/config.yaml", "SBMA 100%": "sbma_100/config.yaml"},
+    equilibration="10ns",
+)
 ```
 
-The key sections are:
+In folder names, PolyzyMD replaces characters that a file system cannot hold.
+For example, `SBMA 100%` can become `SBMA_100_` in a path, and stays
+`SBMA 100%` in reports and figures.
 
-### `conditions`
+## The shipped analyses
 
-Each entry points to a simulation's `config.yaml` and lists which replicate
-numbers to include. The `label` is a human-readable name that shows up in plots
-and result files. When labels appear in directory names, PolyzyMD sanitizes them
-for the filesystem; for example, `100% SBMA` may be written as `100_SBMA` in
-paths while remaining `100% SBMA` in summaries and plots.
+Each shipped analysis is a function in `polyzymd.analyses.functions`, and
+`polyzymd analyze` runs it with settings given as `--set key=value`:
 
-### `control`
-
-Which condition to use as the baseline for statistical comparisons. Set this to
-the label of your reference condition (typically an unmodified or no-polymer
-system). If you only have one condition or don't want relative comparisons, set
-it to `null` or leave it out.
-
-### `defaults.equilibration_time`
-
-How much trajectory to discard from the beginning of each run. Early frames
-are typically not equilibrated, so the pipeline skips them. Specify as a string
-with units: `"10ns"`, `"5000ps"`, etc. The default is `"10ns"`.
-
-### `plugins`
-
-Which analyses to run and their settings. Each key is a plugin name (like
-`rmsf` or `contacts`), and the value is a settings block for that plugin. An
-empty block `{}` means "run with defaults." Only plugins listed here are
-executed — if you don't include `sasa`, SASA won't be computed.
-
-For the complete schema with all fields, see
-{doc}`../reference/comparison_yaml`.
-
-## Conditions and replicates
-
-These two terms come up everywhere in the analysis output, so it helps to be
-precise about what they mean in PolyzyMD.
-
-A **condition** is one simulation setup. Examples: "No Polymer", "SBMA-100",
-"PEG-50". Each condition has its own `config.yaml` that defines the system
-(which protein, which polymer, which force field, etc.).
-
-A **replicate** is a separate run of the same condition, intended to sample the
-same setup independently. Replicates are identified by number — 1, 2, 3, and so
-on. Each replicate uses the same
-`config.yaml` but usually starts from a different random seed, initial velocity
-assignment, or starting configuration. These choices help separate trajectories,
-but they do not guarantee statistical independence by themselves. Interpretation
-also depends on equilibration, stationarity, decorrelation, and whether the
-simulated timescales are long enough for the process being measured.
-
-The pipeline processes data in this order:
-
-1. **Per-replicate**: the compute stage runs once for each replicate of each
-   condition and writes a `ReplicateArtifact`. If you have 2 conditions with 3
-   replicates each, that is 6 replicate artifacts.
-2. **Per-condition**: `aggregate` runs once per condition, combining replicate
-   artifacts into a `ConditionArtifact`. That's 2 aggregate calls.
-3. **Cross-condition**: `compare` runs once, looking at all conditions together
-   and writing a `ComparisonArtifact` or an active custom comparison result.
-   `plot` then reads those cached outputs and any referenced sidecars.
-
-## Plugins — the analysis modules
-
-PolyzyMD ships with 9 analysis plugins. Each plugin is a self-contained
-module that knows how to compute one type of measurement, aggregate it, compare
-across conditions, and generate plots.
-
-The available plugins are:
-
-| Plugin name | What it measures |
-|-------------|-----------------|
-| `rmsd` | Root-mean-square deviation over time |
-| `rg` | Radius of gyration over time |
-| `rmsf` | Root-mean-square fluctuation per residue |
-| `contacts` | Intermolecular contacts between protein and other components |
-| `distances` | Distances between specified atom groups |
-| `catalytic_triad` | Catalytic triad geometry (active-site distances) |
-| `secondary_structure` | Secondary structure content (helix, sheet, coil fractions) |
+| Name | What it measures |
+|------|------------------|
+| `rg` | Radius of gyration |
+| `rmsd` | RMSD from a reference structure, one value per frame |
+| `rmsf` | Per-residue fluctuations |
+| `rmsd_per_residue` | Per-residue RMS deviation from a reference over the frames, as `gmx rmsf -od` gives |
 | `sasa` | Solvent-accessible surface area |
-| `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
+| `secondary_structure` | DSSP secondary-structure fractions |
+| `contacts` | Polymer-protein contacts and how long they last |
+| `native_contacts` | Fraction of native contacts |
+| `hydrogen_bonds` | Hydrogen-bond counts, lifetimes and per-residue occupancy |
+| `distances` | Pair distances and the fraction of frames below a threshold |
 
-Each plugin has a `Settings` model with configurable parameters. Most
-parameters have sensible defaults, so you often just need `plugin_name: {}` in
-your `comparison.yaml` to get started.
+The catalytic triad is not a separate analysis but a routine that combines
+these functions; see {doc}`../how_to/analysis_triad_quickstart`. For what each
+function measures, see {doc}`../reference/analysis_functions`.
 
-For contributors, the plugin boundary is the supported extension point: a
-plugin defines its settings, replicate computation, aggregation behavior,
-comparison behavior, plotting behavior, and formatting behavior without changing
-the core orchestration code. The conceptual boundary is important because
-PolyzyMD owns artifact storage and orchestration, while plugins own the
-domain-specific measurement and interpretation logic. For a contributor-focused
-walkthrough, see {doc}`../contributor_guide/extending_analyses`.
+## Periodic boundaries, whole molecules, and alignment
 
-You configure plugins in the `plugins:` block. For example, to run RMSF with a
-custom selection and contacts with defaults:
+Molecular dynamics runs in a periodic box, and the coordinates written to a
+trajectory are usually wrapped back into the primary cell. A molecule that
+drifts across a face of the box is then stored in pieces, with some atoms at one
+edge and the rest at the opposite edge. Nothing in the file says whether that
+happened, so an observable computed from raw coordinates can be right on one
+frame and badly wrong on the next.
 
-```yaml
-plugins:
-  rmsf:
-    selection: "protein and name CA"
-  contacts: {}
-```
+Which observables care depends on what they measure. A radius of gyration is a
+spread about a center of mass, so a molecule stored in two pieces reports a
+radius of roughly half a box length rather than its real size. Alignment and
+RMSD have the same problem, because fitting a structure that is split in two
+fits a shape the molecule never adopted. A pair distance is different. The
+minimum image convention gives the distance to the nearest periodic copy of the
+second point, which is the physically meaningful separation whether or not the
+molecules were wrapped, so distances need the box rather than whole molecules.
+PolyzyMD therefore makes wholeness an explicit choice at load time through
+`pbc_policy`, records the choice in provenance, and refuses to unwrap a topology
+that has no bonds, because unwrapping walks the bond graph.
+
+Distances are measured on the coordinates as the trajectory stores them,
+without alignment. A distance does not change under rotation or translation,
+so alignment cannot improve it, and an in-memory aligned copy of the
+trajectory costs memory. Alignment can also make a distance wrong. MDAnalysis
+applies the minimum image convention with box vectors built from the stored
+`(a, b, c, alpha, beta, gamma)`, and assumes that these vectors match the
+coordinates. An in-memory alignment rotates every coordinate but keeps the
+box, so the two no longer match. A pair closer than half a box length in each
+Cartesian component is not affected. A long pair, such as the center of mass
+of a domain and that of a polymer in a 90 Å box, can be folded against the
+wrong lattice vector.
+
+### References
+
+- Michaud-Agrawal, N., Denning, E. J., Woolf, T. B., and Beckstein, O. (2011).
+  MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
+  *Journal of Computational Chemistry*, 32(10), 2319-2327.
+  doi:10.1002/jcc.21787
+- MDAnalysis `MDAnalysis.lib.distances` documentation, on the `box` argument and
+  the minimum image convention:
+  <https://docs.mdanalysis.org/stable/documentation_pages/lib/distances.html>
+- MDAnalysis `MDAnalysis.transformations.wrap` documentation, on `unwrap` and
+  its bond requirement:
+  <https://docs.mdanalysis.org/stable/documentation_pages/transformations/wrap.html>
+
+## Why hydrogen bonds exclude carbon
+
+MDAnalysis finds hydrogen bonds from geometry alone: it pairs each hydrogen with
+a nearby heavy atom, then keeps the triplets whose donor-acceptor distance and
+D-H...A angle pass the cutoffs. Which atoms are allowed to be donors and
+acceptors is therefore a scientific choice, not a detail. If that choice is the
+whole selection, every aliphatic and aromatic carbon that carries a hydrogen
+becomes a donor and every atom becomes an acceptor, so C-H...O and N-H...C
+contacts are counted alongside real hydrogen bonds.
+
+The IUPAC definition requires the donor to be more electronegative than
+hydrogen and the acceptor to carry a lone pair or a pi cloud, which carbon
+generally does not (Arunan et al. 2011). `functions.hbond_atoms` therefore
+takes as donors only the hydrogens covalently bonded to nitrogen, oxygen or
+sulfur, and as acceptors every oxygen and every nitrogen or sulfur bonded to at
+most two atoms, which keeps a lone pair. The practical reason matters as much
+as the formal one: the share of short C-H...O geometries depends on polymer
+chemistry, so counting them biases one condition relative to another instead of
+shifting every condition by the same amount. How the rule was checked is in
+{doc}`analysis_hydrogen_bonds_verification`.
+
+Arunan, E., et al. (2011). Definition of the hydrogen bond (IUPAC
+Recommendations 2011). Pure and Applied Chemistry, 83(8), 1637-1641.
+doi:10.1351/PAC-REC-10-01-02
 
 ## Statistical comparison
 
-When you have two or more conditions, the compare stage produces statistical
-output so you can assess whether differences are meaningful. There are two
-comparison paths:
+When you have two or more conditions, every condition is compared with the
+control, on one value per replicate:
 
-- **Default scalar/artifact comparison**: plugins that expose scalar metrics can
-  use the framework's default comparison behavior. In that path, PolyzyMD can
-  compute pairwise tests, effect sizes, optional omnibus statistics, and metric
-  rankings from the condition artifacts.
-- **Custom comparison**: plugins with richer result structures can implement
-  their own comparison behavior. These plugins still write comparison output,
-  but they may not produce the same tests, tables, or rankings as the default
-  scalar path.
+- **Welch's t test** by default, or Student's t test with `test="student"` in
+  Python, with the difference of the means and its 95 percent interval from
+  the same test.
+- **Benjamini-Hochberg correction** over one family per call: every tested row
+  of that comparison. For a per-residue result the family is every residue of
+  every condition compared, because scanning a profile for the residues that
+  changed is a search over that set.
+- **Effect sizes**, Cohen's d and Hedges' g, oriented like the difference, so
+  you can see not just whether a difference is significant but how large it is.
 
-For plugins using the default scalar comparison path, PolyzyMD computes:
-
-- **Pairwise t-tests** between each pair of conditions, with
-  Benjamini–Hochberg FDR correction to account for multiple comparisons.
-- **Effect sizes** (Cohen's d) for each pair, so you can see not just whether
-  a difference is significant but how large it is.
-- **ANOVA** when there are three or more conditions, as an omnibus test before
-  the pairwise comparisons.
-- **Rankings** of conditions according to each metric's directionality. These
-  rankings are screening aids for follow-up interpretation, not biological truth
-  by themselves.
-
-The comparison results are saved as JSON and also printed to the terminal when
-you run `polyzymd compare run`. For details on interpreting these outputs, see
-{doc}`../reference/analysis_comparison_reference`.
+A row is not testable when a condition has fewer than two replicates, or when
+both conditions have the same value in every replicate; it then takes no part
+in the correction. The report states a verdict per comparison in plain words.
+For the report's fields, see {doc}`../reference/analysis_protocol_report`, and
+for the choices behind the tests, {doc}`analysis_statistics_best_practices`.
 
 ## Output structure
 
-After running `polyzymd compare run`, your project directory will contain:
+`polyzymd analyze NAME -c ... --output-dir out` writes:
 
 ```text
-comparison_project/
-├── comparison.yaml
-├── analysis/
-│   └── <condition_label>/
-│       └── <plugin_name>/
-│           ├── run_<N>/
-│           │   └── result.json # ReplicateArtifact
-│           └── aggregated/
-│               └── result.json # ConditionArtifact
-├── comparison/
-│   └── <plugin_name>/
-│       └── result.json         # ComparisonArtifact or active custom result
+out/
+├── polyzymd_results/
+│   └── <name>/
+│       └── <condition>/
+│           └── replicate_<n>/
+│               ├── series.npz   # per-frame values, frames and times, or values.npz
+│               └── record.json  # how the values were made
 └── figures/
-    └── <plugin_name>/
-        └── *.<format>          # Plots; png by default, pdf/svg supported
+    └── <name>/
+        └── *.<format>           # png by default
 ```
 
-The three output directories map directly to the pipeline stages:
+A per-frame measurement writes `series.npz`, a per-replicate one
+`values.npz`. The `record.json` beside it holds the function's name, module and
+source hash, the arguments with their selection strings, the config hash, the
+topology and trajectory file records, the equilibration window, the frames, the
+times, the unit and the PolyzyMD, MDAnalysis, NumPy and Python versions.
+`--no-plots` skips the figures, and `--format json` prints the whole report.
 
-- **`analysis/`** holds the compute and aggregate output. Each condition gets
-  its own filesystem-sanitized subdirectory, and within that, each plugin gets
-  a directory with `ReplicateArtifact` files in `run_1/`, `run_2/`, ... and a
-  `ConditionArtifact` in `aggregated/result.json`.
-- **`comparison/`** holds the compare output. One `result.json` per plugin
-  stores a `ComparisonArtifact` or an active custom comparison result. Default
-  scalar comparisons include framework-generated tests and rankings; custom
-  comparison outputs may use plugin-specific summaries.
-- **`figures/`** holds the plot output. One subdirectory per plugin with PNG
-  files by default, or another configured format such as PDF or SVG. Plots are
-  generated from cached artifacts and sidecars only.
+## Why a cached result is checked against its inputs
 
-Results are cached: if you rerun the pipeline without changing settings, the
-compute stage skips replicates that already have canonical artifacts on disk.
+A replicate that gained three segments since its result was computed will keep
+reporting the old window for as long as the cache is reused, so a figure
+regenerated a week later still describes last week's data. The failure is quiet
+in the same way an unfinished segment is quiet: the cached number is a real
+average over the frames that were read, and the provenance describes the run
+rather than the subset, so nothing in the output says the two have drifted
+apart.
+
+Reuse is therefore conditional rather than automatic. A stored result is read
+back only when every field of its `record.json`, except the versions and the
+plot bounds, equals the record the new call would write: the same function
+source, arguments, config, equilibration window, stride and frames, and a
+topology and set of trajectory files with the recorded relative paths, sizes
+and SHA-256 hashes. A file that grew, or changed in any other way, therefore
+does not match. PolyzyMD reads a trajectory hash from `progress.json` or
+`trajectory_hashes.json` when the run recorded it, or else computes it once
+and caches it. Any other result is measured again, and `--recompute` measures
+every replicate again whatever its record says.
+
+## Why an unfinished segment is not read
+
+A production segment that is still being written has a trajectory file that
+ends at the last flush. If the loader reads it, the analysis window is shorter
+than the run directory suggests, and the result records nothing about the
+difference. The mean is a real average over fewer nanoseconds, the provenance
+describes the whole run, and no later check can separate the two cases.
+
+The OpenMM engine writes a status for each segment in `progress.json`.
+The loader reads that status and skips segments marked `running` or
+`failed`, and it lists the skipped indices in the provenance. Segments marked
+`interrupted` are kept, because the continuation chain restarts from an
+interrupted segment's saved state and its frames belong to the same time line.
+The frame count of an interrupted segment is not recorded, so the last segment
+of a chain may be partial. Dropping it instead would leave a gap between the
+segments that were kept, and the lineage check would refuse the trajectory.
 
 ## See also
 
 - {doc}`../tutorials/first_analysis` — Hands-on tutorial for running your
   first analysis
-- {doc}`../how_to/analysis_compare_conditions` — Practical guide to setting up
-  a multi-condition comparison
-- {doc}`../reference/comparison_yaml` — Full `comparison.yaml` schema reference
-- {doc}`../reference/analysis_comparison_reference` — Plugin listing and
-  statistical terms reference
+- {doc}`../how_to/analysis_compare_conditions` — Practical guide to comparing
+  several conditions
+- {doc}`../how_to/study_api` — Running your own functions on a study
+- {doc}`analysis_api` — How the study API works
+- {doc}`../reference/analysis_functions` — What each shipped function measures

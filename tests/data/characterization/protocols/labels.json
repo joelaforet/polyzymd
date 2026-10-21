@@ -1,0 +1,62 @@
+{
+ "all_metrics": [],
+ "all_runs": ["protein_polymer_mean_hbonds","protein_polymer_mean_residue_pairs","protein_polymer_any_fraction","protein_polymer_mean_lifetime","protein_polymer_lifetime_events","protein_polymer_censored_fraction","protein_polymer_residues","protein_polymer_pairs"],
+ "analysis": "hydrogen_bonds",
+ "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"no polymer","mean":0.0,"n_effective":[],"n_replicates":3,"no_partner":"second group 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},{"ci95":[0.572674,1.2051],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"polymer","mean":0.888889,"n_effective":[],"n_replicates":3,"replicate_values":[1.0,0.916667,0.75],"replicates":[1,2,3],"sem":0.0734931,"statistical_inefficiency":[]}],
+ "equilibration": "0ns",
+ "frames_per_replicate": {
+  "no polymer": [12,12,12],
+  "polymer": [12,12,12]
+ },
+ "metric": "protein_polymer_mean_hbonds",
+ "pairwise": [{"a":"no polymer","b":"polymer","cohens_d":9.87541,"correction":"BH","delta":0.888889,"delta_ci95":[0.572674,1.2051],"direction":"no significant change","entry":null,"family_size":null,"hedges_g":7.90033,"p":null,"p_adjusted":null,"reason":"no polymer has no partner: second group 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+ "problems": [],
+ "protocol_version": "2",
+ "provenance.config_hashes.no polymer": "c4429a507b8cea42",
+ "provenance.config_hashes.polymer": "c4429a507b8cea42",
+ "provenance.mdanalysis_version": "<masked>",
+ "provenance.output_paths.results": "<tmp>/polyzymd_results/hydrogen_bonds_protein_polymer",
+ "provenance.polyzymd_version": "<masked>",
+ "provenance.settings.acceptors": null,
+ "provenance.settings.d_a_cutoff": 3.5,
+ "provenance.settings.d_h_a_angle_cutoff": 150.0,
+ "provenance.settings.donors": null,
+ "provenance.settings.groups": {
+  "polymer": "chainid C",
+  "protein": "chainid A"
+ },
+ "provenance.settings.hbond_atoms": {
+  "acceptors": {
+   "GLN O": 1,
+   "SER OG": 1,
+   "THR OG1": 1
+  },
+  "donors": {
+   "SER OG": 1,
+   "THR OG1": 1
+  },
+  "hydrogens": 2
+ },
+ "provenance.settings.hydrogens": null,
+ "provenance.settings.lifetime_key": "residue",
+ "provenance.settings.summaries": {
+  "protein_polymer": {
+   "between": ["protein","polymer"]
+  }
+ },
+ "provenance.settings.summary": {
+  "groups": ["chainid A","chainid C"],
+  "name": "protein_polymer"
+ },
+ "provenance.settings.tolerance_ps": 0.0,
+ "provenance.settings_fingerprint": null,
+ "provenance.study": null,
+ "run": "protein_polymer_mean_hbonds",
+ "status": "complete",
+ "stride": 1,
+ "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_mean_hbonds  unit none  run protein_polymer_mean_hbonds  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\nno polymer  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\npolymer  n 3  mean 0.8889  sem 0.07349  ci95 0.5727 to 1.205  values 1, 0.9167, 0.75\nno polymer vs polymer  delta +0.8889  ci95 0.5727 to 1.205  p na  p_adj na  test welch_t  correction BH  d 9.875  not_testable\nwarning: condition no polymer has the same protein_polymer_mean_hbonds in every replicate, so its interval is not estimable\nwarning: hydrogen_bonds: second group 'chainid C' matched no atoms in no polymer replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch) and no comparison with it is tested. Check the selection if that condition has them.\nverdict: not testable: protein_polymer_mean_hbonds for no polymer vs polymer, as no polymer has no partner: second group 'chainid C' matched no atoms in replicate 1, 2, 3 (n 3 vs 3)\n",
+ "trends": [],
+ "unit": null,
+ "verdict": "<text>",
+ "warnings": "<text>"
+}

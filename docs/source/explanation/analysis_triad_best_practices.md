@@ -1,107 +1,78 @@
-# Catalytic triad analysis: interpretation and best practices
+# Catalytic triad: interpretation and best practices
 
-Catalytic triad analysis in PolyzyMD summarizes active-site geometry from MD
+A catalytic triad measurement summarizes active-site geometry from MD
 trajectories. It is useful for asking whether a serine protease, lipase, or
 esterase active site tends to preserve the geometric arrangement associated
 with catalysis.
 
-It is not direct evidence of catalytic activity. The reported distances and
-contact fractions are **geometric proxies**. They should be interpreted with
-replicate uncertainty, substrate pose, hydrogen-bond geometry, protonation
-state, and experimental activity data whenever those are available.
+It is not direct evidence of catalytic activity. The hydrogen-bond fractions,
+distances and contact fractions are **geometric proxies**. Interpret them
+together with the replicate uncertainty, the substrate pose, the hydrogen-bond
+geometry, the protonation state and any experimental activity data.
 
 ```{note}
-For command examples and setup steps, see the
-{doc}`../how_to/analysis_triad_quickstart`. For field-level lookup, see
-{doc}`../reference/analysis_triad_reference`.
+PolyzyMD has no separate triad analysis: the triad is a routine on the analysis
+API. For the code, see {doc}`../how_to/analysis_triad_quickstart`. For what each
+function measures, see {doc}`../reference/analysis_functions`.
 ```
 
 ## What the metric represents
 
 A classical Ser-His-Asp/Glu catalytic triad depends on a hydrogen-bond network
 that helps position histidine and activate the serine nucleophile. PolyzyMD does
-not model reactivity or proton transfer directly in this analysis. Instead, it
-tracks user-defined heavy-atom or point-to-point distances such as:
+not model reactivity or proton transfer. The routine of
+{doc}`../how_to/analysis_triad_quickstart` measures the network in two ways.
 
-- Asp/Glu carboxylate to His nitrogen
-- His nitrogen to Ser hydroxyl oxygen
-- other active-site distances chosen for a specific enzyme family
+**Hydrogen bonds.** `functions.hbond_count(group_a, group_b)` counts, on every
+frame, the hydrogen bonds between two groups with MDAnalysis
+`HydrogenBondAnalysis`: donor within 3.5 Å of the acceptor and a
+donor-hydrogen-acceptor angle of at least 150° by default. One `study.timeseries`
+call per triad bond, such as Ser OG-HG to His NE2 and His ND1-HD1 to Asp OD1 or
+OD2, gives each bond's count per frame, and `Timeseries.transform` combines
+them into a series that is 1 on the frames where every bond is formed.
 
-For each trajectory frame, the plugin asks whether every configured pair is
-below the contact threshold. The main scalar metric is the **simultaneous
-contact fraction**:
+**Distances.** `functions.pair_distance` measures a heavy-atom or
+point-to-point distance per frame, and `polyzymd analyze distances --set
+pairs=triad.yaml` measures every listed pair with the fraction of frames below
+its threshold. `functions.all_below` combines stored distance series into a
+series that is 1 on the frames where every pair is below its threshold.
+
+Either way, the mean of the combined series over one replicate's production
+frames is the **simultaneous fraction**:
 
 $$
-f_{\text{contact}} = \frac{1}{N} \sum_{t=1}^{N} \prod_{i=1}^{M} \mathbb{1}[d_i(t) < \theta]
+f_{\text{simultaneous}} = \frac{1}{N} \sum_{t=1}^{N} \prod_{i=1}^{M} \mathbb{1}[\text{pair } i \text{ formed at frame } t]
 $$
 
-where $N$ is the number of analyzed frames, $M$ is the number of configured
-pairs, $d_i(t)$ is the distance for pair $i$ at frame $t$, and $\theta$ is the
-distance threshold.
+where $N$ is the number of analyzed frames and $M$ the number of bonds or pairs.
+A pair is formed when its hydrogen bond is counted, or when its distance
+$d_i(t)$ is below the threshold $\theta_i$.
 
-The simultaneous fraction is stricter than per-pair contact fractions. Two
-pairs can each be in contact 50% of the time but never be in contact in the
-same frames. In that case, the simultaneous contact fraction is 0%, which is
-often more relevant to an intact triad interpretation than either per-pair
-fraction alone.
+The simultaneous fraction is stricter than per-pair fractions. Two pairs can
+each be formed 50% of the time but never in the same frames. In that case, the
+simultaneous fraction is 0%, which is often more relevant to an intact triad
+interpretation than either per-pair fraction alone.
 
-## Configuration shape and plugin name
+## Running the routine
 
-The plugin name is `catalytic_triad`. Use this canonical name in CLI commands
-and `comparison.yaml` configuration.
+{doc}`../how_to/analysis_triad_quickstart` gives the code. Each replicate
+contributes one value per result: the simultaneous fraction, from 0 to 1, and
+each bond's fraction or each pair's mean distance and fraction below threshold.
+`compare()` compares every condition with the control by Welch's t test on those
+replicate values, with the Benjamini-Hochberg correction over the conditions
+compared. The per-frame series of every replicate are stored with a record of
+the selections, thresholds and input files, so combining them again, or
+reporting another result, does not read the trajectory again.
 
-Current `comparison.yaml` files define triad settings under `plugins:`:
-
-```yaml
-plugins:
-  catalytic_triad:
-    name: "LipA_catalytic_triad"
-    description: "Ser-His-Asp catalytic triad of Lipase A"
-    threshold: 3.5
-    pairs:
-      - label: "Asp133-His156"
-        selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
-        selection_b: "protein and resid 156 and name ND1"
-      - label: "His156-Ser77"
-        selection_a: "protein and resid 156 and name NE2"
-        selection_b: "protein and resid 77 and name OG"
+```{tip}
+Decide before looking at the results which outcome carries your conclusion.
+For a claim about catalytic competence, make the simultaneous fraction the
+primary outcome and read the individual pairs as supporting evidence. The
+simultaneous fraction already combines the pairs, so it needs no correction
+across them, and each outcome is corrected over its own condition comparisons.
+Reporting whichever outcome happens to give the smallest p value is a form of
+selective reporting that no correction repairs.
 ```
-
-Older examples that used a top-level `catalytic_triad:` block are stale. Keep
-plugin settings under `plugins.catalytic_triad` so the comparison workflow can
-discover and configure the plugin consistently.
-
-## Artifact lifecycle and output interpretation
-
-Catalytic triad analysis uses the current PolyzyMD analysis artifact lifecycle:
-
-1. Per-replicate MDAnalysis jobs compute distance profiles and contact metrics.
-2. Per-replicate artifacts are written for each condition and replicate.
-3. Condition aggregation combines replicate artifacts without re-reading
-   trajectories.
-4. Cross-condition comparison reads condition artifacts and writes a comparison
-   artifact.
-5. Plotting reads cached artifacts and sidecars; it should not rerun the
-   trajectory analysis.
-
-Canonical artifact paths are:
-
-- Per replicate:
-  `analysis/<sanitized_condition_label>/catalytic_triad/run_<N>/result.json`
-- Per condition:
-  `analysis/<sanitized_condition_label>/catalytic_triad/aggregated/result.json`
-- Cross-condition comparison:
-  `comparison/catalytic_triad/result.json`
-
-Condition labels from `comparison.yaml` are sanitized before they become
-filesystem path components. For example, a label such as `75% SBMA / 25% EGMA`
-is written under a filesystem-safe directory name rather than the literal label.
-Use the label stored inside the artifact when you need the human-readable
-condition name.
-
-Large arrays, such as distance time series or aggregated distance profiles, may
-be stored in artifact sidecars below `sidecars/`. Treat `result.json` as the
-entry point and sidecars as validated data referenced by the artifact.
 
 ## Thresholds are heuristics, not activity cutoffs
 
@@ -116,20 +87,20 @@ Useful ways to think about threshold choices:
 - **Around 4.0 Å** is more permissive and may include weak or transient
   interactions.
 
-Choose thresholds before comparing conditions whenever possible. Avoid tuning a
+Choose the thresholds before you compare conditions. Avoid tuning a
 threshold after seeing the results just to make a preferred condition look
 active or inactive. That kind of post-hoc threshold selection makes the metric
 circular and can overstate the evidence.
 
-When a threshold is uncertain, report sensitivity analyses honestly. For
-example, note whether the same qualitative ordering appears at 3.0, 3.5, and
+When a threshold is uncertain, report how the result changes with it. For
+example, state whether the same qualitative ordering appears at 3.0, 3.5, and
 4.0 Å, rather than selecting only the cutoff that gives the clearest story.
 
 ## Heavy-atom distances are only hydrogen-bond proxies
 
-PolyzyMD triad distances are usually measured between heavy atoms or
-user-defined points such as `midpoint(...)`. This is robust and convenient, but
-it is only a proxy for hydrogen bonding.
+Triad distances are usually measured between heavy atoms or user-defined
+points such as `midpoint(...)`. This needs no hydrogens. It is only a proxy
+for hydrogen bonding. `hbond_count` also checks the angle at the hydrogen.
 
 Important cautions:
 
@@ -138,8 +109,8 @@ Important cautions:
 - A distance slightly above the threshold does not prove the active site is
   catalytically inactive; transient geometry, force-field behavior, and sampling
   limitations can all matter.
-- Histidine tautomer and protonation state affect which nitrogen should be used
-  and how the Ser-His and Asp/Glu-His contacts should be interpreted.
+- The histidine tautomer and protonation state decide which nitrogen to
+  measure, and how to read the Ser-His and Asp/Glu-His contacts.
 - Asp/Glu atom choices matter. A midpoint of the carboxylate atoms can be useful
   for symmetric monitoring, but it is not the same as tracking a specific
   oxygen involved in a particular hydrogen bond.
@@ -148,7 +119,7 @@ Important cautions:
   proposed mechanism.
 
 For mechanistic claims, combine the triad metric with direct inspection of
-active-site snapshots, hydrogen-bond angle checks when available, substrate
+active-site snapshots, the hydrogen-bond counts of `hbond_count`, substrate
 distance/orientation analyses, and experiment.
 
 ## Replicate uncertainty matters more than frame count
@@ -219,25 +190,20 @@ For example, do not state that a polymer composition "preserves activity" or
 replicate uncertainty, substrate pose consistency, hydrogen-bond geometry, and
 experimental activity or other mechanistic validation.
 
-## Plot behavior
+## Figures
 
-The current plugin plot lifecycle reads existing artifacts and generates
-high-level comparison figures. The primary outputs are:
-
-- `triad_kde_panel.<format>` — per-pair distance distributions across conditions,
-  with the configured threshold shown as a visual reference.
-- `triad_threshold_bars.<format>` — grouped summaries of fractions below threshold,
-  including the simultaneous contact metric and per-pair contact behavior.
-
-The plot file format is configurable through PolyzyMD plot settings. Supported
-formats include `png`, `pdf`, and `svg`; `png` is the default. For example, the
-default filenames are `triad_kde_panel.png` and `triad_threshold_bars.png`, while
-PDF output would use `triad_kde_panel.pdf` and `triad_threshold_bars.pdf`.
-
-Use these plots to understand whether a scalar difference is driven by a broad
-distributional shift, a small subpopulation, or one limiting pair. The plots are
-interpretive aids; they do not replace statistical uncertainty or structural
-validation.
+`polyzymd analyze distances` draws, for each pair, the distribution of its
+per-frame distance in every condition, pooled over replicates with one thin
+curve per replicate and the threshold marked (`distance_kde_<pair>`), a bar chart
+of each fraction with every replicate value shown (`distance_fraction_<result>`),
+`distance_threshold_bars`, every pair's fraction in one chart, and
+`distance_kde_panel`, one distribution panel per pair. In Python,
+`series.plot_distribution()` draws a stored series' distribution and
+`series.reduce("mean").plot()` the condition means with every replicate value,
+for the simultaneous fraction too. Use the distributions to see whether a
+difference in a fraction comes from a broad shift, a small subpopulation, or one
+limiting pair. The figures are interpretive aids; they do not replace
+statistical uncertainty or structural validation.
 
 ## Common interpretation pitfalls
 
@@ -282,6 +248,6 @@ Springer-Verlag.
 ## See also
 
 - {doc}`../how_to/analysis_triad_quickstart`
-- {doc}`../reference/analysis_triad_reference`
+- {doc}`../reference/analysis_functions`
 - {doc}`analysis_statistics_best_practices`
 - {doc}`../how_to/analysis_compare_conditions`

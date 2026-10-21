@@ -82,10 +82,9 @@ PolyzyMD v1.3 uses a split environment workflow on clusters:
   selects the site's fixed `sim-cuda-12-*` runtime when it generates the job.
 - Use `analysis` after trajectories are produced to run comparisons and plots.
 
-This is different from the older `cuda-*` workflow where one CUDA environment
-was used for almost everything. The split is intentional: CUDA 12.4 OpenMM
-builds require a NumPy 1.x runtime, while package development and analysis use
-Python 3.12 with NumPy 2. Your project directory, prepared system files,
+The environments are separate because the CUDA 12.4 OpenMM builds require a
+NumPy 1.x runtime, while package development and analysis use Python 3.12
+with NumPy 2. Your project directory, prepared system files,
 checkpoints, and trajectories are shared across environments.
 
 Install the system-preparation environment first:
@@ -122,9 +121,7 @@ After simulations finish, switch to the analysis environment:
 
 ```bash
 pixi install -e analysis
-pixi run -e analysis polyzymd compare validate -f comparison.yaml
-pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml
-pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
+pixi run -e analysis polyzymd analyze rmsf -c config.yaml --eq 10ns
 ```
 
 ### Choose the CUDA Environment
@@ -151,7 +148,7 @@ fatal; PolyzyMD uses CPU only when `openmm.platform: CPU` is explicitly
 configured.
 The standard OpenMM SLURM template is NVIDIA-only in version 1.3. CPU and AMD
 OpenCL use need a site-managed environment and batch wrapper. See
-{doc}`../how_to/hardware_platforms` for examples and the extension checklist.
+{doc}`../how_to/hardware_platforms` for examples.
 
 ## 4. Verify the Commands You Can Use
 
@@ -159,17 +156,19 @@ In the `build` environment, these commands should work directly:
 
 | Command | Works in `build`? | Notes |
 |---------|-------------------|-------|
-| `polyzymd init` | Yes | Project scaffolding |
+| `polyzymd project init` | Yes | Project scaffolding |
 | `polyzymd build` | Yes | System building |
 | `polyzymd validate` | Yes | Config validation |
 | `polyzymd clean-pdb` | Yes | Convenience PDB cleanup, not biological-system selection |
 | `polyzymd info` | Yes | Version/dependency summary |
 | `polyzymd submit --engine openmm` | Yes | The generated Slurm job activates the selected `sim-cuda-*` runtime |
 | `polyzymd submit --engine gromacs` | Yes | GROMACS submission can run from `build`; SLURM runs GROMACS in the external cluster environment |
-| `polyzymd run-segment` | No | OpenMM execution requires a `sim-cuda-*` runtime |
+| `polyzymd run` | Yes | Builds and runs a simulation on this machine, on the OpenMM platform of the config, such as `CPU`. For a local NVIDIA GPU, build here and run in a `sim-cuda-*` environment: see {doc}`../how_to/hardware_platforms` |
+| `polyzymd run-segment` | No | Runs one segment of a SLURM chain. The job scripts run it in a `sim-cuda-*` environment |
 
-The `analysis` environment is the supported environment for `polyzymd compare`
-commands. It contains MDAnalysis, MDTraj, pandas, SciPy, scikit-learn,
+`polyzymd analyze` runs in the `build` environment, which includes the
+analysis tools, and in the smaller `analysis` environment. The `analysis`
+environment contains MDAnalysis, MDTraj, pandas, SciPy, scikit-learn,
 matplotlib, seaborn, Python 3.12, and NumPy 2 without the CUDA runtime pins.
 
 PolyzyMD also prints advisory CLI warnings when pixi reports an active

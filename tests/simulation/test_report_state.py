@@ -14,6 +14,7 @@ interval) and the overlap and gap bookkeeping in ``progress.json``.
 """
 
 import json
+import logging
 import re
 import struct
 from pathlib import Path
@@ -43,9 +44,14 @@ from polyzymd.simulation.report_state import (
 # ---------------------------------------------------------------------------
 
 
-def _write_dcd_header(path: Path, frames: int, first_step: int, interval: int) -> None:
-    """Write the 100-byte header OpenMM's DCDFile starts every trajectory with."""
+def _write_dcd_header(path: Path, frames: int, interval: int) -> None:
+    """Write the 100-byte header OpenMM's DCDReporter starts every trajectory with.
+
+    DCDReporter always passes ``firstStep=reportInterval``, whatever step the
+    simulation starts at, so the header steps are relative to the segment start.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    first_step = interval
     last_step = first_step + (frames - 1) * interval
     header = struct.pack(
         "<i4c9if",
@@ -77,11 +83,16 @@ def _write_state(path: Path, step: int | None) -> None:
 
 
 def _prev_segment(tmp_path: Path, index: int, *, frames: int, first: int, interval: int) -> Path:
-    """Create ``production_<index>`` with a system XML and a DCD header."""
+    """Create ``production_<index>`` with a system XML, a DCD header and a state-data CSV.
+
+    *first* is the step of the first frame; the CSV holds one row per frame.
+    """
     seg_dir = tmp_path / f"production_{index}"
     seg_dir.mkdir(parents=True, exist_ok=True)
     (seg_dir / f"production_{index}_system.xml").write_text("<System/>")
-    _write_dcd_header(seg_dir / f"production_{index}_trajectory.dcd", frames, first, interval)
+    _write_dcd_header(seg_dir / f"production_{index}_trajectory.dcd", frames, interval)
+    rows = "".join(f"{first + i * interval},0.0\n" for i in range(frames))
+    (seg_dir / f"production_{index}_state_data.csv").write_text('#"Step","Time (ps)"\n' + rows)
     return seg_dir
 
 
@@ -112,12 +123,20 @@ class TestHeaderReaders:
         assert read_state_step(tmp_path / "old.xml") is None
         assert read_state_step(tmp_path / "missing.xml") is None
 
-    def test_segment_frames_reads_dcd_header(self, tmp_path):
+    def test_segment_frames_uses_absolute_steps_of_a_later_segment(self, tmp_path):
+        """The DCD header counts steps from the segment start; the CSV holds the real steps."""
         _prev_segment(tmp_path, 9, frames=154, first=220000000, interval=200000)
         frame = segment_frames(tmp_path, 9)
         assert frame.last_step == 250600000
         assert frame.report_interval == 200000
         assert frame.frames == 154
+
+    def test_segment_frames_counts_a_frame_missing_from_the_csv(self, tmp_path):
+        """A kill between the DCD write and the CSV row of one step leaves one more frame."""
+        seg_dir = _prev_segment(tmp_path, 1, frames=3, first=1200, interval=200)
+        _write_dcd_header(seg_dir / "production_1_trajectory.dcd", 4, 200)
+        frame = segment_frames(tmp_path, 1)
+        assert (frame.last_step, frame.frames) == (1800, 4)
 
     def test_segment_frames_falls_back_to_csv(self, tmp_path):
         seg_dir = tmp_path / "production_0"
@@ -230,7 +249,9 @@ class TestReportIntervalCheck:
 
     def test_override_allows_the_change(self, tmp_path, caplog):
         progress = self._progress(report_interval=20000)
-        check_report_interval_unchanged(progress, tmp_path, 1, 200000, allow_change=True)
+        # `polyzymd status` raises this logger to ERROR for the rest of the process.
+        with caplog.at_level(logging.WARNING, logger="polyzymd.simulation.progress"):
+            check_report_interval_unchanged(progress, tmp_path, 1, 200000, allow_change=True)
         assert "explicitly allowed" in caplog.text
 
     def test_unrecorded_interval_falls_back_to_the_dcd_header(self, tmp_path):
@@ -299,10 +320,10 @@ def _run_segment_zero(tmp_path: Path, total_steps: int = 20) -> None:
     )
 
 
-def _run_segment_one(tmp_path: Path, total_steps: int = 10):
+def _run_segment_one(tmp_path: Path, total_steps: int = 10, *, index: int = 1):
     from polyzymd.simulation.continuation import ContinuationManager
 
-    manager = ContinuationManager(working_dir=tmp_path, segment_index=1, platform="Reference")
+    manager = ContinuationManager(working_dir=tmp_path, segment_index=index, platform="Reference")
     manager.load_previous_state()
     manager.run_segment(
         duration_ns=total_steps * 1e-6,
@@ -357,8 +378,8 @@ class TestRestartEndToEnd:
         assert seg1.overlap_frames == 0
         assert seg1.gap_frames == 0
 
-    def test_resume_before_the_last_frame_is_recorded(self, tmp_path, caplog):
-        """A state older than the last frame is reported as overlap."""
+    def test_resume_before_the_last_frame_writes_no_frame_twice(self, tmp_path, caplog):
+        """A state older than the last frame does not repeat that frame's steps."""
         _run_segment_zero(tmp_path)
         seg_dir = tmp_path / "production_0"
         _hard_kill(seg_dir)
@@ -367,10 +388,41 @@ class TestRestartEndToEnd:
         restart.write_text(re.sub(r'stepCount="\d+"', 'stepCount="12"', restart.read_text()))
 
         _run_segment_one(tmp_path, total_steps=10)
-        assert _csv_steps(tmp_path / "production_1" / "production_1_state_data.csv") == [15, 20]
+        assert _csv_steps(tmp_path / "production_1" / "production_1_state_data.csv") == [25, 30]
         seg1 = next(s for s in load_progress(tmp_path).segments if s.index == 1)
-        assert seg1.overlap_frames == 2
-        assert "repeat steps already in the trajectory" in caplog.text
+        assert (seg1.overlap_frames, seg1.samples_written) == (0, 2)
+        assert "not writing its first 2 frame(s)" in caplog.text
+
+    def test_hard_killed_segment_resumed_from_an_older_state_completes_the_chain(self, tmp_path):
+        """The chain ends at the requested step with one frame per report step.
+
+        The killed segment wrote its frame at step 20 but its restart state
+        is still at step 15, and the scan estimated its steps as 20.
+        """
+        _run_segment_zero(tmp_path)
+        seg_dir = tmp_path / "production_0"
+        _hard_kill(seg_dir)
+        restart = seg_dir / "restart_state.xml"
+        restart.write_text(re.sub(r'stepCount="\d+"', 'stepCount="15"', restart.read_text()))
+        progress = load_progress(tmp_path)
+        seg0 = progress.segments[0]
+        seg0.status = SegmentStatus.INTERRUPTED
+        seg0.steps_completed = 20
+        save_progress(tmp_path, progress)
+
+        _run_segment_one(tmp_path, total_steps=progress.total_steps_requested - 20)
+
+        frames = _csv_steps(seg_dir / "production_0_state_data.csv") + _csv_steps(
+            tmp_path / "production_1" / "production_1_state_data.csv"
+        )
+        assert frames == list(range(5, 101, 5))
+        reloaded = load_or_scan_progress(tmp_path, total_steps=100, timestep_fs=1.0)
+        assert [s.steps_completed for s in reloaded.segments] == [15, 85]
+        assert reloaded.total_steps_completed == 100
+        params = json.loads(
+            (tmp_path / "production_1" / "production_1_parameters.json").read_text()
+        )
+        assert params["__values__"]["integ_params"]["__values__"]["num_samples"] == 16
 
     def test_failed_frame_write_is_not_skipped(self, tmp_path, monkeypatch):
         """Pattern C: the frame whose write raised is written by the next segment."""
@@ -411,3 +463,50 @@ class TestRestartEndToEnd:
         )
         reporter = params["__values__"]["reporter_params"]["__values__"]
         assert reporter["report_interval"] == REPORT_INTERVAL
+
+    def test_segment_after_a_resumed_segment_continues_its_frames(self, tmp_path, caplog):
+        """Frames of a segment that began at a non-zero step are read at their real steps."""
+        _run_segment_zero(tmp_path)
+        _run_segment_one(tmp_path)
+        assert segment_frames(tmp_path, 1).last_step == 30
+
+        _run_segment_one(tmp_path, index=2)
+        assert _csv_steps(tmp_path / "production_2" / "production_2_state_data.csv") == [35, 40]
+        seg2 = next(s for s in load_progress(tmp_path).segments if s.index == 2)
+        assert (seg2.start_step, seg2.overlap_frames, seg2.gap_frames) == (30, 0, 0)
+        assert "never written" not in caplog.text
+        assert "have no frame" not in caplog.text
+
+    def test_hard_killed_segment_is_followed_by_one_that_ends_at_the_total(self, tmp_path):
+        """The next segment stops at the requested total, whatever the killed one was estimated at."""
+        _run_segment_zero(tmp_path)
+        _hard_kill(tmp_path / "production_0")
+        # What the filesystem scan records for a hard-killed segment: an
+        # estimated step count and no frame bookkeeping.
+        progress = load_progress(tmp_path)
+        seg0 = progress.segments[0]
+        seg0.status = SegmentStatus.INTERRUPTED
+        seg0.steps_completed = 15
+        seg0.last_reported_step = None
+        seg0.samples_written = 0
+        save_progress(tmp_path, progress)
+
+        _run_segment_one(tmp_path, total_steps=progress.total_steps_requested - 15)
+        steps = _csv_steps(tmp_path / "production_1" / "production_1_state_data.csv")
+        assert steps[-1] == 100
+        assert load_progress(tmp_path).total_steps_completed == 100
+
+    def test_hard_killed_segment_frames_are_read_from_its_files(self, tmp_path):
+        """The next segment fills in the frame fields a hard-killed segment never wrote."""
+        _run_segment_zero(tmp_path)
+        _hard_kill(tmp_path / "production_0")
+        progress = load_progress(tmp_path)
+        seg0 = progress.segments[0]
+        seg0.status = SegmentStatus.INTERRUPTED
+        seg0.last_reported_step = None
+        seg0.samples_written = 0
+        save_progress(tmp_path, progress)
+
+        _run_segment_one(tmp_path)
+        seg0 = load_progress(tmp_path).segments[0]
+        assert (seg0.last_reported_step, seg0.samples_written) == (20, 4)

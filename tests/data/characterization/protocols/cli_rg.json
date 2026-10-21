@@ -1,0 +1,34 @@
+{
+ "agent": "# polyzymd analyze rg  metric mean_rg  unit A  eq 0ns  conditions 2  replicates 3,3  protocol rg/2\nA  n 3  mean 5.582  sem 0.1452  ci95 4.958 to 6.207  values 5.435, 5.44, 5.873  replicates 1, 2, 3  g 1.634, 1.359, 1.095  n_eff 14.68, 17.66, 21.91  eq_detected 0.1 ns\nB  n 3  mean 8.095  sem 0.2474  ci95 7.03 to 9.159  values 7.608, 8.262, 8.414  replicates 1, 2, 3  g 1.119, 1.246, 1  n_eff 21.45, 19.26, 24  eq_detected 1.1 ns\nA vs B  delta +2.512  ci95 1.635 to 3.389  p 0.002334  p_adj 0.002334  test welch_t  correction BH  family 1  d 7.152  significant\nwarning: condition A: replicates 1, 2 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nwarning: condition B: replicates 2 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nwarning: condition B replicate 1: pymbar detect_equilibration puts the start of the equilibrated region at 0.8 ns, production frame 9 of 24, after the equilibration window; the window may be too short for it\nverdict: B larger mean_rg than A (delta +2.512 A, 95% CI 1.635 to 3.389, p_adj 0.002334, p 0.002334, n 3 vs 3)\n\n",
+ "json": {
+  "all_metrics": [],
+  "all_runs": [],
+  "analysis": "rg",
+  "conditions": [{"ci95":[4.95772,6.20693],"ci_method":"student_t","entry":null,"eq_detected_frame":[0,0,1],"eq_detected_ns":[0.0,0.0,0.1],"label":"A","mean":5.58233,"n_effective":[14.6849,17.6601,21.912],"n_replicates":3,"replicate_values":[5.43472,5.43962,5.87265],"replicates":[1,2,3],"sem":0.145167,"statistical_inefficiency":[1.63433,1.359,1.09529]},{"ci95":[7.03022,9.15882],"ci_method":"student_t","entry":null,"eq_detected_frame":[8,11,0],"eq_detected_ns":[0.8,1.1,0.0],"label":"B","mean":8.09452,"n_effective":[21.4464,19.261,24.0],"n_replicates":3,"replicate_values":[7.6076,8.2622,8.41376],"replicates":[1,2,3],"sem":0.247358,"statistical_inefficiency":[1.11907,1.24604,1.0]}],
+  "equilibration": "0ns",
+  "frames_per_replicate": {
+   "A": [24,24,24],
+   "B": [24,24,24]
+  },
+  "metric": "mean_rg",
+  "pairwise": [{"a":"A","b":"B","cohens_d":7.15179,"correction":"BH","delta":2.51219,"delta_ci95":[1.63535,3.38904],"direction":"increased","entry":null,"family_size":1,"hedges_g":5.72143,"p":0.00233429,"p_adjusted":0.00233429,"significant":true,"test":"welch_t","testable":true}],
+  "problems": [],
+  "protocol_version": "2",
+  "provenance": {
+   "config_hashes": {"A":"c4429a507b8cea42","B":"c4429a507b8cea42"},
+   "mdanalysis_version": "<masked>",
+   "output_paths": {"results":"<out>/polyzymd_results/rg"},
+   "polyzymd_version": "<masked>",
+   "settings": {},
+   "settings_fingerprint": null,
+   "study": null
+  },
+  "run": null,
+  "status": "complete",
+  "stride": 1,
+  "trends": [],
+  "unit": "A",
+  "verdict": ["B larger mean_rg than A (delta +2.512 A, 95% CI 1.635 to 3.389, p_adj 0.002334, p 0.002334, n 3 vs 3)"],
+  "warnings": ["condition A: replicates 1, 2 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected","condition B: replicates 2 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected","condition B replicate 1: pymbar detect_equilibration puts the start of the equilibrated region at 0.8 ns, production frame 9 of 24, after the equilibration window; the window may be too short for it"]
+ }
+}

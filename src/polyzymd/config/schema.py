@@ -7,6 +7,7 @@ providing validation, type safety, and YAML/JSON serialization support.
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import re
@@ -15,7 +16,7 @@ import warnings
 from enum import Enum
 from pathlib import Path
 from string import Formatter
-from typing import Any, Literal, Self
+from typing import Any, ClassVar, Literal, Self, get_args
 
 from pydantic import (
     BaseModel,
@@ -28,6 +29,8 @@ from pydantic import (
 )
 
 LOGGER = logging.getLogger(__name__)
+#: Warnings about unread keys printed in this process, so each prints once.
+_WARNED_UNREAD: set[str] = set()
 
 _TOKEN_UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
 _TOKEN_UNDERSCORES = re.compile(r"_+")
@@ -78,7 +81,13 @@ class ChargeMethod(str, Enum):
 
 
 class WaterModel(str, Enum):
-    """Supported water models."""
+    """Water models a config may name.
+
+    Only TIP3P is built: the force fields PolyzyMD loads carry the TIP3P water
+    parameters. The other values stay loadable so configs of existing runs
+    still load for status and analysis; new builds refuse them
+    (:meth:`SimulationConfig.require_buildable`).
+    """
 
     TIP3P = "tip3p"
     SPCE = "spce"
@@ -92,7 +101,6 @@ class BoxShape(str, Enum):
 
     CUBE = "cube"
     RHOMBIC_DODECAHEDRON = "rhombic_dodecahedron"
-    TRUNCATED_OCTAHEDRON = "truncated_octahedron"
 
 
 class Ensemble(str, Enum):
@@ -133,18 +141,120 @@ class RestraintType(str, Enum):
 # =============================================================================
 
 
-class EnzymeConfig(BaseModel):
+class _ConfigModel(BaseModel):
+    """Base of every config section: a key the section does not define is an error.
+
+    A misspelled or unsupported key (``chrage_method``) would otherwise be
+    dropped without a word, and the build would use the default. Numbers must
+    be finite, and ``true``/``false`` is not a number.
+    """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    #: Keys a section still accepts only so the configs of existing runs load.
+    #: No code reads them. Giving one prints its warning once per process, and
+    #: ``save_config`` leaves out those at their default value; the config hash
+    #: still includes them, so a saved config keeps its hash.
+    UNREAD_FIELDS: ClassVar[dict[str, str]] = {}
+
+    @model_validator(mode="after")
+    def _warn_unread_fields(self) -> Self:
+        """Warn once for each unread key the config gives."""
+        for name in sorted(self.model_fields_set & self.UNREAD_FIELDS.keys()):
+            message = self.UNREAD_FIELDS[name]
+            if message not in _WARNED_UNREAD:
+                _WARNED_UNREAD.add(message)
+                LOGGER.warning(message)
+        return self
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _refuse_bool_as_number(cls, value: Any, info: Any) -> Any:
+        """Refuse ``true``/``false`` where a number is expected (it would read as 1 or 0)."""
+        if isinstance(value, bool) and info.field_name in cls.model_fields:
+            annotation = cls.model_fields[info.field_name].annotation
+            kinds = get_args(annotation) or (annotation,)
+            if bool not in kinds and (int in kinds or float in kinds):
+                raise ValueError(f"must be a number, not {str(value).lower()}")
+        return value
+
+
+def load_custom_substructures(path: Path) -> dict[str, dict[str, list[str]]]:
+    """Read a custom substructures JSON file and check its shape.
+
+    Parameters
+    ----------
+    path : Path
+        JSON file that maps each residue name to SMARTS patterns, and each
+        SMARTS pattern to the PDB atom names it matches, in order.
+
+    Returns
+    -------
+    dict
+        The file's content, ``{residue name: {SMARTS: [atom names]}}``.
+
+    Raises
+    ------
+    ValueError
+        When the file is missing, is not JSON or has another shape.
+    """
+    import json
+
+    try:
+        data = json.loads(Path(path).read_text())
+    except OSError as error:
+        raise ValueError(f"Cannot read custom_substructures_path {path}: {error}") from error
+    except json.JSONDecodeError as error:
+        raise ValueError(f"custom_substructures_path {path} is not JSON: {error}") from error
+    if not isinstance(data, dict) or not all(
+        isinstance(name, str)
+        and isinstance(patterns, dict)
+        and all(
+            isinstance(smarts, str)
+            and isinstance(atoms, list)
+            and all(isinstance(atom, str) for atom in atoms)
+            for smarts, atoms in patterns.items()
+        )
+        for name, patterns in data.items()
+    ):
+        raise ValueError(
+            f"custom_substructures_path {path} must map each residue name to SMARTS "
+            'patterns, and each pattern to a list of atom names: {"NCYX": {"[#7:1]...": ["N", ...]}}'
+        )
+    return data
+
+
+class EnzymeConfig(_ConfigModel):
     """Configuration for the enzyme/protein component.
 
     Attributes:
         name: Identifier for the enzyme (e.g., "LipA")
         pdb_path: Path to the PDB file containing the enzyme structure
         description: Optional description of the enzyme
+        custom_substructures_path: Optional JSON file of residue templates for
+            residues that OpenFF's template matcher does not know
     """
 
     name: str = Field(..., description="Enzyme identifier")
     pdb_path: Path = Field(..., description="Path to enzyme PDB file")
     description: str | None = Field(None, description="Optional description")
+    custom_substructures_path: Path | None = Field(
+        None,
+        description=(
+            "JSON file of extra residue templates, passed to OpenFF's "
+            "Topology.from_pdb(_custom_substructures=...): "
+            '{"RESNAME": {"SMARTS": ["ATOM", ...]}}. Relative to the config.'
+        ),
+    )
+
+    @field_validator("custom_substructures_path")
+    @classmethod
+    def validate_custom_substructures(cls, v: Path | None) -> Path | None:
+        """Check that the file exists and has the shape OpenFF reads."""
+        if v is None:
+            return v
+        load_custom_substructures(v)
+        return v
 
     @field_validator("pdb_path")
     @classmethod
@@ -160,7 +270,7 @@ class EnzymeConfig(BaseModel):
 # =============================================================================
 
 
-class SubstrateConfig(BaseModel):
+class SubstrateConfig(_ConfigModel):
     """Configuration for the docked substrate/ligand.
 
     Attributes:
@@ -191,11 +301,11 @@ class SubstrateConfig(BaseModel):
 # =============================================================================
 
 
-class PolymerPackingConfig(BaseModel):
+class PolymerPackingConfig(_ConfigModel):
     """Settings for packing polymers around the solute.
 
-    Controls the box size and PACKMOL behavior when packing polymers
-    around the protein-ligand complex.
+    Controls the PACKMOL behavior when packing polymers around the
+    protein-ligand complex.
 
     Attributes:
         padding: Room reserved for the polymer chains around the solute, in
@@ -210,16 +320,6 @@ class PolymerPackingConfig(BaseModel):
             unique chain types).  Has no effect when only a single chain
             type is present.  Default is ``False`` (PACKMOL default
             behaviour is preserved).
-        box_vectors: Optional explicit box dimensions ``[Lx, Ly, Lz]`` in
-            nanometers.  When set, overrides the auto-computed bounding box
-            plus *padding*.  The protein is centered at the midpoint of
-            the box.  Default is ``None`` (auto-compute from solute
-            bounding box + padding).
-        exclude_solute_bbox: When ``True``, add a PACKMOL ``outside box``
-            constraint equal to the solute bounding box inflated by the
-            tolerance, confining chains to a rectangular shell (legacy
-            behaviour).  Default ``False``: chains may pack anywhere in the
-            box and the tolerance against the fixed solute prevents overlap.
         confine_to_sphere: When ``True`` (default), chains are packed inside a
             sphere centred on the solute with radius
             ``0.5 * |solute bbox diagonal| + padding``, in addition to the
@@ -229,21 +329,12 @@ class PolymerPackingConfig(BaseModel):
 
     Example:
         >>> PolymerPackingConfig(padding=2.5, movebadrandom=True)
-        >>> PolymerPackingConfig(box_vectors=[8.0, 10.0, 12.0])
     """
 
     padding: float = Field(
         2.0, gt=0.0, description="Room reserved for polymer chains around the solute (nm)"
     )
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
-    exclude_solute_bbox: bool = Field(
-        False,
-        description=(
-            "Confine polymers to a rectangular shell outside the solute bounding box "
-            "(legacy behaviour). Off by default: the PACKMOL tolerance against the fixed "
-            "solute already prevents overlap, and the shell over-constrains long chains."
-        ),
-    )
     confine_to_sphere: bool = Field(
         True,
         description=(
@@ -261,16 +352,25 @@ class PolymerPackingConfig(BaseModel):
             "by placing badly-packed molecules at random box positions."
         ),
     )
-    box_vectors: list[float] | None = Field(
-        None,
-        min_length=3,
-        max_length=3,
-        description=(
-            "Optional explicit box dimensions [Lx, Ly, Lz] in nanometers. "
-            "Overrides auto-computed bounding box + padding. "
-            "Protein is centered at the midpoint of this box."
-        ),
-    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_packing_keys(cls, data: Any) -> Any:
+        """Refuse the removed packing keys and name the keys that replace them."""
+        if not isinstance(data, dict):
+            return data
+        if "exclude_solute_bbox" in data:
+            raise ValueError(
+                "'exclude_solute_bbox' was removed: chains are kept off the solute by the "
+                "Packmol tolerance and near it by 'confine_to_sphere'. Delete the key."
+            )
+        if "box_vectors" in data:
+            raise ValueError(
+                "'box_vectors' was removed: the periodic cell is the protein + substrate "
+                "bounding box plus 2 x ('polymers.packing.padding' + 'solvent.box.padding'). "
+                "Delete the key and set those paddings."
+            )
+        return data
 
 
 # =============================================================================
@@ -278,7 +378,7 @@ class PolymerPackingConfig(BaseModel):
 # =============================================================================
 
 
-class MonomerSpec(BaseModel):
+class MonomerSpec(_ConfigModel):
     """Specification for a single monomer type in a co-polymer.
 
     For dynamic polymer generation, provide the raw (unactivated) monomer SMILES.
@@ -321,7 +421,7 @@ class PolymerGenerationMode(str, Enum):
     DYNAMIC = "dynamic"  # Generate polymers on-the-fly using Polymerist
 
 
-class ReactionConfig(BaseModel):
+class ReactionConfig(_ConfigModel):
     """Paths to reaction templates for ATRP polymer generation.
 
     These .rxn files define the chemical transformations used to create
@@ -384,7 +484,7 @@ class ReactionConfig(BaseModel):
         return v
 
 
-class PolymerConfig(BaseModel):
+class PolymerConfig(_ConfigModel):
     """Configuration for polymer components.
 
     Supports two generation modes:
@@ -498,7 +598,7 @@ class PolymerConfig(BaseModel):
 # =============================================================================
 
 
-class CoSolventSpec(BaseModel):
+class CoSolventSpec(_ConfigModel):
     """Specification for a co-solvent component.
 
     You must specify either ``mole_fraction`` or ``concentration``, not both.
@@ -535,6 +635,18 @@ class CoSolventSpec(BaseModel):
     # Specification method 2: Molar concentration
     concentration: float | None = Field(None, gt=0.0, description="Molar concentration (mol/L)")
 
+    # Specification method 3: number of molecules
+    count: int | None = Field(None, ge=1, description="Number of molecules in the box")
+
+    charge_method: ChargeMethod = Field(
+        ChargeMethod.NAGL,
+        description=(
+            "How partial charges are assigned to a co-solvent that is not in the bundled "
+            "library: 'nagl' (default, the OpenFF graph network trained on AM1-BCC), "
+            "'am1bcc' (needs AmberTools) or 'espaloma'"
+        ),
+    )
+
     # Optional physical property for library metadata
     density: float | None = Field(
         None,
@@ -562,17 +674,13 @@ class CoSolventSpec(BaseModel):
         from polyzymd.data.cosolvent_library import get_cosolvent
 
         # Check that exactly one composition method is specified
-        has_mole_fraction = self.mole_fraction is not None
-        has_conc = self.concentration is not None
-
-        if not has_mole_fraction and not has_conc:
+        given = [
+            key for key in ("mole_fraction", "concentration", "count") if getattr(self, key) is not None
+        ]
+        if len(given) != 1:
             raise ValueError(
-                f"Co-solvent '{self.name}': Must specify either 'mole_fraction' or 'concentration'"
-            )
-        if has_mole_fraction and has_conc:
-            raise ValueError(
-                f"Co-solvent '{self.name}': Cannot specify both 'mole_fraction' "
-                f"and 'concentration' - choose one"
+                f"Co-solvent '{self.name}': give exactly one of mole_fraction, concentration "
+                f"and count, not {given or 'none'}"
             )
 
         # Look up from library
@@ -591,14 +699,39 @@ class CoSolventSpec(BaseModel):
         if self.density is None and library_data:
             object.__setattr__(self, "density", library_data.density)
 
-        # Set default residue name
+        # Set default residue name: the library's, or three letters of the
+        # name that no protein, nucleic, water or ion selection matches.
         if self.residue_name is None:
-            object.__setattr__(self, "residue_name", self.name[:3].upper())
+            if library_data:
+                default = library_data.residue_name
+            else:
+                letters = [c for c in self.name.upper() if c.isalnum()] or ["X"]
+                head = "".join(letters[:2]).ljust(2, "X")
+                candidates = [head + c for c in letters[2:] + list("0123456789")]
+                reserved = reserved_residue_names()
+                default = next(c for c in candidates if c not in reserved)
+            object.__setattr__(self, "residue_name", default)
 
         return self
 
 
-class PrimarySolventConfig(BaseModel):
+@functools.cache
+def reserved_residue_names() -> frozenset[str]:
+    """Return the residue names that protein, nucleic, water or ion selections match."""
+    from MDAnalysis.core.selection import NucleicSelection, ProteinSelection
+
+    from polyzymd.core.atom_groups import ION_RESIDUE_NAMES, WATER_RESIDUE_NAMES
+
+    return frozenset(
+        set(ProteinSelection.prot_res)
+        | set(NucleicSelection.nucl_res)
+        | {"SOL", "H2O", "OH2", "TIP", "T3P", "T4P", "T5P"}
+        | WATER_RESIDUE_NAMES
+        | ION_RESIDUE_NAMES
+    )
+
+
+class PrimarySolventConfig(_ConfigModel):
     """Configuration for the primary solvent (usually water).
 
     Attributes:
@@ -610,31 +743,30 @@ class PrimarySolventConfig(BaseModel):
     model: WaterModel = Field(WaterModel.TIP3P, description="Water model")
 
 
-class IonConfig(BaseModel):
+class IonConfig(_ConfigModel):
     """Configuration for ions in the solvent.
 
-    ``nacl_concentration`` is a NaCl-equivalent target for the final ion
-    concentration. When ``neutralize`` is true, PolyzyMD adjusts Na+ and Cl-
-    counts to cancel solute charge while keeping the achieved concentration
-    near this target; it is not additional salt layered on top of neutralizing
-    ions.
+    ``nacl_concentration`` is the NaCl salt concentration. When ``neutralize``
+    is true, PolyzyMD adds the Na+ or Cl- ions that cancel the charge of the
+    solute and co-solvents on top of the salt.
     """
 
     neutralize: bool = Field(True, description="Neutralize system charge")
     nacl_concentration: float = Field(
         0.0,
         ge=0.0,
-        description="NaCl-equivalent target concentration (mol/L)",
+        description="NaCl salt concentration (mol/L), before neutralizing ions",
     )
-    kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L)")
-    mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L)")
+    kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L); not built")
+    mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L); not built")
 
 
-class BoxConfig(BaseModel):
+class BoxConfig(_ConfigModel):
     """Configuration for the simulation box.
 
     Attributes:
-        padding: Distance from solute to box edge in nm
+        padding: Distance from solute to box edge in nm. The cell edge is the
+            solute diameter plus 2 x padding.
         shape: Box geometry
         target_density: Target density in g/mL
         tolerance: Minimum molecular spacing for PACKMOL in Angstrom
@@ -646,7 +778,7 @@ class BoxConfig(BaseModel):
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
 
 
-class SolventConfig(BaseModel):
+class SolventConfig(_ConfigModel):
     """Complete solvent configuration."""
 
     primary: PrimarySolventConfig = Field(
@@ -670,21 +802,23 @@ class SolventConfig(BaseModel):
 # =============================================================================
 
 
-class AtomSelectionConfig(BaseModel):
+class AtomSelectionConfig(_ConfigModel):
     """Configuration for selecting atoms for restraints.
 
-    Uses MDAnalysis-compatible selection syntax for flexibility.
+    The selection is an MDTraj selection in which ``resid``, ``chain`` and
+    ``pdbindex`` keep their MDAnalysis meaning (PDB residue number, chain
+    letter, PDB atom serial).
 
     Attributes:
-        selection: MDAnalysis selection string (e.g., "resid 77 and name OG")
+        selection: Selection string (e.g., "protein and resid 77 and name OG")
         description: Optional human-readable description
     """
 
-    selection: str = Field(..., description="MDAnalysis selection string")
+    selection: str = Field(..., description="Atom selection, e.g. 'resid 77 and name OG'")
     description: str | None = Field(None, description="Human-readable description")
 
 
-class RestraintConfig(BaseModel):
+class RestraintConfig(_ConfigModel):
     """Configuration for a single restraint.
 
     Attributes:
@@ -711,13 +845,12 @@ class RestraintConfig(BaseModel):
 # =============================================================================
 
 
-class ThermodynamicsConfig(BaseModel):
+class ThermodynamicsConfig(_ConfigModel):
     """Thermodynamic conditions for the simulation.
 
     Attributes:
         temperature: System temperature in Kelvin
         pressure: System pressure in atmospheres (for NPT)
-        salt_concentration: Ionic strength in mol/L (deprecated, use solvent.ions)
     """
 
     temperature: float = Field(..., gt=0.0, description="Temperature (K)")
@@ -729,7 +862,7 @@ class ThermodynamicsConfig(BaseModel):
 # =============================================================================
 
 
-class SimulationPhaseConfig(BaseModel):
+class SimulationPhaseConfig(_ConfigModel):
     """Configuration for a single simulation phase (equilibration or production).
 
     Attributes:
@@ -756,10 +889,10 @@ class SimulationPhaseConfig(BaseModel):
     barostat: BarostatType | None = Field(None, description="Barostat type")
     barostat_frequency: int = Field(25, ge=1, description="Barostat update frequency")
     checkpoint_interval: float = Field(
-        ...,
+        60.0,
         gt=0.0,
         description=(
-            "Wall-time interval in seconds between restart checkpoints. "
+            "Wall-time interval in seconds between restart checkpoints (default 60). "
             "Controls how frequently simulation state is saved for automatic "
             "restart on SLURM preemption or hard kill. Independent of "
             "trajectory/reporter output frequency. Must be positive so "
@@ -769,14 +902,13 @@ class SimulationPhaseConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def discard_report_interval(cls, data: Any) -> Any:
-        """Ignore the obsolete reporter interval in existing configurations."""
+    def reject_report_interval(cls, data: Any) -> Any:
+        """Refuse the removed reporter interval and name the key that replaces it."""
         if isinstance(data, dict) and "report_interval" in data:
-            LOGGER.warning(
-                "Ignoring deprecated production 'report_interval'; trajectory "
-                "cadence is derived from 'samples'"
+            raise ValueError(
+                "'report_interval' was removed: the trajectory interval is the phase's steps "
+                "divided by 'samples'. Delete 'report_interval' and set 'samples'."
             )
-            return {key: value for key, value in data.items() if key != "report_interval"}
         return data
 
     @model_validator(mode="after")
@@ -792,7 +924,7 @@ class SimulationPhaseConfig(BaseModel):
 # =============================================================================
 
 
-class PositionRestraintConfig(BaseModel):
+class PositionRestraintConfig(_ConfigModel):
     """Configuration for positional restraints on an atom group.
 
     Position restraints apply a harmonic potential to keep atoms near their
@@ -801,7 +933,7 @@ class PositionRestraintConfig(BaseModel):
 
     Attributes:
         group: Predefined atom group name
-        force_constant: Force constant in kJ/mol/nm^2 (4184.0 = 1.0 kcal/mol/A^2)
+        force_constant: Force constant in kJ/mol/nm^2 (4184.0 = 10 kcal/mol/A^2)
     """
 
     group: str = Field(
@@ -812,9 +944,9 @@ class PositionRestraintConfig(BaseModel):
         ),
     )
     force_constant: float = Field(
-        4184.0,  # 1.0 kcal/mol/A^2 in kJ/mol/nm^2
+        4184.0,  # 10 kcal/mol/A^2 in kJ/mol/nm^2
         gt=0.0,
-        description="Force constant (kJ/mol/nm^2). Default 4184.0 = 1.0 kcal/mol/A^2",
+        description="Force constant (kJ/mol/nm^2). Default 4184.0 = 10 kcal/mol/A^2",
     )
 
     @field_validator("group")
@@ -830,7 +962,7 @@ class PositionRestraintConfig(BaseModel):
         return v
 
 
-class EquilibrationStageConfig(BaseModel):
+class EquilibrationStageConfig(_ConfigModel):
     """Configuration for a single equilibration stage.
 
     Supports two temperature modes:
@@ -911,93 +1043,28 @@ class EquilibrationStageConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_temperature_ramp_config(cls, data: Any) -> Any:
-        """Migrate legacy ramp fields before validating the derived duration."""
+    def reject_removed_ramp_keys(cls, data: Any) -> Any:
+        """Refuse the removed ramp keys and name ``temperature_interval_steps``."""
         if not isinstance(data, dict):
             return data
-
-        values = dict(data)
-        start = values.get("temperature_start")
-        end = values.get("temperature_end")
-        if start is None and end is None:
-            return values
-
-        rate = values.pop("temperature_ramp_rate", None)
-        duration = values.get("duration")
-        increment = values.get("temperature_increment")
-        interval_steps = values.get("temperature_interval_steps")
-        interval_fs = values.pop("temperature_interval", None)
-
-        if rate is not None:
+        if "temperature_ramp_rate" in data:
             raise ValueError(
                 "'temperature_ramp_rate' is not supported; specify "
                 "'temperature_increment' and 'temperature_interval_steps'"
             )
-
-        if interval_fs is not None and interval_steps is not None:
+        if "temperature_interval" in data:
             raise ValueError(
-                "Cannot specify both legacy 'temperature_interval' and 'temperature_interval_steps'"
+                "'temperature_interval' was removed; give the MD steps between temperature "
+                "updates as 'temperature_interval_steps' (1200 fs at a 2 fs time step is 600)"
             )
-
-        if duration is not None and interval_steps is not None:
+        ramping = any(data.get(key) is not None for key in ("temperature_start", "temperature_end"))
+        if ramping and data.get("duration") is not None:
             raise ValueError(
                 "Do not specify 'duration' for a temperature ramp; it is derived from "
                 "'temperature_start', 'temperature_end', 'temperature_increment', "
                 "and 'temperature_interval_steps'"
             )
-
-        used_legacy_interval_default = (
-            duration is not None and interval_fs is None and interval_steps is None
-        )
-        if used_legacy_interval_default:
-            # The former schema required duration and defaulted the interval to
-            # 1200 fs. Preserve that behavior long enough to migrate existing
-            # configuration files to the step-based schedule.
-            interval_fs = 1200.0
-
-        timestep_fs = float(values.get("time_step") or 2.0)
-        if interval_fs is not None:
-            try:
-                increment_value = float(increment if increment is not None else 1.0)
-                interval_value = float(interval_fs)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    "Legacy 'temperature_increment' and 'temperature_interval' must be numeric"
-                ) from exc
-            if increment_value > 0 and interval_value > 0:
-                exact_interval_steps = interval_value / timestep_fs
-                rounded_interval_steps = round(exact_interval_steps)
-                if not math.isclose(
-                    exact_interval_steps,
-                    rounded_interval_steps,
-                    rel_tol=1e-12,
-                    abs_tol=1e-9,
-                ):
-                    raise ValueError(
-                        "Legacy 'temperature_interval' must be an exact multiple "
-                        "of the stage timestep"
-                    )
-                values["temperature_increment"] = increment_value
-                values["temperature_interval_steps"] = max(1, rounded_interval_steps)
-                legacy_source = (
-                    "the legacy 1200 fs default"
-                    if used_legacy_interval_default
-                    else f"temperature_interval={interval_value:g} fs"
-                )
-                warnings.warn(
-                    f"Deprecated temperature-ramp configuration using {legacy_source} "
-                    "was converted to 'temperature_interval_steps'; update the "
-                    "configuration file and remove the ramp 'duration' field",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                LOGGER.warning(
-                    f"Deprecated temperature-ramp configuration using {legacy_source} was "
-                    f"converted to temperature_interval_steps="
-                    f"{values['temperature_interval_steps']}; any supplied ramp "
-                    "duration is ignored"
-                )
-        return values
+        return data
 
     @model_validator(mode="after")
     def validate_temperature_mode(self) -> "EquilibrationStageConfig":
@@ -1119,7 +1186,7 @@ class EquilibrationStageConfig(BaseModel):
         )
 
 
-class MinimizationConfig(BaseModel):
+class MinimizationConfig(_ConfigModel):
     """Energy-minimisation settings.
 
     Attributes:
@@ -1141,7 +1208,7 @@ class MinimizationConfig(BaseModel):
     tolerance: float = Field(10.0, gt=0, description="Energy tolerance in kJ/mol/nm")
 
 
-class SimulationPhasesConfig(BaseModel):
+class SimulationPhasesConfig(_ConfigModel):
     """Configuration for all simulation phases.
 
     Attributes:
@@ -1172,9 +1239,7 @@ class SimulationPhasesConfig(BaseModel):
         """Ensure staged equilibration is configured."""
         if self.equilibration_stages is None:
             raise ValueError(
-                "PolyzyMD now requires 'equilibration_stages' in simulation_phases. "
-                "The legacy 'equilibration' block is no longer supported. "
-                "Convert your config to one or more staged equilibration entries."
+                "simulation_phases.equilibration_stages is missing: list at least one stage"
             )
 
         if len(self.equilibration_stages) == 0:
@@ -1224,7 +1289,21 @@ def expand_path(path: Path) -> Path:
     return Path(expanded)
 
 
-class OutputConfig(BaseModel):
+#: Placeholders ``output.naming_template`` may use.
+NAMING_PLACEHOLDERS = (
+    "enzyme",
+    "substrate",
+    "polymer_type",
+    "temperature",
+    "replicate",
+    "duration",
+    "primary_solvent",
+    "cosolvent_composition",
+    "solvent_composition",
+)
+
+
+class OutputConfig(_ConfigModel):
     """Configuration for simulation output.
 
     Supports separate directories for:
@@ -1241,9 +1320,9 @@ class OutputConfig(BaseModel):
         naming_template: Template for naming working directories
         job_scripts_subdir: Subdirectory name for job scripts within projects
         slurm_logs_subdir: Subdirectory name for SLURM logs within projects
-        save_checkpoint: Whether to save checkpoint files
-        save_state_data: Whether to save thermodynamic state data
-        trajectory_format: Output trajectory format
+        save_checkpoint: Not read; kept so the configs of existing runs load
+        save_state_data: Not read; kept so the configs of existing runs load
+        trajectory_format: Not read; the engine picks the format (OpenMM dcd, GROMACS xtc)
 
     Example YAML:
         output:
@@ -1253,6 +1332,21 @@ class OutputConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    UNREAD_FIELDS: ClassVar[dict[str, str]] = {
+        "save_checkpoint": (
+            "output.save_checkpoint is not read: both engines always write checkpoints. "
+            "Leave it out of new configs."
+        ),
+        "save_state_data": (
+            "output.save_state_data is not read: both engines always write energies. "
+            "Leave it out of new configs."
+        ),
+        "trajectory_format": (
+            "output.trajectory_format is not read: OpenMM writes dcd and GROMACS writes xtc. "
+            "Leave it out of new configs."
+        ),
+    }
 
     # Directory configuration
     projects_directory: Path = Field(
@@ -1279,9 +1373,27 @@ class OutputConfig(BaseModel):
     )
 
     # Output options
-    save_checkpoint: bool = Field(True, description="Save checkpoint files")
-    save_state_data: bool = Field(True, description="Save state data CSV")
-    trajectory_format: str = Field("dcd", description="Trajectory file format")
+    save_checkpoint: bool = Field(True, description="Not read: checkpoints are always written")
+    save_state_data: bool = Field(True, description="Not read: energies are always written")
+    trajectory_format: str = Field(
+        "dcd", description="Not read: OpenMM writes dcd and GROMACS writes xtc trajectories"
+    )
+
+    @field_validator("naming_template")
+    @classmethod
+    def validate_naming_template(cls, v: str) -> str:
+        """Refuse a placeholder the run-folder name does not fill."""
+        try:
+            fields = [field for _, field, _, _ in Formatter().parse(v) if field is not None]
+        except ValueError as error:
+            raise ValueError(f"naming_template {v!r} is not a valid template: {error}") from None
+        unknown = sorted({field for field in fields if field not in NAMING_PLACEHOLDERS})
+        if unknown:
+            raise ValueError(
+                f"naming_template {v!r} has unknown placeholders {unknown}; use only "
+                + ", ".join("{" + name + "}" for name in NAMING_PLACEHOLDERS)
+            )
+        return v
 
     @field_validator("projects_directory", "scratch_directory", mode="before")
     @classmethod
@@ -1327,7 +1439,9 @@ class OutputConfig(BaseModel):
         replicate : int or str
             Replicate number or glob token.
         duration : float, optional
-            Production duration in ns, by default 0.0.
+            Production duration in ns, by default 0.0. Written as whole ns
+            from 1 ns up (``100``) and in full below 1 ns (``0.005``), so a
+            short run does not become ``0``.
         primary_solvent : str, optional
             Primary solvent token, by default ``"water_tip3p"``.
         cosolvent_composition : str, optional
@@ -1354,7 +1468,7 @@ class OutputConfig(BaseModel):
             polymer_type=polymer_type,
             temperature=int(temperature),
             replicate=replicate,
-            duration=int(duration),
+            duration=int(duration) if duration >= 1 else f"{duration:g}",
             primary_solvent=primary_solvent,
             cosolvent_composition=cosolvent_composition,
             solvent_composition=solvent_composition,
@@ -1383,7 +1497,12 @@ class OutputConfig(BaseModel):
 # =============================================================================
 
 
-class ForceFieldConfig(BaseModel):
+#: OpenMM platform names, keyed by the lowercase spelling a config may use
+#: (``simulation/platform.py`` maps them; HIP must be written as is).
+OPENMM_PLATFORMS = {"cuda": "CUDA", "cpu": "CPU", "opencl": "OpenCL", "reference": "Reference"}
+
+
+class ForceFieldConfig(_ConfigModel):
     """Configuration for force field selection.
 
     Attributes:
@@ -1401,7 +1520,7 @@ class ForceFieldConfig(BaseModel):
 # =============================================================================
 
 
-class OpenMMEngineConfig(BaseModel):
+class OpenMMEngineConfig(_ConfigModel):
     """OpenMM-specific engine settings.
 
     These settings control OpenMM platform selection and device configuration.
@@ -1418,7 +1537,7 @@ class OpenMMEngineConfig(BaseModel):
     precision: str = Field("mixed", description="Floating-point precision")
 
 
-class GromacsEngineConfig(BaseModel):
+class GromacsEngineConfig(_ConfigModel):
     """GROMACS-specific engine settings.
 
     These settings control how GROMACS binaries are located and invoked,
@@ -1452,8 +1571,20 @@ class GromacsEngineConfig(BaseModel):
     """
 
     gmx_binary: str | None = Field(None, description="GROMACS binary path or name")
+    analysis_topology: str | None = Field(
+        None,
+        description=(
+            "File name of the run's GROMACS topology (.top) in the run folder. Analyses "
+            "read it when MDAnalysis cannot read prod.tpr, and freeze deposits it with the "
+            "files it includes. Default: <prefix>.top, the file PolyzyMD writes."
+        ),
+    )
     mdrun_flags: str = Field("", description="Extra flags for gmx mdrun (all stages)")
-    grompp_flags: str = Field("-maxwarn 1", description="Extra flags for gmx grompp")
+    grompp_flags: str = Field(
+        "",
+        description="Extra flags for gmx grompp, such as '-maxwarn 1' to accept a warning "
+        "you have read; by default every grompp warning stops the run",
+    )
     mdrun_flags_equilibration: str | None = Field(
         None,
         description=(
@@ -1588,13 +1719,29 @@ class GromacsEngineConfig(BaseModel):
 
         return self
 
+    @model_validator(mode="after")
+    def _refuse_noconfout(self) -> Self:
+        """Refuse ``-noconfout``: without it mdrun writes the final ``.gro`` and checkpoint.
+
+        PolyzyMD finds a finished equilibration stage by its ``.gro`` and a
+        finished production by its last checkpoint, so a run with
+        ``-noconfout`` would never count as finished.
+        """
+        for name in ("mdrun_flags", "mdrun_flags_equilibration", "mdrun_flags_production"):
+            if "-noconfout" in (getattr(self, name) or "").split():
+                raise ValueError(
+                    f"gromacs.{name} contains -noconfout. PolyzyMD needs the final .gro "
+                    "and checkpoint that mdrun writes to know a stage finished; remove it."
+                )
+        return self
+
 
 # =============================================================================
 # Main Simulation Configuration
 # =============================================================================
 
 
-class SimulationConfig(BaseModel):
+class SimulationConfig(_ConfigModel):
     """Complete simulation configuration.
 
     This is the top-level configuration model that contains all settings
@@ -1645,6 +1792,286 @@ class SimulationConfig(BaseModel):
         default_factory=GromacsEngineConfig, description="GROMACS engine settings"
     )
 
+    @field_validator("polymers", mode="before")
+    @classmethod
+    def _disabled_polymers_need_no_fields(cls, value: Any) -> Any:
+        """Read ``polymers: {enabled: false}`` as no polymers.
+
+        A disabled section that lacks the fields a polymer build needs is
+        ``None``, as ``polymers: null`` is; its other keys are not read, and a
+        warning names them. A disabled section with every required field is
+        kept as written, so the configs and hashes of existing runs do not change.
+        """
+        from pydantic import TypeAdapter, ValidationError
+
+        if not isinstance(value, dict) or "enabled" not in value:
+            return value
+        try:
+            # The same values pydantic reads as false: false, "false", "no", 0, ...
+            if TypeAdapter(bool).validate_python(value["enabled"]):
+                return value
+        except ValidationError:
+            return value
+        required = [
+            name for name, field in PolymerConfig.model_fields.items() if field.is_required()
+        ]
+        if all(name in value for name in required):
+            return value
+        ignored = sorted(str(key) for key in value if key != "enabled")
+        if ignored:
+            LOGGER.warning(
+                "polymers.enabled is false, so these polymer keys are not read: %s",
+                ", ".join(ignored),
+            )
+        return None
+
+    @model_validator(mode="after")
+    def validate_barostat_for_engine(self) -> "SimulationConfig":
+        """Refuse barostat MCA with engine openmm, which runs only the isotropic barostat."""
+        if self.engine == "openmm":
+            self.require_engine_barostats("openmm")
+        return self
+
+    def require_buildable(self, engine: str | None = None, *, inputs: bool = True) -> None:
+        """Raise ``ValueError`` when a new system built from this config would be wrong.
+
+        Loading a config does not run these checks, so the configs of existing
+        runs still load for status and analysis. The commands that build a new
+        system (``validate``, ``build``, ``run``, ``submit``) call this. It
+        also checks the input files (:func:`polyzymd.config.validation.require_inputs`).
+
+        Parameters
+        ----------
+        engine : str or None
+            Engine that will run the system. Default: the config's engine.
+        inputs : bool
+            Check the input files too. ``submit`` passes False: it runs only
+            replicates that ``build`` has already built.
+        """
+        engine = engine or self.engine
+        model = self.solvent.primary.model
+        if model != WaterModel.TIP3P:
+            raise ValueError(
+                f"PolyzyMD cannot build water model '{model.value}' correctly: the force fields "
+                "it loads carry TIP3P water parameters; use model: tip3p for new systems."
+            )
+        ions = self.solvent.ions
+        for key in ("kcl_concentration", "mgcl2_concentration"):
+            if getattr(ions, key):
+                raise ValueError(
+                    f"{key}: the build adds only Na+ and Cl- ions. For new systems, remove "
+                    f"{key} and use nacl_concentration."
+                )
+        for cs in self.solvent.co_solvents:
+            if cs.residue_name.upper() in reserved_residue_names():
+                raise ValueError(
+                    f"Co-solvent '{cs.name}' has residue_name '{cs.residue_name}', an amino-acid, "
+                    "nucleic-acid, water or ion name, so selections such as 'protein' would "
+                    "include it. Set residue_name to another 3-letter name, such as the "
+                    "molecule's PDB chemical-component code, or leave it out."
+                )
+        self._require_buildable_settings(engine)
+        self.require_engine_restraints(engine)
+        self.require_engine_barostats(engine)
+        if inputs:
+            from polyzymd.config.validation import require_inputs
+
+            require_inputs(self)
+
+    def _require_buildable_settings(self, engine: str) -> None:
+        """Raise ``ValueError`` for settings a new build would not run as written."""
+        if self.solvent.primary.type != "water":
+            raise ValueError(
+                f"solvent.primary.type {self.solvent.primary.type!r}: the build makes only water."
+                "\nfix: set type: water; add other solvents as co_solvents."
+            )
+        phases = self.simulation_phases
+        stages = phases.equilibration_stages or []
+        named = [(f"equilibration stage {stage.name!r}", stage) for stage in stages]
+        named.append(("production", phases.production))
+        for what, phase in named:
+            if phase.ensemble == Ensemble.NVE:
+                raise ValueError(
+                    f"{what}: ensemble NVE is not run; both engines keep the thermostat on."
+                    "\nfix: use ensemble NVT or NPT."
+                )
+            if engine == "openmm" and phase.thermostat in (
+                ThermostatType.NOSE_HOOVER,
+                ThermostatType.ANDERSEN,
+            ):
+                raise ValueError(
+                    f"{what}: thermostat {phase.thermostat.value} runs only with engine gromacs; "
+                    "the OpenMM engine would run LangevinMiddle instead."
+                    "\nfix: use thermostat LangevinMiddle or Langevin, or set engine: gromacs."
+                )
+        for what, phase in named:
+            if isinstance(phase, EquilibrationStageConfig):
+                time_step = phase.time_step or 2.0
+                steps = int(round(phase.resolved_duration * 1e6 / time_step))
+            else:
+                time_step = phase.time_step
+                steps = int(phase.duration * 1e6 / time_step)
+            if steps < 1:
+                raise ValueError(
+                    f"{what}: duration {phase.duration:g} ns is shorter than one "
+                    f"{time_step:g} fs time step.\nfix: give a longer duration."
+                )
+            if phase.samples > steps:
+                raise ValueError(
+                    f"{what}: samples {phase.samples} is more than its {steps} steps "
+                    f"({phase.duration:g} ns / {time_step:g} fs), and at most one frame is saved "
+                    f"per step.\nfix: set samples to {steps} or fewer, or give a longer duration."
+                )
+        has_component = {
+            "ligand_heavy": self.substrate is not None,
+            "polymer_heavy": bool(self.polymers and self.polymers.enabled),
+        }
+        for stage in stages:
+            for posres in stage.position_restraints:
+                if not has_component.get(posres.group, True):
+                    part = "substrate" if posres.group == "ligand_heavy" else "enabled polymers"
+                    raise ValueError(
+                        f"equilibration stage {stage.name!r} restrains {posres.group}, but the "
+                        f"config has no {part}, so nothing would be restrained."
+                        f"\nfix: remove that position restraint, or add the {part}."
+                    )
+        fields = {f for _, f, _, _ in Formatter().parse(self.output.naming_template) if f}
+        if "replicate" not in fields:
+            raise ValueError(
+                "output.naming_template has no {replicate}, so every replicate would write to "
+                "the same folder.\nfix: add {replicate} to naming_template."
+            )
+        if not self.enzyme.name.strip():
+            raise ValueError("enzyme.name is empty.\nfix: give the enzyme a name.")
+        folder = self.format_run_directory_name(1)
+        if not folder.strip() or folder in (".", "..") or "/" in folder or "\\" in folder:
+            raise ValueError(
+                f"The run folder name {folder!r} (output.naming_template filled with the enzyme, "
+                "substrate and polymer names) is not a single folder name."
+                "\nfix: remove '/' and '\\' from those names and from naming_template."
+            )
+        for stage in stages:
+            if not stage.name.strip() or "/" in stage.name or "\\" in stage.name:
+                raise ValueError(
+                    f"Equilibration stage name {stage.name!r} is used in a folder name."
+                    "\nfix: give each stage a non-empty name without '/' or '\\'."
+                )
+        from polyzymd.config.loader import UNSET_VARIABLE
+
+        paths = {
+            "enzyme.pdb_path": self.enzyme.pdb_path,
+            "enzyme.custom_substructures_path": self.enzyme.custom_substructures_path,
+            "substrate.sdf_path": self.substrate.sdf_path if self.substrate else None,
+            "output.projects_directory": self.output.projects_directory,
+            "output.scratch_directory": self.output.scratch_directory,
+        }
+        if self.polymers is not None:
+            paths["polymers.sdf_directory"] = self.polymers.sdf_directory
+            paths["polymers.cache_directory"] = self.polymers.cache_directory
+        for key, path in paths.items():
+            unset = UNSET_VARIABLE.search(str(path)) if path is not None else None
+            if unset:
+                raise ValueError(
+                    f"{key} {str(path)!r} names the environment variable ${unset.group(1)}, "
+                    f"which is not set.\nfix: set {unset.group(1)} before running PolyzyMD, or "
+                    "write the path out."
+                )
+        if engine == "openmm":
+            platform = self.openmm.platform
+            if platform != "HIP" and platform.lower() not in OPENMM_PLATFORMS:
+                raise ValueError(
+                    f"openmm.platform {platform!r} is not an OpenMM platform."
+                    f"\nfix: use one of {', '.join(OPENMM_PLATFORMS.values())} or HIP."
+                )
+            if self.openmm.precision not in ("single", "mixed", "double"):
+                raise ValueError(
+                    f"openmm.precision {self.openmm.precision!r} is not an OpenMM precision."
+                    "\nfix: use single, mixed or double."
+                )
+        if engine == "gromacs":
+            if not re.fullmatch(r"\d+[KMGTkmgt]?", self.gromacs.memory):
+                raise ValueError(
+                    f"gromacs.memory {self.gromacs.memory!r} is not a SLURM --mem value."
+                    "\nfix: give a number with an optional K, M, G or T unit, such as 16G."
+                )
+            from polyzymd.engines.gromacs.slurm import GromacsSlurmScriptGenerator
+
+            prefix = self.gromacs.command_prefix
+            pattern = GromacsSlurmScriptGenerator._COMMAND_PREFIX_PATTERN
+            if prefix and not pattern.match(prefix):
+                raise ValueError(
+                    f"gromacs.command_prefix {prefix!r} has characters the job script refuses "
+                    "($, quotes, ;, |, & and others).\nfix: write the command out without them."
+                )
+
+    def require_engine_restraints(self, engine: str) -> None:
+        """Raise ``ValueError`` when ``engine`` would drop a restraint this config names.
+
+        Only the OpenMM engine applies distance restraints (``restraints:``).
+        The GROMACS export writes position restraints for the protein, ligand
+        and polymer groups only. :meth:`require_buildable` calls this with the
+        engine a command builds for, so ``build --format gromacs`` and
+        ``run --engine gromacs`` on an OpenMM config are refused too.
+        """
+        if engine != "gromacs":
+            return
+        enabled = [r.name for r in self.restraints if r.enabled]
+        if enabled:
+            raise ValueError(
+                f"Distance restraints ({', '.join(enabled)}) are applied only by the OpenMM "
+                "engine; GROMACS runs would drop them. To keep them, set engine: openmm. "
+                "To run on GROMACS, remove them or set enabled: false. Position restraints "
+                "in equilibration stages work on both engines."
+            )
+        from polyzymd.exporters.gromacs import PositionRestraintGenerator
+
+        mapping = PositionRestraintGenerator.GROUP_MAPPING
+        force_constants: dict[str, set[float]] = {}
+        for stage in self.simulation_phases.equilibration_stages or []:
+            for posres in stage.position_restraints:
+                force_constants.setdefault(posres.group, set()).add(posres.force_constant)
+        unknown = sorted(group for group in force_constants if group not in mapping)
+        if unknown:
+            raise ValueError(
+                f"GROMACS cannot apply position restraints on {', '.join(unknown)}: it restrains "
+                f"only {', '.join(mapping)}. Remove those groups from position_restraints, "
+                "or set engine: openmm."
+            )
+        # The GROMACS export writes one restraint block per group, with one
+        # force constant, and the protein groups share the POSRES_PROTEIN define.
+        varying = sorted(group for group, values in force_constants.items() if len(values) > 1)
+        if varying:
+            raise ValueError(
+                f"On GROMACS a position restraint group has one force constant in every stage, "
+                f"but {', '.join(varying)} has several. Use the same force_constant in "
+                "every stage."
+            )
+        protein = sorted(group for group in force_constants if mapping[group][0] == "protein")
+        if len(protein) > 1:
+            raise ValueError(
+                f"On GROMACS the protein groups share one restraint switch, so {', '.join(protein)} "
+                "would all be on in every stage that names one of them. Use the same protein "
+                "group in every stage."
+            )
+
+    def require_engine_barostats(self, engine: str) -> None:
+        """Raise ``ValueError`` when ``engine`` cannot run a barostat this config names.
+
+        The OpenMM engine runs only the isotropic Monte Carlo barostat, so
+        barostat MCA (anisotropic) needs GROMACS. Commands that run OpenMM on
+        a config call this, so ``run --engine openmm`` on a GROMACS config
+        with MCA is refused too.
+        """
+        phases = self.simulation_phases
+        barostats = [stage.barostat for stage in phases.equilibration_stages or []]
+        barostats.append(phases.production.barostat)
+        if engine == "openmm" and BarostatType.MONTE_CARLO_ANISOTROPIC in barostats:
+            raise ValueError(
+                "barostat MCA (anisotropic) runs only with engine gromacs. The OpenMM engine "
+                "runs only the isotropic Monte Carlo barostat: set engine: gromacs, or use "
+                "barostat MC."
+            )
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SimulationConfig":
         """Load configuration from a YAML file.
@@ -1662,16 +2089,6 @@ class SimulationConfig(BaseModel):
         from polyzymd.config.loader import load_config
 
         return load_config(path)
-
-    def to_yaml(self, path: str | Path) -> None:
-        """Save configuration to a YAML file.
-
-        Args:
-            path: Path to save the configuration file
-        """
-        from polyzymd.config.loader import save_config
-
-        save_config(self, path)
 
     def _primary_solvent_token(self) -> str:
         """Format the primary solvent naming token.
@@ -1707,6 +2124,8 @@ class SimulationConfig(BaseModel):
             elif cosolvent.concentration is not None:
                 concentration = _format_decimal_token(cosolvent.concentration)
                 token = f"{name}_{concentration}M"
+            elif cosolvent.count is not None:
+                token = f"{name}_{cosolvent.count}mol"
             else:
                 # Validation guarantees one composition mode, but keep errors explicit
                 raise ValueError(f"Co-solvent '{cosolvent.name}' has no composition value")
@@ -1747,7 +2166,7 @@ class SimulationConfig(BaseModel):
             "polymer_type": polymer_type,
             "temperature": int(self.thermodynamics.temperature),
             "replicate": replicate,
-            "duration": int(self.simulation_phases.production.duration),
+            "duration": self.simulation_phases.production.duration,
             "primary_solvent": primary_solvent,
             "cosolvent_composition": cosolvent_composition,
             "solvent_composition": solvent_composition,
@@ -1780,24 +2199,33 @@ class SimulationConfig(BaseModel):
         Returns:
             Path to the working directory (in scratch)
         """
-        dir_name = self.format_run_directory_name(replicate)
-        return self.output.effective_scratch_directory / dir_name
+        scratch = self.output.effective_scratch_directory
+        path = scratch / self.format_run_directory_name(replicate)
+        old_path = self._zero_duration_run_directory(replicate)
+        if not path.exists() and old_path is not None and old_path.is_dir():
+            return old_path
+        return path
 
-    def get_projects_directory(self) -> Path:
-        """Get the projects directory path.
+    def _zero_duration_run_directory(self, replicate: int | str) -> Path | None:
+        """The run directory as named before durations below 1 ns kept their value.
 
-        This is where scripts, configs, and logs are stored.
-
-        Returns:
-            Path to the projects directory
+        Earlier versions wrote a production shorter than 1 ns as ``0``
+        (``..._0ns_...``). Returns that path, or None when the duration is
+        1 ns or longer.
         """
-        return self.output.projects_directory
+        values = self._run_directory_template_values(replicate)
+        if values["duration"] >= 1:
+            return None
+        values["duration"] = 0
+        return self.output.effective_scratch_directory / self.output.format_directory_name(**values)
 
     def discover_replicate_dirs(self) -> list[tuple[int, Path]]:
         """Auto-detect all replicate directories on disk.
 
         Builds a glob pattern from the naming template with
-        ``replicate="*"`` and scans the effective scratch directory.
+        ``replicate="*"`` and scans the effective scratch directory. For a
+        production shorter than 1 ns it also finds folders with the earlier
+        ``0`` duration name; a folder with the current name wins.
 
         Returns:
             Sorted list of ``(replicate_number, directory_path)`` tuples.
@@ -1811,21 +2239,26 @@ class SimulationConfig(BaseModel):
                 "include the {replicate} placeholder."
             )
 
-        glob_pattern = self.format_run_directory_name(replicate="*")
-        regex_pattern = "^" + re.escape(glob_pattern).replace(r"\*", r"(?P<replicate>\d+)") + "$"
-        replicate_regex = re.compile(regex_pattern)
+        glob_patterns = [self.format_run_directory_name(replicate="*")]
+        old_path = self._zero_duration_run_directory("*")
+        if old_path is not None:
+            glob_patterns.insert(0, old_path.name)
 
         scratch = self.output.effective_scratch_directory
-        results: list[tuple[int, Path]] = []
-        for path in scratch.glob(glob_pattern):
-            if not path.is_dir():
-                continue
-            match = replicate_regex.fullmatch(path.name)
-            if match:
-                results.append((int(match.group("replicate")), path))
+        found: dict[int, Path] = {}
+        for glob_pattern in glob_patterns:
+            regex_pattern = (
+                "^" + re.escape(glob_pattern).replace(r"\*", r"(?P<replicate>\d+)") + "$"
+            )
+            replicate_regex = re.compile(regex_pattern)
+            for path in scratch.glob(glob_pattern):
+                if not path.is_dir():
+                    continue
+                match = replicate_regex.fullmatch(path.name)
+                if match:
+                    found[int(match.group("replicate"))] = path
 
-        results.sort(key=lambda t: t[0])
-        return results
+        return sorted(found.items())
 
     def _format_run_directory_name(self, replicate: int | str) -> str:
         """Format the run directory name for a replicate.
@@ -1837,41 +2270,3 @@ class SimulationConfig(BaseModel):
             Formatted directory name
         """
         return self.format_run_directory_name(replicate)
-
-    def to_signac_statepoint(self, replicate: int = 1) -> dict[str, Any]:
-        """Convert configuration to a Signac-compatible state point dictionary.
-
-        Args:
-            replicate: Replicate number
-
-        Returns:
-            Dictionary suitable for use as a Signac state point
-        """
-        statepoint = {
-            "enzyme": self.enzyme.name,
-            "temperature": self.thermodynamics.temperature,
-            "replicate": replicate,
-        }
-
-        if self.substrate:
-            statepoint["substrate"] = self.substrate.name
-            statepoint["substrate_conformer"] = self.substrate.conformer_index
-
-        if self.polymers and self.polymers.enabled:
-            statepoint["polymer_type"] = self.polymers.type_prefix
-            statepoint["polymer_length"] = self.polymers.length
-            statepoint["polymer_count"] = self.polymers.count
-            # Include monomer probabilities
-            for monomer in self.polymers.monomers:
-                statepoint[f"monomer_{monomer.label}_prob"] = monomer.probability
-        else:
-            statepoint["polymer_type"] = "none"
-
-        # Include co-solvent info
-        for cosolvent in self.solvent.co_solvents:
-            if cosolvent.mole_fraction is not None:
-                statepoint[f"cosolvent_{cosolvent.name}_mole_fraction"] = cosolvent.mole_fraction
-            elif cosolvent.concentration is not None:
-                statepoint[f"cosolvent_{cosolvent.name}_molarity"] = cosolvent.concentration
-
-        return statepoint

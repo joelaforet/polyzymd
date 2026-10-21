@@ -1,0 +1,694 @@
+"""Known-answer tests for Study, Study.timeseries and the replicate statistics.
+
+Every replicate is a real OpenMM run directory with one DCD segment of four
+unit-mass atoms on a cross. Frame ``k`` is scaled by ``scales[k]``, so its
+radius of gyration is ``scales[k]`` and its time is ``k * 0.1`` ns.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+from scipy import stats
+
+import polyzymd as pz
+from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
+from polyzymd.analyses.shared.statistics import mean_sem_ci
+from tests._support.analysis_testkit import (
+    replicate_values,
+    write_openmm_replicate,
+    write_simulation_config,
+)
+
+pytest.importorskip("MDAnalysis")
+pytestmark = [
+    pytest.mark.filterwarnings("ignore::DeprecationWarning"),
+    pytest.mark.filterwarnings("ignore::UserWarning"),
+]
+
+# Frame k is at 0.1 * k ns, and a 0.25 ns window leaves frames 3 to 9.
+EQUILIBRATION = "0.25ns"
+FRAMES = list(range(3, 10))
+
+
+def radius_of_gyration(atoms):
+    """Mass-weighted radius of gyration of ``atoms``."""
+    return atoms.radius_of_gyration()
+
+
+def _scales(base: float) -> list[float]:
+    """Ten per-frame Rg values whose production mean is ``base + 0.06``."""
+    return [base + 0.01 * k for k in range(10)]
+
+
+@pytest.fixture()
+def configs(tmp_path: Path) -> dict[str, Path]:
+    """Two conditions of three replicates, B larger than A by one Å."""
+    paths = {}
+    for label, offset in (("A", 1.0), ("B", 2.0)):
+        config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "scratch")
+        for replicate in (1, 2, 3):
+            write_openmm_replicate(config, replicate, _scales(offset + 0.1 * replicate))
+        paths[label] = config
+    return paths
+
+
+@pytest.fixture()
+def study(configs: dict[str, Path]) -> pz.Study:
+    """The two-condition study with the 0.25 ns window."""
+    return pz.Study.from_configs(configs, equilibration=EQUILIBRATION)
+
+
+class TestStudy:
+    """Conditions, replicates, frames, times and identity."""
+
+    def test_labels_control_and_iteration(self, study: pz.Study) -> None:
+        assert study.labels == ["A", "B"]
+        assert study.control == "A"
+        assert [condition.label for condition in study] == ["A", "B"]
+        assert [r.index for r in study["B"].replicates] == [1, 2, 3]
+
+    def test_sequence_labels_come_from_folders(self, configs: dict[str, Path]) -> None:
+        assert pz.Study.from_configs(list(configs.values()), equilibration="0ns").labels == [
+            "A",
+            "B",
+        ]
+
+    def test_frames_and_times_follow_the_window(self, study: pz.Study) -> None:
+        replicate = study["A"].replicates[0]
+        assert replicate.frames.tolist() == FRAMES
+        assert replicate.times == pytest.approx([0.1 * k for k in FRAMES], abs=1e-6)
+
+    def test_universe_is_cached(self, study: pz.Study) -> None:
+        replicate = study["A"].replicates[0]
+        assert replicate.universe() is replicate.universe()
+
+    def test_identity_records_config_window_and_files(self, study: pz.Study) -> None:
+        identity = study["A"].replicates[0].identity
+        assert identity["config_hash"] == study["A"].config_hash
+        assert identity["equilibration"] == EQUILIBRATION
+        assert identity["topology"]["path"].endswith("solvated_system.pdb")
+        assert identity["trajectories"][0]["path"].endswith("production_0_trajectory.dcd")
+        assert identity["trajectories"][0]["size_bytes"] > 0
+
+    def test_replicate_subset_and_missing_replicate(self, configs: dict[str, Path]) -> None:
+        subset = pz.Study.from_configs(configs, equilibration="0ns", replicates=[2])
+        assert [r.index for r in subset["A"].replicates] == [2]
+        with pytest.raises(ProtocolError, match="no run directory"):
+            pz.Study.from_configs(configs, equilibration="0ns", replicates=[7])
+
+    def test_unknown_label_and_bad_window(self, study: pz.Study, configs) -> None:
+        with pytest.raises(ProtocolError, match="no condition"):
+            study["C"]
+        with pytest.raises(ProtocolError, match="equilibration"):
+            pz.Study.from_configs(configs, equilibration="soon")
+
+    def test_importing_polyzymd_imports_no_numpy(self) -> None:
+        import subprocess
+
+        code = "import sys, polyzymd; print('numpy' in sys.modules or 'MDAnalysis' in sys.modules)"
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        assert result.stdout.strip() == "False"
+
+
+def _run(study: pz.Study, tmp_path: Path, function=radius_of_gyration, selection="all", **kw):
+    """Run the Rg timeseries into ``tmp_path``."""
+    return study.timeseries(
+        function, pz.select(selection), unit="A", name="rg", output_dir=tmp_path, **kw
+    )
+
+
+class TestTimeseries:
+    """Per-frame values, storage and reuse."""
+
+    def test_values_are_the_known_radii(self, study: pz.Study, tmp_path: Path) -> None:
+        series = _run(study, tmp_path).series["A"][0]
+        assert series.values == pytest.approx([1.1 + 0.01 * k for k in FRAMES], abs=1e-5)
+        assert series.frames.tolist() == FRAMES
+
+    def test_record_holds_code_arguments_inputs_and_versions(
+        self, study: pz.Study, tmp_path: Path
+    ) -> None:
+        folder = tmp_path / "polyzymd_results" / "rg" / "A" / "replicate_1"
+        _run(study, tmp_path)
+        record = json.loads((folder / "record.json").read_text())
+        assert record["function"]["qualname"] == "radius_of_gyration"
+        assert record["function"]["module"] == __name__
+        assert record["function"]["hash_of"] == "source"
+        assert record["arguments"]["args"] == [{"select": "all"}]
+        assert record["config_hash"] == study["A"].config_hash
+        assert record["equilibration"] == EQUILIBRATION
+        assert record["frames"] == FRAMES
+        assert len(record["times_ns"]) == len(FRAMES)
+        assert record["trajectories"][0]["path"].endswith(".dcd")
+        assert record["unit"] == "A"
+        assert set(record["versions"]) == {"polyzymd", "MDAnalysis", "numpy", "python"}
+        with np.load(folder / "series.npz") as data:
+            assert data["frames"].tolist() == FRAMES
+
+    def test_matching_record_is_reused(self, study: pz.Study, tmp_path, monkeypatch) -> None:
+        _run(study, tmp_path)
+        monkeypatch.setattr(
+            "MDAnalysis.analysis.base.AnalysisFromFunction.run",
+            lambda *args, **kwargs: pytest.fail("a matching stored series was measured again"),
+        )
+        assert _run(study, tmp_path).series["B"][2].values[0] == pytest.approx(2.33, abs=1e-5)
+
+    def test_recompute_measures_again(self, study: pz.Study, tmp_path: Path) -> None:
+        folder = tmp_path / "polyzymd_results" / "rg" / "A" / "replicate_1"
+        _run(study, tmp_path)
+        (folder / "series.npz").unlink()
+        np.savez(folder / "series.npz", values=np.zeros(7))
+        assert _run(study, tmp_path).series["A"][0].values[0] == 0.0
+        assert _run(study, tmp_path, recompute=True).series["A"][0].values[0] > 1.0
+
+    def test_changed_argument_recomputes(self, study: pz.Study, tmp_path: Path) -> None:
+        _run(study, tmp_path)
+        # Two opposite atoms of the cross have the same radius of gyration.
+        values = _run(study, tmp_path, selection="name C1 C2").series["A"][0].values
+        record = json.loads(
+            (tmp_path / "polyzymd_results/rg/A/replicate_1/record.json").read_text()
+        )
+        assert record["arguments"]["args"] == [{"select": "name C1 C2"}]
+        assert values == pytest.approx([1.1 + 0.01 * k for k in FRAMES], abs=1e-5)
+
+    def test_changed_function_source_recomputes(
+        self, study: pz.Study, tmp_path: Path, monkeypatch
+    ) -> None:
+        module_dir = tmp_path / "code"
+        module_dir.mkdir()
+        source = module_dir / "measure_rg.py"
+        source.write_text("def measure(atoms):\n    return atoms.radius_of_gyration()\n")
+        monkeypatch.syspath_prepend(str(module_dir))
+        module = importlib.import_module("measure_rg")
+        first = _run(study, tmp_path, function=module.measure).series["A"][0].values
+        source.write_text("def measure(atoms):\n    return 2 * atoms.radius_of_gyration()\n")
+        module = importlib.reload(module)
+        second = _run(study, tmp_path, function=module.measure).series["A"][0].values
+        sys.modules.pop("measure_rg", None)
+        assert second == pytest.approx(2 * first)
+
+    def test_changed_input_file_recomputes(self, configs, tmp_path: Path) -> None:
+        study = pz.Study.from_configs(configs, equilibration=EQUILIBRATION)
+        _run(study, tmp_path)
+        write_openmm_replicate(configs["A"], 1, [5.0] * 10)
+        fresh = pz.Study.from_configs(configs, equilibration=EQUILIBRATION)
+        assert _run(fresh, tmp_path).series["A"][0].values == pytest.approx([5.0] * 7)
+
+    def test_array_output_is_rejected(self, study: pz.Study, tmp_path: Path) -> None:
+        with pytest.raises(ProtocolError, match="per frame, not one number"):
+            study.timeseries(lambda atoms: atoms.positions[0], pz.select("all"), unit=None)
+
+    def test_universe_argument(self, study: pz.Study, tmp_path: Path) -> None:
+        def n_atoms(u):
+            return len(u.atoms)
+
+        series = study.timeseries(n_atoms, pz.universe(), unit=None, output_dir=tmp_path)
+        assert series.series["A"][0].values.tolist() == [4.0] * 7
+
+
+def below(values, threshold):
+    """1 where ``values`` is below ``threshold``."""
+    return values < threshold
+
+
+class TestTransform:
+    """A stored series transformed frame by frame, without reading a trajectory."""
+
+    def test_fraction_below_comes_from_the_stored_values(self, study, tmp_path, monkeypatch):
+        rg = _run(study, tmp_path)
+        monkeypatch.setattr(
+            "MDAnalysis.analysis.base.AnalysisFromFunction.run",
+            lambda *args, **kwargs: pytest.fail("a transform read the trajectory"),
+        )
+        # Replicate A1 has Rg 1.13 to 1.19 over the production frames.
+        fraction = rg.transform(below, unit=None, threshold=1.155).reduce("fraction")
+        assert fraction.values["A"][0] == pytest.approx(3 / 7)
+        assert fraction.values["B"] == [0.0, 0.0, 0.0]
+        assert fraction.unit is None and fraction.metric == "fraction_below_rg"
+
+    def test_record_holds_the_transform_its_arguments_and_inputs(self, study, tmp_path):
+        rg = _run(study, tmp_path)
+        doubled = rg.transform(lambda d: 2 * d, name="double")
+        record = json.loads(
+            (tmp_path / "polyzymd_results/double/A/replicate_1/record.json").read_text()
+        )
+        assert doubled.unit == "A" and doubled.series["A"][0].frames.tolist() == FRAMES
+        assert doubled.series["A"][0].values == pytest.approx(2 * rg.series["A"][0].values)
+        assert record["transform"]["qualname"].endswith("<lambda>")
+        assert record["transform"]["hash_of"] == "source"
+        source = tmp_path / "polyzymd_results/rg/A/replicate_1/record.json"
+        assert record["inputs"] == [
+            {"name": "record.json", "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+        ]
+        kwargs = rg.transform(below, threshold=1.155).series["A"][0].path / "record.json"
+        assert json.loads(kwargs.read_text())["kwargs"] == {"threshold": 1.155}
+
+    def test_several_series_combine_frame_by_frame(self, study, tmp_path):
+        rg = _run(study, tmp_path)
+        other = study.timeseries(
+            radius_of_gyration,
+            pz.select("name C1 C2"),
+            unit="A",
+            name="rg12",
+            output_dir=tmp_path,
+        )
+        both = rg.transform(lambda a, b: (a < 1.155) & (b < 1.145), other, unit=None)
+        assert both.reduce("fraction").values["A"][0] == pytest.approx(2 / 7)
+
+    def test_mismatched_frames_and_shapes_are_rejected(self, study, configs, tmp_path):
+        rg = _run(study, tmp_path)
+        short = pz.Study.from_configs(configs, equilibration="0.5ns")
+        other = _run(short, tmp_path / "short")
+        with pytest.raises(ProtocolError, match="has no series with the frames"):
+            rg.transform(lambda a, b: a + b, other)
+        with pytest.raises(ProtocolError, match="returned shape"):
+            rg.transform(lambda d: d[:2])
+
+
+class TestReduce:
+    """Named reductions and a function reduction."""
+
+    def test_named_and_callable_reductions(self, study: pz.Study, tmp_path: Path) -> None:
+        series = _run(study, tmp_path)
+        assert series.reduce("mean").values["A"] == pytest.approx([1.16, 1.26, 1.36], abs=1e-5)
+        expected_std = float(np.std([0.01 * k for k in FRAMES], ddof=1))
+        assert series.reduce("std").values["B"] == pytest.approx([expected_std] * 3, abs=1e-5)
+        last = series.reduce(lambda values, times: float(values[-1]))
+        assert last.values["A"] == pytest.approx([1.19, 1.29, 1.39], abs=1e-5)
+
+    def test_fraction_needs_zeros_and_ones(self, study: pz.Study, tmp_path: Path) -> None:
+        with pytest.raises(ProtocolError, match="0 and 1"):
+            _run(study, tmp_path).reduce("fraction")
+
+
+class TestSummaryAndCompare:
+    """Intervals, tests and warnings with known answers."""
+
+    def test_summary_matches_mean_sem_ci(self) -> None:
+        report = replicate_values({"A": [1.0, 2.0, 4.0]}).summary()
+        (row,) = report.conditions
+        expected = mean_sem_ci([1.0, 2.0, 4.0])
+        assert (row.mean, row.sem, row.ci95) == (
+            expected.mean,
+            expected.sem,
+            (expected.ci_low, expected.ci_high),
+        )
+        assert row.replicate_values == [1.0, 2.0, 4.0]
+        assert row.statistical_inefficiency == [1.0, 1.0, 1.0]
+        assert row.n_effective == [20.0, 20.0, 20.0]
+
+    def test_identical_replicates_are_not_estimable(self) -> None:
+        report = replicate_values({"A": [3.0, 3.0, 3.0]}).summary()
+        assert report.conditions[0].ci95 is None
+        assert report.conditions[0].ci_method == "not_estimable"
+        assert any("not estimable" in text for text in report.warnings)
+
+    def test_fraction_interval_past_one_is_flagged(self) -> None:
+        report = replicate_values({"A": [1.0, 1.0, 0.0]}, how="fraction").summary()
+        assert report.unit is None
+        assert any("extends past the bounds 0 to 1" in text for text in report.warnings)
+
+    def test_interval_past_the_series_bound_is_flagged(self) -> None:
+        """A mean of a quantity bounded below by 0 warns when its interval crosses 0."""
+        data = {"A": [0.1, 0.1, 3.0]}
+        bounded = replicate_values(data, series_bounds=(0.0, None))
+        assert bounded.bounds == (0.0, None)
+        assert any("extends past the bounds 0 to inf" in t for t in bounded.summary().warnings)
+        assert not any("extends past" in t for t in replicate_values(data).summary().warnings)
+        explicit = replicate_values(data, bounds=(0.0, None))
+        assert any("extends past the bounds 0 to inf" in t for t in explicit.summary().warnings)
+        custom = replicate_values(
+            data, how=lambda values, times: float(values[0]), series_bounds=(0.0, None)
+        )
+        assert custom.bounds == (None, None)
+        assert replicate_values(data, how="std", series_bounds=(0.0, None)).bounds == (0.0, None)
+
+    def test_compare_welch_student_bh_and_cohens_d(self) -> None:
+        data = {"A": [1.0, 1.2, 1.1], "B": [2.0, 2.4, 2.2], "C": [1.0, 1.3, 1.15]}
+        values = replicate_values(data)
+        welch = values.compare()
+        student = values.compare(test="student")
+        for row in welch.pairwise:
+            expected = stats.ttest_ind(data[row.b], data[row.a], equal_var=False)
+            assert row.p == pytest.approx(expected.pvalue)
+            low, high = expected.confidence_interval(0.95)
+            assert row.delta_ci95 == pytest.approx((low, high))
+        assert student.pairwise[0].p == pytest.approx(stats.ttest_ind(data["B"], data["A"]).pvalue)
+        adjusted = benjamini_hochberg([row.p for row in welch.pairwise])
+        assert [row.p_adjusted for row in welch.pairwise] == [
+            item.adjusted_p_value for item in adjusted
+        ]
+        # B is larger than A, so the difference and Cohen's d are both positive.
+        assert welch.pairwise[0].delta > 0 and welch.pairwise[0].cohens_d > 0
+        assert welch.pairwise[0].test == "welch_t"
+
+    def test_constant_conditions_are_not_testable(self) -> None:
+        report = replicate_values({"A": [0.0, 0.0], "B": [0.0, 0.0], "C": [1.0, 2.0]}).compare()
+        untestable, testable = report.pairwise
+        assert not untestable.testable and untestable.p is None
+        assert untestable.p_adjusted is None
+        # The untestable row takes no part in the correction.
+        assert testable.p_adjusted == pytest.approx(testable.p)
+
+    def test_family_size_counts_the_tests_corrected_together(self) -> None:
+        """Each outcome is one family: the conditions compared with the control."""
+        values = replicate_values(
+            {"A": [0.0, 0.0], "B": [0.0, 0.0], "C": [1.0, 2.0], "D": [3.0, 5.0]}
+        )
+        report = values.compare()
+        untestable, c_row, d_row = report.pairwise
+        assert untestable.family_size is None
+        assert c_row.family_size == d_row.family_size == 2
+        lines = report.to_agent_text().splitlines()
+        assert any(
+            line.startswith("A vs C") and "correction BH  family 2" in line for line in lines
+        )
+        assert not any(line.startswith("A vs B") and "family" in line for line in lines)
+
+    def test_conditions_and_control_arguments(self) -> None:
+        values = replicate_values({"A": [1.0, 2.0], "B": [3.0, 4.0], "C": [5.0, 6.0]})
+        report = values.compare(control="B", conditions=["C"])
+        assert [(row.a, row.b) for row in report.pairwise] == [("B", "C")]
+        assert [row.label for row in values.summary(conditions=["C"]).conditions] == ["C"]
+
+    def test_agent_text_lists_every_value(self) -> None:
+        text = (
+            replicate_values({"A": [1.0, 2.0, 4.0], "B": [2.0, 3.0, 5.0]}).compare().to_agent_text()
+        )
+        assert "values 1, 2, 4" in text and "g 1, 1, 1" in text and "A vs B" in text
+
+
+#: Polymer effect 0.5 at every temperature; temperature effect 10 per step.
+POLYMER_EFFECT, TEMPERATURE_EFFECT = 0.5, 10.0
+NOISE = ([0.0, 0.3, 0.1], [0.3, 0.1, 0.0], [0.1, 0.0, 0.3])
+
+
+def temperature_polymer_values() -> object:
+    """Three temperatures by two polymers, every condition with the same mean noise."""
+    data, factors = {}, {}
+    for polymer in ("none", "SBMA"):
+        for step, kelvin in enumerate((300, 330, 360)):
+            label = f"{polymer} {kelvin} K"
+            shift = TEMPERATURE_EFFECT * step + (POLYMER_EFFECT if polymer == "SBMA" else 0.0)
+            data[label] = [1.0 + shift + noise for noise in NOISE[step]]
+            factors[label] = {"temperature_K": kelvin, "polymer": polymer}
+    values = replicate_values(data)
+    values.source.study.factors = factors
+    return values
+
+
+class TestCompareWithinStrata:
+    """``within`` compares each condition with the control of its own stratum."""
+
+    def test_within_isolates_the_polymer_effect(self) -> None:
+        report = temperature_polymer_values().compare(within="temperature_K")
+        pairs = [(row.a, row.b, row.stratum) for row in report.pairwise]
+        assert pairs == [
+            ("none 300 K", "SBMA 300 K", {"temperature_K": 300}),
+            ("none 330 K", "SBMA 330 K", {"temperature_K": 330}),
+            ("none 360 K", "SBMA 360 K", {"temperature_K": 360}),
+        ]
+        assert [row.delta for row in report.pairwise] == pytest.approx([POLYMER_EFFECT] * 3)
+        # One correction family: every comparison of the call, over the strata.
+        assert {row.family_size for row in report.pairwise} == {3}
+        adjusted = benjamini_hochberg([row.p for row in report.pairwise])
+        assert [row.p_adjusted for row in report.pairwise] == [
+            item.adjusted_p_value for item in adjusted
+        ]
+        for row in report.pairwise:
+            a, b = (next(c for c in report.conditions if c.label == x) for x in (row.a, row.b))
+            expected = stats.ttest_ind(b.replicate_values, a.replicate_values, equal_var=False)
+            assert row.p == pytest.approx(expected.pvalue)
+        assert "none 330 K vs SBMA 330 K  temperature_K 330  delta" in report.to_agent_text()
+
+    def test_without_within_the_differences_mix_both_effects(self) -> None:
+        report = temperature_polymer_values().compare()
+        assert {row.a for row in report.pairwise} == {"none 300 K"}
+        assert all(row.stratum is None for row in report.pairwise)
+        deltas = {row.b: row.delta for row in report.pairwise}
+        assert deltas["SBMA 360 K"] == pytest.approx(2 * TEMPERATURE_EFFECT + POLYMER_EFFECT)
+        assert deltas["none 360 K"] == pytest.approx(2 * TEMPERATURE_EFFECT)
+        assert "stratum" not in report.pairwise[0].model_dump()
+
+    def test_control_given_as_factor_values(self) -> None:
+        values = temperature_polymer_values()
+        report = values.compare(within=["temperature_K"], control={"polymer": "SBMA"})
+        assert [row.a for row in report.pairwise] == ["SBMA 300 K", "SBMA 330 K", "SBMA 360 K"]
+        assert [row.delta for row in report.pairwise] == pytest.approx([-POLYMER_EFFECT] * 3)
+
+    def test_the_study_comparison_is_the_default(self) -> None:
+        values = temperature_polymer_values()
+        values.source.study.comparison = {"within": ["temperature_K"], "control": None}
+        assert len(values.compare().pairwise) == 3
+        assert len(values.compare(within=[]).pairwise) == 5
+
+    def test_a_stratum_without_its_control_is_refused(self) -> None:
+        values = temperature_polymer_values()
+        values.source.study.factors["none 330 K"]["polymer"] = "PEG"
+        with pytest.raises(ProtocolError, match="temperature_K 330 has no control"):
+            values.compare(within="temperature_K")
+
+    def test_a_control_without_replicate_values_is_refused(self) -> None:
+        values = temperature_polymer_values()
+        values.rows["none 330 K"] = []
+        with pytest.raises(ProtocolError, match="temperature_K 330 has no control"):
+            values.compare(within="temperature_K")
+
+    def test_the_default_control_is_the_first_study_condition_not_the_first_measured(
+        self,
+    ) -> None:
+        """A first condition with no values is never replaced by a measured one."""
+        values = temperature_polymer_values()
+        values.source.study.comparison = {"within": ["temperature_K"], "control": None}
+        values.rows["none 300 K"] = []
+        kept = [label for label in values.rows if values.rows[label]]
+        with pytest.raises(ProtocolError, match="temperature_K 300 has no control values"):
+            values.compare(conditions=kept)
+        with pytest.raises(ProtocolError, match="temperature_K 300 has no control values"):
+            values.compare(within="temperature_K", conditions=kept)
+        report = values.compare(conditions=[label for label in kept if "300" not in label])
+        assert [row.a for row in report.pairwise] == ["none 330 K", "none 360 K"]
+        assert [row.delta for row in report.pairwise] == pytest.approx([POLYMER_EFFECT] * 2)
+
+    def test_a_condition_without_replicate_values_is_refused_by_name(self) -> None:
+        values = temperature_polymer_values()
+        values.rows["SBMA 330 K"] = []
+        with pytest.raises(ProtocolError, match="condition SBMA 330 K has no replicate values"):
+            values.compare()
+        with pytest.raises(ProtocolError, match="SBMA 330 K has no replicate values"):
+            values.compare(within="temperature_K")
+
+    def test_within_without_control_takes_the_study_control(self) -> None:
+        values = temperature_polymer_values()
+        values.source.study.comparison = {
+            "within": ["temperature_K"],
+            "control": {"polymer": "SBMA"},
+        }
+        report = values.compare(within="temperature_K")
+        assert [row.a for row in report.pairwise] == ["SBMA 300 K", "SBMA 330 K", "SBMA 360 K"]
+
+    def test_a_control_left_out_of_the_conditions_is_named(self) -> None:
+        """Values of some conditions, as --label gives, name the control a stratum needs."""
+        values = temperature_polymer_values()
+        values.source.study.comparison = {
+            "within": ["temperature_K"],
+            "control": {"polymer": "none"},
+        }
+        del values.rows["none 330 K"]
+        with pytest.raises(ProtocolError) as caught:
+            values.compare()
+        assert str(caught.value) == (
+            "Cannot compare: the stratum temperature_K 330 has no control values: its control "
+            "none 330 K is not among the conditions."
+        )
+        assert "--label" in caught.value.hint
+
+    def test_a_stratum_with_two_controls_is_refused(self) -> None:
+        values = temperature_polymer_values()
+        values.source.study.factors["SBMA 330 K"]["polymer"] = "none"
+        with pytest.raises(ProtocolError, match="temperature_K 330 has 2 controls"):
+            values.compare(within="temperature_K")
+
+
+class TestDetectedEquilibration:
+    """pymbar detect_equilibration is reported per replicate and changes nothing.
+
+    Replicate B2 is raised by one for its first 20 percent of frames.
+    """
+
+    @staticmethod
+    def _values(relaxation: float, n_frames: int = 2000, **kwargs) -> object:
+        from types import SimpleNamespace
+
+        from polyzymd.analyses.timeseries import ReplicateSeries, Timeseries
+
+        rng = np.random.default_rng(4)
+        frames = np.arange(n_frames)
+        series = {}
+        for label in ("A", "B"):
+            items = []
+            for index in (1, 2, 3):
+                values = rng.normal(size=n_frames) + index
+                if label == "B" and index == 2:
+                    values += relaxation * (frames < 0.2 * n_frames)
+                items.append(ReplicateSeries(label, index, values, frames, frames * 0.1, Path()))
+            series[label] = items
+
+        class _Study:
+            control = "A"
+
+            def __getitem__(self, label):
+                return SimpleNamespace(equilibration="0ns", config_hash="hash")
+
+        return Timeseries("x", "A", _Study(), series, Path()).reduce("mean", **kwargs)
+
+    @staticmethod
+    def _lines(report) -> list[str]:
+        return [text for text in report.warnings if "equilibrat" in text]
+
+    def test_relaxation_with_enough_samples_is_warned_about(self) -> None:
+        report = self._values(1.0).compare()
+        row = next(item for item in report.conditions if item.label == "B")
+        assert row.n_effective[1] >= 20 and row.eq_detected_frame[1] > 200
+        assert row.eq_detected_ns[1] == pytest.approx(0.1 * row.eq_detected_frame[1])
+        (line,) = self._lines(report)
+        assert line.startswith("condition B replicate 2: pymbar detect_equilibration puts")
+        assert f"eq_detected {row.eq_detected_ns[1]:.4g} ns" in report.to_agent_text()
+
+    def test_stationary_series_is_not_warned_about(self) -> None:
+        report = self._values(0.0).summary()
+        assert self._lines(report) == []
+        assert all(frame < 200 for row in report.conditions for frame in row.eq_detected_frame)
+
+    def test_few_effective_samples_give_one_line_for_the_conditions_they_share(self) -> None:
+        report = self._values(1.0, n_frames=15).summary()
+        assert self._lines(report) == [
+            "condition A, condition B: replicates 1, 2, 3 have fewer than 20 effective samples, "
+            "so the start of an equilibrated region cannot be detected reliably; values and "
+            "statistics are unaffected"
+        ]
+        assert [len(row.eq_detected_ns) for row in report.conditions] == [3, 3]
+
+    def test_opt_out_computes_nothing_and_values_are_identical(self) -> None:
+        on, off = self._values(1.0), self._values(1.0, detect_equilibration=False)
+        report = off.compare()
+        assert all(row.eq_detected_frame == [] == row.eq_detected_ns for row in report.conditions)
+        assert self._lines(report) == [] and "eq_detected" not in report.to_agent_text()
+        assert on.values == off.values
+        assert on.values["B"][1] == float(np.mean(on.source.series["B"][1].values))
+        assert on.compare().pairwise == report.pairwise
+        summary_on = {row.label: (row.mean, row.sem, row.ci95) for row in on.summary().conditions}
+        summary_off = {row.label: (row.mean, row.sem, row.ci95) for row in off.summary().conditions}
+        assert summary_on == summary_off
+
+
+def _distance_to_reference(atoms, reference):
+    """Root mean square distance of ``atoms`` from ``reference``, without superposition."""
+    return float(np.sqrt(np.mean(np.sum((atoms.positions - reference.positions) ** 2, axis=1))))
+
+
+def _wrap_every_reader(study: pz.Study) -> None:
+    """Wrap each replicate's reader as the loader does for a multi-segment chain."""
+    from polyzymd.analyses.shared.loader import _TimestampPreservingTrajectory
+
+    for condition in study:
+        for replicate in condition.replicates:
+            universe = replicate.universe()
+            universe.trajectory = _TimestampPreservingTrajectory(universe.trajectory)
+
+
+def test_timeseries_hands_mdanalysis_the_reader_behind_the_loader_proxy(
+    configs: dict[str, Path], tmp_path: Path
+) -> None:
+    """Issue #144: a wrapped reader was passed to the function as its first argument."""
+    from polyzymd.analyses.shared.loader import _TimestampPreservingTrajectory, underlying_reader
+
+    plain = pz.Study.from_configs(configs, equilibration=EQUILIBRATION)
+    wrapped = pz.Study.from_configs(configs, equilibration=EQUILIBRATION)
+    _wrap_every_reader(wrapped)
+    reader = wrapped["A"].replicates[0].universe().trajectory
+    assert isinstance(reader, _TimestampPreservingTrajectory)
+    assert not isinstance(underlying_reader(reader), _TimestampPreservingTrajectory)
+    assert underlying_reader(plain["A"].replicates[0].universe().trajectory) is (
+        plain["A"].replicates[0].universe().trajectory
+    )
+
+    arguments = (pz.select("all"), pz.reference("frame", "all", frame=1))
+    two = {
+        name: study.timeseries(
+            _distance_to_reference, *arguments, unit="A", output_dir=tmp_path / name
+        )
+        for name, study in (("plain", plain), ("wrapped", wrapped))
+    }
+    one = {
+        name: study.timeseries(
+            radius_of_gyration, pz.select("all"), unit="A", output_dir=tmp_path / f"rg_{name}"
+        )
+        for name, study in (("plain", plain), ("wrapped", wrapped))
+    }
+    for label in ("A", "B"):
+        for results in (two, one):
+            for got, expected in zip(
+                results["wrapped"].series[label], results["plain"].series[label]
+            ):
+                assert got.values == pytest.approx(expected.values)
+                assert list(got.frames) == FRAMES
+    assert two["wrapped"].series["A"][0].values[0] == pytest.approx(0.0, abs=1e-5)
+
+
+class TestStride:
+    """stride keeps every n-th production frame for every measurement, time and report."""
+
+    def test_frames_times_and_identity_follow_the_stride(self, configs: dict[str, Path]) -> None:
+        study = pz.Study.from_configs(configs, equilibration=EQUILIBRATION, stride=3)
+        replicate = study["A"].replicates[0]
+        assert replicate.frames.tolist() == FRAMES[::3]
+        assert replicate.times == pytest.approx([0.1 * k for k in FRAMES[::3]], abs=1e-6)
+        assert replicate.identity["stride"] == 3
+
+    def test_series_and_report_use_and_record_the_stride(
+        self, configs: dict[str, Path], tmp_path: Path
+    ) -> None:
+        study = pz.Study.from_configs(configs, equilibration=EQUILIBRATION, stride=2)
+        series = study.timeseries(
+            radius_of_gyration, pz.select("all"), unit="A", output_dir=tmp_path
+        )
+        values = series.series["A"][0]
+        assert list(values.frames) == FRAMES[::2]
+        report = series.reduce("mean").compare()
+        assert report.stride == 2
+        assert "  stride 2  " in report.to_agent_text().splitlines()[0]
+        whole = pz.Study.from_configs(configs, equilibration=EQUILIBRATION)
+        again = whole.timeseries(
+            radius_of_gyration, pz.select("all"), unit="A", output_dir=tmp_path
+        )
+        assert list(again.series["A"][0].frames) == FRAMES
+        assert "stride" not in again.reduce("mean").compare().to_agent_text().splitlines()[0]
+
+    @pytest.mark.parametrize("stride", [0, -1, 1.5, True])
+    def test_a_stride_below_one_or_not_whole_is_refused(self, configs, stride) -> None:
+        with pytest.raises(ProtocolError, match="stride must be a whole number"):
+            pz.Study.from_configs(configs, equilibration=EQUILIBRATION, stride=stride)
+
+    def test_analyze_takes_a_stride(self, configs: dict[str, Path], tmp_path: Path) -> None:
+        from polyzymd.analyses.protocols import analyze
+
+        report = analyze(
+            "rg",
+            [configs["A"], configs["B"]],
+            equilibration=EQUILIBRATION,
+            settings={"selection": "all"},
+            output_dir=tmp_path,
+            plots=False,
+            stride=2,
+        )
+        assert report.stride == 2
+        assert report.frames_per_replicate["A"] == [len(FRAMES[::2])] * 3

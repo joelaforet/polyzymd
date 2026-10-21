@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from polyzymd.core.branding import FULL_CREDIT_LINE
-from polyzymd.utils.templates import render_package_template
+from polyzymd.utils.templates import render_package_template, shell_quote
 from polyzymd.workflow.slurm import (
     SlurmConfig,
     _discover_manifest_path,
@@ -16,6 +16,8 @@ from polyzymd.workflow.slurm import (
     _validate_gpu_type_value,
     _validate_nodelist_value,
     _validate_script_value,
+    pixi_activation_block,
+    sbatch_lines,
 )
 
 from .binary import is_mpi_binary
@@ -51,7 +53,7 @@ class GromacsSlurmScriptGenerator:
         slurm_config: SlurmConfig,
         pixi_env: str = "build",
         gmx_binary: str = "gmx",
-        grompp_flags: str = "-maxwarn 1",
+        grompp_flags: str = "",
         mdrun_flags: str = "",
         mdrun_flags_eq: str | None = None,
         mdrun_flags_prod: str | None = None,
@@ -60,6 +62,7 @@ class GromacsSlurmScriptGenerator:
         module_load: str | None = None,
         env_exports: dict[str, str] | None = None,
         setup_commands: list[str] | None = None,
+        checkpoint_interval_s: float = 60.0,
     ) -> None:
         """Initialize the GROMACS SLURM script generator.
 
@@ -89,6 +92,9 @@ class GromacsSlurmScriptGenerator:
             Environment variables exported in the script prior to GROMACS commands.
         setup_commands : list[str] | None, optional
             Simple environment setup commands executed after module loading and env exports.
+        checkpoint_interval_s : float, optional
+            Wall time in seconds between the checkpoints that equilibration
+            and production write (``mdrun -cpt``, which takes minutes).
         """
         self._config = slurm_config
         self._pixi_env = pixi_env
@@ -103,58 +109,7 @@ class GromacsSlurmScriptGenerator:
         self._module_load = module_load
         self._env_exports = env_exports or {}
         self._setup_commands = setup_commands or []
-
-    def _gpu_line(self) -> str:
-        """Return the GPU SBATCH directive for the configured cluster style."""
-        if self._config.gpus == 0:
-            return ""
-        if self._config.gpu_directive_style == "gpus" and self._config.gpu_type:
-            return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
-        if self._config.gpu_type:
-            return f"#SBATCH --gres=gpu:{self._config.gpu_type}:{self._config.gpus}"
-        return f"#SBATCH --gres=gpu:{self._config.gpus}"
-
-    def _nodes_line(self) -> str:
-        """Return nodes and tasks directives for the configured cluster style."""
-        if self._config.gpu_directive_style == "gpus" and self._config.gpus > 0:
-            return f"#SBATCH -N {self._config.nodes}"
-        return f"#SBATCH --nodes={self._config.nodes}\n#SBATCH --ntasks={self._config.ntasks}"
-
-    def _cpus_line(self) -> str:
-        """Return CPUs-per-task SBATCH directive when greater than one."""
-        if self._config.cpus_per_task > 1:
-            return f"#SBATCH --cpus-per-task={self._config.cpus_per_task}"
-        return ""
-
-    def _qos_line(self) -> str:
-        """Return the optional QoS SBATCH directive."""
-        return f"#SBATCH --qos={self._config.qos}" if self._config.qos else ""
-
-    def _mem_line(self) -> str:
-        """Return the optional memory SBATCH directive."""
-        return f"#SBATCH --mem={self._config.memory}" if self._config.memory else ""
-
-    def _account_line(self) -> str:
-        """Return the optional account SBATCH directive."""
-        return f"#SBATCH --account={self._config.account}" if self._config.account else ""
-
-    def _mail_line(self) -> str:
-        """Return optional SLURM email directives."""
-        if self._config.email:
-            return f"#SBATCH --mail-type=FAIL,END\n#SBATCH --mail-user={self._config.email}"
-        return ""
-
-    def _exclude_line(self) -> str:
-        """Return optional node exclusion SBATCH directive."""
-        return f"#SBATCH --exclude={self._config.exclude}" if self._config.exclude else ""
-
-    def _constraint_line(self) -> str:
-        """Return the constraint SBATCH directive, or an empty string to omit it."""
-        return f"#SBATCH --constraint={self._config.constraint}" if self._config.constraint else ""
-
-    def _nodelist_line(self) -> str:
-        """Return optional nodelist SBATCH directive."""
-        return f"#SBATCH --nodelist={self._config.nodelist}" if self._config.nodelist else ""
+        self._checkpoint_interval_s = checkpoint_interval_s
 
     def _validate_setup_command(self, command: str) -> None:
         """Validate setup command content before script interpolation.
@@ -384,7 +339,8 @@ class GromacsSlurmScriptGenerator:
         job_name : str | None, optional
             Custom scheduler job name.
         output_file : str | None, optional
-            Custom SLURM log path pattern.
+            Custom SLURM log path pattern. A relative path is made absolute
+            against the current directory.
 
         Returns
         -------
@@ -395,6 +351,9 @@ class GromacsSlurmScriptGenerator:
             job_name = f"pzmd_gmx_r{replicate}"
         if output_file is None:
             output_file = f"slurm_logs/{job_name}.%j.out"
+        # The job runs in its run directory (``--chdir``); see the OpenMM generator.
+        output_file = str(Path(output_file).absolute())
+        working_dir = str(Path(working_dir).absolute())
 
         wall_hours = self._parse_wall_time_hours(self._config.time_limit)
         maxh_hours = wall_hours * self.MAXH_SAFETY_FACTOR
@@ -486,25 +445,20 @@ class GromacsSlurmScriptGenerator:
                 "partition": self._config.partition,
                 "job_name": job_name,
                 "output_file": output_file,
-                "qos_line": self._qos_line(),
-                "nodes_line": self._nodes_line(),
-                "cpus_line": self._cpus_line(),
-                "mem_line": self._mem_line(),
+                **sbatch_lines(self._config, mail_type="FAIL,END"),
                 "time_limit": self._config.time_limit,
-                "gpu_line": self._gpu_line(),
-                "mail_line": self._mail_line(),
-                "account_line": self._account_line(),
-                "exclude_line": self._exclude_line(),
-                "nodelist_line": self._nodelist_line(),
-                "constraint_line": self._constraint_line(),
                 "pixi_env": self._pixi_env,
                 "manifest_path": manifest_path,
+                "pixi_activation": pixi_activation_block(
+                    shell_quote(self._pixi_env), manifest_path
+                ),
                 "config_path": config_path,
                 "replicate": replicate,
                 "working_dir": working_dir,
                 "gmx_binary": gmx_base,
                 "system_prefix": system_prefix,
-                "maxh_hours": f"{maxh_hours:.2f}",
+                "maxh_hours": f"{maxh_hours:.4f}",
+                "checkpoint_minutes": f"{self._checkpoint_interval_s / 60.0:.4g}",
                 "grompp_flags": self._grompp_flags,
                 "mdrun_flags": self._mdrun_flags,
                 "mdrun_flags_eq": self._mdrun_flags_eq or "",
@@ -635,12 +589,12 @@ class GromacsSlurmScriptGenerator:
             )
             lines.append(
                 f'        run_mdrun_stage "equilibration stage {idx}" '
-                f"$MDRUN -deffnm {stage} -cpi {stage}.cpt -cpo {stage}.cpt -append $MDRUN_FLAGS_EQ -v"
+                f"$MDRUN -deffnm {stage} -cpi {stage}.cpt -cpo {stage}.cpt -append -cpt $CPT $MDRUN_FLAGS_EQ -v"
             )
             lines.append("    else")
             lines.append(
                 f'        run_mdrun_stage "equilibration stage {idx}" '
-                f"$MDRUN -deffnm {stage} -cpo {stage}.cpt $MDRUN_FLAGS_EQ -v"
+                f"$MDRUN -deffnm {stage} -cpo {stage}.cpt -cpt $CPT $MDRUN_FLAGS_EQ -v"
             )
             lines.append("    fi")
             lines.append(f"    if [ ! -f {stage}.gro ]; then")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from polyzymd.analyses.shared.selections import SelectionMode, get_position, validate_selection
+from polyzymd.analyses.shared.selections import SelectionMode, get_position
 
 
 class _FakeAtomGroup:
@@ -16,19 +16,6 @@ class _FakeAtomGroup:
 
     def __len__(self) -> int:
         return len(self.positions)
-
-
-class _RaisingUniverse:
-    """Universe test double that raises from ``select_atoms``."""
-
-    def __init__(self, error: Exception) -> None:
-        self.error = error
-
-    def select_atoms(self, selection: str) -> _FakeAtomGroup:
-        """Raise the configured selection error."""
-
-        del selection
-        raise self.error
 
 
 def test_get_position_single_mode_returns_atom_position() -> None:
@@ -48,16 +35,8 @@ def test_get_position_single_mode_rejects_multi_atom_selection() -> None:
         get_position(atoms, SelectionMode.SINGLE)
 
 
-def test_validate_selection_returns_invalid_for_expected_failure() -> None:
-    """Expected selection errors should produce an invalid diagnostic payload."""
+def test_pdbindex_means_the_same_in_analyses_and_restraints() -> None:
+    """pdbindex N is the N-th atom (bynum), as restraints read it."""
+    from polyzymd.analyses.shared.selections import translate_selection
 
-    result = validate_selection(_RaisingUniverse(ValueError("invalid selection")), "bad")
-
-    assert result == {"valid": False, "error": "invalid selection", "n_atoms": 0}
-
-
-def test_validate_selection_propagates_unexpected_runtime_error() -> None:
-    """Unexpected runtime errors should not be swallowed as validation failures."""
-
-    with pytest.raises(RuntimeError, match="boom"):
-        validate_selection(_RaisingUniverse(RuntimeError("boom")), "protein")
+    assert translate_selection("pdbindex 100 and name CA") == "bynum 100 and name CA"

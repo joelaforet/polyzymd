@@ -106,6 +106,28 @@ def _ensure_openmm_loaded() -> None:
     StateDataReporter = _StateDataReporter
 
 
+def production_dynamics(production: Any) -> Dict[str, Any]:
+    """Return the ``run_production`` arguments the config's production phase sets.
+
+    Parameters
+    ----------
+    production : SimulationPhaseConfig
+        ``simulation_phases.production`` of the config.
+
+    Returns
+    -------
+    dict
+        ``ensemble``, ``thermostat``, ``friction`` (1/ps, the inverse of
+        ``thermostat_timescale``) and ``barostat_frequency``.
+    """
+    return {
+        "ensemble": production.ensemble.value,
+        "thermostat": production.thermostat.value if production.thermostat else "LangevinMiddle",
+        "friction": 1.0 / production.thermostat_timescale,
+        "barostat_frequency": production.barostat_frequency,
+    }
+
+
 class SimulationRunner:
     """Runner for executing OpenMM molecular dynamics simulations.
 
@@ -127,6 +149,9 @@ class SimulationRunner:
         >>> runner.run_production(temperature=300, duration_ns=100)
     """
 
+    #: Seeds of the running production segment, recorded in ``progress.json``.
+    _segment_seeds: Optional[Dict[str, int]] = None
+
     def __init__(
         self,
         topology: Any,
@@ -136,6 +161,7 @@ class SimulationRunner:
         platform: str = "CUDA",
         precision: str = "mixed",
         device_index: str | None = None,
+        replicate: int | None = None,
     ) -> None:
         """Initialize the SimulationRunner.
 
@@ -145,6 +171,10 @@ class SimulationRunner:
             positions: Initial positions with units.
             working_dir: Working directory for output files.
             platform: Compute platform (CUDA, OpenCL, CPU).
+            replicate: The replicate number, which seeds the initial
+                velocities and the thermostat noise of every phase
+                (:func:`polyzymd.simulation.seeds.dynamics_seed`). ``None``
+                lets OpenMM choose random seeds.
         """
         _ensure_openmm_loaded()
 
@@ -155,6 +185,7 @@ class SimulationRunner:
         self._platform_name = platform
         self._platform_precision = precision
         self._platform_device_index = device_index
+        self._replicate = replicate
 
         self._simulation: Optional[Simulation] = None
         self._current_positions = positions
@@ -228,6 +259,7 @@ class SimulationRunner:
         friction: float = 1.0,
         timestep: float = 2.0,
         thermostat: str = "LangevinMiddle",
+        phase: str | None = None,
     ) -> openmm.Integrator:
         """Create an integrator for the simulation.
 
@@ -236,6 +268,9 @@ class SimulationRunner:
             friction: Friction coefficient in 1/ps.
             timestep: Time step in femtoseconds.
             thermostat: Thermostat type.
+            phase: The phase this integrator runs, such as
+                ``"equilibration:0:0"``; with the replicate number it seeds
+                the thermostat noise.
 
         Returns:
             OpenMM Integrator.
@@ -245,18 +280,44 @@ class SimulationRunner:
         dt = timestep * omm_unit.femtosecond
 
         if thermostat == "LangevinMiddle":
-            return openmm.LangevinMiddleIntegrator(temp, fric, dt)
+            integrator = openmm.LangevinMiddleIntegrator(temp, fric, dt)
         elif thermostat == "Langevin":
-            return openmm.LangevinIntegrator(temp, fric, dt)
+            integrator = openmm.LangevinIntegrator(temp, fric, dt)
         else:
             LOGGER.warning(f"Unknown thermostat {thermostat}, using LangevinMiddle")
-            return openmm.LangevinMiddleIntegrator(temp, fric, dt)
+            integrator = openmm.LangevinMiddleIntegrator(temp, fric, dt)
+        seed = self._seed(phase)
+        if seed is not None:
+            integrator.setRandomNumberSeed(seed)
+            LOGGER.info(f"Thermostat noise of {phase}: seed {seed}")
+        return integrator
+
+    def _seed(self, phase: str | None) -> int | None:
+        """Return the seed of ``phase`` from the replicate number, or ``None`` without one."""
+        if self._replicate is None or phase is None:
+            return None
+        from polyzymd.simulation.seeds import dynamics_seed
+
+        return dynamics_seed(self._replicate, phase)
+
+    def _set_velocities(self, temperature: float, phase: str) -> int:
+        """Draw Maxwell-Boltzmann velocities at ``temperature`` K, seeded by the replicate number.
+
+        Returns the seed, or 0 when OpenMM chose a random one.
+        """
+        seed = self._seed(f"velocities:{phase}")
+        if seed is None:
+            self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
+            return 0
+        self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin, seed)
+        return seed
 
     def _add_barostat(
         self,
         pressure: float = 1.0,
         temperature: float = 300.0,
         frequency: int = 25,
+        phase: str | None = None,
     ) -> None:
         """Add a Monte Carlo barostat to the system.
 
@@ -264,12 +325,17 @@ class SimulationRunner:
             pressure: Pressure in atmospheres.
             temperature: Temperature in Kelvin.
             frequency: Update frequency in steps.
+            phase: The phase the barostat runs in. With a replicate number,
+                it seeds the barostat's random volume moves.
         """
         barostat = openmm.MonteCarloBarostat(
             pressure * omm_unit.atmosphere,
             temperature * omm_unit.kelvin,
             frequency,
         )
+        seed = self._seed(None if phase is None else f"barostat:{phase}")
+        if seed is not None:
+            barostat.setRandomNumberSeed(seed)
         self._system.addForce(barostat)
         LOGGER.info(f"Added MC barostat: {pressure} atm, {temperature} K")
 
@@ -536,11 +602,6 @@ class SimulationRunner:
                         "the prepared structure must enter equilibration unchanged."
                     )
 
-        if is_interrupted():
-            # OpenMM minimization is not resumable.  Leave only ``started`` so
-            # the dependent successor deterministically reruns this phase.
-            raise GracefulExit(get_interrupt_signal())
-
         # Get final state (including box vectors for proper handoff to equilibration)
         state = simulation.context.getState(getEnergy=True, getPositions=True)
         energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
@@ -561,6 +622,10 @@ class SimulationRunner:
         )
 
         LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
+        if is_interrupted():
+            # A signal that arrived during minimization is honoured only now,
+            # after the result is saved, so the next job does not redo it.
+            raise GracefulExit(get_interrupt_signal())
 
         return energy
 
@@ -659,7 +724,9 @@ class SimulationRunner:
             add_position_restraints_to_system,
             remove_position_restraints_from_system,
         )
+        from polyzymd.simulation.progress import _now_iso
 
+        started_at = _now_iso()
         stage_name = f"equilibration_{stage_index}_{stage.name}"
         LOGGER.info(
             f"Starting equilibration stage: {stage.name} ({stage.resolved_duration:.6f} ns)"
@@ -689,6 +756,7 @@ class SimulationRunner:
                 pressure=pressure,
                 temperature=start_temp,
                 frequency=barostat_freq,
+                phase=f"equilibration:{stage_index}:{resume_from_step}",
             )
         else:
             # NVT - ensure no barostat
@@ -723,6 +791,9 @@ class SimulationRunner:
             temperature=start_temp,
             friction=friction,
             timestep=timestep_fs,
+            thermostat=stage.thermostat.value if stage.thermostat else "LangevinMiddle",
+            # A resumed stage draws new noise, not a repeat of its start.
+            phase=f"equilibration:{stage_index}:{resume_from_step}",
         )
         # Create simulation
         self._simulation = self._create_simulation(integrator)
@@ -749,12 +820,17 @@ class SimulationRunner:
         # velocities for the first stage. Subsequent stages inherit velocities
         # from the previous stage for physical continuity — matching the
         # GROMACS convention (gen_vel=yes only for stage 0).
+        velocity_seed = None
         if (stage_index == 0 and resume_from_step == 0) or self._current_velocities is None:
-            self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
+            velocity_seed = self._set_velocities(start_temp, f"equilibration:{stage_index}")
             LOGGER.info(f"Stage {stage_index}: initialized velocities at {start_temp} K")
         else:
             self._simulation.context.setVelocities(self._current_velocities)
             LOGGER.info(f"Stage {stage_index}: inherited velocities from previous stage")
+
+        from polyzymd.simulation.seeds import openmm_seeds
+
+        seeds = openmm_seeds(self._simulation, velocity_seed)
 
         # Log initial energy
         _state = self._simulation.context.getState(getEnergy=True)
@@ -817,9 +893,15 @@ class SimulationRunner:
         if self._simulation is None:
             raise RuntimeError("Equilibration simulation was not initialized")
 
-        from polyzymd.simulation.phase_state import write_phase_record
+        from functools import partial
+
+        from polyzymd.simulation.phase_state import load_phase_record
+        from polyzymd.simulation.phase_state import write_phase_record as _write_record
 
         phase_record_path = phase_dir / "phase.json"
+        earlier = load_phase_record(phase_record_path) if resume_from_step > 0 else None
+        seeds_by_attempt = [*(earlier.seeds_by_attempt if earlier else []), seeds]
+        write_phase_record = partial(_write_record, seeds_by_attempt=seeds_by_attempt)
         write_phase_record(
             phase_record_path,
             phase=stage_name,
@@ -1026,6 +1108,10 @@ class SimulationRunner:
             ),
             "trajectory_path": str(traj_path),
             "checkpoint_path": str(checkpoint_path),
+            "started_at": started_at,
+            "finished_at": _now_iso(),
+            "seeds": seeds,
+            "seeds_by_attempt": seeds_by_attempt,
         }
 
         LOGGER.info(f"Equilibration stage '{stage.name}' complete")
@@ -1128,13 +1214,12 @@ class SimulationRunner:
             LOGGER.warning(f"Could not parse EQ_INTERRUPTED marker {marker_path}: {exc}")
             return None
 
-        # Verify a synchronized portable state or binary checkpoint exists.
-        chk = stage_dir / f"{stage_name}_checkpoint.chk"
+        # Resuming loads the stage's portable state; without it the stage restarts.
         state_xml = stage_dir / f"{stage_name}_state.xml"
-        if not state_xml.exists() and not chk.exists():
+        if not state_xml.exists():
             LOGGER.warning(
-                f"EQ_INTERRUPTED marker found for stage {next_idx} but no state or "
-                "checkpoint — will restart stage from beginning"
+                f"EQ_INTERRUPTED marker found for stage {next_idx} but no "
+                f"{state_xml.name} — will restart stage from beginning"
             )
             return None
 
@@ -1150,12 +1235,10 @@ class SimulationRunner:
         stage_index: int,
         stage_name: str,
     ) -> None:
-        """Load positions, velocities, and box vectors from a completed equilibration checkpoint.
+        """Load positions, velocities, and box vectors from a completed equilibration stage.
 
-        Creates a temporary ``Simulation`` to deserialise the binary
-        checkpoint, then stores the extracted state on ``self`` so
-        subsequent stages or production can pick up seamlessly.
-        The temporary simulation is discarded after extraction.
+        Reads the stage's ``*_state.xml`` and stores the state on ``self`` so
+        the next stage or production starts from it.
 
         Parameters
         ----------
@@ -1167,45 +1250,17 @@ class SimulationRunner:
         dir_name = f"equilibration_{stage_index}_{stage_name}"
         stage_dir = self._working_dir / dir_name
         state_path = stage_dir / f"{dir_name}_state.xml"
-        chk_path = stage_dir / f"{dir_name}_checkpoint.chk"
+        if not state_path.exists():
+            raise FileNotFoundError(f"Equilibration state not found: {state_path}")
 
-        if state_path.exists():
-            state = XmlSerializer.deserialize(state_path.read_text())
-            self._current_positions = state.getPositions()
-            self._current_velocities = state.getVelocities()
-            self._current_box_vectors = state.getPeriodicBoxVectors()
-            self._current_step_count = int(state.getStepCount())
-            self._current_time = state.getTime()
-            LOGGER.info(
-                f"Loaded portable state from equilibration stage {stage_index} "
-                f"({stage_name}) at step {self._current_step_count}"
-            )
-            return
-
-        if not chk_path.exists():
-            raise FileNotFoundError(
-                f"Equilibration state and checkpoint not found: {state_path}, {chk_path}"
-            )
-
-        # Temporary simulation context to deserialise the binary checkpoint.
-        # We use a dummy VerletIntegrator because we only need to extract
-        # geometric state (positions, velocities, box vectors) — the next
-        # run_equilibration_stage() call creates a proper LangevinMiddleIntegrator.
-        integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
-        temp_sim = self._create_simulation(integrator)
-        temp_sim.loadCheckpoint(str(chk_path))
-
-        state = temp_sim.context.getState(getPositions=True, getVelocities=True)
+        state = XmlSerializer.deserialize(state_path.read_text())
         self._current_positions = state.getPositions()
         self._current_velocities = state.getVelocities()
         self._current_box_vectors = state.getPeriodicBoxVectors()
         self._current_step_count = int(state.getStepCount())
         self._current_time = state.getTime()
-        # Discard the temporary simulation — it has a dummy integrator
-        del temp_sim
-
         LOGGER.info(
-            f"Loaded legacy checkpoint from equilibration stage {stage_index} "
+            f"Loaded portable state from equilibration stage {stage_index} "
             f"({stage_name}) at step {self._current_step_count}"
         )
 
@@ -1433,8 +1488,13 @@ class SimulationRunner:
         *,
         report_interval: int,
         checkpoint_interval_s: float,
+        ensemble: str = "NPT",
+        thermostat: str = "LangevinMiddle",
     ) -> Dict[str, Any]:
-        """Run NPT production simulation.
+        """Run production in the configured ensemble (NPT or NVT).
+
+        :func:`production_dynamics` gives ``friction``, ``barostat_frequency``,
+        ``ensemble`` and ``thermostat`` from the config's production phase.
 
         Args:
             temperature: Temperature in Kelvin.
@@ -1443,7 +1503,7 @@ class SimulationRunner:
             timestep_fs: Time step in femtoseconds.
             friction: Friction coefficient in 1/ps.
             pressure: Pressure in atmospheres.
-            barostat_frequency: Barostat update frequency.
+            barostat_frequency: Barostat update frequency (NPT only).
             output_prefix: Prefix for output files.
             segment_index: Segment index for multi-segment production.
             report_interval: Explicit reporter interval in steps.
@@ -1454,17 +1514,29 @@ class SimulationRunner:
         Returns:
             Dictionary with phase results.
         """
+        if ensemble not in ("NPT", "NVT"):
+            raise ValueError(f"production ensemble must be NPT or NVT, got {ensemble!r}")
+        if thermostat not in ("LangevinMiddle", "Langevin"):
+            # The parameters record the thermostat, so it must be the one that runs.
+            raise ValueError(
+                f"OpenMM production runs LangevinMiddle or Langevin, not {thermostat!r}"
+            )
+        npt = ensemble == "NPT"
         LOGGER.info(
-            f"Starting production: {duration_ns} ns at {temperature} K, {pressure} atm (NPT)"
+            f"Starting production: {duration_ns} ns at {temperature} K"
+            + (f", {pressure} atm" if npt else "")
+            + f" ({ensemble}, {thermostat}, friction {friction:g}/ps"
+            + (f", barostat every {barostat_frequency} steps)" if npt else ")")
         )
 
-        # Add barostat for NPT
         self._remove_barostat()
-        self._add_barostat(
-            pressure=pressure,
-            temperature=temperature,
-            frequency=barostat_frequency,
-        )
+        if npt:
+            self._add_barostat(
+                pressure=pressure,
+                temperature=temperature,
+                frequency=barostat_frequency,
+                phase=f"production:{segment_index}",
+            )
 
         # Create output directory
         phase_name = f"{output_prefix}_{segment_index}"
@@ -1484,6 +1556,8 @@ class SimulationRunner:
             temperature=temperature,
             friction=friction,
             timestep=timestep_fs,
+            thermostat=thermostat,
+            phase=f"production:{segment_index}",
         )
         self._simulation = self._create_simulation(integrator)
 
@@ -1512,13 +1586,17 @@ class SimulationRunner:
         # - Otherwise generate new velocities at target temperature
         # Note: For continuation segments (segment > 0), ContinuationManager uses
         # loadState() which restores both positions and velocities from the XML state file
+        velocity_seed = None
         if segment_index == 0:
             if self._current_velocities is not None:
                 self._simulation.context.setVelocities(self._current_velocities)
                 LOGGER.info("Using velocities preserved from equilibration")
             else:
-                self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
+                velocity_seed = self._set_velocities(temperature, "production")
                 LOGGER.info("Initialized velocities from Maxwell-Boltzmann distribution")
+        from polyzymd.simulation.seeds import openmm_seeds
+
+        self._segment_seeds = openmm_seeds(self._simulation, velocity_seed)
 
         # Add reporters
         traj_path = phase_dir / f"{phase_name}_trajectory.dcd"
@@ -1573,7 +1651,7 @@ class SimulationRunner:
         # Save parameters JSON (needed for continuation across segments)
         params_dict = {
             "__class__": "SimulationParameters",
-            "provenance": runtime_provenance(),
+            "provenance": runtime_provenance(self._simulation),
             "__values__": {
                 "thermo_params": {
                     "__class__": "ThermoParameters",
@@ -1593,6 +1671,7 @@ class SimulationRunner:
                                     "__class__": "Quantity",
                                     "__values__": {"value": friction, "unit": "/picosecond"},
                                 },
+                                "thermostat": thermostat,
                             },
                         },
                         "barostat_params": {
@@ -1635,6 +1714,9 @@ class SimulationRunner:
                 },
             },
         }
+        if not npt:
+            # Continuation adds a barostat only when these parameters name one.
+            del params_dict["__values__"]["thermo_params"]["__values__"]["barostat_params"]
         params_path = phase_dir / f"{phase_name}_parameters.json"
         with open(params_path, "w") as f:
             json.dump(params_dict, f, indent=2)
@@ -1808,6 +1890,11 @@ class SimulationRunner:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved system to {system_xml_path}")
 
+        from polyzymd.simulation.progress import flush_reporters
+
+        # The trajectory is hashed into progress.json: make sure it is all on disk.
+        flush_reporters(self._simulation)
+
         # Update progress tracker (successful completion)
         self._update_progress_completed(
             segment_index=segment_index,
@@ -1820,9 +1907,9 @@ class SimulationRunner:
         results = {
             "phase": "production",
             "segment": segment_index,
-            "ensemble": "NPT",
+            "ensemble": ensemble,
             "temperature_K": temperature,
-            "pressure_atm": pressure,
+            "pressure_atm": pressure if npt else None,
             "duration_ns": duration_ns,
             "total_steps": total_steps,
             "final_energy_kJ_mol": state.getPotentialEnergy().value_in_unit(
@@ -1890,7 +1977,8 @@ class SimulationRunner:
             steps_requested=total_steps,
             samples_written=0,
             status=SegmentStatus.RUNNING,
-            **record_provenance(),
+            seeds=self._segment_seeds,
+            **record_provenance(self._simulation),
         )
         self._apply_frame_fields(record)
 
@@ -1986,6 +2074,9 @@ class SimulationRunner:
             LOGGER.warning("No progress file found — skipping progress update")
             return
 
+        from polyzymd.simulation.progress import trajectory_digest
+
+        segment_dir = Path(self._working_dir) / f"production_{segment_index}"
         record = SegmentRecord(
             index=segment_index,
             steps_completed=total_steps,
@@ -1993,7 +2084,9 @@ class SimulationRunner:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
-            **record_provenance(),
+            seeds=self._segment_seeds,
+            **record_provenance(self._simulation),
+            **trajectory_digest(segment_dir / f"production_{segment_index}_trajectory.dcd"),
         )
         record.finished_at = _now_iso()
         self._apply_frame_fields(record)
@@ -2040,6 +2133,7 @@ class SimulationRunner:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _now_iso,
             _update_or_append_segment,
             load_progress,
             save_progress,
@@ -2060,7 +2154,9 @@ class SimulationRunner:
             samples_written=0,  # Replaced by the tracker's count when known
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
-            **record_provenance(),
+            finished_at=_now_iso(),
+            seeds=self._segment_seeds,
+            **record_provenance(self._simulation),
         )
         self._apply_frame_fields(record)
 
@@ -2072,22 +2168,6 @@ class SimulationRunner:
             f"Progress updated (interrupted): {steps_done}/{total_steps} steps "
             f"in segment {segment_index}"
         )
-
-    def save_history(self, path: Optional[Union[str, Path]] = None) -> None:
-        """Save simulation history to JSON.
-
-        Args:
-            path: Output path (defaults to working_dir/simulation_history.json).
-        """
-        if path is None:
-            path = self._working_dir / "simulation_history.json"
-        else:
-            path = Path(path)
-
-        with open(path, "w") as f:
-            json.dump(self._history, f, indent=2)
-
-        LOGGER.info(f"Saved simulation history to {path}")
 
     def load_checkpoint(self, checkpoint_path: Union[str, Path]) -> None:
         """Load state from a checkpoint file.

@@ -255,7 +255,6 @@ class TestSolvateAssemblyCoordinates:
         mock_load_positions = MagicMock(return_value=np.asarray(loaded_positions, dtype=float))
 
         packmol_mod = types.ModuleType("openff.packmol._packmol")
-        packmol_mod._center_topology_at = mock_center
         packmol_mod._compute_brick_from_box_vectors = mock_compute_brick
         packmol_mod._create_molecule_pdbs = mock_create_molecule_pdbs
         packmol_mod._create_solute_pdb = mock_create_solute_pdb
@@ -284,6 +283,7 @@ class TestSolvateAssemblyCoordinates:
         monkeypatch.setitem(sys.modules, "openff.packmol._packmol", packmol_mod)
         monkeypatch.setitem(sys.modules, "openff.toolkit", toolkit_mod)
         monkeypatch.setitem(sys.modules, "openff.units", units_mod)
+        monkeypatch.setattr("polyzymd.utils.packmol.center_in_brick", mock_center)
 
         return {
             "center": mock_center,
@@ -387,7 +387,6 @@ class TestSolvateAssemblyCoordinates:
         monkeypatch.setattr(
             packmol, "run_packmol", MagicMock(return_value=tmp_path / "packmol.pdb")
         )
-        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
 
         result = packmol.pack_polymers(
             molecules=[object()],
@@ -458,7 +457,7 @@ class TestSolvateAssemblyCoordinates:
 
         message = str(excinfo.value)
         assert "2 solvent atom(s)" in message
-        assert "d96b1fcd" in message
+        assert "packed coordinates are shifted against the solute" in message
         assert "0.100" in message  # minimum separation
 
     def test_pack_polymers_raises_on_overlapping_polymer(self, monkeypatch, tmp_path):
@@ -499,7 +498,6 @@ class TestSolvateAssemblyCoordinates:
         monkeypatch.setattr(
             packmol, "run_packmol", MagicMock(return_value=tmp_path / "packmol.pdb")
         )
-        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
 
         monkeypatch.setattr(packmol, "SOLVATION_CLASH_ATOM_LIMIT", 0)
         with pytest.raises(packmol.SolvationClashError, match="1 polymer atom"):
@@ -628,7 +626,6 @@ class TestPackmolSeed:
         monkeypatch.setitem(sys.modules, "polyzymd.utils.boxvectors", boxvectors_mod)
         run_packmol = MagicMock(return_value=tmp_path / "packmol.pdb")
         monkeypatch.setattr(packmol, "run_packmol", run_packmol)
-        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
 
         packmol.pack_polymers(
             molecules=[object()],
@@ -678,7 +675,7 @@ class TestClashAtomLimit:
 
 
 class TestPolymerShellExclusion:
-    """The solute bounding-box annulus is opt-in."""
+    """The Packmol input of the polymer packing stage."""
 
     def _run(self, monkeypatch, tmp_path, **kwargs):
         from polyzymd.utils import packmol
@@ -700,7 +697,6 @@ class TestPolymerShellExclusion:
         monkeypatch.setitem(sys.modules, "polyzymd.utils.boxvectors", boxvectors_mod)
         run_packmol = MagicMock(return_value=tmp_path / "packmol.pdb")
         monkeypatch.setattr(packmol, "run_packmol", run_packmol)
-        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
         packmol.pack_polymers(
             molecules=[object()],
             number_of_copies=[1],
@@ -711,16 +707,28 @@ class TestPolymerShellExclusion:
         )
         return run_packmol.call_args.kwargs["input_text"], boxvectors_mod.get_topology_bbox_bounds
 
-    def test_default_has_no_outside_box(self, monkeypatch, tmp_path):
+    def test_default_packmol_input_is_unchanged(self, monkeypatch, tmp_path):
+        """The default polymer packing writes this exact Packmol input."""
         text, bbox = self._run(monkeypatch, tmp_path)
-        assert "outside box" not in text
-        assert "inside box" in text
+        assert text == (
+            "tolerance 2.000000\n"
+            "filetype pdb\n"
+            "output packmol_output.pdb\n"
+            "\n"
+            "nloop 200\n"
+            "\n"
+            "structure solute.pdb\n"
+            "  number 1\n"
+            "  fixed 0. 0. 0. 0. 0. 0.\n"
+            "end structure\n"
+            "\n"
+            "structure water.pdb\n"
+            "  number 1\n"
+            "  inside box 0. 0. 0. 28.000000 38.000000 48.000000\n"
+            "  inside sphere 15.000000 20.000000 25.000000 20.000000\n"
+            "end structure\n"
+        )
         bbox.assert_not_called()
-
-    def test_opt_in_restores_annulus(self, monkeypatch, tmp_path):
-        text, bbox = self._run(monkeypatch, tmp_path, exclude_solute_bbox=True)
-        assert "outside box 8.000000 8.000000 8.000000 22.000000 22.000000 22.000000" in text
-        bbox.assert_called_once()
 
     def test_nloop_is_rendered(self, monkeypatch, tmp_path):
         text, _ = self._run(monkeypatch, tmp_path, nloop=50)
@@ -729,9 +737,7 @@ class TestPolymerShellExclusion:
     def test_packing_config_defaults(self):
         from polyzymd.config.schema import PolymerPackingConfig
 
-        cfg = PolymerPackingConfig()
-        assert cfg.exclude_solute_bbox is False
-        assert cfg.nloop == 200
+        assert PolymerPackingConfig().nloop == 200
 
 
 # ---------------------------------------------------------------------------
@@ -774,7 +780,7 @@ class TestInsideSphereConstraint:
             )
 
     def test_constraint_from_solute_topology(self):
-        """Radius = bounding-box circumradius + padding, centre = centre of geometry."""
+        """Radius = bounding-box circumradius + padding, centre = bounding-box centre."""
         from polyzymd.utils.packmol import solute_sphere_constraint
 
         solute = _MockTopology(np.array([[0.0, 0.0, 0.0], [6.0, 8.0, 0.0], [3.0, 4.0, 0.0]]))
@@ -791,6 +797,36 @@ class TestInsideSphereConstraint:
         here = solute_sphere_constraint(_MockTopology(coords), padding_angstrom=5.0)
         there = solute_sphere_constraint(_MockTopology(coords + 137.0), padding_angstrom=5.0)
         assert here[3] == pytest.approx(there[3])
+
+    def test_sphere_is_centred_on_the_bounding_box(self):
+        """An uneven atom distribution does not pull the sphere off the bounding box."""
+        from polyzymd.utils.packmol import solute_sphere_constraint
+
+        coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [6.0, 8.0, 4.0]])
+        sphere = solute_sphere_constraint(_MockTopology(coords), padding_angstrom=5.0)
+        np.testing.assert_allclose(sphere[:3], [3.0, 4.0, 2.0])
+
+
+class TestCenterInBrick:
+    """The solute is centred in the brick by its bounding box."""
+
+    def test_bounding_box_is_centred(self):
+        """Opposite brick faces get the same clearance, whatever the atom distribution."""
+        from openff.toolkit import Molecule, Topology
+
+        from polyzymd.utils.packmol import center_in_brick
+
+        molecule = Molecule.from_smiles("CCCCCCCCO")
+        molecule.generate_conformers(n_conformers=1)
+        topology = Topology.from_molecules([molecule])
+        brick = np.array([30.0, 40.0, 50.0])
+
+        positions = center_in_brick(topology, brick).get_positions().m_as("angstrom")
+        low = positions.min(axis=0)
+        high = brick - positions.max(axis=0)
+        np.testing.assert_allclose(low, high, atol=1e-6)
+        # the input topology is not moved
+        assert not np.allclose(topology.get_positions().m_as("angstrom"), positions)
 
 
 # ---------------------------------------------------------------------------
@@ -932,7 +968,6 @@ class TestPackPolymersFinalBox:
         )
         run_packmol = MagicMock(return_value=tmp_path / "packmol.pdb")
         monkeypatch.setattr(packmol, "run_packmol", run_packmol)
-        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
 
         packmol.pack_polymers(
             molecules=[object()],
@@ -1005,3 +1040,14 @@ class TestSolvateCenterSolute:
     def test_centring_is_the_default(self, monkeypatch, tmp_path):
         _, mocks, _ = self._run(monkeypatch, tmp_path)
         mocks["center"].assert_called_once()
+
+
+def test_a_missing_packmol_is_named(monkeypatch) -> None:
+    """A missing Packmol is named as such, not reported as an unexpected TypeError."""
+    import shutil
+
+    from polyzymd.utils import packmol
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(OSError, match="Packmol is not on PATH"):
+        packmol._require_packmol()

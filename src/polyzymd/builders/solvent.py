@@ -42,10 +42,10 @@ AVOGADRO_CONSTANT = 6.02214076e23
 ION_CHARGE_TOLERANCE = 1.0e-5
 
 # Water model type
-WaterModelType = Literal["tip3p", "spce", "tip4p", "tip4pew", "opc"]
+WaterModelType = Literal["tip3p"]
 
 # Box shape type
-BoxShapeType = Literal["cube", "rhombic_dodecahedron", "truncated_octahedron"]
+BoxShapeType = Literal["cube", "rhombic_dodecahedron"]
 
 
 @dataclass
@@ -79,6 +79,12 @@ class CoSolvent:
     density: float | None = None  # g/mL
     residue_name: str = "COS"
     molecule: Molecule | None = field(default=None, repr=False)
+    count: int | None = None
+    #: How charges are assigned when the molecule is not in the bundled library.
+    charge_method: str = "nagl"
+    #: Whether the config set charge_method; when it did not, the build asks
+    #: the user to check the default.
+    charge_method_given: bool = False
 
     def __post_init__(self) -> None:
         """Validate co-solvent specification.
@@ -92,14 +98,16 @@ class CoSolvent:
             self.residue_name = self.residue_name[:3].upper()
 
         # Validate that exactly one composition method is used
-        if self.mole_fraction is None and self.concentration is None:
+        given = [
+            v for v in (self.mole_fraction, self.concentration, self.count) if v is not None
+        ]
+        if len(given) != 1:
             raise ValueError(
-                f"CoSolvent '{self.name}': Must specify either mole_fraction or concentration"
+                f"CoSolvent '{self.name}': give exactly one of mole_fraction, concentration "
+                "and count"
             )
-        if self.mole_fraction is not None and self.concentration is not None:
-            raise ValueError(
-                f"CoSolvent '{self.name}': Cannot specify both mole_fraction and concentration"
-            )
+        if self.count is not None and self.count < 1:
+            raise ValueError(f"CoSolvent '{self.name}': count must be at least 1")
         if self.mole_fraction is not None and not 0.0 < self.mole_fraction < 1.0:
             raise ValueError(f"CoSolvent '{self.name}': mole_fraction must be between 0 and 1")
         if self.concentration is not None and self.concentration <= 0.0:
@@ -143,17 +151,13 @@ class SolventComposition:
     Attributes:
         water_model: Water model to use.
         co_solvents: List of co-solvent specifications.
-        nacl_concentration: NaCl-equivalent target for the final ion concentration in mol/L.
-        kcl_concentration: KCl concentration in mol/L.
-        mgcl2_concentration: MgCl2 concentration in mol/L.
+        nacl_concentration: NaCl salt concentration in mol/L, before neutralizing ions.
         neutralize: Whether to neutralize system charge.
     """
 
     water_model: WaterModelType = "tip3p"
     co_solvents: List[CoSolvent] = field(default_factory=list)
-    nacl_concentration: float = 0.0  # NaCl-equivalent target concentration, mol/L
-    kcl_concentration: float = 0.0
-    mgcl2_concentration: float = 0.0
+    nacl_concentration: float = 0.0  # NaCl salt concentration, mol/L
     neutralize: bool = True
 
     def __post_init__(self) -> None:
@@ -220,16 +224,6 @@ class SolventBuilder:
         """Get the box vectors of the solvated system."""
         return self._box_vectors
 
-    @property
-    def solvation_counts(self) -> Optional[SolvationCounts]:
-        """Get the molecule counts from solvation.
-
-        Returns:
-            SolvationCounts with water, ion, and co-solvent molecule counts,
-            or None if solvate() has not been called.
-        """
-        return self._solvation_counts
-
     def compute_box_vectors(
         self,
         topology: Topology,
@@ -237,32 +231,36 @@ class SolventBuilder:
         padding: float = 1.2,
         box_shape: BoxShapeType = "rhombic_dodecahedron",
         extra_padding: float = 0.0,
+        tolerance: float = 2.0,
     ) -> "Quantity":
         """Compute the periodic box vectors for a topology.
 
-        This is the single definition of the simulation cell: the topology's
-        axis-aligned bounding box, grown by ``2 * (padding + extra_padding)``
-        in every direction, transformed by the box-shape matrix.  It is a pure
-        function of the topology's coordinates, so calling it *before* polymers
-        are packed makes the cell deterministic — every replicate of a
-        condition gets the same box, and therefore the same water and ion
-        counts.
+        This is the single definition of the simulation cell (see
+        :func:`polyzymd.utils.boxvectors.plan_box`): the cell edge is the
+        solute diameter plus ``2 * (padding + extra_padding)``, so the solute
+        is at least that far from each of its periodic copies.  The edge grows
+        further if the solute bounding box would come closer than *tolerance*
+        to a face of the brick that Packmol fills.  It is a pure function of
+        the topology's coordinates, so calling it *before* polymers are packed
+        makes the cell deterministic — every replicate of a condition gets the
+        same box, and therefore the same water and ion counts.
 
         Parameters
         ----------
         topology : openff.toolkit.Topology
-            Topology whose bounding box sets the box size.  For a deterministic
+            Topology whose coordinates set the box size.  For a deterministic
             build this is the protein + substrate only, never the packed
             polymers.
         padding : float
             Solute-to-box-edge padding in nm (``solvent.box.padding``).
         box_shape : str
-            Box geometry (``cube``, ``rhombic_dodecahedron``,
-            ``truncated_octahedron``).
+            Box geometry (``cube`` or ``rhombic_dodecahedron``).
         extra_padding : float
             Additional padding in nm reserved for molecules that will be packed
             later (``polymers.packing.padding``).  ``0.0`` for a build without
-            polymers, which reproduces the legacy box exactly.
+            polymers.
+        tolerance : float
+            Packmol tolerance in Angstrom (``solvent.box.tolerance``).
 
         Returns
         -------
@@ -273,16 +271,14 @@ class SolventBuilder:
 
         from polyzymd.utils import boxvectors
 
-        box_shape_matrix = self._get_box_shape_matrix(box_shape)
-        total_padding = float(padding) + float(extra_padding)
-        padding_qty = Quantity(total_padding, "nanometer")
-
-        min_box_vecs = boxvectors.get_topology_bbox(topology)
-        box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
-        box_vecs = box_shape_matrix @ box_vecs
-
-        self._warn_on_thin_brick(min_box_vecs, box_vecs)
-        return box_vecs
+        plan = boxvectors.plan_box(
+            boxvectors.get_topology_positions(topology) / 10.0,
+            self._get_box_shape_matrix(box_shape),
+            padding_nm=float(padding) + float(extra_padding),
+            margin_nm=float(tolerance) / 10.0,
+        )
+        LOGGER.info("Box: %s", boxvectors.describe_box_plan(plan))
+        return Quantity(plan["box_vectors"], "nanometer")
 
     def compute_box_vectors_from_config(
         self,
@@ -301,36 +297,8 @@ class SolventBuilder:
             padding=config.box.padding,
             box_shape=config.box.shape.value,
             extra_padding=extra_padding_nm,
+            tolerance=config.box.tolerance,
         )
-
-    @staticmethod
-    def _warn_on_thin_brick(bbox_vectors: "Quantity", box_vecs: "Quantity") -> None:
-        """Log the clearance between the solute bounding box and the brick faces.
-
-        The rectangular brick of a rhombic dodecahedron is shorter along ``z``
-        than the padded extent (``c_z = sqrt(2)/2 * L_z``), so the clearance
-        along ``z`` is not the requested padding.  A negative clearance means
-        the solute itself pokes through a brick face, which guarantees
-        periodic-image contacts.
-        """
-        bbox = np.diagonal(np.asarray(bbox_vectors.m_as("nanometer"), dtype=float))
-        brick = np.diagonal(np.asarray(box_vecs.m_as("nanometer"), dtype=float))
-        clearance = (brick - bbox) / 2.0
-        LOGGER.info(
-            "Brick %.2f x %.2f x %.2f nm; solute bbox %.2f x %.2f x %.2f nm; "
-            "clearance to the brick faces %.2f / %.2f / %.2f nm",
-            *brick,
-            *bbox,
-            *clearance,
-        )
-        if np.any(clearance < 0.0):
-            LOGGER.warning(
-                "The solute bounding box does not fit inside the periodic brick "
-                "(clearance %.2f / %.2f / %.2f nm). The rhombic-dodecahedron brick is "
-                "sqrt(2)/2 times shorter along z than the padded extent; increase the "
-                "padding or use a cubic box.",
-                *clearance,
-            )
 
     def solvate(
         self,
@@ -368,7 +336,11 @@ class SolventBuilder:
         from openff.toolkit import Molecule
         from openff.units import Quantity
 
-        from polyzymd.data.solvent_molecules import get_solvent_molecule
+        from polyzymd.data.solvent_molecules import (
+            get_solvent_molecule,
+            is_bundled_solvent,
+            split_counter_ions,
+        )
         from polyzymd.utils import boxvectors
         from polyzymd.utils.packmol import solvate_with_packmol
 
@@ -387,7 +359,9 @@ class SolventBuilder:
         # this topology, which is the behaviour for solute-only builds.
         center_solute = box_vectors is None
         if box_vectors is None:
-            box_vecs = self.compute_box_vectors(topology, padding=padding, box_shape=box_shape)
+            box_vecs = self.compute_box_vectors(
+                topology, padding=padding, box_shape=box_shape, tolerance=tolerance
+            )
             LOGGER.info(f"Computed box vectors: {box_vecs}")
 
             # Center topology in box
@@ -412,7 +386,7 @@ class SolventBuilder:
         water_mass = sum(atom.mass for atom in water.atoms)
         molarity_pure_water = Quantity(55.5, "mole / liter")
 
-        # Calculate NaCl-equivalent target concentration
+        # Calculate the number of NaCl pairs
         na = Molecule.from_smiles("[Na+]")
         cl = Molecule.from_smiles("[Cl-]")
         na_mass = sum(atom.mass for atom in na.atoms)
@@ -424,106 +398,137 @@ class SolventBuilder:
         nacl_mass_to_add = solvent_mass * nacl_mass_fraction
         nacl_to_add = self._round_dimensionless_to_int(nacl_mass_to_add / nacl_mass)
 
-        # Resolve ion counts, including any neutralizing imbalance
-        solute_charge = sum(mol.total_charge for mol in topology.molecules)
-        na_to_add, cl_to_add = self._calculate_ion_counts(
-            nacl_to_add=nacl_to_add,
-            solute_charge=solute_charge,
-            neutralize=composition.neutralize,
-        )
-
-        # Load co-solvents before count calculations so molar masses are known
+        # Load co-solvents so molar masses and charges are known. Na+ and Cl-
+        # written in a co-solvent SMILES become ions of their own.
         cosolvent_masses: list[tuple[str, float, Any]] = []
+        counter_ions: list[tuple[int, int]] = []
+        copies: list[int] = []
         for cosolvent in composition.co_solvents:
+            smiles, na_per_copy, cl_per_copy = (cosolvent.smiles, 0, 0)
+            if smiles:
+                smiles, na_per_copy, cl_per_copy = split_counter_ions(smiles, cosolvent.name)
             if cosolvent.molecule is None:
                 # Load molecule with pre-computed charges to ensure all copies
                 # of the same co-solvent have identical parameters
                 cosolvent.molecule = get_solvent_molecule(
                     name=cosolvent.name,
-                    smiles=cosolvent.smiles,
+                    smiles=smiles,
                     residue_name=cosolvent.residue_name,
+                    charge_method=cosolvent.charge_method,
                 )
+                if not cosolvent.charge_method_given and not is_bundled_solvent(cosolvent.name):
+                    LOGGER.warning(
+                        f"Co-solvent {cosolvent.name}: partial charges are from "
+                        f"{cosolvent.charge_method.upper()} (the default). Check that they suit "
+                        "this molecule; set charge_method: am1bcc in its co_solvents entry to "
+                        "use AM1-BCC, which needs AmberTools."
+                    )
+            counter_ions.append((na_per_copy, cl_per_copy))
 
-            cosolvent_molar_mass = sum(atom.mass for atom in cosolvent.molecule.atoms)
             if cosolvent.mole_fraction is not None:
+                cosolvent_molar_mass = sum(atom.mass for atom in cosolvent.molecule.atoms)
                 cosolvent_masses.append(
                     (cosolvent.name, cosolvent.mole_fraction, cosolvent_molar_mass)
                 )
-            elif cosolvent.concentration is None:
-                # Should not reach here due to validation in CoSolvent.__post_init__
-                raise ValueError(
-                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction nor concentration"
+                copies.append(0)  # set from the mass budget below
+            elif cosolvent.concentration is not None:
+                # n = C x V x N_A, with the box volume in liters
+                copies.append(
+                    self._count_concentration_molecules(
+                        concentration_molar=cosolvent.concentration,
+                        box_volume_liters=self._box_volume_liters(box_vol),
+                    )
                 )
+            else:
+                copies.append(int(cosolvent.count))
 
-        neutral_solvent_mass = self._calculate_neutral_solvent_mass(
-            solvent_mass=solvent_mass,
-            na_count=na_to_add,
-            cl_count=cl_to_add,
-            na_mass=na_mass,
-            cl_mass=cl_mass,
-        )
-        if cosolvent_masses:
-            water_to_add, mole_fraction_counts = self._calculate_mole_fraction_counts(
-                neutral_solvent_mass=neutral_solvent_mass,
-                water_mass=water_mass,
-                cosolvent_mole_fractions=cosolvent_masses,
+        # A charged co-solvent (a SMILES such as dodecyl sulfate) carries
+        # charge too. Counter-ions written in its SMILES ("...[O-].[Na+]") are
+        # added as Na+ and Cl- ions; neutralizing then adds only what they
+        # leave unbalanced, on top of the salt pairs.
+        solute_int = self._charge_to_integer(sum(mol.total_charge for mol in topology.molecules))
+
+        def ion_counts(copies: list[int]) -> tuple[int, int, int, int, int]:
+            cosolvent_int = sum(
+                self._charge_to_integer(cosolvent.molecule.total_charge) * n
+                for cosolvent, n in zip(composition.co_solvents, copies)
             )
-        else:
-            water_to_add = self._round_dimensionless_to_int(neutral_solvent_mass / water_mass)
-            mole_fraction_counts = []
+            counter_na = sum(na * n for (na, _), n in zip(counter_ions, copies))
+            counter_cl = sum(cl * n for (_, cl), n in zip(counter_ions, copies))
+            na_count, cl_count = self._calculate_ion_counts(
+                nacl_to_add=nacl_to_add,
+                solute_charge=solute_int + cosolvent_int + counter_na - counter_cl,
+                neutralize=composition.neutralize,
+            )
+            return (
+                na_count + counter_na,
+                cl_count + counter_cl,
+                cosolvent_int,
+                counter_na,
+                counter_cl,
+            )
+
+        # Mole-fraction counts come from the mass left after the ions, and
+        # the ions depend on those counts: count once without the
+        # mole-fraction co-solvents, then take water and co-solvent counts
+        # from a second pass that reserves their ions.
+        for _ in range(2 if cosolvent_masses else 1):
+            na_to_add, cl_to_add, *_ = ion_counts(copies)
+            neutral_solvent_mass = self._calculate_neutral_solvent_mass(
+                solvent_mass=solvent_mass,
+                na_count=na_to_add,
+                cl_count=cl_to_add,
+                na_mass=na_mass,
+                cl_mass=cl_mass,
+            )
+            if cosolvent_masses:
+                water_to_add, mole_fraction_counts = self._calculate_mole_fraction_counts(
+                    neutral_solvent_mass=neutral_solvent_mass,
+                    water_mass=water_mass,
+                    cosolvent_mole_fractions=cosolvent_masses,
+                )
+                fraction_counts = iter(n for _, n in mole_fraction_counts)
+                copies = [
+                    next(fraction_counts) if cosolvent.mole_fraction is not None else n
+                    for cosolvent, n in zip(composition.co_solvents, copies)
+                ]
+            else:
+                water_to_add = self._round_dimensionless_to_int(neutral_solvent_mass / water_mass)
+        na_to_add, cl_to_add, cosolvent_int, counter_na, counter_cl = ion_counts(copies)
 
         LOGGER.info(f"Adding {int(water_to_add)} water, {na_to_add} Na+, {cl_to_add} Cl-")
-
-        # Build molecule and count lists
-        solvent_molecules = [water, na, cl]
-        solvent_counts = [int(water_to_add), na_to_add, cl_to_add]
-
-        # Track co-solvent counts for SolvationCounts
-        cosolvent_counts_list: List[Tuple[str, int]] = []
-
-        # Add co-solvents (using cached charges for consistency)
-        mole_fraction_count_index = 0
-        for cosolvent in composition.co_solvents:
+        if cosolvent_int or counter_na or counter_cl:
+            LOGGER.info(
+                f"Co-solvents carry charge {cosolvent_int:+d} and {counter_na} Na+, "
+                f"{counter_cl} Cl- counter-ions"
+            )
+        for cosolvent, n_cosolvent in zip(composition.co_solvents, copies):
             if cosolvent.mole_fraction is not None:
-                _, n_cosolvent = mole_fraction_counts[mole_fraction_count_index]
-                mole_fraction_count_index += 1
-
-                LOGGER.info(
-                    f"Adding {n_cosolvent} {cosolvent.name} molecules "
-                    f"({cosolvent.mole_fraction * 100:.1f} mol%)"
-                )
-
+                amount = f"{cosolvent.mole_fraction * 100:.1f} mol%"
             elif cosolvent.concentration is not None:
-                # =============================================================
-                # CONCENTRATION METHOD
-                # =============================================================
-                # Formula: n = C × V × N_A
-                # Where:
-                #   C   = concentration (mol/L)
-                #   V   = box volume (L)
-                #   N_A = Avogadro's number
-                #
-                # Convert volume to liters explicitly before applying N_A
-                # =============================================================
-                box_volume_liters = self._box_volume_liters(box_vol)
-                n_cosolvent = self._count_concentration_molecules(
-                    concentration_molar=cosolvent.concentration,
-                    box_volume_liters=box_volume_liters,
-                )
-
-                LOGGER.info(
-                    f"Adding {n_cosolvent} {cosolvent.name} molecules ({cosolvent.concentration} M)"
-                )
-
+                amount = f"{cosolvent.concentration} M"
             else:
-                # Should not reach here due to validation in CoSolvent.__post_init__
-                raise ValueError(
-                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction nor concentration"
-                )
+                amount = "count"
+            LOGGER.info(f"Adding {n_cosolvent} {cosolvent.name} molecules ({amount})")
 
-            solvent_molecules.append(cosolvent.molecule)
-            solvent_counts.append(n_cosolvent)
-            cosolvent_counts_list.append((cosolvent.name, n_cosolvent))
+        solvent_molecules = [water, na, cl] + [c.molecule for c in composition.co_solvents]
+        solvent_counts = [int(water_to_add), na_to_add, cl_to_add] + copies
+        cosolvent_counts_list: List[Tuple[str, int]] = [
+            (cosolvent.name, n) for cosolvent, n in zip(composition.co_solvents, copies)
+        ]
+        net_charge = solute_int + cosolvent_int + na_to_add - cl_to_add
+        if net_charge and composition.neutralize:
+            raise ValueError(
+                f"The solvated system would carry net charge {net_charge:+d} although neutralize "
+                "is on; check the charges of the solute and co-solvents."
+            )
+        if net_charge:
+            LOGGER.warning(
+                f"The solvated system carries net charge {net_charge:+d} (solute {solute_int:+d}, "
+                f"co-solvents {cosolvent_int:+d}, ions {na_to_add - cl_to_add:+d}) because "
+                "solvent.ions.neutralize is false. Periodic electrostatics then add a uniform "
+                "neutralizing background; set neutralize: true unless you mean this."
+            )
 
         # Pack the box using PACKMOL (with CONECT-record overflow protection)
         solvated_top = solvate_with_packmol(
@@ -588,6 +593,9 @@ class SolventBuilder:
                 concentration=cs.concentration,
                 density=cs.density,
                 residue_name=cs.residue_name or cs.name[:3].upper(),
+                count=cs.count,
+                charge_method=cs.charge_method.value,
+                charge_method_given="charge_method" in cs.model_fields_set,
             )
             for cs in config.co_solvents
         ]
@@ -596,8 +604,6 @@ class SolventBuilder:
             water_model=config.primary.model.value,
             co_solvents=co_solvents,
             nacl_concentration=config.ions.nacl_concentration,
-            kcl_concentration=config.ions.kcl_concentration,
-            mgcl2_concentration=config.ions.mgcl2_concentration,
             neutralize=config.ions.neutralize,
         )
 
@@ -705,21 +711,17 @@ class SolventBuilder:
         solute_charge: Any,
         neutralize: bool,
     ) -> tuple[int, int]:
-        """Calculate final Na+ and Cl- counts from a NaCl-equivalent target.
+        """Calculate final Na+ and Cl- counts from the NaCl pair count.
 
-        When neutralization is enabled, counts are chosen so that the final
-        solute plus ion charge is exactly zero while keeping the final ion
-        concentration as close as possible to the requested NaCl-equivalent
-        target. Exact counts may differ by one ion from the concentration
-        target to satisfy integer charge neutrality; neutrality is prioritized
-        because this difference is negligible for realistic systems. If parity
-        makes the target total impossible, the tie is resolved by adding the
-        larger feasible ion count.
+        Every requested NaCl pair is added. When neutralization is enabled,
+        Na+ or Cl- ions that cancel the solute charge are added on top of the
+        pairs, as OpenMM ``Modeller.addSolvent(neutralize=True)`` and
+        ``gmx genion -neutral`` do.
 
         Parameters
         ----------
         nacl_to_add : Any
-            NaCl-equivalent target count as a scalar or dimensionless quantity.
+            NaCl pair count as a scalar or dimensionless quantity.
         solute_charge : Any
             Solute net charge in elementary-charge units.
         neutralize : bool
@@ -735,28 +737,7 @@ class SolventBuilder:
             return nacl_count, nacl_count
 
         solute_charge_int = cls._charge_to_integer(solute_charge)
-        charge_difference = -solute_charge_int
-        minimum_total_ions = abs(charge_difference)
-        target_total_ions = 2 * nacl_count
-
-        lower_total = target_total_ions
-        while lower_total >= minimum_total_ions and (lower_total - charge_difference) % 2 != 0:
-            lower_total -= 1
-
-        upper_total = max(target_total_ions, minimum_total_ions)
-        while (upper_total - charge_difference) % 2 != 0:
-            upper_total += 1
-
-        if lower_total < minimum_total_ions:
-            total_ions = upper_total
-        elif abs(upper_total - target_total_ions) <= abs(target_total_ions - lower_total):
-            total_ions = upper_total
-        else:
-            total_ions = lower_total
-
-        na_count = (total_ions + charge_difference) // 2
-        cl_count = (total_ions - charge_difference) // 2
-        return na_count, cl_count
+        return nacl_count + max(0, -solute_charge_int), nacl_count + max(0, solute_charge_int)
 
     @staticmethod
     def _charge_to_integer(charge: Any, tolerance: float = ION_CHARGE_TOLERANCE) -> int:
@@ -844,7 +825,8 @@ class SolventBuilder:
         water_count = total_neutral_molecules - sum(count for _, count in cosolvent_counts)
         return water_count, cosolvent_counts
 
-    def _get_box_shape_matrix(self, shape: BoxShapeType) -> NDArray:
+    @staticmethod
+    def _get_box_shape_matrix(shape: BoxShapeType) -> NDArray:
         """Get the transformation matrix for the box shape.
 
         Args:
@@ -859,8 +841,6 @@ class SolventBuilder:
             return packmol.UNIT_CUBE
         elif shape == "rhombic_dodecahedron":
             return packmol.RHOMBIC_DODECAHEDRON
-        elif shape == "truncated_octahedron":
-            return packmol.TRUNCATED_OCTAHEDRON
         else:
             LOGGER.warning(f"Unknown box shape '{shape}', using cube")
             return packmol.UNIT_CUBE
@@ -878,8 +858,6 @@ class SolventBuilder:
         """
         from polyzymd.data.solvent_molecules import get_solvent_molecule
 
-        # Map water model name to canonical form
-        # get_solvent_molecule handles: tip3p, spce, tip4pew, opc, etc.
         return get_solvent_molecule(model)
 
     def _center_topology_in_box(self, topology: Topology, box_vecs: NDArray) -> None:
@@ -978,6 +956,14 @@ class SolventBuilder:
                 residue_name = smiles_to_residue[mol_smiles]
                 for atom in mol.atoms:
                     atom.metadata["residue_name"] = residue_name
+            # A molecule made from SMILES has blank atom names, which the
+            # Amber topology analyses read cannot hold: ions get their element
+            # (NA, CL), other molecules OpenFF's unique names.
+            if any(not atom.name.strip() for atom in mol.atoms):
+                if mol.n_atoms == 1:
+                    mol.atoms[0].name = mol.atoms[0].symbol.upper()
+                else:
+                    mol.generate_unique_atom_names()
 
     @property
     def packmol_seed(self) -> Optional[int]:

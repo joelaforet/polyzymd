@@ -255,3 +255,20 @@ def test_dynamic_generation_rejects_unknown_sequence_label(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="No monomer name configured for sequence label: X"):
         generator.generate_polymer("AXA", {"A": "EGMA"})
+
+
+def test_built_residues_take_the_configured_residue_name() -> None:
+    """A monomer's residue_name names its residues; a monomer without one keeps 3 letters."""
+    from openff.toolkit import Molecule
+
+    from polyzymd.builders.polymer_generator import _name_residues
+
+    topology = Molecule.from_smiles("CCO").to_topology()
+    molecule = topology.molecule(0)
+    for atom, fragment in zip(molecule.atoms, ["EGPMA_2-site", "EGPMA_1-site", "SBMA_2-site"]):
+        atom.metadata["residue_name"] = fragment
+    _name_residues(topology, {"EGPMA": "EGM"})
+    names = [atom.metadata["residue_name"] for atom in molecule.atoms[:3]]
+    extended = [atom.metadata["extended_name"] for atom in molecule.atoms[:3]]
+    assert names == ["EGM", "EGM", "SBM"]
+    assert extended == ["EGPMA_2-site", "EGPMA_1-site", "SBMA_2-site"]

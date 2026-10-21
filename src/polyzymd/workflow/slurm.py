@@ -15,8 +15,10 @@ batch scripts for self-resubmitting MD simulation jobs.
 from __future__ import annotations
 
 import logging
+import os
 import re as _re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
@@ -219,12 +221,52 @@ def _validate_positive_replicate(value: object) -> int:
     return value
 
 
+def pixi_activation_block(env_word: str, manifest_path: str) -> str:
+    """Return the bash lines that activate a job's pixi environment, or stop the job.
+
+    ``eval "$(pixi shell-hook ...)"`` hides a failed hook: the job then runs
+    without the environment, and ``set -e`` does not see it. A job that starts
+    while another job updates the same environment can see such a failure
+    once, so the hook is tried three times, ten seconds apart, before the job
+    stops with an error.
+
+    Parameters
+    ----------
+    env_word : str
+        The environment as one shell word, already quoted (``"$PIXI_ENV"``
+        or a quoted name).
+    manifest_path : str
+        Path of the ``pixi.toml`` the job uses.
+    """
+    from polyzymd.utils.templates import shell_quote
+
+    manifest = shell_quote(manifest_path)
+    return f"""_pixi_active=0
+for _attempt in 1 2 3; do
+    if _pixi_hook="$(pixi shell-hook -e {env_word} --manifest-path {manifest})"; then
+        _pixi_active=1
+        break
+    fi
+    echo "WARNING: pixi shell-hook failed (attempt $_attempt of 3)" >&2
+    [ "$_attempt" -lt 3 ] && sleep "${{POLYZYMD_PIXI_RETRY_SLEEP:-10}}"
+done
+if [ "$_pixi_active" -ne 1 ]; then
+    echo "FATAL: cannot activate the pixi environment of" {manifest} >&2
+    exit 1
+fi
+eval "$_pixi_hook"
+unset _pixi_hook _pixi_active _attempt"""
+
+
 def _discover_manifest_path() -> str:
     """Auto-detect the pixi workspace manifest (``pixi.toml``).
 
-    Strategy: find the ``polyzymd`` executable on ``$PATH`` (installed by
-    pixi into ``.pixi/envs/<name>/bin/``), walk up the directory tree from
-    the resolved binary to locate ``pixi.toml``.
+    Uses ``PIXI_PROJECT_MANIFEST``, which pixi sets in an activated
+    environment, when that environment (``CONDA_PREFIX``) is the one running
+    this Python. Otherwise walks up from the ``polyzymd`` executable on
+    ``$PATH`` (``<workspace>/.pixi/envs/<name>/bin/``), first along the path
+    as found, so a symlinked ``.pixi`` folder still leads to the workspace,
+    then along the resolved path.
 
     Returns
     -------
@@ -236,28 +278,32 @@ def _discover_manifest_path() -> str:
     RuntimeError
         If the manifest cannot be found.
     """
+    active = os.environ.get("PIXI_PROJECT_MANIFEST")
+    prefix = os.environ.get("CONDA_PREFIX")
+    if (
+        active
+        and prefix
+        and Path(active).is_file()
+        and Path(prefix).resolve() == Path(sys.prefix).resolve()
+    ):
+        return str(Path(active).absolute())
     exe = shutil.which("polyzymd")
     if exe is None:
         raise RuntimeError(
             "Cannot auto-detect pixi manifest: 'polyzymd' is not on PATH. "
             "Are you running inside a pixi environment?"
         )
-    # Resolve symlinks → .pixi/envs/<env>/bin/polyzymd
-    exe_path = Path(exe).resolve()
-    # Walk up looking for pixi.toml
-    candidate = exe_path.parent
-    for _ in range(10):  # prevent infinite traversal
-        manifest = candidate / "pixi.toml"
-        if manifest.is_file():
-            return str(manifest)
-        if candidate.parent == candidate:
-            break
-        candidate = candidate.parent
+    exe_path = Path(exe).absolute()
+    for start in (exe_path, exe_path.resolve()):
+        for candidate in start.parents:
+            manifest = candidate / "pixi.toml"
+            if manifest.is_file():
+                return str(manifest)
 
     raise RuntimeError(
         f"Cannot auto-detect pixi manifest: walked up from {exe_path} "
-        "but no pixi.toml found. Ensure you cloned the polyzymd repo and "
-        "installed via 'pixi install'."
+        "but no pixi.toml found. Run polyzymd from the pixi workspace "
+        "(pixi run or pixi shell), or install it there with 'pixi install'."
     )
 
 
@@ -392,6 +438,51 @@ class SlurmConfig:
         return cls(email=email, **config_dict)
 
 
+def sbatch_lines(config: SlurmConfig, mail_type: str = "FAIL") -> dict[str, str]:
+    """Return the optional ``#SBATCH`` lines of ``config``, keyed by template variable.
+
+    An unset setting gives an empty string. With ``gpu_directive_style ==
+    "gpus"`` and GPUs requested, the GPU line is ``--gpus=<type>:<n>`` and the
+    node line is ``-N <nodes>`` (Bridges2); otherwise ``--gres=gpu:...`` and
+    ``--nodes``/``--ntasks`` lines (Alpine, Blanca).
+    """
+    if config.gpus == 0:
+        gpu = ""
+    elif config.gpu_directive_style == "gpus" and config.gpu_type:
+        gpu = f"#SBATCH --gpus={config.gpu_type}:{config.gpus}"
+    elif config.gpu_type:
+        gpu = f"#SBATCH --gres=gpu:{config.gpu_type}:{config.gpus}"
+    else:
+        gpu = f"#SBATCH --gres=gpu:{config.gpus}"
+    if config.gpu_directive_style == "gpus" and config.gpus > 0:
+        nodes = f"#SBATCH -N {config.nodes}"
+    else:
+        nodes = f"#SBATCH --nodes={config.nodes}\n#SBATCH --ntasks={config.ntasks}"
+    mail = (
+        f"#SBATCH --mail-type={mail_type}\n#SBATCH --mail-user={config.email}"
+        if config.email
+        else ""
+    )
+
+    def line(flag: str, value: object) -> str:
+        return f"#SBATCH --{flag}={value}" if value else ""
+
+    return {
+        "qos_line": line("qos", config.qos),
+        "nodes_line": nodes,
+        "cpus_line": (
+            line("cpus-per-task", config.cpus_per_task) if config.cpus_per_task > 1 else ""
+        ),
+        "mem_line": line("mem", config.memory),
+        "gpu_line": gpu,
+        "mail_line": mail,
+        "account_line": line("account", config.account),
+        "exclude_line": line("exclude", config.exclude),
+        "nodelist_line": line("nodelist", config.nodelist),
+        "constraint_line": line("constraint", config.constraint),
+    }
+
+
 @dataclass
 class JobContext:
     """Context for job script template rendering.
@@ -476,86 +567,6 @@ class SlurmScriptGenerator:
         return self._config
 
     # ------------------------------------------------------------------
-    # Internal helpers — compute optional SBATCH directive lines
-    # ------------------------------------------------------------------
-
-    def _gpu_line(self) -> str:
-        """Return the appropriate GPU SBATCH directive for this config.
-
-        Returns ``#SBATCH --gpus=<type>:<n>`` for clusters that use the newer
-        ``--gpus`` syntax (e.g. Bridges2), or ``#SBATCH --gres=gpu:<n>`` for
-        clusters that use the classic Generic RESources syntax (Alpine).
-        """
-        if self._config.gpus == 0:
-            return ""
-        if self._config.gpu_directive_style == "gpus" and self._config.gpu_type:
-            return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
-        if self._config.gpu_type:
-            return f"#SBATCH --gres=gpu:{self._config.gpu_type}:{self._config.gpus}"
-        return f"#SBATCH --gres=gpu:{self._config.gpus}"
-
-    def _nodes_line(self) -> str:
-        """Return the nodes/tasks SBATCH directive(s) appropriate for this config.
-
-        Alpine-style (``gpu_directive_style == "gres"``) emits two lines::
-
-            #SBATCH --nodes=N
-            #SBATCH --ntasks=N
-
-        Bridges2-style (``gpu_directive_style == "gpus"``) emits a single
-        short-flag line::
-
-            #SBATCH -N N
-        """
-        if self._config.gpu_directive_style == "gpus" and self._config.gpus > 0:
-            return f"#SBATCH -N {self._config.nodes}"
-        return f"#SBATCH --nodes={self._config.nodes}\n#SBATCH --ntasks={self._config.ntasks}"
-
-    def _cpus_line(self) -> str:
-        """Return the CPUs-per-task directive when requested."""
-        if self._config.cpus_per_task > 1:
-            return f"#SBATCH --cpus-per-task={self._config.cpus_per_task}"
-        return ""
-
-    def _qos_line(self) -> str:
-        """Return the QoS SBATCH directive, or an empty string to omit it."""
-        return f"#SBATCH --qos={self._config.qos}" if self._config.qos else ""
-
-    def _mem_line(self) -> str:
-        """Return the memory SBATCH directive, or an empty string to omit it."""
-        return f"#SBATCH --mem={self._config.memory}" if self._config.memory else ""
-
-    def _account_line(self) -> str:
-        """Return the account SBATCH directive, or an empty string to omit it.
-
-        An empty account string means the cluster infers the allocation from the
-        submitting user's login (e.g. Bridges2).
-        """
-        return f"#SBATCH --account={self._config.account}" if self._config.account else ""
-
-    def _mail_line(self) -> str:
-        """Return the mail-type + mail-user SBATCH directives, or empty string.
-
-        Both ``--mail-type`` and ``--mail-user`` are omitted together when no
-        email address is configured, keeping the script clean.
-        """
-        if self._config.email:
-            return f"#SBATCH --mail-type=FAIL\n#SBATCH --mail-user={self._config.email}"
-        return ""
-
-    def _exclude_line(self) -> str:
-        """Return the exclude SBATCH directive, or an empty string to omit it."""
-        return f"#SBATCH --exclude={self._config.exclude}" if self._config.exclude else ""
-
-    def _nodelist_line(self) -> str:
-        """Return the nodelist SBATCH directive, or empty string when unset."""
-        return f"#SBATCH --nodelist={self._config.nodelist}" if self._config.nodelist else ""
-
-    def _constraint_line(self) -> str:
-        """Return the constraint SBATCH directive, or an empty string to omit it."""
-        return f"#SBATCH --constraint={self._config.constraint}" if self._config.constraint else ""
-
-    # ------------------------------------------------------------------
     # Self-resubmitting job generation
     # ------------------------------------------------------------------
 
@@ -590,8 +601,8 @@ class SlurmScriptGenerator:
             Falls back to ``pzmd_r{replicate}`` if not provided.
         output_file : str or None, optional
             SLURM log file pattern.  Falls back to
-            ``slurm_logs/{job_name}.%j.out`` relative to the directory
-            where ``sbatch`` is invoked.
+            ``slurm_logs/{job_name}.%j.out``. A relative path is made
+            absolute against the current directory.
 
         Returns
         -------
@@ -604,6 +615,11 @@ class SlurmScriptGenerator:
             job_name = f"pzmd_r{replicate}"
         if output_file is None:
             output_file = f"slurm_logs/{job_name}.%j.out"
+        # The job runs in its run directory (``--chdir``), which is how
+        # ``squeue`` tells the jobs of two runs apart. Absolute paths keep the
+        # log where ``sbatch`` was invoked and the run directory where it is.
+        output_file = str(Path(output_file).absolute())
+        working_dir = str(Path(working_dir).absolute())
 
         openff_logs_flag = " --openff-logs" if self._openff_logs else ""
         skip_build_flag = " \\\n    --skip-build" if self._skip_build else ""
@@ -645,20 +661,12 @@ class SlurmScriptGenerator:
                 "partition": self._config.partition,
                 "job_name": job_name,
                 "output_file": output_file,
-                "qos_line": self._qos_line(),
-                "nodes_line": self._nodes_line(),
-                "cpus_line": self._cpus_line(),
-                "mem_line": self._mem_line(),
+                **sbatch_lines(self._config),
                 "time_limit": self._config.time_limit,
-                "gpu_line": self._gpu_line(),
-                "mail_line": self._mail_line(),
-                "account_line": self._account_line(),
-                "exclude_line": self._exclude_line(),
                 "configured_exclude": self._config.exclude or "",
-                "nodelist_line": self._nodelist_line(),
-                "constraint_line": self._constraint_line(),
                 "pixi_env": self._pixi_env,
                 "manifest_path": manifest_path,
+                "pixi_activation": pixi_activation_block('"$PIXI_ENV"', manifest_path),
                 "config_path": config_path,
                 "replicate": replicate,
                 "working_dir": working_dir,

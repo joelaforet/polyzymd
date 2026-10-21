@@ -1,10 +1,9 @@
-"""Base classes for residue grouping/classification.
+"""Classify residue names into groups, such as the physicochemical classes of amino acids.
 
-This module provides the abstract base class for residue classification
-schemes and concrete implementations for protein amino acids.
-
-The Strategy pattern allows users to define custom classification schemes
-for polymers, modified residues, or other systems.
+:class:`ProteinAAClassification` puts each standard amino acid in one of
+aromatic, charged_positive, charged_negative, polar or nonpolar; the
+``contacts`` analysis of ``polyzymd analyze`` reports one value per class with
+it. :class:`ResidueGrouping` is the interface it implements.
 """
 
 from __future__ import annotations
@@ -100,8 +99,8 @@ class ProteinAAClassification(ResidueGrouping):
     - polar: ASN, CYS, GLN, SER, THR
     - nonpolar: ALA, GLY, ILE, LEU, MET, PRO, VAL
 
-    This classification matches the scaffold notebooks and common
-    biochemistry conventions.
+    This classification matches the lab's per-residue contact analysis
+    notebooks and common biochemistry conventions.
 
     Parameters
     ----------
@@ -121,7 +120,7 @@ class ProteinAAClassification(ResidueGrouping):
     """
 
     # Standard amino acid classification
-    # Based on scaffold notebooks: Contact_Analysis_SBMA_EGMA_EGPMA_per_Residue.ipynb
+    # As in the notebook Contact_Analysis_SBMA_EGMA_EGPMA_per_Residue.ipynb
     _CLASSIFICATION = {
         # Aromatic
         "PHE": "aromatic",
@@ -197,96 +196,3 @@ class ProteinAAClassification(ResidueGrouping):
     @property
     def _all_resnames(self) -> list[str]:
         return list(self._CLASSIFICATION.keys())
-
-    def get_charged_groups(self) -> list[str]:
-        """Convenience: get both charged group names."""
-        return ["charged_positive", "charged_negative"]
-
-    def get_hydrophobic_groups(self) -> list[str]:
-        """Convenience: groups typically considered hydrophobic."""
-        return ["aromatic", "nonpolar"]
-
-    def get_hydrophilic_groups(self) -> list[str]:
-        """Convenience: groups typically considered hydrophilic."""
-        return ["charged_positive", "charged_negative", "polar"]
-
-
-class CustomGrouping(ResidueGrouping):
-    """User-defined residue classification.
-
-    Allows arbitrary mapping from residue names to group labels.
-
-    Parameters
-    ----------
-    classification : dict[str, str]
-        Mapping from residue name to group label.
-    default_group : str, optional
-        Group label for unclassified residues. Default "other".
-
-    Examples
-    --------
-    >>> # Custom polymer classification
-    >>> grouping = CustomGrouping({
-    ...     "SBM": "zwitterionic",
-    ...     "SBMA": "zwitterionic",
-    ...     "EGP": "peg_like",
-    ...     "EGMA": "peg_like",
-    ... }, default_group="unknown")
-    >>> grouping.classify("SBM")
-    'zwitterionic'
-    """
-
-    def __init__(
-        self,
-        classification: dict[str, str],
-        default_group: str = "other",
-    ):
-        self._classification = {k.upper(): v for k, v in classification.items()}
-        self.default_group = default_group
-
-        # Compute available groups
-        self._groups = sorted(set(self._classification.values()))
-        if default_group not in self._groups:
-            self._groups.append(default_group)
-
-    def classify(self, resname: str) -> str:
-        """Classify residue by name using custom mapping."""
-        return self._classification.get(resname.upper(), self.default_group)
-
-    @property
-    def available_groups(self) -> list[str]:
-        return self._groups
-
-    @property
-    def _all_resnames(self) -> list[str]:
-        return list(self._classification.keys())
-
-    @classmethod
-    def from_groups(
-        cls, groups: dict[str, list[str]], default_group: str = "other"
-    ) -> "CustomGrouping":
-        """Create grouping from group -> residue list mapping.
-
-        Parameters
-        ----------
-        groups : dict[str, list[str]]
-            Mapping from group name to list of residue names
-        default_group : str
-            Group for unlisted residues
-
-        Returns
-        -------
-        CustomGrouping
-
-        Examples
-        --------
-        >>> grouping = CustomGrouping.from_groups({
-        ...     "zwitterionic": ["SBM", "SBMA"],
-        ...     "peg_like": ["EGP", "EGMA", "OEGMA"],
-        ... })
-        """
-        classification = {}
-        for group_name, resnames in groups.items():
-            for resname in resnames:
-                classification[resname] = group_name
-        return cls(classification, default_group=default_group)

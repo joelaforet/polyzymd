@@ -1,4 +1,4 @@
-# Post-Hoc Testing Reference
+# Comparison Tests Reference
 
 ```{contents}
 :local:
@@ -7,151 +7,91 @@
 
 ## Overview
 
-PolyzyMD performs post-hoc pairwise comparisons automatically during
-`polyzymd compare run`. Two methods are available: BH-corrected t-tests
-(default) and Tukey's HSD. Both methods compute Cohen's d effect sizes and
-percent-change for every pair.
+`polyzymd analyze` with two or more `-c`, and `ReplicateValues.compare()` on
+the study API, compare every condition with the control, the first `-c` or
+the `control=` argument. The replicate is the sampling unit: each condition's
+sample is its one value per replicate. Each comparison row is one two-sample
+t test of `mean(b) - mean(a)`, and the p values of one call are corrected
+together with the Benjamini-Hochberg procedure. The rows are the `pairwise`
+entries of the {doc}`ProtocolReport <analysis_protocol_report>`.
+
+| Setting | `polyzymd analyze` | `ReplicateValues.compare()` |
+|---|---|---|
+| Control | first `-c`; with `--study`, the control of each stratum when `study.yaml` has a `comparison:` block | `control=`, default the first condition of the study; `within=` for the control of each stratum |
+| Test | Welch's t test | `test="welch"` (default) or `test="student"` |
+| Correction | Benjamini-Hochberg over every tested row of the report | Benjamini-Hochberg over every tested row of the call |
+| Significance threshold | adjusted p at most 0.05 | adjusted p at most 0.05 |
+
+No omnibus ANOVA is run and no Tukey HSD is offered: each condition is
+compared with the control only, not with every other condition.
 
 ---
 
-## Available Methods
+## The test
 
-| Method | `posthoc_method` value | When to use | Assumptions |
-|--------|------------------------|-------------|-------------|
-| BH-corrected t-tests | `"ttest_bh"` | Specific pairs of interest or heterogeneous sample sizes. **Default.** | Independence between pairs; equal variance (Student) or relaxed (Welch). |
-| Tukey's HSD | `"tukey_hsd"` | All conditions are equally important; balanced design preferred. | Equal variance; equal (or similar) sample sizes across conditions. |
-
----
-
-## Configuration
-
-Set post-hoc options in the `defaults:` block of `comparison.yaml`:
-
-```yaml
-defaults:
-  posthoc_method: "ttest_bh"   # or "tukey_hsd"
-  ttest_method: "student"      # or "welch" (only used when posthoc_method is ttest_bh)
-  fdr_alpha: 0.05              # significance threshold (used by both ttest_bh and tukey_hsd)
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `posthoc_method` | `"ttest_bh"` or `"tukey_hsd"` | `"ttest_bh"` | Selects which post-hoc procedure to use for pairwise comparisons. |
-| `ttest_method` | `"student"` or `"welch"` | `"student"` | Controls the variance assumption for the two-sample t-test. Only used when `posthoc_method` is `"ttest_bh"`. |
-| `fdr_alpha` | float (0, 1] | `0.05` | Significance threshold for pairwise comparisons and ANOVA. Used as the BH false-discovery-rate threshold when `posthoc_method` is `"ttest_bh"`, and as the family-wise alpha threshold when `posthoc_method` is `"tukey_hsd"`. |
+- `welch_t` runs `scipy.stats.ttest_ind(b, a, equal_var=False)`, which does
+  not assume equal variances; `student_t` runs it with `equal_var=True`.
+- `delta_ci95` is the 95 percent interval on `mean(b) - mean(a)` from the
+  same `ttest_ind` call: a pooled variance for Student's t, separate
+  variances with Welch-Satterthwaite degrees of freedom for Welch's t. It
+  carries no multiplicity correction, so a row can be non-significant after
+  the correction while its interval excludes zero.
+- A row is **not testable** when a condition has fewer than two replicates,
+  or when both conditions have the same value in every replicate. It then has
+  no `p` and takes no part in the correction, and the verdict reads
+  `not testable`.
 
 ---
 
-## Method Details
+## The correction family
 
-### BH-Corrected t-Tests (`ttest_bh`)
+One call is one family. For one number per replicate, the family is the
+conditions compared with the control: four treated conditions against one
+control correct four tests together. For labelled values, such as a
+per-residue profile, the family is every tested label of every compared
+condition, because scanning a profile for the labels that changed is a search
+over that set. `family_size` on each row records the size of its family.
+Labels passed as `untested=` are summarised but left out of the tests and the
+family.
 
-- Runs independent two-sample t-tests for each pair of conditions.
-- `ttest_method: "student"` assumes equal variances (`scipy.stats.ttest_ind` with `equal_var=True`).
-- `ttest_method: "welch"` relaxes that assumption (`equal_var=False`).
-- Raw p-values from all pairs across all metrics are collected into a single family, then adjusted via the Benjamini-Hochberg step-up procedure.
-- A pair is significant when `p_adj <= fdr_alpha`.
-- Cohen's d is computed for effect size, with interpretation labels: `"negligible"` (|d| < 0.2), `"small"` (0.2 <= |d| < 0.5), `"medium"` (0.5 <= |d| < 0.8), `"large"` (|d| >= 0.8).
-
-```{note}
-When a `control` label is set in `comparison.yaml`, only control-vs-treatment pairs are tested. Otherwise, all unique pairs are tested.
-```
-
-### Tukey's HSD (`tukey_hsd`)
-
-- Tests all pairs simultaneously using `scipy.stats.tukey_hsd`.
-- Controls the family-wise error rate (FWER) rather than FDR.
-- A pair is significant when the Tukey-adjusted `p_value <= fdr_alpha`.
-- `p_value_adjusted` mirrors `p_value` for Tukey results (Tukey p-values are already family-wise corrected).
-- Best with balanced designs (equal replicates per condition).
-- Cohen's d is still computed for each pair.
-- The `t_statistic` field is set to `NaN` for Tukey results since the test does not produce a t-statistic.
+The family never spans separate commands or calls. For why the boundary is
+drawn there, see {doc}`../explanation/analysis_statistics_best_practices`.
 
 ---
 
-## ANOVA
+## Effect size and direction
 
-A one-way ANOVA (`scipy.stats.f_oneway`) is always run alongside post-hoc tests when there are 3 or more conditions. It tests whether at least one condition's mean differs from the others.
+| Field | Meaning |
+|-------|---------|
+| `cohens_d` | Mean difference divided by the pooled standard deviation, oriented like `delta`: positive when condition `b` is larger. |
+| `hedges_g` | `cohens_d` multiplied by the Hedges (1981) correction `J = 1 - 3 / (4 * (n1 + n2) - 9)`. With three replicates per condition, `J` is about 0.80. |
+| `direction` | `increased` or `decreased` when the row is significant, otherwise `no significant change`. |
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `f_statistic` | float | F-statistic from the one-way ANOVA. |
-| `p_value` | float | P-value for the omnibus test. |
-| `significant` | bool | Whether `p_value <= fdr_alpha` (uses the configured `fdr_alpha` threshold). |
-
-ANOVA does **not** determine which pairs differ -- that is the role of post-hoc tests. ANOVA is skipped when fewer than 3 conditions are present, and returns `NaN` statistics if any group has fewer than 2 observations.
-
----
-
-## Output Fields
-
-These fields appear in comparison JSON files and are used by the CLI formatter.
-
-### Pairwise result fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `condition_a` | str | Label of first condition (typically control). |
-| `condition_b` | str | Label of second condition (typically treatment). |
-| `metric` | str | Name of the metric being compared. |
-| `t_statistic` | float | T-test statistic. `NaN` for Tukey HSD results. |
-| `p_value` | float | Raw p-value from the pairwise test. |
-| `p_value_adjusted` | float or null | Adjusted p-value (BH-adjusted for `ttest_bh`; mirrors `p_value` for `tukey_hsd` since Tukey p-values are already family-wise corrected). `null` when not available. |
-| `posthoc_method` | str | `"ttest_bh"` or `"tukey_hsd"`. |
-| `cohens_d` | float | Effect size (positive = `condition_a` mean > `condition_b` mean). |
-| `effect_size_interpretation` | str | `"negligible"`, `"small"`, `"medium"`, or `"large"`. |
-| `direction` | str | Interpreted direction of change (e.g. `"higher"`, `"lower"`, or `"undetermined"`). |
-| `significant` | bool | Whether `p_adj <= alpha` (uses adjusted p-value when available, raw otherwise). |
-| `percent_change` | float | Percent change from `condition_a` to `condition_b`. |
-
-### Comparison-level fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `fdr_alpha` | float | The alpha threshold used for significance (BH FDR for `ttest_bh`; FWER for `tukey_hsd`). Also used as the ANOVA significance threshold. |
-| `ttest_method` | str | `"student"` or `"welch"`. |
-| `posthoc_method` | str | `"ttest_bh"` or `"tukey_hsd"`. |
+For which number to quote, see
+{doc}`../explanation/analysis_statistics_best_practices`.
 
 ---
 
-## CLI Significance Markers
-
-The CLI formatter annotates pairwise rows with significance markers:
-
-| Marker | Meaning |
-|--------|---------|
-| `*` | `p_adj <= fdr_alpha` (default 0.05) |
-| `**` | `p_adj <= 0.01` |
-| `***` | `p_adj <= 0.001` |
-
-```{note}
-The contacts formatter uses multi-level markers (`**`, `***`). The default
-scalar formatter uses a single `*` for any significant result.
-```
-
-Some plugins also use:
-
-| Marker | Meaning |
-|--------|---------|
-| `†` (dagger) | Cohen's d meets the `min_effect_size` threshold (practical significance). Currently used by the contacts plugin. |
-
----
-
-## Edge Cases
+## Edge cases
 
 | Scenario | Behavior |
 |----------|----------|
-| Fewer than 2 replicates in a group | t-test returns `NaN` for t-statistic and p-value; Cohen's d returns `NaN`. |
-| Equal values across all replicates in both groups | p-value = 1.0, Cohen's d = 0.0 (`"negligible"`). |
-| Single condition | No pairwise tests are generated; ANOVA is skipped. |
-| Two conditions | Pairwise tests run normally; ANOVA is skipped (requires >= 3 conditions). |
-| Tukey HSD with fewer than 2 groups or fewer than 2 observations per group | Returns empty results (no pairs generated). |
-| Zero control mean | Percent change returns `inf` or `-inf`; `NaN` if both means are non-finite. |
+| One replicate in a condition | The row is not testable: no `p`, no `delta_ci95`; the report warns that the condition has no interval. |
+| The same value in every replicate of both conditions | The row is not testable. |
+| One condition | No comparison rows; the verdict summarises the condition. |
+| A label in `untested` | Summarised in `conditions`, absent from `pairwise` and from the family. |
 
 ---
 
 ## See Also
 
-- {doc}`comparison_yaml` -- full `comparison.yaml` schema reference
-- {doc}`analysis_comparison_reference` -- comparison CLI commands and plugin summary
+- {doc}`analysis_protocol_report` -- every field of the report and its comparison rows
+- {doc}`study_api` -- `summary()` and `compare()` on the study API
 - {doc}`../explanation/analysis_statistics_best_practices` -- autocorrelation, FDR concepts, and interpretation guidance
+
+## References
+
+- Benjamini, Y. and Hochberg, Y. (1995). Controlling the false discovery rate: a practical and powerful approach to multiple testing. *Journal of the Royal Statistical Society B*, 57(1), 289-300. doi:10.1111/j.2517-6161.1995.tb02031.x
+- Benjamini, Y. (2010). Discovering the false discovery rate. *Journal of the Royal Statistical Society B*, 72(4), 405-416. doi:10.1111/j.1467-9868.2010.00746.x
+- Hedges, L. V. (1981). Distribution theory for Glass's estimator of effect size and related estimators. *Journal of Educational Statistics*, 6(2), 107-128. doi:10.3102/10769986006002107
+- Welch, B. L. (1947). The generalization of "Student's" problem when several different population variances are involved. *Biometrika*, 34(1-2), 28-35. doi:10.1093/biomet/34.1-2.28

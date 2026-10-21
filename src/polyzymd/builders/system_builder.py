@@ -111,13 +111,19 @@ class SystemBuilder:
         builder._config = config
         return builder
 
-    def build_enzyme(self, pdb_path: Union[str, Path]) -> Topology:
+    def build_enzyme(
+        self,
+        pdb_path: Union[str, Path],
+        custom_substructures_path: Union[str, Path, None] = None,
+    ) -> Topology:
         """Build the enzyme component.
 
         Parameters
         ----------
         pdb_path : str or Path
             Path to enzyme PDB file.
+        custom_substructures_path : str or Path, optional
+            JSON file of residue templates for residues OpenFF does not know.
 
         Returns
         -------
@@ -129,7 +135,7 @@ class SystemBuilder:
         RuntimeError
             If OpenFF loads the enzyme PDB without any molecules.
         """
-        self._enzyme_topology = self._enzyme_builder.build(pdb_path)
+        self._enzyme_topology = self._enzyme_builder.build(pdb_path, custom_substructures_path)
         self._n_enzyme_molecules = self._enzyme_topology.n_molecules
         if self._n_enzyme_molecules <= 0:
             raise RuntimeError("OpenFF enzyme topology contains no molecules")
@@ -286,48 +292,35 @@ class SystemBuilder:
 
     def pack_polymers(
         self,
+        box_vectors: Any,
         padding: float = 2.0,
         tolerance: float = 2.0,
         movebadrandom: bool = False,
         working_directory: Optional[Union[str, Path]] = None,
-        box_vectors_nm: Optional[List[float]] = None,
         seed: Optional[int] = None,
-        exclude_solute_bbox: bool = False,
         confine_to_sphere: bool = True,
         nloop: int = 200,
-        box_vectors: Optional[Any] = None,
     ) -> Topology:
         """Pack polymers around the combined solute topology.
 
         Args:
-            padding: Box padding in nm. Larger values give polymers more room
-                and can significantly speed up PACKMOL convergence.  Ignored
-                when *box_vectors_nm* is provided.
+            box_vectors: Final periodic box vectors (3x3 Quantity) of the
+                simulation cell.  Chains are packed inside the rectangular
+                brick of this cell so that no atom can overlap its own
+                periodic image.
+            padding: Padding in nm of the confinement sphere around the solute.
             tolerance: PACKMOL tolerance in Angstrom.
             movebadrandom: When True, pass the ``movebadrandom`` keyword to
                 PACKMOL. Improves convergence for dense or heterogeneous
                 polymer systems (many unique chain types) by placing
                 badly-packed molecules at random positions in the box.
             working_directory: Directory for PACKMOL files.
-            box_vectors_nm: Optional explicit box dimensions ``[Lx, Ly, Lz]``
-                in nanometers.  When provided, overrides the auto-computed
-                bounding box + *padding*.  The protein is centered at the
-                midpoint of this box.
             seed: Packmol random seed (typically the replicate index).
                 ``None`` leaves Packmol on its fixed built-in default.
-            exclude_solute_bbox: Confine chains to a shell outside the solute
-                bounding box (legacy). Default ``False``.
             confine_to_sphere: Confine chains to a sphere around the solute
                 (radius = solute bounding-box circumradius + *padding*) while
                 packing inside the final periodic brick. Default ``True``.
             nloop: Maximum PACKMOL GENCAN loops per molecule type.
-            box_vectors: Final periodic box vectors (3x3 Quantity) of the
-                simulation cell.  When given, chains are packed inside the
-                rectangular brick of this cell so that no atom can overlap its
-                own periodic image, and *padding* is used only for the radius
-                of the confinement sphere.  ``None`` restores the legacy
-                behaviour of packing into a separate rectangular box of
-                solute bbox + 2 * *padding*.
 
         Returns:
             Topology with polymers packed.
@@ -343,35 +336,15 @@ class SystemBuilder:
             return self._combined_topology
 
         import numpy as np
-        from openff.units import Quantity
 
-        from polyzymd.utils import boxvectors
         from polyzymd.utils.packmol import pack_polymers as _pack_polymers
         from polyzymd.utils.packmol import solute_sphere_constraint
 
-        # Calculate box vectors — final cell, explicit override, or legacy
-        # bbox + padding.  The final cell is preferred: packing inside the
-        # brick of the box the system will actually be simulated in is what
-        # keeps the chains away from their own periodic images.
-        if box_vectors is not None:
-            box_vecs = box_vectors
-            LOGGER.info(
-                "Packing polymers inside the final periodic brick "
-                f"(box vectors {np.diagonal(np.asarray(box_vecs.m_as('nanometer'))).round(3)} nm "
-                "on the diagonal)"
-            )
-        elif box_vectors_nm is not None:
-            LOGGER.info(
-                f"Using explicit box vectors: "
-                f"[{box_vectors_nm[0]:.2f}, {box_vectors_nm[1]:.2f}, "
-                f"{box_vectors_nm[2]:.2f}] nm"
-            )
-            box_vecs = Quantity(np.diag(box_vectors_nm), "nanometer")
-        else:
-            padding_qty = Quantity(padding, "nanometer")
-            min_box_vecs = boxvectors.get_topology_bbox(self._combined_topology)
-            box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
-
+        LOGGER.info(
+            "Packing polymers inside the final periodic brick "
+            f"(box vectors {np.diagonal(np.asarray(box_vectors.m_as('nanometer'))).round(3)} nm "
+            "on the diagonal)"
+        )
         LOGGER.info(
             f"Packing {sum(self._polymer_counts)} polymer chains "
             f"({len(self._polymer_molecules)} unique types), "
@@ -384,12 +357,11 @@ class SystemBuilder:
             molecules=self._polymer_molecules,
             number_of_copies=self._polymer_counts,
             solute=self._combined_topology,
-            box_vectors=box_vecs,
+            box_vectors=box_vectors,
             tolerance_angstrom=tolerance,
             movebadrandom=movebadrandom,
             nloop=nloop,
             seed=seed,
-            exclude_solute_bbox=exclude_solute_bbox,
             confine_to_sphere=confine_to_sphere,
             sphere_padding_angstrom=padding * 10.0,
             working_directory=str(working_directory) if working_directory else None,
@@ -490,92 +462,6 @@ class SystemBuilder:
 
         return self._interchange
 
-    def _build_molecule_name_mapping(self) -> Dict[str, str]:
-        """Build SMILES -> friendly name mapping for logging.
-
-        Creates a mapping from molecule SMILES to human-readable names
-        for use in log messages during Interchange creation.
-
-        Returns:
-            Dictionary mapping SMILES strings to display names.
-
-        Example output:
-            {
-                "[large-enzyme-smiles]": "LipA",
-                "[substrate-smiles]": "ResorufinButyrate",
-                "[polymer-smiles]": "EGPMA-SBMA_AAABA",
-                "CS(=O)C": "dmso",
-            }
-        """
-        name_map: Dict[str, str] = {}
-
-        # Add enzyme name from config or default
-        if self._enzyme_topology:
-            enzyme_smiles = self._enzyme_topology.molecule(0).to_smiles()
-            config = getattr(self, "_config", None)
-            if config and hasattr(config, "enzyme") and config.enzyme:
-                name_map[enzyme_smiles] = config.enzyme.name
-            else:
-                name_map[enzyme_smiles] = "Enzyme"
-
-        # Add substrate name from config or default
-        if self._substrate_molecule:
-            substrate_smiles = self._substrate_molecule.to_smiles()
-            config = getattr(self, "_config", None)
-            if config and hasattr(config, "substrate") and config.substrate:
-                name_map[substrate_smiles] = config.substrate.name
-            else:
-                name_map[substrate_smiles] = "Substrate"
-
-        # Add polymer names: type_prefix + sequence (e.g., "EGPMA-SBMA_AAABA")
-        if self._polymer_builder:
-            for sequence, mol in self._polymer_builder.loaded_molecules.items():
-                polymer_smiles = mol.to_smiles()
-                name_map[polymer_smiles] = f"{self._polymer_builder._type_prefix}_{sequence}"
-
-        # Add co-solvent names
-        if self._solvent_builder._composition:
-            for cosolvent in self._solvent_builder._composition.co_solvents:
-                if cosolvent.molecule:
-                    cosolvent_smiles = cosolvent.molecule.to_smiles()
-                    # Use name if available, otherwise use SMILES
-                    name_map[cosolvent_smiles] = cosolvent.name
-
-        return name_map
-
-    def _build_charge_template_mapping(self, water_mol: Molecule) -> Dict[str, Molecule]:
-        """Build SMILES -> charge template molecule mapping.
-
-        Creates a mapping from molecule SMILES to template molecules with
-        pre-computed charges for use with charge_from_molecules parameter.
-
-        Args:
-            water_mol: Water molecule with pre-computed charges.
-
-        Returns:
-            Dictionary mapping SMILES strings to charged template molecules.
-        """
-        smiles_to_template: Dict[str, Molecule] = {}
-
-        # Add water
-        smiles_to_template[water_mol.to_smiles()] = water_mol
-
-        # Add polymers (already have charges from SDF)
-        for mol in self._polymer_molecules:
-            smiles_to_template[mol.to_smiles()] = mol
-
-        # Add substrate (already has charges from NAGL/AM1BCC)
-        if self._substrate_molecule:
-            smiles_to_template[self._substrate_molecule.to_smiles()] = self._substrate_molecule
-
-        # Add co-solvents with pre-computed charges
-        if self._solvent_builder._composition:
-            for cosolvent in self._solvent_builder._composition.co_solvents:
-                if cosolvent.molecule is not None:
-                    smiles_to_template[cosolvent.molecule.to_smiles()] = cosolvent.molecule
-
-        return smiles_to_template
-
     def _create_interchange_single_call(self, ff: ForceField, water_mol: Molecule) -> Interchange:
         """Create Interchange with a single ``ForceField.create_interchange()`` call.
 
@@ -605,18 +491,21 @@ class SystemBuilder:
                 charge_from.append(mol)
                 seen_smiles.add(smi)
 
+        parts = ["water"]
+        if seen_smiles:
+            parts.append(f"{len(seen_smiles)} polymer type(s)")
+
         if self._substrate_molecule:
             charge_from.append(self._substrate_molecule)
+            parts.append("substrate")
 
         if self._solvent_builder._composition:
             for cosolvent in self._solvent_builder._composition.co_solvents:
                 if cosolvent.molecule is not None:
                     charge_from.append(cosolvent.molecule)
+                    parts.append(cosolvent.name)
 
-        LOGGER.info(
-            f"Charge templates: {len(charge_from)} "
-            f"(water + {len(seen_smiles)} polymer type(s) + substrate + co-solvents)"
-        )
+        LOGGER.info(f"Charge templates: {len(charge_from)} ({' + '.join(parts)})")
         LOGGER.info(f"  Template prep took {time.perf_counter() - t0:.1f}s")
 
         # Single parameterization call
@@ -660,7 +549,9 @@ class SystemBuilder:
             topology: Topology to modify.
         """
         for i, mol in enumerate(topology.molecules):
-            for atom in mol.atoms:
+            for atom_index, atom in enumerate(mol.atoms):
+                # Record the input residue, chain included, before the chain is replaced.
+                self._get_original_residue_token(atom, atom_index)
                 atom.metadata["chain_id"] = str(i + 1)
 
     def _assign_pdb_identifiers(self) -> None:
@@ -713,22 +604,18 @@ class SystemBuilder:
 
             protein_residue_num = 1
 
-            # Sometimes, we have more than one unique protein molecule in the loaded pdb file
-            # such as in loading a homodimer enzyme, as in https://www.rcsb.org/structure/1HXW
-            # We must ensure all of the protein loads into polyzymd.
-            # Here, we enforce that unique protein chains
-            # monomer 1 == Chain A, monomer 2 == Chain B
-            # have unique residue labels.
-            # So if the chains are 100 AA long, monomer 1 will be
-            # residues 1-101, and then monomer 2 will be RENUMBERED
-            # to residues 102-202. Adjust your downstream analysis accordingly!!!
+            # A PDB can hold several protein molecules (a homodimer such as
+            # https://www.rcsb.org/structure/1HXW), or several chains joined into one
+            # molecule by disulfides (insulin). All of them go on chain A, numbered one
+            # after the other: two 100-residue chains become residues 1-100 and
+            # 101-200. Adjust your downstream analysis accordingly!!!
 
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
                 residue_map: dict[str, int] = {}
                 for atom_index, atom in enumerate(mol.atoms):
-                    atom.metadata["chain_id"] = PROTEIN_CHAIN
                     residue_token = self._get_original_residue_token(atom, atom_index)
+                    atom.metadata["chain_id"] = PROTEIN_CHAIN
                     if residue_token not in residue_map:
                         residue_map[residue_token] = protein_residue_num
                         protein_residue_num += 1
@@ -820,13 +707,15 @@ class SystemBuilder:
         if residue_token is not None:
             return str(residue_token)
 
+        chain_id = metadata.get("chain_id") or ""
         residue_number = metadata.get("residue_number")
         residue_name = metadata.get("residue_name") or metadata.get("residue_name_3") or ""
         insertion_code = metadata.get("insertion_code") or ""
         if residue_number is None:
             residue_token = f"missing-residue-metadata:{atom_index}"
         else:
-            residue_token = f"{residue_number!s}|{residue_name!s}|{insertion_code!s}"
+            # Chains joined by a disulfide are one molecule; A7 and B7 are two residues.
+            residue_token = f"{chain_id!s}|{residue_number!s}|{residue_name!s}|{insertion_code!s}"
 
         metadata[_ORIGINAL_RESIDUE_TOKEN_KEY] = residue_token
         return residue_token
@@ -863,11 +752,13 @@ class SystemBuilder:
                 residue_num = 1
 
                 if chain_idx >= len(chain_letters):
-                    LOGGER.warning(
-                        f"Exceeded {len(chain_letters)} chain letters - cycling. "
-                        "Consider using a topology format with larger chain ID capacity."
+                    # Cycling back would give solvent the chain IDs that mark the
+                    # protein, substrate and polymer, which analyses select on.
+                    raise ValueError(
+                        f"The solvent needs more than {len(chain_letters) - start_chain_idx} "
+                        f"chains of {max_residue} residues each ({n_solvent} solvent "
+                        "molecules), and chain IDs would repeat those of the solute."
                     )
-                    chain_idx = chain_idx % len(chain_letters)
 
             chain_id = chain_letters[chain_idx]
             mol = self._solvated_topology.molecule(mol_idx)
@@ -938,12 +829,16 @@ class SystemBuilder:
 
         Returns:
             OpenFF Interchange ready for simulation.
+
+        Raises:
+            ValueError: If the config names something the build cannot make
+                correctly (see ``SimulationConfig.require_buildable``).
         """
+        config.require_buildable()
         self._working_dir = Path(working_dir) if working_dir else None
-        self._build_provenance = {
-            "polymer_seed": polymer_seed,
-            "packmol_seed": polymer_seed,
-        }
+        self._build_provenance = {"packmol_seed": polymer_seed}
+        if config.polymers and config.polymers.enabled:
+            self._build_provenance["polymer_seed"] = polymer_seed
         if polymer_seed is None:
             LOGGER.warning(
                 "No replicate seed supplied: Packmol will use its fixed default seed and "
@@ -954,7 +849,7 @@ class SystemBuilder:
 
         # 1. Build enzyme
         LOGGER.info(f"Building enzyme: {config.enzyme.name}")
-        self.build_enzyme(config.enzyme.pdb_path)
+        self.build_enzyme(config.enzyme.pdb_path, config.enzyme.custom_substructures_path)
 
         # 2. Build substrate (if configured)
         if config.substrate:
@@ -973,23 +868,17 @@ class SystemBuilder:
         # Polymers get their room by reserving polymers.packing.padding on top
         # of solvent.box.padding.
         polymers_enabled = bool(config.polymers and config.polymers.enabled)
-        deterministic_box = polymers_enabled and config.polymers.packing.box_vectors is None
         box_vectors = None
-        if deterministic_box:
+        if polymers_enabled:
             box_vectors = self._solvent_builder.compute_box_vectors_from_config(
                 self._combined_topology,
                 config.solvent,
                 extra_padding_nm=config.polymers.packing.padding,
             )
             LOGGER.info(
-                "Deterministic periodic cell from the protein + substrate bounding box "
+                "Deterministic periodic cell from the protein + substrate diameter "
                 f"+ 2 x ({config.polymers.packing.padding} + {config.solvent.box.padding}) nm: "
                 f"{box_vectors}"
-            )
-        elif polymers_enabled:
-            LOGGER.warning(
-                "polymers.packing.box_vectors is set: the periodic cell is derived from the "
-                "packed topology (legacy behaviour) and will differ between replicates."
             )
 
         # 4. Build and pack polymers (if configured)
@@ -1054,16 +943,14 @@ class SystemBuilder:
             # Get packing config (uses defaults if not specified)
             packing = config.polymers.packing
             self.pack_polymers(
+                box_vectors=box_vectors,
                 padding=packing.padding,
                 tolerance=packing.tolerance,
                 movebadrandom=packing.movebadrandom,
                 working_directory=self._working_dir,
-                box_vectors_nm=packing.box_vectors,
                 seed=polymer_seed,
-                exclude_solute_bbox=packing.exclude_solute_bbox,
                 confine_to_sphere=packing.confine_to_sphere,
                 nloop=packing.nloop,
-                box_vectors=box_vectors,
             )
 
         # 5. Solvate.  With a precomputed cell the packed topology is already
@@ -1077,7 +964,7 @@ class SystemBuilder:
         )
         self._solvated_topology = self._solvent_builder.solvated_topology
         self._build_provenance["solvent_packmol_seed"] = self._solvent_builder.packmol_seed
-        self._record_box_provenance(deterministic_box)
+        self._record_box_provenance(polymers_enabled)
 
         # Save solvated PDB if working dir specified
         self._assign_pdb_identifiers()
@@ -1129,239 +1016,6 @@ class SystemBuilder:
         )
 
         return omm_topology, omm_system, omm_positions
-
-    def export_to_gromacs(
-        self,
-        output_dir: Union[str, Path],
-        prefix: Optional[str] = None,
-        gmx_command: str = "gmx",
-        generate_mdps: bool = True,
-    ) -> Dict[str, Any]:
-        """Export the system to GROMACS format with full simulation setup.
-
-        Generates a complete GROMACS simulation setup including:
-        - .gro (coordinates) and .top (topology) files
-        - MDP files for energy minimization, equilibration, and production
-        - Position restraint files for equilibration stages
-        - Run script for executing the full workflow
-
-        The topology is split into separate .itp files for each molecule type
-        (monolithic=False), which is cleaner for multi-component systems.
-
-        MDP files are generated from config.yaml parameters to match OpenMM
-        simulation settings (temperature, pressure, duration, etc.). OpenFF
-        defaults are used for force field parameters (rcoulomb=0.9, rvdw=0.9,
-        PME, etc.) to ensure 1:1 parity with OpenMM.
-
-        Args:
-            output_dir: Directory to write GROMACS files. Will be created if it
-                doesn't exist.
-            prefix: Filename prefix for output files. If None, generates a
-                descriptive name from the config (e.g., "LipA_EGPMA-SBMA").
-            gmx_command: GROMACS command/path for the run script (default "gmx").
-            generate_mdps: If True (default), generate MDP files from config.
-                If False, only export coordinates and topology.
-
-        Returns:
-            Dictionary with paths to generated files:
-            - "gro": Path to coordinate file
-            - "top": Path to topology file
-            - "em_mdp": Path to energy minimization MDP (if generate_mdps=True)
-            - "eq_mdps": List of equilibration MDP paths (if generate_mdps=True)
-            - "prod_mdp": Path to production MDP (if generate_mdps=True)
-            - "posres": Dict of position restraint files (if applicable)
-            - "run_script": Path to run script (if generate_mdps=True)
-
-        Raises:
-            RuntimeError: If Interchange has not been created.
-
-        Example:
-            >>> builder = SystemBuilder.from_config(config)
-            >>> builder.build_from_config(config, working_dir)
-            >>> result = builder.export_to_gromacs(
-            ...     output_dir="gromacs/",
-            ...     prefix="my_system"
-            ... )
-            >>> print(f"Run: cd {result['gro'].parent} && ./{result['run_script'].name}")
-        """
-        if self._interchange is None:
-            raise RuntimeError(
-                "Interchange not created. Call create_interchange() or build_from_config() first."
-            )
-
-        if self._solvated_topology is not None:
-            self._assign_pdb_identifiers()
-
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Generate prefix from config if not provided
-        if prefix is None:
-            prefix = self._generate_gromacs_prefix()
-
-        LOGGER.info(f"Exporting to GROMACS format: {output_dir / prefix}.*")
-
-        # Check if we have config for MDP generation
-        config = getattr(self, "_config", None)
-
-        if generate_mdps and config is None:
-            raise RuntimeError(
-                "GROMACS MDP generation requires a validated SimulationConfig. "
-                "Pass generate_mdps=False to export coordinates and topology only."
-            )
-
-        if generate_mdps:
-            # Use GromacsExporter for full export with MDP generation
-            from polyzymd.exporters.gromacs import GromacsExporter
-
-            # Get component info for position restraints
-            try:
-                component_info = self.get_component_info()
-            except RuntimeError:
-                component_info = None
-                LOGGER.warning(
-                    "Could not get component info for position restraints. "
-                    "Position restraint files will not be generated."
-                )
-
-            exporter = GromacsExporter(
-                interchange=self._interchange,
-                config=config,
-                component_info=component_info,
-            )
-
-            result = exporter.export(
-                output_dir=output_dir,
-                prefix=prefix,
-                gmx_command=gmx_command,
-            )
-
-            return result
-        # Build-only export without MDP generation
-        return self._export_gromacs_minimal(output_dir, prefix)
-
-    def _export_gromacs_minimal(
-        self,
-        output_dir: Path,
-        prefix: str,
-    ) -> Dict[str, Any]:
-        """Export GROMACS coordinates and topology only.
-
-        This build-only mode lets users export ``.gro``, ``.top``, and
-        ``.itp`` files and then manage downstream GROMACS inputs themselves.
-
-        Args:
-            output_dir: Output directory.
-            prefix: Filename prefix.
-
-        Returns:
-            Dictionary with gro and top paths.
-        """
-        # Fix 0-indexed residues (GROMACS requires 1-indexed)
-        self._fix_zero_indexed_residues()
-
-        # Export using OpenFF Interchange
-        output_prefix = str(output_dir / prefix)
-        self._interchange.to_gromacs(
-            prefix=output_prefix,
-            monolithic=False,
-            _merge_atom_types=True,
-        )
-
-        gro_path = output_dir / f"{prefix}.gro"
-        top_path = output_dir / f"{prefix}.top"
-        mdp_path = output_dir / f"{prefix}.mdp"
-
-        LOGGER.info("Generated GROMACS files:")
-        LOGGER.info(f"  Coordinates: {gro_path}")
-        LOGGER.info(f"  Topology:    {top_path}")
-        LOGGER.info(f"  MDP stub:    {mdp_path}")
-        LOGGER.info("")
-        LOGGER.info("Note: The .mdp file is a stub for single-point energy calculation.")
-        LOGGER.info("For MD simulations, use generate_mdps=True with a config file,")
-        LOGGER.info("or create custom MDP files.")
-
-        return {
-            "gro": gro_path,
-            "top": top_path,
-            "mdp_stub": mdp_path,
-        }
-
-    def _generate_gromacs_prefix(self) -> str:
-        """Generate a descriptive filename prefix from the config.
-
-        Creates a prefix in the format: {enzyme_name}_{polymer_prefix}
-        Falls back to "system" if config information is not available.
-
-        Returns:
-            Filename prefix string (without extension).
-        """
-        parts = []
-
-        # Get enzyme name from config
-        config = getattr(self, "_config", None)
-        if config and hasattr(config, "enzyme") and config.enzyme:
-            parts.append(config.enzyme.name)
-
-        # Get polymer type prefix from config
-        if config and hasattr(config, "polymers") and config.polymers:
-            if config.polymers.enabled and config.polymers.type_prefix:
-                parts.append(config.polymers.type_prefix)
-
-        if parts:
-            return "_".join(parts)
-        else:
-            return "system"
-
-    def _fix_zero_indexed_residues(self) -> None:
-        """Fix 0-indexed residues in the topology for GROMACS compatibility.
-
-        GROMACS requires residue numbers to be 1-indexed. This method checks
-        all atoms in the topology and increments any 0-indexed residue numbers.
-        """
-        if self._interchange is None:
-            return
-
-        found_zero_indexed = False
-
-        # First pass: check for 0-indexed residues
-        for molecule in self._interchange.topology.molecules:
-            for atom in molecule.atoms:
-                residue_num = atom.metadata.get("residue_number")
-                if residue_num is not None:
-                    # Handle both string and int representations
-                    if isinstance(residue_num, str):
-                        try:
-                            if int(residue_num) == 0:
-                                found_zero_indexed = True
-                                break
-                        except ValueError:
-                            pass
-                    elif residue_num == 0:
-                        found_zero_indexed = True
-                        break
-            if found_zero_indexed:
-                break
-
-        if not found_zero_indexed:
-            LOGGER.debug("No 0-indexed residues found")
-            return
-
-        # Second pass: fix 0-indexed residues
-        LOGGER.info("Fixing 0-indexed residues for GROMACS compatibility")
-        for molecule in self._interchange.topology.molecules:
-            for atom in molecule.atoms:
-                residue_num = atom.metadata.get("residue_number")
-                if residue_num is not None:
-                    if isinstance(residue_num, str):
-                        try:
-                            atom.metadata["residue_number"] = str(int(residue_num) + 1)
-                        except ValueError:
-                            pass
-                    else:
-                        atom.metadata["residue_number"] = residue_num + 1
-
-        LOGGER.info("Fixed all 0-indexed residues")
 
     def _record_box_provenance(self, deterministic_box: bool) -> None:
         """Record the final cell in the build provenance.

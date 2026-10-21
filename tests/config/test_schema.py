@@ -1,20 +1,27 @@
 """Test that all public modules can be imported."""
 
+import json
+import logging
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
-from polyzymd.config.schema import SimulationConfig
+from polyzymd.config.schema import CoSolventSpec, SimulationConfig
+from tests._support.analysis_testkit import write_simulation_config
+
+_ONE_ATOM_PDB = "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\nEND\n"
 
 
 @pytest.fixture
-def minimal_config_data():
-    """Provide minimal valid SimulationConfig input data."""
+def minimal_config_data(tmp_path):
+    """Provide minimal valid SimulationConfig input data, with a one-atom enzyme PDB."""
+    (tmp_path / "test.pdb").write_text(_ONE_ATOM_PDB)
     return {
         "name": "test_simulation",
         "engine": "openmm",
-        "enzyme": {"name": "TestEnzyme", "pdb_path": "test.pdb"},
+        "enzyme": {"name": "TestEnzyme", "pdb_path": str(tmp_path / "test.pdb")},
         "thermodynamics": {"temperature": 300.0},
         "simulation_phases": {
             "equilibration_stages": [
@@ -193,17 +200,13 @@ class TestConfigValidation:
         assert config.neutralize is True
         assert config.nacl_concentration == 0.0
 
-    def test_ion_config_nacl_description_documents_target_concentration(self):
-        """IonConfig should document NaCl-equivalent target concentration."""
+    def test_ion_config_nacl_description_says_salt_comes_before_neutralizing_ions(self):
+        """IonConfig should say the NaCl concentration is salt added before neutralizing ions."""
         from polyzymd.config.schema import IonConfig
 
         description = IonConfig.model_fields["nacl_concentration"].description
 
-        assert description is not None
-        assert "NaCl-equivalent" in description
-        assert "target concentration" in description
-        assert "pool" not in description
-        assert "Additional" not in description
+        assert description == "NaCl salt concentration (mol/L), before neutralizing ions"
 
 
 class TestCoSolventCompositionValidation:
@@ -258,10 +261,10 @@ class TestCoSolventCompositionValidation:
         """Each co-solvent should have exactly one composition method."""
         from polyzymd.config.schema import CoSolventSpec
 
-        with pytest.raises(ValidationError, match="Must specify either 'mole_fraction'"):
+        with pytest.raises(ValidationError, match="give exactly one of mole_fraction, concentration"):
             CoSolventSpec(name="dmso")
 
-        with pytest.raises(ValidationError, match="Cannot specify both 'mole_fraction'"):
+        with pytest.raises(ValidationError, match="give exactly one of mole_fraction, concentration"):
             CoSolventSpec(name="dmso", mole_fraction=0.1, concentration=1.0)
 
 
@@ -380,6 +383,38 @@ class TestRunDirectoryNaming:
 
         assert config.format_run_directory_name() == "acn_meoh"
 
+    def test_duration_below_one_ns_is_not_rounded_to_zero(self, minimal_config_data):
+        """A 5 ps run is named 0.005ns, not 0ns; whole-ns durations are unchanged."""
+        from polyzymd.config.schema import SimulationConfig
+
+        minimal_config_data["simulation_phases"]["production"]["duration"] = 0.005
+        assert (
+            SimulationConfig(**minimal_config_data).format_run_directory_name(1)
+            == "TestEnzyme_apo_none_0.005ns_300K_run1"
+        )
+        minimal_config_data["simulation_phases"]["production"]["duration"] = 100.0
+        assert "_100ns_" in SimulationConfig(**minimal_config_data).format_run_directory_name(1)
+
+    def test_existing_run_folder_named_0ns_is_reused_for_a_short_run(
+        self, minimal_config_data, tmp_path
+    ):
+        """Folders named with 0ns by earlier versions are found; a 0.005ns folder wins."""
+        from polyzymd.config.schema import SimulationConfig
+
+        minimal_config_data["output"] = {"scratch_directory": str(tmp_path)}
+        minimal_config_data["simulation_phases"]["production"]["duration"] = 0.005
+        config = SimulationConfig(**minimal_config_data)
+        old = tmp_path / "TestEnzyme_apo_none_0ns_300K_run1"
+        new = tmp_path / "TestEnzyme_apo_none_0.005ns_300K_run1"
+
+        assert config.get_working_directory(1) == new
+        old.mkdir()
+        assert config.get_working_directory(1) == old
+        assert config.discover_replicate_dirs() == [(1, old)]
+        new.mkdir()
+        assert config.get_working_directory(1) == new
+        assert config.discover_replicate_dirs() == [(1, new)]
+
     def test_format_run_directory_name_and_working_directory_match(
         self, minimal_config_data, tmp_path
     ):
@@ -429,20 +464,18 @@ class TestRunDirectoryNaming:
 class TestSimulationPhasesConfig:
     """Test staged equilibration requirements."""
 
-    def test_ignores_deprecated_report_interval(self, caplog):
-        """Legacy intervals are ignored so samples controls trajectory cadence."""
+    def test_refuses_report_interval_and_names_samples(self):
+        """production.report_interval is refused; the error says samples sets the cadence."""
         from polyzymd.config.schema import SimulationPhaseConfig
 
-        phase = SimulationPhaseConfig(
-            ensemble="NPT",
-            duration=1.0,
-            samples=10,
-            report_interval=50000,
-            checkpoint_interval=60.0,
-        )
-
-        assert "report_interval" not in phase.model_dump()
-        assert "Ignoring deprecated" in caplog.text
+        with pytest.raises(ValidationError, match="'report_interval' was removed.*'samples'"):
+            SimulationPhaseConfig(
+                ensemble="NPT",
+                duration=1.0,
+                samples=10,
+                report_interval=50000,
+                checkpoint_interval=60.0,
+            )
 
     def test_requires_equilibration_stages(self):
         from pydantic import ValidationError
@@ -457,7 +490,7 @@ class TestSimulationPhasesConfig:
             time_step=2.0,
         )
 
-        with pytest.raises(ValidationError, match="requires 'equilibration_stages'"):
+        with pytest.raises(ValidationError, match="equilibration_stages is missing: list at least one stage"):
             SimulationPhasesConfig(production=production)
 
     def test_rejects_empty_equilibration_stages(self):
@@ -475,6 +508,14 @@ class TestSimulationPhasesConfig:
 
         with pytest.raises(ValidationError, match="must contain at least one stage"):
             SimulationPhasesConfig(equilibration_stages=[], production=production)
+
+    def test_rejects_a_zero_ns_equilibration_stage(self):
+        from pydantic import ValidationError
+
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        with pytest.raises(ValidationError, match="greater than 0"):
+            EquilibrationStageConfig(name="nvt", duration=0.0, temperature=300.0)
 
     def test_rejects_legacy_segments_field(self):
         """Legacy simulation_phases.segments should be rejected."""
@@ -577,39 +618,31 @@ class TestEquilibrationTemperatureRamp:
         with pytest.raises(ValidationError, match="must be <"):
             self._stage(temperature_end=end)
 
-    def test_migrates_legacy_increment_and_interval(self, caplog):
+    def test_refuses_temperature_interval_and_names_the_step_key(self):
         from polyzymd.config.schema import EquilibrationStageConfig
 
-        with pytest.warns(DeprecationWarning, match="temperature_interval_steps"):
-            stage = EquilibrationStageConfig(
+        removed = "'temperature_interval' was removed.*'temperature_interval_steps'"
+        with pytest.raises(ValidationError, match=removed):
+            EquilibrationStageConfig(
                 name="heating",
-                duration=0.1,
                 temperature_start=60.0,
                 temperature_end=300.0,
                 temperature_increment=1.0,
                 temperature_interval=1200.0,
             )
 
-        assert stage.temperature_increment == pytest.approx(1.0)
-        assert stage.temperature_interval_steps == 600
-        assert stage.resolved_duration == pytest.approx(0.288)
-        assert "converted to temperature_interval_steps=600" in caplog.text
-
-    def test_migrates_duration_only_ramp_with_legacy_defaults(self, caplog):
+    def test_refuses_duration_only_ramp_and_names_the_step_key(self):
         from polyzymd.config.schema import EquilibrationStageConfig
 
-        with pytest.warns(DeprecationWarning, match="legacy 1200 fs default"):
-            stage = EquilibrationStageConfig(
+        with pytest.raises(
+            ValidationError, match="Do not specify 'duration'.*'temperature_interval_steps'"
+        ):
+            EquilibrationStageConfig(
                 name="heating",
                 duration=0.3,
                 temperature_start=60.0,
                 temperature_end=300.0,
             )
-
-        assert stage.temperature_increment == pytest.approx(1.0)
-        assert stage.temperature_interval_steps == 600
-        assert stage.resolved_duration == pytest.approx(0.288)
-        assert "legacy 1200 fs default" in caplog.text
 
     def test_constant_stage_does_not_emit_ramp_deprecation_warning(self):
         import warnings
@@ -636,76 +669,6 @@ class TestEquilibrationTemperatureRamp:
                 temperature_end=300.0,
                 temperature_ramp_rate=0.8333333333333334,
             )
-
-    def test_rejects_old_and_new_intervals_together(self):
-        from polyzymd.config.schema import EquilibrationStageConfig
-
-        with pytest.raises(ValidationError, match="Cannot specify both"):
-            EquilibrationStageConfig(
-                name="heating",
-                temperature_start=60.0,
-                temperature_end=300.0,
-                temperature_increment=1.0,
-                temperature_interval=1200.0,
-                temperature_interval_steps=600,
-            )
-
-
-# ---------------------------------------------------------------------------
-# B13 – statepoint export handles concentration-based co-solvents
-# ---------------------------------------------------------------------------
-
-
-class TestStatepointCoSolventExport:
-    """to_statepoint must not crash when co-solvents use concentration instead
-    of mole_fraction."""
-
-    def _make_config(self, *, mole_fraction=None, concentration=None):
-        """Build a minimal SimulationConfig with one co-solvent."""
-        from unittest.mock import MagicMock
-
-        config = MagicMock()
-        config.enzyme.name = "CALB"
-        config.thermodynamics.temperature = 310.0
-        config.substrate = None
-        config.polymers = None
-
-        cs = MagicMock()
-        cs.name = "urea"
-        cs.mole_fraction = mole_fraction
-        cs.concentration = concentration
-        config.solvent.co_solvents = [cs]
-        return config
-
-    def test_mole_fraction_exported_as_mole_fraction_key(self):
-        """mole_fraction co-solvent produces a _mole_fraction key."""
-        from polyzymd.config.schema import SimulationConfig
-
-        _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
-        cfg = self._make_config(mole_fraction=0.3)
-        sp = _to_statepoint(cfg)
-        assert sp["cosolvent_urea_mole_fraction"] == 0.3
-        assert "cosolvent_urea_molarity" not in sp
-
-    def test_concentration_exported_as_molarity_key(self):
-        """concentration co-solvent produces a _molarity key, not _fraction."""
-        from polyzymd.config.schema import SimulationConfig
-
-        _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
-        cfg = self._make_config(concentration=2.0)
-        sp = _to_statepoint(cfg)
-        assert sp["cosolvent_urea_molarity"] == 2.0
-        assert "cosolvent_urea_mole_fraction" not in sp
-
-    def test_no_crash_with_none_mole_fraction(self):
-        """Concentration statepoints should allow no mole_fraction."""
-        from polyzymd.config.schema import SimulationConfig
-
-        _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
-        cfg = self._make_config(concentration=1.5)
-        # Should not raise
-        sp = _to_statepoint(cfg)
-        assert "cosolvent_urea_molarity" in sp
 
 
 class TestOutputConfig:
@@ -766,7 +729,7 @@ class TestEngineConfig:
         """GROMACS engine config should have sensible defaults."""
         config = SimulationConfig(**minimal_config_data)
         assert config.gromacs.gmx_binary is None
-        assert config.gromacs.grompp_flags == "-maxwarn 1"
+        assert config.gromacs.grompp_flags == ""
         assert config.gromacs.mdrun_flags_equilibration is None
         assert config.gromacs.mdrun_flags_production is None
         assert config.gromacs.command_prefix is None
@@ -850,6 +813,15 @@ class TestEngineConfig:
 
 class TestGromacsEngineConfigWarnings:
     """Tests for GROMACS config warning validators."""
+
+    @pytest.mark.parametrize(
+        "field", ["mdrun_flags", "mdrun_flags_equilibration", "mdrun_flags_production"]
+    )
+    def test_noconfout_is_refused(self, minimal_config_data, field):
+        """-noconfout stops mdrun writing the final checkpoint that marks a run finished."""
+        minimal_config_data["gromacs"] = {field: "-nb gpu -noconfout"}
+        with pytest.raises(ValidationError, match="-noconfout"):
+            SimulationConfig(**minimal_config_data)
 
     def test_gpu_ntmpi_warning(self, minimal_config_data, caplog):
         """gpu=True + ntmpi>1 should log a warning."""
@@ -973,6 +945,61 @@ class TestMinimizationConfig:
         assert "minimization" not in without.model_dump(mode="json")["simulation_phases"]
 
 
+class TestUnreadFields:
+    """Keys kept only so old configs load warn once and stay out of shipped configs."""
+
+    def test_an_unread_key_warns_once(self, minimal_config_data, monkeypatch, caplog):
+        import copy
+        import logging
+
+        from polyzymd.config import schema
+
+        monkeypatch.setattr(schema, "_WARNED_UNREAD", set())
+        data = copy.deepcopy(minimal_config_data)
+        data["output"] = {"trajectory_format": "xtc", "save_checkpoint": False}
+        with caplog.at_level(logging.WARNING, logger="polyzymd.config.schema"):
+            SimulationConfig(**data)
+            SimulationConfig(**copy.deepcopy(data))
+
+        warnings = [r.getMessage() for r in caplog.records if "is not read" in r.getMessage()]
+        assert warnings == [
+            "output.save_checkpoint is not read: both engines always write checkpoints. "
+            "Leave it out of new configs.",
+            "output.trajectory_format is not read: OpenMM writes dcd and GROMACS writes xtc. "
+            "Leave it out of new configs.",
+        ]
+
+    def test_a_config_without_unread_keys_does_not_warn(
+        self, minimal_config_data, monkeypatch, caplog
+    ):
+        import logging
+
+        from polyzymd.config import schema
+
+        monkeypatch.setattr(schema, "_WARNED_UNREAD", set())
+        with caplog.at_level(logging.WARNING, logger="polyzymd.config.schema"):
+            SimulationConfig(**minimal_config_data)
+
+        assert "is not read" not in caplog.text
+
+    def test_shipped_configs_give_no_unread_key(self):
+        """Templates and examples (some are Jinja, so the text is searched) list no unread key."""
+        import re
+
+        from polyzymd.config.schema import OutputConfig
+
+        root = Path(__file__).resolve().parents[2]
+        shipped = [
+            *(root / "src/polyzymd/templates").rglob("*.yaml"),
+            *(root / "src/polyzymd/templates").rglob("*.jinja"),
+            *(root / "examples").rglob("*.yaml"),
+        ]
+        keys = "|".join(OutputConfig.UNREAD_FIELDS)
+        assert shipped
+        for path in shipped:
+            assert not re.search(rf"^\s*({keys}):", path.read_text(), re.M), path
+
+
 class TestPolymerPackingSphereConfinement:
     """``polymers.packing.confine_to_sphere`` and its effect on the build hash."""
 
@@ -998,6 +1025,23 @@ class TestPolymerPackingSphereConfinement:
         from polyzymd.config.schema import PolymerPackingConfig
 
         assert PolymerPackingConfig(confine_to_sphere=False).confine_to_sphere is False
+
+    def test_refuses_exclude_solute_bbox_and_names_the_sphere(self):
+        from polyzymd.config.schema import PolymerPackingConfig
+
+        with pytest.raises(
+            ValidationError, match="'exclude_solute_bbox' was removed.*'confine_to_sphere'"
+        ):
+            PolymerPackingConfig(exclude_solute_bbox=True)
+
+    def test_refuses_packing_box_vectors_and_names_the_paddings(self):
+        from polyzymd.config.schema import PolymerPackingConfig
+
+        with pytest.raises(
+            ValidationError,
+            match="'box_vectors' was removed.*'polymers.packing.padding'.*'solvent.box.padding'",
+        ):
+            PolymerPackingConfig(box_vectors=[8.0, 10.0, 12.0])
 
     def test_changes_the_build_hash_of_polymer_configs(self, minimal_config_data):
         """Polymer systems built before this change must be rebuilt."""
@@ -1033,3 +1077,370 @@ class TestPolymerPackingSphereConfinement:
         with_block = copy.deepcopy(base)
         with_block["simulation_phases"]["minimization"] = {"freeze_solute": False}
         assert config_hash(without) == config_hash(SimulationConfig(**with_block))
+
+
+SDS = "CCCCCCCCCCCCOS(=O)(=O)[O-]"
+
+
+def _config_with_solvent(tmp_path: Path, **solvent) -> SimulationConfig:
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    if solvent:
+        data["solvent"] = solvent
+    path.write_text(yaml.safe_dump(data))
+    return SimulationConfig.from_yaml(path)
+
+
+class TestCoSolventAmount:
+    def test_a_count_is_a_third_way_to_give_the_amount(self, tmp_path: Path) -> None:
+        """A co-solvent takes a number of molecules, or a concentration, but not both."""
+        config = _config_with_solvent(
+            tmp_path, co_solvents=[{"name": "sds", "smiles": SDS, "count": 8}]
+        )
+        assert config.solvent.co_solvents[0].count == 8
+        with pytest.raises(ValidationError, match="exactly one"):
+            _config_with_solvent(
+                tmp_path,
+                co_solvents=[{"name": "sds", "smiles": SDS, "count": 8, "concentration": 0.1}],
+            )
+
+    def test_custom_cosolvents_default_to_nagl(self, tmp_path: Path) -> None:
+        """AM1-BCC needs AmberTools, which the default environment lacks, so NAGL is the default."""
+        config = _config_with_solvent(
+            tmp_path, co_solvents=[{"name": "sds", "smiles": SDS, "count": 8}]
+        )
+        assert config.solvent.co_solvents[0].charge_method.value == "nagl"
+        assert "charge_method" not in config.solvent.co_solvents[0].model_fields_set
+
+
+def test_checkpoint_interval_has_a_default_and_unknown_keys_are_refused(tmp_path: Path) -> None:
+    """checkpoint_interval defaults to 60 s, and a key a section does not define is refused."""
+    import yaml
+
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    del data["simulation_phases"]["production"]["checkpoint_interval"]
+    path.write_text(yaml.safe_dump(data))
+    assert SimulationConfig.from_yaml(path).simulation_phases.production.checkpoint_interval == 60.0
+    data["solvent"] = {"co_solvents": [{"name": "x", "smiles": "CO", "concentration": 1.0, "bananas": 3}]}
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValidationError, match="bananas"):
+        SimulationConfig.from_yaml(path)
+
+
+_CYSTINE_TEMPLATES = (
+    Path(__file__).resolve().parents[2]
+    / "examples"
+    / "pdb_preparation"
+    / "4cha"
+    / "nterminal_cystine_substructure.json"
+)
+
+
+def _config_with_templates(tmp_path: Path, templates):
+    """Load a config whose enzyme.custom_substructures_path is templates.json beside it."""
+    import shutil
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    if isinstance(templates, Path):
+        shutil.copy(templates, tmp_path / "c" / "templates.json")
+    else:
+        (tmp_path / "c" / "templates.json").write_text(templates)
+    data = yaml.safe_load(path.read_text())
+    data["enzyme"]["custom_substructures_path"] = "templates.json"
+    path.write_text(yaml.safe_dump(data))
+    return SimulationConfig.from_yaml(path)
+
+
+class TestCustomSubstructures:
+    def test_the_config_takes_the_file_relative_to_itself(self, tmp_path: Path) -> None:
+        """enzyme.custom_substructures_path resolves against the config's folder, like pdb_path."""
+        config = _config_with_templates(tmp_path, _CYSTINE_TEMPLATES)
+        assert config.enzyme.custom_substructures_path == (tmp_path / "c" / "templates.json").resolve()
+
+    def test_a_file_of_another_shape_is_refused(self, tmp_path: Path) -> None:
+        """A templates file that does not map residue names to SMARTS and atom names is refused."""
+        with pytest.raises(ValidationError, match="must map each residue name"):
+            _config_with_templates(tmp_path, json.dumps({"NCYX": ["N", "CA"]}))
+
+
+def test_openmm_runs_refuse_the_anisotropic_barostat_whatever_the_engine_key(tmp_path: Path) -> None:
+    """A GROMACS config with barostat MCA loads, but running it on OpenMM is refused."""
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    data["engine"] = "gromacs"
+    data["simulation_phases"]["production"].update(ensemble="NPT", barostat="MCA")
+    path.write_text(yaml.safe_dump(data))
+    config = SimulationConfig.from_yaml(path)
+    config.require_engine_barostats("gromacs")
+    with pytest.raises(ValueError, match="set engine: gromacs"):
+        config.require_engine_barostats("openmm")
+
+
+
+def test_box_shape_refuses_truncated_octahedron():
+    """Only the box shapes the build can make are accepted."""
+    from polyzymd.config.schema import BoxConfig
+
+    with pytest.raises(ValidationError, match="'cube' or 'rhombic_dodecahedron'"):
+        BoxConfig(shape="truncated_octahedron")
+
+
+@pytest.mark.parametrize("name", ["methylurea", "acetate", "sodium_dodecyl_sulfate", "proline"])
+def test_default_cosolvent_residue_name_avoids_protein_nucleic_water_and_ion_names(
+    minimal_config_data, name: str
+) -> None:
+    """A config without residue_name loads, and its derived name is not one a selection takes."""
+    minimal_config_data["solvent"] = {"co_solvents": [{"name": name, "smiles": "CCO", "count": 1}]}
+    config = SimulationConfig(**minimal_config_data)
+    config.require_buildable()
+
+    from polyzymd.config.schema import reserved_residue_names
+
+    (cosolvent,) = config.solvent.co_solvents
+    assert len(cosolvent.residue_name) == 3
+    assert cosolvent.residue_name not in reserved_residue_names()
+    assert cosolvent.residue_name == CoSolventSpec(name=name, smiles="CCO", count=1).residue_name
+
+
+def test_explicit_clashing_cosolvent_residue_name_loads_but_is_not_built(
+    minimal_config_data,
+) -> None:
+    """A config that names a co-solvent GLY loads for analysis; validate and build refuse it."""
+    minimal_config_data["solvent"] = {
+        "co_solvents": [{"name": "glycerol", "mole_fraction": 0.1, "residue_name": "GLY"}]
+    }
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match="residue_name"):
+        config.require_buildable()
+
+
+@pytest.mark.parametrize("model", ["spce", "tip4p", "tip4pew", "opc"])
+def test_water_models_the_build_cannot_make_load_but_are_not_built(minimal_config_data, model):
+    """Configs of existing runs with another water model load; a new build refuses them."""
+    minimal_config_data["solvent"] = {"primary": {"type": "water", "model": model}}
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match="use model: tip3p for new systems"):
+        config.require_buildable()
+
+
+_DISTANCE_RESTRAINT = {
+    "type": "flat_bottom",
+    "name": "substrate_active_site",
+    "atom1": {"selection": "protein and resid 76 and name OG"},
+    "atom2": {"selection": "resname LIG and name C1"},
+    "distance": 3.5,
+}
+
+
+def test_gromacs_refuses_enabled_distance_restraints(minimal_config_data):
+    """GROMACS runs apply no distance restraints, so a build refuses an enabled one."""
+    minimal_config_data["engine"] = "gromacs"
+    minimal_config_data["restraints"] = [_DISTANCE_RESTRAINT]
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match="set engine: openmm"):
+        config.require_buildable()
+    minimal_config_data["restraints"] = [{**_DISTANCE_RESTRAINT, "enabled": False}]
+    SimulationConfig(**minimal_config_data).require_buildable()
+    minimal_config_data["engine"] = "openmm"
+    minimal_config_data["restraints"] = [_DISTANCE_RESTRAINT]
+    config = SimulationConfig(**minimal_config_data)
+    config.require_buildable()
+    with pytest.raises(ValueError, match="set engine: openmm"):
+        config.require_buildable("gromacs")
+
+
+def test_gromacs_refuses_position_restraints_on_groups_it_cannot_restrain(minimal_config_data):
+    """GROMACS writes position restraints for protein, ligand and polymer groups only."""
+    minimal_config_data["engine"] = "gromacs"
+    stage = minimal_config_data["simulation_phases"]["equilibration_stages"][0]
+    stage["position_restraints"] = [{"group": "protein_heavy"}]
+    SimulationConfig(**minimal_config_data).require_buildable()
+    stage["position_restraints"] = [{"group": "water_only"}]
+    with pytest.raises(ValueError, match="water_only"):
+        SimulationConfig(**minimal_config_data).require_buildable()
+
+
+@pytest.mark.parametrize(
+    ("stages", "fix"),
+    [
+        ([[("protein_heavy", 4184.0)], [("protein_heavy", 1000.0)]], "same force_constant"),
+        ([[("protein_heavy", 4184.0)], [("protein_backbone", 4184.0)]], "same protein group"),
+    ],
+)
+def test_gromacs_refuses_position_restraints_its_export_would_merge(
+    minimal_config_data, stages, fix
+):
+    """GROMACS writes one block per group and one switch for all protein groups."""
+    minimal_config_data["engine"] = "gromacs"
+    first = minimal_config_data["simulation_phases"]["equilibration_stages"][0]
+    minimal_config_data["simulation_phases"]["equilibration_stages"] = [
+        {
+            **first,
+            "name": f"eq{i}",
+            "position_restraints": [{"group": group, "force_constant": fc} for group, fc in stage],
+        }
+        for i, stage in enumerate(stages)
+    ]
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match=fix):
+        config.require_buildable()
+    config.require_buildable("openmm")
+
+
+@pytest.mark.parametrize("key", ["kcl_concentration", "mgcl2_concentration"])
+def test_salts_the_build_does_not_add_load_but_are_not_built(minimal_config_data, key):
+    """Configs of existing runs with KCl or MgCl2 load; a new build refuses them."""
+    minimal_config_data["solvent"] = {"ions": {key: 0.15}}
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match="use nacl_concentration"):
+        config.require_buildable()
+    minimal_config_data["solvent"] = {"ions": {key: 0.0}}
+    SimulationConfig(**minimal_config_data).require_buildable()
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("simulation_phases", "production", "duration"), float("inf"), "finite"),
+        (("thermodynamics", "temperature"), float("nan"), "finite"),
+        (("thermodynamics", "temperature"), True, "must be a number, not true"),
+        (("simulation_phases", "production", "samples"), False, "must be a number, not false"),
+        (("output", "naming_template"), "{enzyme}_{foo}_run{replicate}", "unknown placeholders"),
+        (("output", "naming_template"), "{enzyme}_{}", "unknown placeholders"),
+    ],
+)
+def test_values_no_config_can_hold_are_refused_on_load(minimal_config_data, path, value, message):
+    """Infinite numbers, true/false as numbers and unknown name placeholders are refused."""
+    section = minimal_config_data
+    for key in path[:-1]:
+        section = section.setdefault(key, {})
+    section[path[-1]] = value
+    with pytest.raises(ValidationError, match=message):
+        SimulationConfig(**minimal_config_data)
+
+
+def _phase(data, where):
+    phases = data["simulation_phases"]
+    return phases["production"] if where == "production" else phases["equilibration_stages"][0]
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda d: _phase(d, "production").update(ensemble="NVE"), "ensemble NVE is not run"),
+        (lambda d: _phase(d, "eq").update(ensemble="NVE"), "ensemble NVE is not run"),
+        (
+            lambda d: _phase(d, "production").update(thermostat="NoseHoover"),
+            "NoseHoover runs only with engine gromacs",
+        ),
+        (
+            lambda d: _phase(d, "eq").update(thermostat="Andersen"),
+            "Andersen runs only with engine gromacs",
+        ),
+        (lambda d: d.update(solvent={"primary": {"type": "methanol"}}), "makes only water"),
+        (lambda d: _phase(d, "production").update(samples=600000), "more than its 500000 steps"),
+        (lambda d: _phase(d, "eq").update(duration=1e-7), "shorter than one 2 fs time step"),
+        (
+            lambda d: _phase(d, "eq").update(position_restraints=[{"group": "ligand_heavy"}]),
+            "no substrate",
+        ),
+        (
+            lambda d: _phase(d, "eq").update(position_restraints=[{"group": "polymer_heavy"}]),
+            "no enabled polymers",
+        ),
+        (lambda d: d.update(output={"naming_template": "{enzyme}_x"}), "no {replicate}"),
+        (lambda d: d["enzyme"].update(name=" "), "enzyme.name is empty"),
+        (lambda d: d["enzyme"].update(name="x/../y"), "not a single folder name"),
+        (lambda d: _phase(d, "eq").update(name="a/b"), "used in a folder name"),
+        (lambda d: d.update(openmm={"platform": "GPU"}), "not an OpenMM platform"),
+        (lambda d: d.update(openmm={"precision": "dubble"}), "not an OpenMM precision"),
+    ],
+)
+def test_settings_a_new_build_would_not_run_as_written_load_but_are_refused(
+    minimal_config_data, edit, message
+):
+    """Old runs with these settings still load; validate and build refuse them."""
+    edit(minimal_config_data)
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match=message):
+        config.require_buildable()
+
+
+def test_gromacs_runs_nose_hoover_and_refuses_bad_job_settings(minimal_config_data):
+    """GROMACS runs NoseHoover; its memory and command prefix must suit the job script."""
+    minimal_config_data["engine"] = "gromacs"
+    minimal_config_data["simulation_phases"]["production"]["thermostat"] = "NoseHoover"
+    SimulationConfig(**minimal_config_data).require_buildable()
+    minimal_config_data["gromacs"] = {"memory": "lots"}
+    with pytest.raises(ValueError, match="not a SLURM --mem value"):
+        SimulationConfig(**minimal_config_data).require_buildable()
+    minimal_config_data["gromacs"] = {"command_prefix": "singularity exec --bind $PWD img.sif"}
+    with pytest.raises(ValueError, match="characters the job script refuses"):
+        SimulationConfig(**minimal_config_data).require_buildable()
+
+
+def test_new_openmm_builds_of_a_gromacs_config_refuse_the_anisotropic_barostat(
+    minimal_config_data,
+):
+    """run/submit --engine openmm on a GROMACS MCA config are refused before the run."""
+    minimal_config_data["engine"] = "gromacs"
+    minimal_config_data["simulation_phases"]["production"]["barostat"] = "MCA"
+    config = SimulationConfig(**minimal_config_data)
+    config.require_buildable()
+    with pytest.raises(ValueError, match="MCA"):
+        config.require_buildable("openmm")
+
+
+class TestDisabledPolymers:
+    """``polymers: {enabled: false}`` turns polymers off without the polymer fields."""
+
+    def test_enabled_false_alone_means_no_polymers(self, minimal_config_data):
+        import copy
+
+        from polyzymd.simulation.artifact_integrity import config_hash
+
+        disabled = copy.deepcopy(minimal_config_data)
+        disabled["polymers"] = {"enabled": False}
+        config = SimulationConfig(**disabled)
+
+        assert config.polymers is None
+        for written in ("false", "no", 0):
+            disabled["polymers"] = {"enabled": written}
+            assert SimulationConfig(**copy.deepcopy(disabled)).polymers is None
+        control = SimulationConfig(**copy.deepcopy(minimal_config_data))
+        assert config_hash(config) == config_hash(control)
+
+    def test_keys_of_a_disabled_section_are_named_as_not_read(self, minimal_config_data, caplog):
+        import copy
+
+        disabled = copy.deepcopy(minimal_config_data)
+        disabled["polymers"] = {"enabled": False, "length": 5, "count": 2}
+        with caplog.at_level(logging.WARNING, logger="polyzymd.config.schema"):
+            config = SimulationConfig(**disabled)
+
+        assert config.polymers is None
+        assert "polymers.enabled is false, so these polymer keys are not read: count, length" in (
+            caplog.text
+        )
+
+    def test_a_complete_disabled_section_is_kept_as_written(self, minimal_config_data):
+        import copy
+
+        disabled = copy.deepcopy(minimal_config_data)
+        disabled["polymers"] = {**TestPolymerPackingSphereConfinement._polymer_block()}
+        disabled["polymers"]["enabled"] = False
+        config = SimulationConfig(**disabled)
+
+        assert config.polymers is not None and config.polymers.enabled is False

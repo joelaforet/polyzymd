@@ -18,6 +18,7 @@ For most changes, your loop is:
 
 - one clear purpose per branch or PR
 - changes that follow existing patterns instead of introducing a parallel style
+- terminal colors from the shared helpers in `polyzymd/cli/colors.py`, never ad hoc ANSI escape codes
 - docs and tests updated when behavior changes
 - commands verified in a `pixi` environment
 
@@ -49,6 +50,7 @@ Edit `src/polyzymd/data/cosolvent_library.py` and add a new item to
     smiles="C(=O)N",
     density=1.133,
     molar_mass=45.04,
+    residue_name="FMD",
     common_names=("methanamide",),
 ),
 ```
@@ -59,6 +61,8 @@ Use:
 - a valid SMILES string
 - a literature or database-backed density
 - a molar mass in g/mol
+- a 3-letter residue name that is not an amino-acid, nucleic-acid, water or
+  ion name (the PDB chemical-component code, where there is one)
 - common alternative names that should resolve to the same solvent
 
 ### 2. Generate the solvent SDF
@@ -66,7 +70,7 @@ Use:
 Run the generator from the repository root:
 
 ```bash
-pixi run -e build python src/polyzymd/data/solvents/_generator.py
+pixi run -e build python scripts/generate_solvent_sdfs.py
 ```
 
 This creates a charged SDF in `src/polyzymd/data/solvents/`.
@@ -123,7 +127,7 @@ Check that your change:
 ## Related pages
 
 - contributor environment: {doc}`../contributor_guide/setup`
-- architecture overview: {doc}`../explanation/architecture`
+- architecture overview: {doc}`architecture`
 - packaging notes: {doc}`packaging`
 
 <!-- IMAGE OPPORTUNITY: Add a contributor workflow figure showing `branch ->

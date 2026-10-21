@@ -15,9 +15,9 @@ Multi-stage equilibration is useful when:
 
 ## Basic rule
 
-PolyzyMD now requires `simulation_phases.equilibration_stages`.
-
-Even if your protocol is minimal, represent it as one or more named stages.
+PolyzyMD requires `simulation_phases.equilibration_stages`. Equilibration
+cannot be skipped: list at least one stage, with a duration above 0 ns. Any
+duration above 0 is accepted. The quickstart uses one stage of 0.002 ns.
 
 ## What happens before stage 1: minimization
 
@@ -105,9 +105,8 @@ simulation logs report the derived duration before the stage runs.
 The ramp ends when the target reaches `temperature_end`; it does not include a
 hold at that temperature. Add a following constant-temperature stage when the
 system should equilibrate at the endpoint. Both engines hold each target for
-the requested step interval and change it at the same integration-step
-boundary. GROMACS encodes each boundary change over one MD timestep because its
-annealing schedule is piecewise linear.
+the requested step interval and change it at the same integration step
+({doc}`../reference/gromacs_openmm`).
 
 ### Restrained relaxation stage
 
@@ -119,7 +118,8 @@ Available groups include:
 - `protein_heavy`
 - `protein_backbone`
 - `protein_calpha`
-- `ligand_heavy`
+- `ligand_heavy` (the substrate heavy atoms: list it in one stage to hold the
+  substrate in that stage only)
 - `polymer_heavy`
 - `solute` (protein + substrate, hydrogens included), `solute_heavy` (the same
   without hydrogens: the set frozen during minimization)
@@ -153,6 +153,12 @@ simulation_phases:
 ```
 
 ### Gradual restraint release
+
+This schedule runs on OpenMM only. On GROMACS a position restraint group has
+one force constant in every stage, and all stages must use the same protein
+group, so `validate` refuses it with `engine: gromacs`. On GROMACS, keep
+`protein_heavy` at one `force_constant` in each restrained stage and release
+it by leaving `position_restraints` out of the later stages.
 
 ```yaml
 simulation_phases:

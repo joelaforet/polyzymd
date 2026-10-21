@@ -1,0 +1,199 @@
+"""Known-answer tests for how figures draw and describe uncertainty.
+
+Grossfield et al. (2018, LiveCoMS 1:5067) ask that authors graph 95 percent
+confidence intervals and describe the meaning and basis of the uncertainties in
+every figure. These tests pin the interval arithmetic behind an error bar or a
+shaded band, and check that a figure which draws either one also carries the
+footnote saying what it is.
+"""
+
+from __future__ import annotations
+
+import math
+
+import matplotlib
+import numpy as np
+import pytest
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt  # noqa: E402
+
+from polyzymd.analyses.exceptions import StatisticsError  # noqa: E402
+from polyzymd.analyses.shared.plotting import (  # noqa: E402
+    add_uncertainty_footnote,
+    band_half_widths,
+    error_bar_half_widths,
+)
+from tests.analyses.conftest import (  # noqa: E402
+    figure_draws_uncertainty,
+)
+
+T_FACTOR_N3 = 4.302652729749462
+
+
+def _footnote_texts(fig: "plt.Figure") -> list[str]:
+    """Return the figure-level texts that read as an uncertainty footnote.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure to inspect.
+
+    Returns
+    -------
+    list of str
+        Texts naming either a 95 percent interval or a standard error across
+        replicates.
+    """
+    texts = [text.get_text() for text in fig.texts]
+    return [text for text in texts if ("95%" in text or "SEM" in text) and "replicates" in text]
+
+
+def _draws_uncertainty(fig: "plt.Figure") -> bool:
+    """Return whether any axes on *fig* draws an error bar or a shaded band.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure to inspect.
+
+    Returns
+    -------
+    bool
+        True when an errorbar container or a fill_between collection is present.
+    """
+    from matplotlib.collections import PolyCollection
+
+    for ax in fig.axes:
+        if len(ax.containers) and any(
+            getattr(container, "has_yerr", False) or getattr(container, "has_xerr", False)
+            for container in ax.containers
+        ):
+            return True
+        if any(isinstance(collection, PolyCollection) for collection in ax.collections):
+            return True
+    return False
+
+
+class TestErrorBarWidths:
+    """A drawn error bar must span the interval the figure claims."""
+
+    def test_bar_half_widths_scale_the_sem_by_the_coverage_factor(self) -> None:
+        """A three-replicate bar spans 4.303 standard errors either side."""
+
+        half_widths = error_bar_half_widths(
+            [0.1, 0.2],
+            [[1.0, 1.1, 1.2], [2.0, 2.2, 2.4]],
+            error_bar="ci95",
+        )
+
+        assert half_widths == pytest.approx([0.1 * T_FACTOR_N3, 0.2 * T_FACTOR_N3])
+
+    def test_sem_mode_draws_one_standard_error(self) -> None:
+        """Asking for SEM bars draws exactly one standard error."""
+
+        assert error_bar_half_widths([0.1], [[1.0, 1.1, 1.2]], error_bar="sem") == pytest.approx(
+            [0.1]
+        )
+
+    def test_each_bar_uses_its_own_replicate_count(self) -> None:
+        """Coverage factors differ per bar when replicate counts differ."""
+
+        half_widths = error_bar_half_widths(
+            [0.1, 0.1],
+            [[1.0, 1.1, 1.2], [2.0, 2.1, 2.2, 2.3, 2.4]],
+            error_bar="ci95",
+        )
+
+        assert half_widths[0] > half_widths[1]
+
+    def test_singleton_bars_get_no_error_bar(self) -> None:
+        """A bar backed by one replicate shows no interval at all."""
+
+        assert error_bar_half_widths([0.1], [[1.0]], error_bar="ci95") is None
+
+    def test_band_half_widths_use_the_coverage_factor(self) -> None:
+        """A shaded band over replicate traces is also a 95 percent interval."""
+
+        matrix = np.array([[2.0, 2.0], [2.2, 2.2], [2.4, 2.4]])
+        band = band_half_widths(matrix, error_bar="ci95")
+
+        expected = T_FACTOR_N3 * 0.2 / math.sqrt(3.0)
+        assert band == pytest.approx([expected, expected])
+
+    def test_band_is_none_for_one_replicate(self) -> None:
+        """One trace gives no band."""
+
+        assert band_half_widths(np.array([[2.0, 2.0]]), error_bar="ci95") is None
+
+    @pytest.mark.parametrize("bad", ["ci", "stdev", ""])
+    def test_unknown_error_bar_is_a_typed_error(self, bad: str) -> None:
+        """An unsupported interval name fails loudly with a typed error."""
+
+        with pytest.raises(StatisticsError):
+            error_bar_half_widths([0.1], [[1.0, 1.1]], error_bar=bad)
+        with pytest.raises(StatisticsError):
+            band_half_widths(np.array([[1.0], [1.1]]), error_bar=bad)
+
+
+class TestFootnote:
+    """Every figure that draws an uncertainty says what it is."""
+
+    def test_footnote_states_the_interval_and_the_sampling_unit(self) -> None:
+        """The footnote names the coverage, the replicates and the window."""
+
+        fig, _ax = plt.subplots()
+        try:
+            add_uncertainty_footnote(fig, error_bar="ci95", n_replicates=3, equilibration="10ns")
+            footnotes = _footnote_texts(fig)
+        finally:
+            plt.close(fig)
+
+        assert footnotes
+        assert "95%" in footnotes[0]
+        assert "n = 3" in footnotes[0]
+        assert "10ns" in footnotes[0]
+
+    def test_sem_footnote_warns_that_it_is_not_a_95_percent_interval(self) -> None:
+        """Choosing SEM bars must not let a reader assume 95 percent coverage."""
+
+        fig, _ax = plt.subplots()
+        try:
+            add_uncertainty_footnote(fig, error_bar="sem", n_replicates=3)
+            footnote = _footnote_texts(fig)[0]
+        finally:
+            plt.close(fig)
+
+        assert "SEM" in footnote
+        assert "not a 95% interval" in footnote
+
+    def test_detector_sees_an_error_bar(self) -> None:
+        """The uncertainty detector recognises a bar chart with yerr."""
+
+        fig, ax = plt.subplots()
+        try:
+            ax.bar([0, 1], [1.0, 2.0], yerr=[0.1, 0.2])
+            assert figure_draws_uncertainty(fig)
+        finally:
+            plt.close(fig)
+
+    def test_detector_sees_a_shaded_band(self) -> None:
+        """The uncertainty detector recognises a fill_between band."""
+
+        fig, ax = plt.subplots()
+        try:
+            ax.fill_between([0, 1], [0.9, 1.9], [1.1, 2.1])
+            assert figure_draws_uncertainty(fig)
+        finally:
+            plt.close(fig)
+
+    def test_detector_ignores_a_plain_line(self) -> None:
+        """A figure with no uncertainty is not asked for a footnote."""
+
+        fig, ax = plt.subplots()
+        try:
+            ax.plot([0, 1], [1.0, 2.0])
+            assert not figure_draws_uncertainty(fig)
+        finally:
+            plt.close(fig)

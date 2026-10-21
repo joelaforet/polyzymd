@@ -34,7 +34,7 @@ PolyzyMD provides a streamlined workflow for setting up and running MD simulatio
 
 ## Analysis Status
 
-- Stable comparison and plotting workflows: RMSF, contacts, distances, catalytic triad, secondary structure, RMSD, Rg, SASA, and hydrogen bonds
+- Stable comparison and plotting workflows through `polyzymd analyze NAME -c config.yaml`: RMSD, Rg, RMSF, distances, secondary structure, SASA, native contacts, polymer-protein contacts and hydrogen bonds; the catalytic triad is a short routine on the same study API ([how-to](https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html))
 - Experimental analysis features have been removed from the active CLI surface until their definitions and interpretation are finalized
 - Analysis supports both OpenMM (DCD) and GROMACS (XTC) trajectories via engine-aware trajectory resolution
 
@@ -86,7 +86,8 @@ pixi shell -e sim-cuda-12-6
 After `pixi shell`, the `polyzymd` command is on PATH and works normally.
 
 PolyzyMD v1.3 intentionally splits environments by workflow. Use `build` to
-prepare systems, use `sim-cuda-*` only on GPU nodes to execute simulations, and
+prepare systems, use `sim-cuda-*` only to run simulations on an NVIDIA GPU (a
+cluster node or this machine, after `polyzymd build` in `build`), and
 use `analysis` to compare trajectories and make plots. The same project files,
 prepared systems, checkpoints, and trajectories move between these environments.
 This split preserves CUDA 12.4 cluster support while keeping package and
@@ -111,45 +112,53 @@ Use the environment whose CUDA version does not exceed your driver.
 
 ## Quick Start
 
-### 1. Initialize a Project
+### 1. Make a Project and a Condition
 
 ```bash
-polyzymd init --name my_simulation
-cd my_simulation
+polyzymd project init my_paper --study my_protein
+cd my_paper
+polyzymd study add-condition "No polymer" --new --study my_protein
 ```
 
-This creates a project directory with a template `config.yaml` and placeholder files.
+This makes a project folder with one study, and a template `config.yaml` in
+`my_protein/conditions/no_polymer/`.
+
+**Disk space:** the runs go into the git-ignored `runs/` folder of the
+project unless you set `scratch_directory` in the config. Trajectories can
+use a lot of disk space. On a cluster, set `scratch_directory` to scratch
+storage.
 
 ### 2. Add Your Structure Files
 
 ```bash
-cp /path/to/enzyme.pdb structures/
-cp /path/to/substrate.sdf structures/  # optional
+cp /path/to/enzyme.pdb my_protein/conditions/no_polymer/structures/
+cp /path/to/substrate.sdf my_protein/conditions/no_polymer/structures/  # optional
 ```
 
 ### 3. Edit Configuration & Run
 
 ```bash
+cd my_protein/conditions/no_polymer
 # Edit config.yaml with your settings, then:
 polyzymd validate -c config.yaml
+polyzymd build -c config.yaml -r 1 --dry-run
 ```
 
-Switch to the CUDA simulation environment that matches your cluster before
-running OpenMM simulation commands such as `polyzymd submit`:
+To add more conditions, go back to the project folder (`my_paper`) and run
+`polyzymd study add-condition LABEL --from "No polymer" --study my_protein`.
+
+Run `polyzymd submit` from the `build` environment. The job script activates
+the CUDA simulation environment on the compute node:
 
 ```bash
-# Blanca / CUDA 12.4
-pixi shell -e sim-cuda-12-4
+pixi shell -e build
 polyzymd submit -c config.yaml --replicates 1-5 --preset blanca-shirts
-
-# Bridges2 / CUDA 12.6
-pixi shell -e sim-cuda-12-6
 polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2
 ```
 
-The `--preset` flag selects SLURM configuration and automatically picks the
-correct pixi environment for generated job scripts (`sim-cuda-12-4` for Blanca,
-`sim-cuda-12-6` for Bridges2). You can override with `--pixi-env`:
+The `--preset` flag selects the SLURM settings and the pixi environment of
+the job script (`sim-cuda-12-4` for Blanca, `sim-cuda-12-6` for Bridges2).
+You can override the environment with `--pixi-env`:
 
 ```bash
 polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2 --pixi-env sim-cuda-12-6
@@ -161,7 +170,8 @@ See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/get_starte
 
 | Command | Description |
 |---------|-------------|
-| `polyzymd init -n my_project` | Initialize a new project directory |
+| `polyzymd project init my_paper --study my_protein` | Make a project folder with one study |
+| `polyzymd study add-condition LABEL --new` | Add a condition with a template config |
 | `polyzymd validate -c config.yaml` | Validate configuration file |
 | `polyzymd build -c config.yaml` | Build simulation system |
 | `polyzymd run -c config.yaml --engine gromacs` | Build and run GROMACS simulation |

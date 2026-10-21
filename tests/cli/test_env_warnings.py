@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from click.testing import CliRunner
 
-from polyzymd.cli.compare import compare
 from polyzymd.cli.env_warnings import (
     env_warnings_disabled,
     get_active_pixi_environment,
@@ -24,7 +24,9 @@ def _make_submission_config(engine: str = "openmm") -> SimpleNamespace:
         output=SimpleNamespace(
             get_job_scripts_directory=lambda: "/tmp/polyzymd-job-scripts",
             slurm_logs_subdir="slurm_logs",
+            get_slurm_logs_directory=lambda: Path("/tmp/polyzymd-slurm-logs"),
         ),
+        require_buildable=lambda engine=None, inputs=True: None,
     )
 
 
@@ -195,7 +197,9 @@ def test_recover_submit_openmm_accepts_build_environment(monkeypatch, tmp_path) 
     monkeypatch.setattr("polyzymd.engines.create_engine", lambda *args, **kwargs: fake_engine)
     monkeypatch.setattr("polyzymd.simulation.progress.save_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr("polyzymd.workflow.daisy_chain.create_job_name", lambda *args: "demo-r1")
-    monkeypatch.setattr("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", lambda name: [])
+    monkeypatch.setattr(
+        "polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", lambda run_dir, job_name: []
+    )
     runner = CliRunner()
 
     result = runner.invoke(
@@ -208,34 +212,92 @@ def test_recover_submit_openmm_accepts_build_environment(monkeypatch, tmp_path) 
     assert "Warning: polyzymd recover --submit --engine openmm" not in result.stderr
 
 
-def test_compare_init_warns_for_analysis_environment(monkeypatch, tmp_path) -> None:
-    """Comparison scaffolding should recommend the build environment."""
-    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "analysis")
-    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
-    runner = CliRunner()
+def _import_polyzymd_from(monkeypatch, package_dir: Path, user_site: Path) -> None:
+    """Make the CLI see ``polyzymd`` imported from ``package_dir``."""
+    import site
 
-    with runner.isolated_filesystem(temp_dir=tmp_path):
-        result = runner.invoke(compare, ["init", "-n", "study"])
+    import polyzymd
 
-    assert result.exit_code == 0
-    assert "Created comparison project" in result.output
-    assert "Warning: polyzymd compare init" not in result.stdout
-    assert "Warning: polyzymd compare init" in result.stderr
-    assert "recommended environment is 'build'" in result.stderr
+    monkeypatch.setattr(polyzymd, "__file__", str(package_dir / "__init__.py"))
+    monkeypatch.setattr(site, "getusersitepackages", lambda: str(user_site))
+    monkeypatch.setattr(site, "ENABLE_USER_SITE", True)
 
 
-def test_compare_status_json_skips_environment_warning(monkeypatch, tmp_path) -> None:
-    """Machine-readable analysis status output should not get advisory warnings."""
-    config_path = tmp_path / "comparison.yaml"
-    config_path.write_text("name: demo\nconditions: []\nplugins: {}\n", encoding="utf-8")
-    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "build")
-    runner = CliRunner()
+def test_info_warns_for_a_copy_in_user_site_packages(monkeypatch, tmp_path: Path) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    package_dir = user_site / "polyzymd"
+    package_dir.mkdir(parents=True)
+    _import_polyzymd_from(monkeypatch, package_dir, user_site)
 
-    result = runner.invoke(compare, ["status", "rmsf", "-f", str(config_path), "--json"])
+    result = CliRunner().invoke(cli, ["info"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert isinstance(payload, dict)
-    assert "counts" in payload
-    assert "Warning: polyzymd compare status" not in result.stdout
-    assert "Warning: polyzymd compare status" not in result.stderr
+    assert result.exit_code == 0, result.output
+    assert f"Imported from: {package_dir}" in result.stdout
+    assert f"warning: polyzymd is imported from {package_dir}" in result.stderr
+    assert (
+        "fix: run with PYTHONNOUSERSITE=1, or remove the user install: "
+        "pip uninstall --user polyzymd"
+    ) in result.stderr
+
+
+def test_info_warns_for_an_editable_install_in_user_site_packages(
+    monkeypatch, tmp_path: Path
+) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    user_site.mkdir(parents=True)
+    old_checkout = tmp_path / "old_polyzymd" / "src"
+    (old_checkout / "polyzymd").mkdir(parents=True)
+    (user_site / "_polyzymd.pth").write_text(f"{old_checkout}\n")
+    _import_polyzymd_from(monkeypatch, old_checkout / "polyzymd", user_site)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert f"Imported from: {old_checkout / 'polyzymd'}" in result.stdout
+    assert "warning: polyzymd is imported from" in result.stderr
+    assert "fix: run with PYTHONNOUSERSITE=1" in result.stderr
+
+
+def test_a_relative_pth_line_is_read_from_the_user_site(monkeypatch, tmp_path: Path) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    user_site.mkdir(parents=True)
+    old_checkout = tmp_path / "old_polyzymd" / "src"
+    (old_checkout / "polyzymd").mkdir(parents=True)
+    (user_site / "_polyzymd.pth").write_text("../../../../old_polyzymd/src\n")
+    _import_polyzymd_from(monkeypatch, old_checkout / "polyzymd", user_site)
+    monkeypatch.chdir(tmp_path / "old_polyzymd")
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert "warning: polyzymd is imported from" in result.stderr
+
+
+def test_info_does_not_warn_for_an_install_in_the_environment(monkeypatch, tmp_path: Path) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    user_site.mkdir(parents=True)
+    (user_site / "other.pth").write_text(f"{tmp_path / 'other' / 'src'}\nimport other\n")
+    checkout = tmp_path / "polyzymd" / "src"
+    (checkout / "polyzymd").mkdir(parents=True)
+    _import_polyzymd_from(monkeypatch, checkout / "polyzymd", user_site)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert f"Imported from: {checkout / 'polyzymd'}" in result.stdout
+    assert "user install" not in result.stderr
+
+
+def test_no_warning_when_the_user_site_packages_is_disabled(monkeypatch, tmp_path: Path) -> None:
+    import site
+
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    package_dir = user_site / "polyzymd"
+    package_dir.mkdir(parents=True)
+    _import_polyzymd_from(monkeypatch, package_dir, user_site)
+    monkeypatch.setattr(site, "ENABLE_USER_SITE", False)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert "user install" not in result.stderr

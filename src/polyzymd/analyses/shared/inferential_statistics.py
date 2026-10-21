@@ -1,25 +1,70 @@
 """Inferential statistical tests shared across analysis comparisons.
 
 This module provides statistical functions for comparing analysis results
-across multiple conditions, including t-tests, ANOVA, and effect sizes.
+across multiple conditions, including t tests, Tukey HSD and effect sizes.
 
-It is the canonical home for inferential statistics used by analysis plugins
-and comparison utilities.
+:meth:`~polyzymd.analyses.timeseries.ReplicateValues.compare` takes its t
+tests, effect sizes and Benjamini-Hochberg correction from here.
 
 All functions use SciPy for statistical calculations.
+
+Correction family
+-----------------
+:func:`apply_family_correction` defines the multiple-comparison family once
+for the whole package. One analysis run is one family: every pairwise test
+the run produced, across all of its metrics and all of its condition pairs,
+is corrected together with Benjamini-Hochberg.
+
+One-way ANOVA sits outside that family. Its p-value is reported raw and is
+labelled an omnibus test; it is never adjusted and it never gates the
+pairwise tests. Significance for an ANOVA is the raw p-value compared with
+the same alpha the pairwise family uses.
+
+Direction labels ("stabilizing", "increased", and the rest) describe a
+finding, so they are only assigned when the corrected test is significant.
+Everything else is labelled ``"no significant change"``.
+
+References
+----------
+Benjamini, Y. and Hochberg, Y. (1995). Controlling the false discovery rate:
+    a practical and powerful approach to multiple testing. *Journal of the
+    Royal Statistical Society B*, 57(1), 289-300.
+    doi:10.1111/j.2517-6161.1995.tb02031.x
+Cohen, J. (1988). *Statistical Power Analysis for the Behavioral Sciences*,
+    2nd edition. Lawrence Erlbaum Associates.
+Hedges, L. V. (1981). Distribution theory for Glass's estimator of effect
+    size and related estimators. *Journal of Educational Statistics*, 6(2),
+    107-128. doi:10.3102/10769986006002107
+Tukey, J. W. (1949). Comparing individual means in the analysis of variance.
+    *Biometrics*, 5(2), 99-114. doi:10.2307/3001913
+Welch, B. L. (1947). The generalization of "Student's" problem when several
+    different population variances are involved. *Biometrika*, 34(1-2),
+    28-35. doi:10.1093/biomet/34.1-2.28
 """
 
 from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Protocol
 
 import numpy as np
 from numpy.typing import ArrayLike
 
 logger = logging.getLogger("polyzymd.analyses")
+
+NO_SIGNIFICANT_CHANGE = "no significant change"
+"""Direction label used when a comparison is not significant."""
+
+MIN_N_FOR_EFFECT_SIZE_LABEL = 10
+"""Smallest combined sample size that earns a Cohen (1988) effect adjective.
+
+Below this the standard error of the effect size is of order one, so the
+adjective would report noise. :func:`cohens_d` returns ``None`` for the
+interpretation instead.
+"""
 
 
 @dataclass
@@ -60,64 +105,64 @@ class TTestResult:
 
 @dataclass
 class EffectSize:
-    """Cohen's d effect size with interpretation.
+    """Standardized mean difference with an optional interpretation.
 
     Attributes
     ----------
     cohens_d : float
-        The effect size (positive = group1 > group2)
-    interpretation : str
-        Categorical interpretation: "negligible", "small", "medium", "large"
+        The effect size (positive = group1 > group2).
+    interpretation : str or None
+        Categorical interpretation: "negligible", "small", "medium" or
+        "large". ``None`` when the combined sample is smaller than
+        :data:`MIN_N_FOR_EFFECT_SIZE_LABEL`, or when the effect size is
+        undefined.
     direction : str
         "higher" (d > 0), "lower" (d < 0), or "unchanged" (d == 0).
+    hedges_g : float
+        Cohen's d multiplied by the Hedges (1981) small-sample correction
+        ``J = 1 - 3 / (4 * (n1 + n2) - 9)``. Always report this value for
+        replicate counts of the size molecular dynamics produces.
     """
 
     cohens_d: float
-    interpretation: str
+    interpretation: str | None
     direction: str
+    hedges_g: float = float("nan")
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
             "cohens_d": self.cohens_d,
+            "hedges_g": self.hedges_g,
             "interpretation": self.interpretation,
             "direction": self.direction,
         }
 
 
-@dataclass
-class ANOVAResult:
-    """Result of one-way ANOVA.
+def hedges_correction(n1: int, n2: int) -> float:
+    """Return the Hedges (1981) bias correction factor J.
 
-    Attributes
+    Parameters
     ----------
-    f_statistic : float
-        The F-statistic
-    p_value : float
-        P-value for the test
+    n1, n2 : int
+        Sample sizes of the two groups.
+
+    Returns
+    -------
+    float
+        ``J = 1 - 3 / (4 * (n1 + n2) - 9)``. Returns NaN when the
+        denominator is not positive.
+
+    References
+    ----------
+    Hedges, L. V. (1981). Distribution theory for Glass's estimator of
+    effect size and related estimators. *Journal of Educational
+    Statistics*, 6(2), 107-128. doi:10.3102/10769986006002107
     """
-
-    f_statistic: float
-    p_value: float
-
-    @property
-    def significant(self) -> bool:
-        """Whether the result is significant at p < 0.05.
-
-        .. note::
-           This uses a hardcoded alpha=0.05 threshold.  The comparison
-           pipeline overrides significance with configurable thresholds.
-           Use this property only as a convenience default.
-        """
-        return self.p_value < 0.05
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return {
-            "f_statistic": self.f_statistic,
-            "p_value": self.p_value,
-            "significant": self.significant,
-        }
+    denominator = 4.0 * (n1 + n2) - 9.0
+    if denominator <= 0:
+        return float("nan")
+    return 1.0 - 3.0 / denominator
 
 
 @dataclass
@@ -148,8 +193,9 @@ def benjamini_hochberg(
 ) -> list[BHResult]:
     """Apply Benjamini-Hochberg FDR correction to a family of p-values.
 
-    Implements the Benjamini-Hochberg (1995) step-up procedure to control
-    the false discovery rate. The correction adjusts p-values such that
+    Adjusts the p-values with the Benjamini-Hochberg (1995) step-up procedure
+    of ``scipy.stats.false_discovery_control`` to control the false discovery
+    rate. The correction adjusts p-values such that
     declaring significance at ``adjusted_p <= alpha`` controls the expected
     proportion of false discoveries at level *alpha*.
 
@@ -187,40 +233,26 @@ def benjamini_hochberg(
         for _ in p_values
     ]
 
-    indexed_non_null: list[tuple[int, float]] = []
-    for idx, p in enumerate(p_values):
-        if p is None:
-            continue
-        raw_p = float(p)
-        if math.isnan(raw_p):
-            continue
-        indexed_non_null.append((idx, raw_p))
-
-    if not indexed_non_null:
+    present = [
+        (idx, float(p)) for idx, p in enumerate(p_values) if p is not None and not math.isnan(p)
+    ]
+    if not present:
         return results
 
-    indexed_non_null.sort(key=lambda item: item[1])
-    m = len(indexed_non_null)
+    from scipy import stats
 
-    sorted_p = np.asarray([item[1] for item in indexed_non_null], dtype=np.float64)
-    ranks = np.arange(1, m + 1, dtype=np.float64)
-
-    adjusted_sorted = sorted_p * m / ranks
-    adjusted_sorted = np.minimum.accumulate(adjusted_sorted[::-1])[::-1]
-    adjusted_sorted = np.clip(adjusted_sorted, 0.0, 1.0)
-
-    for rank_idx, ((original_idx, raw_p), adjusted_p) in enumerate(
-        zip(indexed_non_null, adjusted_sorted, strict=False),
-        start=1,
-    ):
-        adjusted = float(adjusted_p)
-        results[original_idx] = BHResult(
+    raw = np.asarray([p for _, p in present], dtype=np.float64)
+    # A p-value one rounding error outside [0, 1] would make scipy raise.
+    adjusted = stats.false_discovery_control(np.clip(raw, 0.0, 1.0), method="bh")
+    ranks = np.empty(len(raw), dtype=int)
+    ranks[np.argsort(raw, kind="stable")] = np.arange(1, len(raw) + 1)
+    for (idx, raw_p), adjusted_p, rank in zip(present, adjusted, ranks, strict=True):
+        results[idx] = BHResult(
             raw_p_value=raw_p,
-            adjusted_p_value=adjusted,
-            significant=adjusted <= alpha,
-            rank=rank_idx,
+            adjusted_p_value=float(adjusted_p),
+            significant=float(adjusted_p) <= alpha,
+            rank=int(rank),
         )
-
     return results
 
 
@@ -314,57 +346,78 @@ def cohens_d(
     Returns
     -------
     EffectSize
-        Effect size with interpretation
+        Effect size carrying both Cohen's d and Hedges' g.
 
     Notes
     -----
     Effect size interpretation (Cohen, 1988):
+
     - |d| < 0.2: negligible
     - 0.2 <= |d| < 0.5: small
     - 0.5 <= |d| < 0.8: medium
     - |d| >= 0.8: large
+
+    The adjective is withheld (``interpretation`` is ``None``) when
+    ``n1 + n2`` is below :data:`MIN_N_FOR_EFFECT_SIZE_LABEL`. At three
+    replicates per condition the standard error of d is of order one, so
+    the boundary between "medium" and "large" carries no information.
+    ``hedges_g`` applies the Hedges (1981) correction J and is the value
+    to quote at these sample sizes.
+
+    References
+    ----------
+    Cohen, J. (1988). *Statistical Power Analysis for the Behavioral
+    Sciences*, 2nd edition. Lawrence Erlbaum Associates.
+
+    Hedges, L. V. (1981). Distribution theory for Glass's estimator of
+    effect size and related estimators. *Journal of Educational
+    Statistics*, 6(2), 107-128. doi:10.3102/10769986006002107
     """
     g1 = np.asarray(group1, dtype=np.float64)
     g2 = np.asarray(group2, dtype=np.float64)
 
     n1, n2 = len(g1), len(g2)
+    undefined = EffectSize(
+        cohens_d=float("nan"),
+        interpretation=None,
+        direction="undetermined",
+        hedges_g=float("nan"),
+    )
 
     if n1 < 2 or n2 < 2:
         # Undefined: can't compute pooled std with < 2 samples
-        return EffectSize(
-            cohens_d=float("nan"),
-            interpretation="undefined",
-            direction="undetermined",
-        )
+        return undefined
+
+    var1 = np.var(g1, ddof=1)
+    var2 = np.var(g2, ddof=1)
+
+    # Pooled standard deviation
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+
+    if pooled_std > 0:
+        d = float((np.mean(g1) - np.mean(g2)) / pooled_std)
+    elif np.mean(g1) != np.mean(g2):
+        # Zero pooled SD with different means is undefined
+        return undefined
     else:
-        var1 = np.var(g1, ddof=1)
-        var2 = np.var(g2, ddof=1)
+        d = 0.0
 
-        # Pooled standard deviation
-        pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+    g = d * hedges_correction(n1, n2)
 
-        if pooled_std > 0:
-            d = float((np.mean(g1) - np.mean(g2)) / pooled_std)
+    # Interpret magnitude, but only when the sample can support an adjective
+    interpretation: str | None
+    if n1 + n2 < MIN_N_FOR_EFFECT_SIZE_LABEL:
+        interpretation = None
+    else:
+        d_abs = abs(d)
+        if d_abs < 0.2:
+            interpretation = "negligible"
+        elif d_abs < 0.5:
+            interpretation = "small"
+        elif d_abs < 0.8:
+            interpretation = "medium"
         else:
-            # Zero pooled SD with different means is undefined
-            if np.mean(g1) != np.mean(g2):
-                return EffectSize(
-                    cohens_d=float("nan"),
-                    interpretation="undefined",
-                    direction="undetermined",
-                )
-            d = 0.0
-
-    # Interpret magnitude
-    d_abs = abs(d)
-    if d_abs < 0.2:
-        interpretation = "negligible"
-    elif d_abs < 0.5:
-        interpretation = "small"
-    elif d_abs < 0.8:
-        interpretation = "medium"
-    else:
-        interpretation = "large"
+            interpretation = "large"
 
     # Interpret direction
     if d > 0:
@@ -378,51 +431,8 @@ def cohens_d(
         cohens_d=d,
         interpretation=interpretation,
         direction=direction,
+        hedges_g=g,
     )
-
-
-def one_way_anova(*groups: ArrayLike) -> ANOVAResult:
-    """Perform classical one-way ANOVA across multiple groups.
-
-    Tests the null hypothesis that all groups have the same mean
-    using ``scipy.stats.f_oneway`` (equal variance assumption).
-
-    Parameters
-    ----------
-    *groups : array_like
-        Variable number of groups to compare.  Each group must have
-        at least 2 observations; groups with fewer observations cause
-        the function to return NaN statistics.
-
-    Returns
-    -------
-    ANOVAResult
-        Result containing F-statistic and p-value.  Both are NaN if
-        any group has fewer than 2 observations.
-
-    Examples
-    --------
-    >>> no_poly = [0.715, 0.693, 0.696]
-    >>> sbma = [0.517, 0.586]
-    >>> egma = [0.558, 0.738, 0.496]
-    >>> result = one_way_anova(no_poly, sbma, egma)
-    >>> print(f"F = {result.f_statistic:.3f}, p = {result.p_value:.4f}")
-    """
-    from scipy import stats
-
-    arrays = [np.asarray(g, dtype=np.float64) for g in groups]
-
-    # Guard: need at least 2 groups for ANOVA
-    if len(arrays) < 2:
-        return ANOVAResult(f_statistic=float("nan"), p_value=float("nan"))
-
-    # Guard: need at least 2 observations per group for ANOVA
-    if any(len(a) < 2 for a in arrays):
-        return ANOVAResult(f_statistic=float("nan"), p_value=float("nan"))
-
-    stat, p = stats.f_oneway(*arrays)
-
-    return ANOVAResult(f_statistic=float(stat), p_value=float(p))
 
 
 @dataclass
@@ -502,36 +512,129 @@ def tukey_hsd(*groups: ArrayLike) -> list[TukeyHSDResult]:
     return pairs
 
 
-def percent_change(control_mean: float, treatment_mean: float) -> float:
-    """Calculate percent change from control.
+class OmnibusTest(Protocol):
+    """What an omnibus ANOVA result exposes to the correction policy.
+
+    Attributes
+    ----------
+    p_value : float or None
+        Raw p-value of the omnibus test.
+    significant : bool
+        Set by the policy from the raw p-value against alpha.
+    """
+
+    p_value: float | None
+    significant: bool
+
+
+class PairwiseTest(OmnibusTest, Protocol):
+    """What a pairwise test exposes to the default correction callbacks.
+
+    Attributes
+    ----------
+    p_value_adjusted : float or None
+        Benjamini-Hochberg value written by the policy.
+    """
+
+    p_value_adjusted: float | None
+
+
+class PValueReader(Protocol):
+    """Reads the raw p-value out of one test object.
+
+    Returning ``None`` keeps the test in the family's ordering but marks it
+    as carrying no p-value, so it is never declared significant.
+    """
+
+    def __call__(self, test: object, /) -> float | None:
+        """Return the raw p-value of *test*, or ``None``."""
+
+
+class CorrectionWriter(Protocol):
+    """Writes a Benjamini-Hochberg outcome back onto one test object."""
+
+    def __call__(self, test: object, bh_result: BHResult, /) -> None:
+        """Record *bh_result* on *test*."""
+
+
+def apply_family_correction(
+    pairwise_tests: Sequence[object],
+    *,
+    fdr_alpha: float = 0.05,
+    get_p_value: PValueReader | None = None,
+    set_corrected: CorrectionWriter | None = None,
+    anova_results: Sequence[OmnibusTest] | Mapping[object, OmnibusTest] | None = None,
+) -> None:
+    """Correct one analysis run's pairwise tests as a single family.
+
+    The family is every pairwise test the run produced, across all of its
+    metrics and all of its condition pairs. Benjamini-Hochberg adjusts them
+    together and significance is read from the adjusted p-value.
+
+    ANOVA results are handled separately and are never adjusted. A one-way
+    ANOVA here is an omnibus statement about a single metric, it belongs to
+    no family of its own, and no pairwise test is gated on it. Its
+    ``significant`` flag comes from the raw p-value against *fdr_alpha* and
+    its ``p_value_adjusted`` field, when present, is set to ``None``.
 
     Parameters
     ----------
-    control_mean : float
-        Mean value of control condition
-    treatment_mean : float
-        Mean value of treatment condition
+    pairwise_tests : Sequence[object]
+        Objects carrying one pairwise test each. Mutated in place. With the
+        default callbacks each object must satisfy :class:`PairwiseTest`;
+        with custom callbacks the objects can be anything those callbacks
+        understand, such as ``(result, field_prefix)`` tuples.
+    fdr_alpha : float, optional
+        False discovery rate for the pairwise family, and the plain alpha
+        used for the omnibus ANOVA, by default 0.05.
+    get_p_value : PValueReader or None, optional
+        Reads the raw p-value from one test. Defaults to ``.p_value``,
+        or ``None`` when the object has ``testable`` set to false.
+    set_corrected : CorrectionWriter or None, optional
+        Writes the correction back. Defaults to setting
+        ``.p_value_adjusted`` and ``.significant``.
+    anova_results : Sequence[OmnibusTest] or Mapping[object, OmnibusTest] or None, optional
+        Omnibus ANOVA results to mark, by default ``None``.
 
-    Returns
-    -------
-    float
-        Percent change: (treatment - control) / control * 100
-        Negative = reduction, Positive = increase.
-
-        Special handling for zero control values:
-
-        - 0 -> 0 returns ``0.0``
-        - 0 -> positive returns ``math.inf``
-        - 0 -> negative returns ``-math.inf``
-
-        If either input is non-finite (NaN or +/-inf), returns ``math.nan``.
+    References
+    ----------
+    Benjamini, Y. and Hochberg, Y. (1995). Controlling the false discovery
+    rate: a practical and powerful approach to multiple testing. *Journal
+    of the Royal Statistical Society B*, 57(1), 289-300.
     """
-    if not (math.isfinite(control_mean) and math.isfinite(treatment_mean)):
-        return math.nan
 
-    if control_mean == 0:
-        if treatment_mean == 0:
-            return 0.0
-        return math.inf if treatment_mean > 0 else -math.inf
+    def _default_get_p_value(test: object, /) -> float | None:
+        if not getattr(test, "testable", True):
+            return None
+        return getattr(test, "p_value", None)
 
-    return (treatment_mean - control_mean) / control_mean * 100
+    def _default_set_corrected(test: object, bh_result: BHResult, /) -> None:
+        test.p_value_adjusted = bh_result.adjusted_p_value  # type: ignore[attr-defined]
+        test.significant = bh_result.significant  # type: ignore[attr-defined]
+
+    p_getter = get_p_value or _default_get_p_value
+    corrected_setter = set_corrected or _default_set_corrected
+
+    tests = list(pairwise_tests)
+    if tests:
+        bh_results = benjamini_hochberg([p_getter(test) for test in tests], alpha=fdr_alpha)
+        for test, bh_result in zip(tests, bh_results, strict=True):
+            corrected_setter(test, bh_result)
+        logger.debug(
+            "Corrected a pairwise family of %d tests at alpha=%.4f",
+            len(tests),
+            fdr_alpha,
+        )
+
+    anova_items = (
+        list(anova_results.values())
+        if isinstance(anova_results, Mapping)
+        else list(anova_results or [])
+    )
+    for anova in anova_items:
+        anova.p_value_adjusted = None  # type: ignore[attr-defined]
+        raw_p = anova.p_value
+        testable = getattr(anova, "testable", True)
+        anova.significant = bool(
+            testable and raw_p is not None and not math.isnan(raw_p) and raw_p <= fdr_alpha
+        )

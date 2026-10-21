@@ -143,7 +143,9 @@ class TestSystemBuilderHomodimerRetention:
         """build_enzyme should retain the OpenFF enzyme molecule count."""
         builder = SystemBuilder()
         enzyme_topology = FakeTopology([FakeMolecule("enzyme_1"), FakeMolecule("enzyme_2")])
-        monkeypatch.setattr(builder._enzyme_builder, "build", lambda _path: enzyme_topology)
+        monkeypatch.setattr(
+            builder._enzyme_builder, "build", lambda _path, _templates=None: enzyme_topology
+        )
 
         with caplog.at_level(logging.INFO, logger="polyzymd.builders.system_builder"):
             topology = builder.build_enzyme(Path("enzyme.pdb"))
@@ -155,7 +157,9 @@ class TestSystemBuilderHomodimerRetention:
     def test_build_enzyme_rejects_empty_topology(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """build_enzyme should reject an OpenFF topology with no molecules."""
         builder = SystemBuilder()
-        monkeypatch.setattr(builder._enzyme_builder, "build", lambda _path: FakeTopology([]))
+        monkeypatch.setattr(
+            builder._enzyme_builder, "build", lambda _path, _templates=None: FakeTopology([])
+        )
 
         with pytest.raises(RuntimeError, match="contains no molecules"):
             builder.build_enzyme(Path("empty.pdb"))
@@ -231,6 +235,28 @@ class TestSystemBuilderHomodimerRetention:
         assert protein_resids == ["1", "1", "2", "2", "3", "3", "4", "4", "5", "5", "6", "6"]
         assert {atom.metadata["chain_id"] for atom in enzyme_1.atoms + enzyme_2.atoms} == {"A"}
         assert {atom.metadata["residue_number"] for atom in substrate.atoms} == {"1"}
+
+    def test_chains_joined_in_one_molecule_are_numbered_one_after_the_other(
+        self,
+        fake_openff_topology: type[FakeTopology],
+    ) -> None:
+        """Insulin A and B chains, joined by disulfides, keep apart residues of equal number."""
+        del fake_openff_topology
+        builder = SystemBuilder()
+        insulin = FakeMolecule("insulin", residue_numbers=["6", "7", "7", "6", "7", "7"])
+        for atom, chain in zip(insulin.atoms, ["A", "A", "A", "B", "B", "B"], strict=True):
+            atom.metadata["chain_id"] = chain
+            atom.metadata["residue_name"] = "CYS"
+        builder._enzyme_topology = FakeTopology([insulin])
+        builder._n_enzyme_molecules = 1
+        builder._solvated_topology = builder.combine_solutes()
+
+        builder._assign_pdb_identifiers()
+        builder._assign_pdb_identifiers()
+
+        resids = [atom.metadata["residue_number"] for atom in insulin.atoms]
+        assert resids == ["1", "2", "2", "3", "4", "4"]
+        assert {atom.metadata["chain_id"] for atom in insulin.atoms} == {"A"}
 
     def test_protein_residue_numbering_is_idempotent(
         self,
@@ -399,28 +425,6 @@ class TestPackPolymersUsesTheFinalBox:
         # solute bbox 10 x 20 x 20 A -> circumradius 15 A, plus 20 A padding
         assert builder.build_provenance["polymer_sphere_radius_nm"] == pytest.approx(3.5)
 
-    def test_legacy_box_is_used_when_no_final_box_is_given(self, monkeypatch):
-        import numpy as np
-
-        captured: dict = {}
-        builder = self._builder(monkeypatch, captured)
-
-        boxvectors = pytest.importorskip("polyzymd.utils.boxvectors")
-        monkeypatch.setattr(
-            boxvectors,
-            "get_topology_bbox",
-            lambda topology: __import__("openff.units", fromlist=["Quantity"]).Quantity(
-                np.diag([10.0, 20.0, 20.0]), "angstrom"
-            ),
-        )
-
-        builder.pack_polymers(padding=2.0)
-
-        # bbox + 2 * 2.0 nm padding, on the diagonal, in nanometers
-        np.testing.assert_allclose(
-            np.diagonal(captured["box_vectors"].m_as("nanometer")), [5.0, 6.0, 6.0]
-        )
-
 
 class TestBuildFromConfigSharesOneBox:
     """Packing and solvation must be handed the same, pre-computed cell."""
@@ -466,7 +470,8 @@ class TestBuildFromConfigSharesOneBox:
         calls: dict = {}
         sentinel_box = Quantity(__import__("numpy").diag([9.0, 9.0, 9.0]), "nanometer")
 
-        monkeypatch.setattr(SystemBuilder, "build_enzyme", lambda self, path: None)
+        monkeypatch.setattr("polyzymd.config.validation.require_inputs", lambda config: None)
+        monkeypatch.setattr(SystemBuilder, "build_enzyme", lambda self, path, templates=None: None)
         monkeypatch.setattr(SystemBuilder, "combine_solutes", lambda self: None)
         monkeypatch.setattr(SystemBuilder, "build_polymers", lambda self, **kwargs: None)
         monkeypatch.setattr(SystemBuilder, "_assign_pdb_identifiers", lambda self: None)
@@ -490,6 +495,7 @@ class TestBuildFromConfigSharesOneBox:
 
         builder = SystemBuilder()
         builder.build_from_config(config, polymer_seed=7)
+        calls["provenance"] = builder.build_provenance
         return calls, sentinel_box
 
     def test_polymer_build_packs_and_solvates_in_one_cell(self, monkeypatch):
@@ -501,9 +507,36 @@ class TestBuildFromConfigSharesOneBox:
         # is what has to be reserved up front
         assert calls["extra_padding_nm"] == pytest.approx(2.0)
 
-    def test_control_build_keeps_the_legacy_path(self, monkeypatch):
+    def test_control_build_keeps_the_solute_only_path(self, monkeypatch):
         calls, _ = self._run(monkeypatch, self._config(with_polymers=False))
 
         assert "pack" not in calls
         assert "extra_padding_nm" not in calls
         assert calls["solvate_box"] is None
+
+    def test_polymer_seed_is_recorded_only_with_polymers(self, monkeypatch):
+        with_polymers, _ = self._run(monkeypatch, self._config(with_polymers=True))
+        without, _ = self._run(monkeypatch, self._config(with_polymers=False))
+
+        assert with_polymers["provenance"]["polymer_seed"] == 7
+        assert "polymer_seed" not in without["provenance"]
+        assert without["provenance"]["packmol_seed"] == 7
+
+
+@pytest.mark.parametrize(
+    ("solvent", "message"),
+    [
+        ({"primary": {"model": "spce"}}, "use model: tip3p for new systems"),
+        ({"ions": {"kcl_concentration": 0.15}}, "use nacl_concentration"),
+    ],
+)
+def test_build_from_config_refuses_what_it_cannot_build(solvent, message):
+    """The Python API refuses spce and KCl as the CLI does, before building anything."""
+    from polyzymd.config.schema import SimulationConfig
+
+    data = TestBuildFromConfigSharesOneBox._config(with_polymers=False).model_dump()
+    data["solvent"] = solvent
+    config = SimulationConfig(**data)
+
+    with pytest.raises(ValueError, match=message):
+        SystemBuilder().build_from_config(config, polymer_seed=1)

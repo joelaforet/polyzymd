@@ -1,0 +1,228 @@
+{
+ "one condition": {
+  "conditions": [{"ci95":[3.27942,3.60449],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"A","mean":3.44196,"n_effective":[],"n_replicates":3,"replicate_values":[3.38611,3.51395,3.42581],"replicates":[1,2,3],"sem":0.037776,"statistical_inefficiency":[]}],
+  "frames_per_replicate": {
+   "A": [24,24,24]
+  },
+  "metric": "core_rmsd_per_residue",
+  "pairwise": [],
+  "provenance.output_paths.results": "<tmp>/one/polyzymd_results/rms_decomposition",
+  "run": "core_rmsd_per_residue",
+  "text": "# polyzymd analyze rmsd_per_residue  metric core_rmsd_per_residue  unit A  run core_rmsd_per_residue  eq 0ns  conditions 1  replicates 3  protocol rmsd_per_residue/2\nA  n 3  mean 3.442  sem 0.03778  ci95 3.279 to 3.604  values 3.386, 3.514, 3.426\nverdict: A core_rmsd_per_residue 3.442 A (95% CI 3.279 to 3.604, n 3)\n"
+ },
+ "records": {
+  "rms_decomposition": {
+   "A/replicate_1": {"record.json:chosen":{"2":{"frame":15,"trajectory_frame":14}}},
+   "A/replicate_2": {"record.json:chosen":{"2":{"frame":3,"trajectory_frame":2}}},
+   "A/replicate_3": {"record.json:chosen":{"2":{"frame":4,"trajectory_frame":3}}},
+   "B/replicate_1": {"record.json:chosen":{"2":{"frame":19,"trajectory_frame":18}}},
+   "B/replicate_2": {"record.json:chosen":{"2":{"frame":24,"trajectory_frame":23}}},
+   "B/replicate_3": {"record.json:chosen":{"2":{"frame":15,"trajectory_frame":14}}},
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["rmsd_per_residue","rmsf","offset","ms_deviation","msf","ms_offset"],"record.json:arguments":{"args":[{"select":"protein and name CA"},{"select":"protein and name CA"},{"reference":{"alignment":"protein and name CA","file":null,"frame":null,"mode":"centroid","selection":"(protein and name CA) or (protein and name CA)"}}],"kwargs":{}},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"rms_decomposition"},"record.json:labels":[1,2,3,4,5,6,7,8,9,10,11,12],"record.json:name":"rms_decomposition","record.json:parts":["rmsd_per_residue","rmsf","offset","ms_deviation","msf","ms_offset"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3],"record.json:unit":"A","record.json:versions":"<masked>"}
+  }
+ },
+ "shared": {
+  "all_metrics": [],
+  "all_runs": ["core_rmsd_per_residue","core_rmsf","core_offset","mean_rmsd_per_residue","mean_rmsf","mean_offset","rmsd_per_residue","rmsf","offset"],
+  "analysis": "rmsd_per_residue",
+  "equilibration": "0ns",
+  "figures": ["rmsd_per_residue/offset_difference.png","rmsd_per_residue/offset_profile.png","rmsd_per_residue/rms_decomposition.png","rmsd_per_residue/rmsd_per_residue_difference.png","rmsd_per_residue/rmsd_per_residue_profile.png","rmsd_per_residue/rmsf_comparison.png","rmsd_per_residue/rmsf_difference.png","rmsd_per_residue/rmsf_profile.png"],
+  "frames_per_replicate": {
+   "A": [24,24,24],
+   "B": [24,24,24]
+  },
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.A": "c4429a507b8cea42",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/rmsd_per_residue",
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/rms_decomposition",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings.alignment_selection": "protein and name CA",
+  "provenance.settings.core": null,
+  "provenance.settings.highlight_residues": [4],
+  "provenance.settings.reference_file": null,
+  "provenance.settings.reference_frame": 1,
+  "provenance.settings.reference_mode": "centroid",
+  "provenance.settings.regions": {},
+  "provenance.settings.residues": {
+   "core": [1,2,3,4,5,6,7,8,9,10,11,12]
+  },
+  "provenance.settings.selection": "protein and name CA",
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "status": "complete",
+  "stride": 1,
+  "trends": [],
+  "unit": "A",
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run core_offset": {
+  "conditions": {
+   "ci95": [[1.18235,2.40273],[1.97025,2.30299]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["A","B"],
+   "mean": [1.79254,2.13662],
+   "replicate_values": [[1.81999,1.53433,2.02329],[2.20938,2.07754,2.12294]],
+   "sem": [0.141816,0.0386666]
+  },
+  "metric": "core_offset",
+  "pairwise": [{"a":"A","b":"B","cohens_d":1.91124,"correction":"BH","delta":0.34408,"delta_ci95":[-0.21638,0.904539],"direction":"no significant change","entry":null,"family_size":1,"hedges_g":1.529,"p":0.127705,"p_adjusted":0.127705,"significant":false,"test":"welch_t","testable":true}],
+  "run": "core_offset",
+  "text": "# polyzymd analyze rmsd_per_residue  metric core_offset  unit A  run core_offset  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 1.793  sem 0.1418  ci95 1.182 to 2.403  values 1.82, 1.534, 2.023\nB  n 3  mean 2.137  sem 0.03867  ci95 1.97 to 2.303  values 2.209, 2.078, 2.123\nA vs B  delta +0.3441  ci95 -0.2164 to 0.9045  p 0.1277  p_adj 0.1277  test welch_t  correction BH  family 1  d 1.911  not_significant\nverdict: no significant difference in core_offset between A and B (delta +0.3441 A, 95% CI -0.2164 to 0.9045, p_adj 0.1277, p 0.1277, n 3 vs 3)\n"
+ },
+ "two conditions, run core_rmsd_per_residue": {
+  "conditions": {
+   "ci95": [[3.27942,3.60449],[3.51865,4.52361]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["A","B"],
+   "mean": [3.44196,4.02113],
+   "replicate_values": [[3.38611,3.51395,3.42581],[4.17493,3.792,4.09645]],
+   "sem": [0.037776,0.116783]
+  },
+  "metric": "core_rmsd_per_residue",
+  "pairwise": [{"a":"A","b":"B","cohens_d":3.85275,"correction":"BH","delta":0.579171,"delta_ci95":[0.129026,1.02932],"direction":"increased","entry":null,"family_size":1,"hedges_g":3.0822,"p":0.0288522,"p_adjusted":0.0288522,"significant":true,"test":"welch_t","testable":true}],
+  "run": "core_rmsd_per_residue",
+  "text": "# polyzymd analyze rmsd_per_residue  metric core_rmsd_per_residue  unit A  run core_rmsd_per_residue  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 3.442  sem 0.03778  ci95 3.279 to 3.604  values 3.386, 3.514, 3.426\nB  n 3  mean 4.021  sem 0.1168  ci95 3.519 to 4.524  values 4.175, 3.792, 4.096\nA vs B  delta +0.5792  ci95 0.129 to 1.029  p 0.02885  p_adj 0.02885  test welch_t  correction BH  family 1  d 3.853  significant\nverdict: B larger core_rmsd_per_residue than A (delta +0.5792 A, 95% CI 0.129 to 1.029, p_adj 0.02885, p 0.02885, n 3 vs 3)\n"
+ },
+ "two conditions, run core_rmsf": {
+  "conditions": {
+   "ci95": [[2.41069,3.44343],[2.90073,3.91132]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["A","B"],
+   "mean": [2.92706,3.40603],
+   "replicate_values": [[2.85541,3.16127,2.7645],[3.54241,3.17223,3.50344]],
+   "sem": [0.120011,0.117438]
+  },
+  "metric": "core_rmsf",
+  "pairwise": [{"a":"A","b":"B","cohens_d":2.32904,"correction":"BH","delta":0.478966,"delta_ci95":[0.0126813,0.945251],"direction":"increased","entry":null,"family_size":1,"hedges_g":1.86323,"p":0.046305,"p_adjusted":0.046305,"significant":true,"test":"welch_t","testable":true}],
+  "run": "core_rmsf",
+  "text": "# polyzymd analyze rmsd_per_residue  metric core_rmsf  unit A  run core_rmsf  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 2.927  sem 0.12  ci95 2.411 to 3.443  values 2.855, 3.161, 2.764\nB  n 3  mean 3.406  sem 0.1174  ci95 2.901 to 3.911  values 3.542, 3.172, 3.503\nA vs B  delta +0.479  ci95 0.01268 to 0.9453  p 0.04631  p_adj 0.04631  test welch_t  correction BH  family 1  d 2.329  significant\nverdict: B larger core_rmsf than A (delta +0.479 A, 95% CI 0.01268 to 0.9453, p_adj 0.04631, p 0.04631, n 3 vs 3)\n"
+ },
+ "two conditions, run mean_offset": {
+  "conditions": {
+   "ci95": [[1.07849,2.26208],[1.62604,2.22997]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["A","B"],
+   "mean": [1.67028,1.928],
+   "replicate_values": [[1.74896,1.40267,1.85923],[2.06645,1.8388,1.87875]],
+   "sem": [0.137542,0.0701812]
+  },
+  "metric": "mean_offset",
+  "pairwise": [{"a":"A","b":"B","cohens_d":1.36275,"correction":"BH","delta":0.257717,"delta_ci95":[-0.236005,0.751439],"direction":"no significant change","entry":null,"family_size":1,"hedges_g":1.0902,"p":0.19446,"p_adjusted":0.19446,"significant":false,"test":"welch_t","testable":true}],
+  "run": "mean_offset",
+  "text": "# polyzymd analyze rmsd_per_residue  metric mean_offset  unit A  run mean_offset  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 1.67  sem 0.1375  ci95 1.078 to 2.262  values 1.749, 1.403, 1.859\nB  n 3  mean 1.928  sem 0.07018  ci95 1.626 to 2.23  values 2.066, 1.839, 1.879\nA vs B  delta +0.2577  ci95 -0.236 to 0.7514  p 0.1945  p_adj 0.1945  test welch_t  correction BH  family 1  d 1.363  not_significant\nverdict: no significant difference in mean_offset between A and B (delta +0.2577 A, 95% CI -0.236 to 0.7514, p_adj 0.1945, p 0.1945, n 3 vs 3)\n"
+ },
+ "two conditions, run mean_rmsd_per_residue": {
+  "conditions": {
+   "ci95": [[3.25466,3.50206],[3.42966,4.44631]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["A","B"],
+   "mean": [3.37836,3.93799],
+   "replicate_values": [[3.34092,3.43487,3.35928],[4.1054,3.70988,3.99869]],
+   "sem": [0.0287507,0.118142]
+  },
+  "metric": "mean_rmsd_per_residue",
+  "pairwise": [{"a":"A","b":"B","cohens_d":3.758,"correction":"BH","delta":0.55963,"delta_ci95":[0.0859899,1.03327],"direction":"increased","entry":null,"family_size":1,"hedges_g":3.0064,"p":0.0355512,"p_adjusted":0.0355512,"significant":true,"test":"welch_t","testable":true}],
+  "run": "mean_rmsd_per_residue",
+  "text": "# polyzymd analyze rmsd_per_residue  metric mean_rmsd_per_residue  unit A  run mean_rmsd_per_residue  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 3.378  sem 0.02875  ci95 3.255 to 3.502  values 3.341, 3.435, 3.359\nB  n 3  mean 3.938  sem 0.1181  ci95 3.43 to 4.446  values 4.105, 3.71, 3.999\nA vs B  delta +0.5596  ci95 0.08599 to 1.033  p 0.03555  p_adj 0.03555  test welch_t  correction BH  family 1  d 3.758  significant\nverdict: B larger mean_rmsd_per_residue than A (delta +0.5596 A, 95% CI 0.08599 to 1.033, p_adj 0.03555, p 0.03555, n 3 vs 3)\n"
+ },
+ "two conditions, run mean_rmsf": {
+  "conditions": {
+   "ci95": [[2.41213,3.37302],[2.88411,3.79916]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["A","B"],
+   "mean": [2.89258,3.34163],
+   "replicate_values": [[2.82459,3.11079,2.74234],[3.47597,3.13168,3.41725]],
+   "sem": [0.111662,0.106336]
+  },
+  "metric": "mean_rmsf",
+  "pairwise": [{"a":"A","b":"B","cohens_d":2.37788,"correction":"BH","delta":0.449058,"delta_ci95":[0.0205447,0.877572],"direction":"increased","entry":null,"family_size":1,"hedges_g":1.9023,"p":0.0437042,"p_adjusted":0.0437042,"significant":true,"test":"welch_t","testable":true}],
+  "run": "mean_rmsf",
+  "text": "# polyzymd analyze rmsd_per_residue  metric mean_rmsf  unit A  run mean_rmsf  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 2.893  sem 0.1117  ci95 2.412 to 3.373  values 2.825, 3.111, 2.742\nB  n 3  mean 3.342  sem 0.1063  ci95 2.884 to 3.799  values 3.476, 3.132, 3.417\nA vs B  delta +0.4491  ci95 0.02054 to 0.8776  p 0.0437  p_adj 0.0437  test welch_t  correction BH  family 1  d 2.378  significant\nverdict: B larger mean_rmsf than A (delta +0.4491 A, 95% CI 0.02054 to 0.8776, p_adj 0.0437, p 0.0437, n 3 vs 3)\n"
+ },
+ "two conditions, run offset": {
+  "conditions": {
+   "ci95": [[0.366784,3.02008],[1.55825,4.56574],[0.706177,2.38564],[-0.0236867,2.83636],[0.975396,2.4771],[-1.55159,5.04864],[0.519846,1.6878],[-0.0361735,4.79038],[0.274711,2.62828],[-0.0443852,2.14185],[-0.129466,3.19488],[0.983563,1.50244],[0.0373436,2.14683],[2.93298,3.88904],[-0.357072,3.92284],[0.866959,3.52022],[0.446317,2.22852],[-1.76206,4.74203],[0.424113,3.71027],[-1.00865,4.07766],[-0.237445,3.45093],[1.05958,2.53249],[1.40731,4.79964],[1.51235,2.13804]],
+   "entry": ["1","1","2","2","3","3","4","4","5","5","6","6","7","7","8","8","9","9","10","10","11","11","12","12"],
+   "every row": {"ci_method":"student_t","eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B"],
+   "mean": [1.69343,3.062,1.54591,1.40634,1.72625,1.74852,1.10382,2.3771,1.45149,1.04873,1.53271,1.243,1.09209,3.41101,1.78288,2.19359,1.33742,1.48999,2.06719,1.5345,1.60674,1.79603,3.10347,1.82519],
+   "replicate_values": [[1.4386,2.30716,1.33453],[2.75646,3.75921,2.67032],[1.15583,1.72872,1.75317],[1.44918,1.95938,0.81045],[1.67867,1.4506,2.04947],[0.812315,1.16426,3.269],[1.02894,1.36722,0.915303],[3.09388,1.27143,2.766],[1.73733,0.904679,1.71247],[1.5567,0.78438,0.805111],[1.95003,0.760932,1.88716],[1.27469,1.32792,1.12639],[1.2397,0.613389,1.42317],[3.21031,3.42878,3.59395],[2.06533,0.81567,2.46765],[1.58839,2.59867,2.3937],[1.48292,0.928811,1.60052],[2.9575,0.44219,1.07027],[2.35517,1.31059,2.53581],[2.63638,1.35435,0.612776],[2.03256,2.03815,0.749516],[1.53082,2.11609,1.74119],[2.82238,2.60609,3.88195],[1.93083,1.85892,1.68583]],
+   "sem": [0.308332,0.349492,0.195166,0.332359,0.174509,0.766995,0.135725,0.560881,0.273502,0.254056,0.386313,0.0602971,0.245138,0.111102,0.497357,0.308328,0.207105,0.755824,0.381876,0.591067,0.428617,0.171163,0.394213,0.0727093]
+  },
+  "metric": "offset",
+  "pairwise": {
+   "cohens_d": [2.3976,-0.295673,0.0231233,1.80157,-0.880953,-0.604985,7.035,0.573055,0.158956,-0.618075,0.334872,-2.60366],
+   "delta": [1.36857,-0.139572,0.0222765,1.27328,-0.402762,-0.289705,2.31893,0.410704,0.152569,-0.532688,0.189288,-1.27828],
+   "delta_ci95": [[0.0666024,2.67053],[-1.31769,1.03855],[-3.07604,3.12059],[-0.976821,3.52338],[-1.44141,0.635885],[-1.89932,1.31991],[1.42443,3.21342],[-1.34895,2.17036],[-2.83245,3.13759],[-2.62378,1.5584],[-1.40685,1.78542],[-2.90203,0.345471]],
+   "entry": ["1","2","3","4","5","6","7","8","9","10","11","12"],
+   "every row": {"a":"A","b":"B","correction":"BH","direction":"no significant change","family_size":12,"significant":false,"test":"welch_t","testable":true},
+   "hedges_g": [1.91808,-0.236539,0.0184986,1.44125,-0.704763,-0.483988,5.628,0.458444,0.127165,-0.49446,0.267897,-2.08293],
+   "p": [0.0433556,0.739651,0.979763,0.144682,0.341637,0.532774,0.00432804,0.528567,0.861521,0.497804,0.712874,0.0788074],
+   "p_adjusted": [0.260133,0.887581,0.979763,0.434047,0.799161,0.799161,0.0519365,0.799161,0.939841,0.799161,0.887581,0.31523]
+  },
+  "run": "offset",
+  "text": "# polyzymd analyze rmsd_per_residue  metric offset  unit A  run offset  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA vs B  labels 12  tested 12  family 12  test welch_t  correction BH  lower 0  higher 0\nnote: the 24 per-label condition rows and 12 per-label comparison rows are in the JSON report\nwarning: the 95 percent interval of condition B at 2 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition B at 3 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition B at 4 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition B at 5 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition A at 6 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition A at 8 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition B at 9 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition B at 10 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition A at 11 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nverdict: B vs A: 0 of 12 tested labels differ in offset after BH over a family of 12; larger at none; smaller at none\n"
+ },
+ "two conditions, run rmsd_per_residue": {
+  "conditions": {
+   "ci95": [[2.16467,5.65718],[5.62338,6.0146],[2.20341,4.1428],[3.337,4.01941],[2.92346,3.7258],[1.90659,5.49799],[2.27393,3.47644],[2.31294,5.4274],[2.50759,3.84309],[2.4777,3.85259],[2.65335,4.17661],[2.64589,3.43641],[2.49356,3.14437],[4.1507,4.79481],[2.45012,3.91007],[3.24139,4.38523],[2.47356,3.25096],[1.62103,5.52421],[2.27073,4.53222],[1.55807,5.22523],[1.29342,5.52544],[3.35108,4.42137],[4.13736,5.85049],[3.89416,5.79259]],
+   "entry": ["1","1","2","2","3","3","4","4","5","5","6","6","7","7","8","8","9","9","10","10","11","11","12","12"],
+   "every row": {"ci_method":"student_t","eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B"],
+   "mean": [3.91092,5.81899,3.1731,3.67821,3.32463,3.70229,2.87518,3.87017,3.17534,3.16514,3.41498,3.04115,2.81897,4.47275,3.1801,3.81331,2.86226,3.57262,3.40147,3.39165,3.40943,3.88622,4.99392,4.84338],
+   "replicate_values": [[3.5286,4.72219,3.48198],[5.75822,5.7908,5.90795],[2.78555,3.5662,3.16756],[3.61516,3.58369,3.83576],[3.34211,3.15511,3.47668],[3.40498,3.17548,4.5264],[2.65116,3.13191,2.84248],[4.29072,3.14968,4.17011],[3.3348,2.86499,3.32624],[3.43162,2.87918,3.18463],[3.67299,3.07604,3.49591],[2.96613,3.22391,2.93341],[2.68624,2.94816,2.8225],[4.45131,4.35516,4.61178],[2.94039,3.09196,3.50793],[3.54861,3.9243,3.96702],[2.97709,2.68404,2.92565],[4.45896,3.29676,2.96213],[3.75684,2.88841,3.55918],[4.23361,3.08526,2.85606],[3.80656,3.99015,2.43157],[3.96602,3.64229,4.05037],[4.60871,5.09934,5.27372],[5.13945,4.41203,4.97865]],
+   "sem": [0.405856,0.0454629,0.225372,0.0793013,0.0932383,0.417347,0.13974,0.361923,0.155195,0.159772,0.177014,0.0918644,0.0756292,0.0748501,0.169657,0.132923,0.0903389,0.453578,0.262802,0.426151,0.491792,0.124375,0.199078,0.220613]
+  },
+  "metric": "rmsd_per_residue",
+  "pairwise": {
+   "cohens_d": [3.81477,1.72618,0.721068,2.09402,-0.0373916,-1.5305,12.6901,2.39885,1.2541,-0.0160262,0.767437,-0.413656],
+   "delta": [1.90807,0.505102,0.377655,0.994987,-0.0102003,-0.37383,1.65378,0.633216,0.710357,-0.00982717,0.476796,-0.150546],
+   "delta_ci95": [[0.191469,3.62466],[-0.351955,1.36216],[-1.31151,2.06682],[-0.360356,2.35033],[-0.628828,0.608427],[-1.00798,0.260321],[1.35834,1.94923],[0.0210596,1.24537],[-1.14595,2.56666],[-1.5177,1.49804],[-1.48571,2.4393],[-0.979005,0.677912]],
+   "direction": ["no significant change","no significant change","no significant change","no significant change","no significant change","no significant change","increased","no significant change","no significant change","no significant change","no significant change","no significant change"],
+   "entry": ["1","2","3","4","5","6","7","8","9","10","11","12"],
+   "every row": {"a":"A","b":"B","correction":"BH","family_size":12,"test":"welch_t","testable":true},
+   "hedges_g": [3.05182,1.38095,0.576855,1.67521,-0.0299132,-1.2244,10.1521,1.91908,1.00328,-0.012821,0.61395,-0.330924],
+   "p": [0.0408867,0.143311,0.462968,0.0962913,0.96567,0.157418,0.000100121,0.0454964,0.255421,0.985458,0.436695,0.639334],
+   "p_adjusted": [0.181985,0.314836,0.617291,0.288874,0.985458,0.314836,0.00120145,0.181985,0.437864,0.985458,0.617291,0.767201],
+   "significant": [false,false,false,false,false,false,true,false,false,false,false,false]
+  },
+  "run": "rmsd_per_residue",
+  "text": "# polyzymd analyze rmsd_per_residue  metric rmsd_per_residue  unit A  run rmsd_per_residue  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA vs B  labels 12  tested 12  family 12  test welch_t  correction BH  lower 0  higher 1\nA vs B  higher: 7 delta +1.654 p_adj 0.001201\nnote: the 24 per-label condition rows and 12 per-label comparison rows are in the JSON report\nverdict: B vs A: 1 of 12 tested labels differ in rmsd_per_residue after BH over a family of 12; larger at 7; smaller at none\n"
+ },
+ "two conditions, run rmsf": {
+  "conditions": {
+   "ci95": [[2.22698,4.8119],[3.79072,6.02952],[1.98886,3.53898],[2.4198,4.28804],[2.71149,2.9553],[2.69301,3.56821],[2.17768,3.12375],[2.69206,3.29148],[2.61805,2.99292],[2.53951,3.40027],[2.79041,3.23348],[2.42243,3.12726],[1.88576,3.25034],[2.39162,3.38093],[1.4162,3.62954],[2.76553,3.41934],[2.35168,2.68079],[2.34269,3.90129],[2.09703,3.23522],[2.19516,3.72098],[1.51332,4.46134],[2.43237,4.4211],[2.74788,4.9829],[3.44221,5.52366]],
+   "entry": ["1","1","2","2","3","3","4","4","5","5","6","6","7","7","8","8","9","9","10","10","11","11","12","12"],
+   "every row": {"ci_method":"student_t","eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B","A","B"],
+   "mean": [3.51944,4.91012,2.76392,3.35392,2.8334,3.13061,2.65072,2.99177,2.80548,2.96989,3.01194,2.77484,2.56805,2.88628,2.52287,3.09244,2.51624,3.12199,2.66613,2.95807,2.98733,3.42674,3.86539,4.48293],
+   "replicate_values": [[3.22202,4.1202,3.21609],[5.05559,4.40473,5.27003],[2.53443,3.11918,2.63815],[3.31199,3.00061,3.74917],[2.88994,2.80188,2.80838],[3.30667,2.95435,3.1308],[2.44335,2.81772,2.69108],[2.97291,2.88166,3.12074],[2.8465,2.71841,2.85155],[3.05821,2.77028,3.08118],[3.1126,2.98043,2.9428],[2.67827,2.93772,2.70854],[2.38307,2.88364,2.43744],[3.08352,2.68532,2.88999],[2.09292,2.98244,2.49325],[3.17327,2.94059,3.16346],[2.58147,2.51821,2.44903],[3.337,3.26697,2.76202],[2.92695,2.57395,2.49748],[3.31255,2.77211,2.78955],[3.21848,3.43034,2.31317],[3.65868,2.96453,3.65701],[3.64339,4.3831,3.56968],[4.76296,4.0013,4.68454]],
+   "sem": [0.300387,0.260164,0.180136,0.217104,0.0283326,0.101705,0.109941,0.0696579,0.0435627,0.100027,0.0514874,0.0819067,0.158573,0.114966,0.257207,0.0759776,0.0382451,0.181121,0.132266,0.177312,0.342582,0.231105,0.259726,0.241879]
+  },
+  "metric": "rmsf",
+  "pairwise": {
+   "cohens_d": [2.85737,1.70764,2.29852,2.1396,1.23039,-2.00106,1.32659,1.73402,2.67184,1.07758,0.868187,1.4207],
+   "delta": [1.39068,0.590001,0.297212,0.341056,0.164406,-0.237102,0.318226,0.569571,0.605756,0.291943,0.439407,0.617544],
+   "delta_ci95": [[0.278427,2.50294],[-0.203878,1.38388],[-0.103553,0.697978],[-0.0478437,0.729955],[-0.202861,0.531672],[-0.526842,0.0526376],[-0.246956,0.883407],[-0.435559,1.5747],[-0.13149,1.343],[-0.342413,0.9263],[-0.77428,1.65309],[-0.369817,1.60491]],
+   "entry": ["1","2","3","4","5","6","7","8","9","10","11","12"],
+   "every row": {"a":"A","b":"B","correction":"BH","direction":"no significant change","family_size":12,"significant":false,"test":"welch_t","testable":true},
+   "hedges_g": [2.2859,1.36611,1.83882,1.71168,0.984312,-1.60085,1.06127,1.38721,2.13747,0.862064,0.694549,1.13656],
+   "p": [0.0257366,0.107025,0.0905425,0.0697506,0.237487,0.0823254,0.186368,0.148557,0.073151,0.262651,0.355292,0.157202],
+   "p_adjusted": [0.214049,0.214049,0.214049,0.214049,0.284984,0.214049,0.248491,0.235803,0.214049,0.286529,0.355292,0.235803]
+  },
+  "run": "rmsf",
+  "text": "# polyzymd analyze rmsd_per_residue  metric rmsf  unit A  run rmsf  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA vs B  labels 12  tested 12  family 12  test welch_t  correction BH  lower 0  higher 0\nnote: the 24 per-label condition rows and 12 per-label comparison rows are in the JSON report\nverdict: B vs A: 0 of 12 tested labels differ in rmsf after BH over a family of 12; larger at none; smaller at none\n"
+ },
+ "unknown run": {
+  "hint": "Use --run with one of ['core_rmsd_per_residue', 'core_rmsf', 'core_offset', 'mean_rmsd_per_residue', 'mean_rmsf', 'mean_offset', 'rmsd_per_residue', 'rmsf', 'offset'].",
+  "message": "rmsd_per_residue: no result named 'bogus'."
+ },
+ "unknown setting": {
+  "hint": "Run polyzymd analyze rmsd_per_residue -c A/config.yaml --set selection=..., one of the settings above.",
+  "message": "rmsd_per_residue takes no setting other than selection, alignment_selection, reference_mode, reference_frame, reference_file, highlight_residues, core, regions."
+ }
+}

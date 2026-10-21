@@ -1,63 +1,50 @@
-"""Shared pytest fixtures for common plugin test inputs.
-
-This module exposes a focused subset of reusable fixtures used across tests:
-
-- default condition fixtures (single and paired control/treatment)
-- a fake MDAnalysis universe fixture
-- a pre-configured trajectory loader mock fixture
-"""
+"""Settings for the whole test suite."""
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
-from tests._support.analysis_testkit import (
-    FakeUniverse,
-    make_condition,
-    make_mock_trajectory_loader,
-)
 
-# ---------------------------------------------------------------------------
-# Condition fixtures
-# ---------------------------------------------------------------------------
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--update-characterization",
+        action="store_true",
+        help="Rewrite the stored outputs in tests/data/characterization instead of comparing.",
+    )
 
 
-@pytest.fixture
-def condition():
-    """A default ``Condition`` for single-condition tests."""
-    return make_condition(label="No Polymer", replicates=(1, 2, 3))
+@pytest.fixture(autouse=True, scope="session")
+def _isolated_hash_cache(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Keep the file-hash cache of stored results out of the user's home during tests."""
+    mp = pytest.MonkeyPatch()
+    mp.setenv("POLYZYMD_CACHE_DIR", str(tmp_path_factory.mktemp("polyzymd_cache")))
+    yield
+    mp.undo()
 
 
-@pytest.fixture
-def control_condition():
-    """A control ``Condition`` for comparison tests."""
-    return make_condition(label="Control", replicates=(1, 2, 3))
+@pytest.fixture(autouse=True)
+def _restore_root_logging() -> None:
+    """Give back the root logger's handlers and level after each test.
+
+    The ``polyzymd`` command replaces the root handlers, which removes the
+    file handler pytest keeps for the whole session. Without it, a later
+    ``polyzymd analyze`` writes a log file into the current folder.
+    """
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    yield
+    root.handlers, root.level = handlers, level
 
 
-@pytest.fixture
-def treatment_condition():
-    """A treatment ``Condition`` for comparison tests."""
-    return make_condition(label="Treatment", replicates=(1, 2, 3))
-
-
-@pytest.fixture
-def two_conditions(control_condition, treatment_condition):
-    """A ``(control, treatment)`` pair for comparison tests."""
-    return [control_condition, treatment_condition]
-
-
-# ---------------------------------------------------------------------------
-# Fake trajectory / universe fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def fake_universe():
-    """A ``FakeUniverse`` with 50 atoms, 100 frames, 10 residues."""
-    return FakeUniverse(n_atoms=50, n_frames=100, n_residues=10)
-
-
-@pytest.fixture
-def mock_trajectory_loader(fake_universe):
-    """A pre-configured mock ``TrajectoryLoader`` returning *fake_universe*."""
-    return make_mock_trajectory_loader(universe=fake_universe)
+@pytest.fixture()
+def git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give git a committer name and email, for tests that commit or tag."""
+    for key, value in {
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@example.com",
+    }.items():
+        monkeypatch.setenv(key, value)

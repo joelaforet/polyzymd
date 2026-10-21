@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -76,36 +75,6 @@ class GromacsEngine(SimulationEngine):
             gmx_binary = resolve_gromacs_binary(config=config, gpu=gpu)
         return cls(config=config, gmx_binary=gmx_binary)
 
-    def _generate_prefix(self) -> str:
-        """Generate filename prefix from simulation config.
-
-        Replicates the prefix logic from ``GromacsExporter._generate_prefix``
-        so that file paths are consistent between build and submit flows.
-
-        Returns
-        -------
-        str
-            System prefix (e.g. ``"CALB_SBMA-EGMA"``).
-        """
-        parts: list[str] = []
-
-        enzyme = getattr(self._config, "enzyme", None)
-        enzyme_name = getattr(enzyme, "name", None)
-        if isinstance(enzyme_name, str) and enzyme_name:
-            parts.append(enzyme_name)
-
-        polymers = getattr(self._config, "polymers", None)
-        polymers_enabled = getattr(polymers, "enabled", False)
-        polymer_prefix = getattr(polymers, "type_prefix", None)
-        if (
-            isinstance(polymers_enabled, bool)
-            and polymers_enabled
-            and isinstance(polymer_prefix, str)
-        ):
-            parts.append(polymer_prefix)
-
-        return "_".join(parts) if parts else "system"
-
     def run_local(self, replicate: int, working_dir: Path, skip_build: bool = False) -> None:
         """Run local GROMACS workflow with exported files.
 
@@ -123,7 +92,9 @@ class GromacsEngine(SimulationEngine):
         _ = replicate
         _ = skip_build
 
-        prefix = self._generate_prefix()
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(self._config)
         eq_mdps = sorted(path.name for path in working_dir.glob("eq_*.mdp"))
 
         runner = GromacsRunner(
@@ -137,6 +108,9 @@ class GromacsEngine(SimulationEngine):
     def prepare_submission(self, request: EngineSubmitRequest) -> Path:
         """Prepare scheduler artifacts for a GROMACS job.
 
+        The script is written to ``extra["script_path"]`` when given, and to
+        ``daisy_chain_scripts/run_rep<N>.sh`` otherwise.
+
         Parameters
         ----------
         request : EngineSubmitRequest
@@ -146,62 +120,35 @@ class GromacsEngine(SimulationEngine):
         -------
         Path
             Path to the generated SLURM script.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the replicate has no GROMACS inputs from ``polyzymd build``.
         """
         if request.slurm_config is None:
             raise ValueError("GROMACS submission requires slurm_config")
 
         pixi_env = str(request.extra.get("pixi_env", "build"))
-        skip_build = bool(request.extra.get("skip_build", False))
+        self.check_build(request)
+        from polyzymd.analyses.shared.gromacs import system_prefix
 
-        request.working_dir.mkdir(parents=True, exist_ok=True)
-
-        # Build and export GROMACS inputs when not already present
-        prefix = self._generate_prefix()
-        top_path = request.working_dir / f"{prefix}.top"
-        gro_path = request.working_dir / f"{prefix}.gro"
-        em_path = request.working_dir / "em.mdp"
-        prod_path = request.working_dir / "prod.mdp"
-
-        inputs_exist = (
-            top_path.exists() and gro_path.exists() and em_path.exists() and prod_path.exists()
-        )
-
-        if not inputs_exist and skip_build:
-            raise FileNotFoundError(
-                "skip_build=True but required GROMACS inputs are missing "
-                f"in {request.working_dir}. Expected: {top_path.name}, {gro_path.name}, "
-                f"{em_path.name}, {prod_path.name}."
-            )
-
-        if not inputs_exist:
-            from polyzymd.builders.system_builder import SystemBuilder
-            from polyzymd.exporters.gromacs import GromacsExporter
-
-            builder = SystemBuilder.from_config(self._config)
-            interchange = builder.build_from_config(
-                config=self._config,
-                working_dir=request.working_dir,
-                polymer_seed=request.replicate,
-            )
-            component_info = builder.get_component_info()
-            exporter = GromacsExporter(interchange, self._config, component_info=component_info)
-            exporter.export(
-                output_dir=request.working_dir,
-                prefix=prefix,
-                gmx_command=self._gmx_binary,
-            )
+        prefix = system_prefix(self._config)
 
         eq_mdps = sorted(path.name for path in request.working_dir.glob("eq_*.mdp"))
-        if inputs_exist and not eq_mdps:
+        if not eq_mdps:
             logging.getLogger(__name__).warning(
                 "Core GROMACS inputs found in %s but no equilibration MDPs (eq_*.mdp). "
                 "The generated script will skip equilibration and run production from EM output.",
                 request.working_dir,
             )
 
-        script_dir = request.working_dir / "daisy_chain_scripts"
-        script_dir.mkdir(parents=True, exist_ok=True)
-        script_path = script_dir / f"run_rep{request.replicate}.sh"
+        script_path = Path(
+            request.extra.get(
+                "script_path",
+                request.working_dir / "daisy_chain_scripts" / f"run_rep{request.replicate}.sh",
+            )
+        )
 
         effective_slurm = self._resolve_slurm_config(request.slurm_config)
         effective_mdrun_flags = self._resolve_mdrun_flags(effective_slurm)
@@ -220,6 +167,7 @@ class GromacsEngine(SimulationEngine):
             module_load=self._config.gromacs.module_load,
             env_exports=self._config.gromacs.env_exports,
             setup_commands=self._config.gromacs.setup_commands,
+            checkpoint_interval_s=self._config.simulation_phases.production.checkpoint_interval,
         )
         script = generator.generate_job_script(
             config_path=str(request.config_path),
@@ -228,9 +176,36 @@ class GromacsEngine(SimulationEngine):
             system_prefix=prefix,
             equilibration_mdps=eq_mdps,
             job_name=request.job_name,
+            output_file=str(
+                self._config.output.get_slurm_logs_directory() / f"{request.job_name}.%j.out"
+            ),
         )
         generator.save_script(script, script_path)
         return script_path
+
+    def check_build(self, request: EngineSubmitRequest) -> None:
+        """Refuse a replicate without the GROMACS inputs from ``polyzymd build``.
+
+        Submission never builds: building runs OpenFF and Packmol, which do not
+        belong on a login node.
+
+        Raises
+        ------
+        FileNotFoundError
+            With the ``polyzymd build`` command to run.
+        """
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(self._config)
+        required = [f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp"]
+        missing = [name for name in required if not (request.working_dir / name).exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"No GROMACS build for replicate {request.replicate} in {request.working_dir} "
+                f"(missing {', '.join(missing)}). Build it first, in a compute job: "
+                f"polyzymd build -c {request.config_path} -r {request.replicate} "
+                "--format gromacs. Then submit again."
+            )
 
     def _resolve_slurm_config(self, base: SlurmConfig) -> SlurmConfig:
         """Override base SLURM config with GROMACS-specific hardware settings.
@@ -277,10 +252,11 @@ class GromacsEngine(SimulationEngine):
         MPI launcher (``mpirun``/``srun``).
 
         When ``gpu`` is enabled in the GROMACS config, the offload flags
-        ``-nb gpu``, ``-pme gpu``, ``-bonded gpu``, and ``-update gpu`` are
-        appended automatically. Each flag is skipped if the user already
-        specified that flag key (e.g., ``-nb cpu`` prevents auto-adding
-        ``-nb gpu``).
+        ``-nb gpu``, ``-pme gpu`` and ``-bonded gpu`` are appended
+        automatically. Each flag is skipped if the user already specified that
+        flag key (e.g., ``-nb cpu`` prevents auto-adding ``-nb gpu``).
+        ``-update gpu`` is never added: GROMACS updates on the GPU only with
+        ``integrator = md``, and the Langevin thermostats export ``sd``.
 
         Parameters
         ----------
@@ -316,7 +292,6 @@ class GromacsEngine(SimulationEngine):
                 ("-nb", "gpu"),
                 ("-pme", "gpu"),
                 ("-bonded", "gpu"),
-                ("-update", "gpu"),
             ]
             for flag_key, flag_val in _GPU_OFFLOAD_FLAGS:
                 if flag_key not in token_set:
@@ -381,18 +356,10 @@ class GromacsEngine(SimulationEngine):
             Submission metadata with script path and optional SLURM job id.
         """
         script_path = self.prepare_submission(request)
-        module_load = self._config.gromacs.module_load
-
-        if not module_load and shutil.which("sbatch") is None:
-            return {
-                "submitted": False,
-                "script_path": script_path,
-                "reason": "sbatch_not_available",
-            }
 
         from polyzymd.workflow.slurm_submit import run_sbatch
 
-        result = run_sbatch(script_path, module_load=module_load)
+        result = run_sbatch(script_path)
         if result.returncode != 0:
             raise RuntimeError(f"sbatch submission failed: {result.stderr.strip()}")
 
@@ -403,6 +370,45 @@ class GromacsEngine(SimulationEngine):
             "stderr": result.stderr.strip(),
             "returncode": result.returncode,
         }
+
+    #: Production trajectories a GROMACS run leaves: the raw ``mdrun`` output and the
+    #: post-processed whole-molecule and centred copies that analyses read.
+    TRAJECTORY_NAMES: ClassVar[tuple[str, ...]] = (
+        "prod.xtc",
+        "prod_nojump.xtc",
+        "prod_centered.xtc",
+    )
+
+    def trajectory_files(
+        self, working_dir: Path, progress: SimulationProgress | None
+    ) -> list[Path]:
+        """Return the production XTC files that exist, once the run has completed.
+
+        ``mdrun`` appends every restart to ``prod.xtc``, so the run's files are
+        finished only when it is: a run whose ``progress.json`` records it as
+        anything but completed gives none. A run without one gives its files.
+
+        Parameters
+        ----------
+        working_dir : Path
+            GROMACS working directory of one replicate.
+        progress : SimulationProgress or None
+            The run's progress, or None when it has no ``progress.json``.
+
+        Returns
+        -------
+        list of Path
+            The existing files of :attr:`TRAJECTORY_NAMES`, in that order.
+        """
+        from polyzymd.simulation.progress import SimulationStatus
+
+        if progress is not None and progress.status != SimulationStatus.COMPLETED:
+            return []
+        return [
+            Path(working_dir) / name
+            for name in self.TRAJECTORY_NAMES
+            if (Path(working_dir) / name).is_file()
+        ]
 
     def load_or_scan_progress(self, working_dir: Path, replicate: int) -> SimulationProgress:
         """Load or reconstruct GROMACS progress state.
@@ -431,15 +437,25 @@ class GromacsEngine(SimulationEngine):
             timestep_fs=prod.time_step,
         )
 
-    def resolve_trajectory_layout(self, working_dir: Path, replicate: int) -> TrajectoryLayout:
+    def resolve_trajectory_layout(
+        self,
+        working_dir: Path,
+        replicate: int,
+        *,
+        require_complete: bool = True,
+    ) -> TrajectoryLayout:
         """Resolve GROMACS trajectory layout for downstream analyses.
 
         Topology search order:
 
-        1. ``solvated_system.pdb`` (preferred system topology with chain IDs)
-        2. ``<prefix>.pdb`` (from system name)
-        3. ``<prefix>.gro``
-        4. Any ``*.gro`` (sorted, first match)
+        1. ``prod.tpr``, the compiled run input, which carries every atom,
+           bond, mass and charge with no atom limit and is what analyses
+           should read
+        2. ``solvated_system.pdb`` (viewer topology with chain IDs; its
+           CONECT records are unreadable above 99,999 atoms)
+        3. ``<prefix>.pdb`` (from system name)
+        4. ``<prefix>.gro``
+        5. Any ``*.gro`` (sorted, first match); a GRO file carries no bonds
 
         Trajectory search order:
 
@@ -454,14 +470,23 @@ class GromacsEngine(SimulationEngine):
             Replicate working directory.
         replicate : int
             Replicate index (unused, kept for interface parity).
+        require_complete : bool, optional
+            Accepted for interface parity and ignored. The GROMACS layout is a
+            single production XTC rather than a chain of segments, and
+            ``progress.json`` records no per-file status for it, so this engine
+            has nothing to exclude. A production XTC that is still being
+            written is therefore still read; check the job state before
+            analyzing a live GROMACS run.
 
         Returns
         -------
         TrajectoryLayout
             Resolved XTC layout with preferred post-processed trajectories
-            and PDB topology preferred over GRO.
+            and PDB topology preferred over GRO. ``segment_status`` and
+            ``excluded_segments`` are always empty.
         """
         _ = replicate
+        _ = require_complete
         logger = logging.getLogger(__name__)
 
         trajectory_paths: list[Path] = []
@@ -481,9 +506,16 @@ class GromacsEngine(SimulationEngine):
         topology_path: Path | None = None
         topology_format = "pdb"
 
-        prefix = self._generate_prefix()
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(self._config)
+        production_tpr = working_dir / "prod.tpr"
+        if production_tpr.exists():
+            topology_path = production_tpr
+            topology_format = "tpr"
+
         solvated_system_pdb = working_dir / "solvated_system.pdb"
-        if solvated_system_pdb.exists():
+        if topology_path is None and solvated_system_pdb.exists():
             topology_path = solvated_system_pdb
 
         if topology_path is None and prefix:
@@ -506,8 +538,11 @@ class GromacsEngine(SimulationEngine):
         if topology_path is not None:
             logger.info("Resolved topology for analysis: %s", topology_path.name)
 
+        from polyzymd.analyses.shared.gromacs import topology_name
+
         return TrajectoryLayout(
             topology_path=topology_path,
+            gromacs_topology_path=working_dir / topology_name(self._config),
             trajectory_paths=trajectory_paths,
             trajectory_format="xtc",
             topology_format=topology_format,

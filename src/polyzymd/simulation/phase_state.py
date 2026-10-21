@@ -25,6 +25,9 @@ class PhaseRecord(BaseModel):
     frozen_atoms: int | None = None
     frozen_rmsd_angstrom: float | None = None
     hydrogen_max_displacement_angstrom: float | None = None
+    #: Seeds of every job that ran this phase, oldest first; a resumed
+    #: equilibration stage keeps the seeds of the attempts before it.
+    seeds_by_attempt: list[dict[str, int | None]] = []
     updated_at: str
 
 

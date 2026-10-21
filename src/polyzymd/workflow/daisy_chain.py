@@ -15,13 +15,14 @@ until the simulation is complete.
 
 from __future__ import annotations
 
+import getpass
 import logging
 import os
 import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from polyzymd.config.schema import SimulationConfig
 from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range
@@ -30,6 +31,7 @@ from polyzymd.workflow.slurm import (
     SlurmConfig,
     SlurmScriptGenerator,
 )
+from polyzymd.workflow.slurm_submit import make_log_folder, require_sbatch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,8 +44,14 @@ _SLURM_JOB_NAME_UNDERSCORES = re.compile(r"_+")
 # ---------------------------------------------------------------------------
 
 
-def check_existing_slurm_jobs(job_name: str) -> List[str]:
-    """Query SLURM for RUNNING or PENDING jobs that match *job_name*.
+def check_existing_slurm_jobs(
+    run_dir: Union[str, Path], job_name: Optional[str] = None
+) -> List[str]:
+    """Query SLURM for RUNNING or PENDING jobs of the run in *run_dir*.
+
+    A job matches as described in :func:`job_belongs_to_run`: by its working
+    directory (``squeue`` field ``%Z``), or, for a chain submitted by an
+    older PolyzyMD, by its name *job_name*.
 
     This is a best-effort check: if ``squeue`` is unavailable (e.g. in a
     non-SLURM environment or CI), a warning is logged and an empty list is
@@ -51,26 +59,29 @@ def check_existing_slurm_jobs(job_name: str) -> List[str]:
 
     Parameters
     ----------
-    job_name : str
-        The SLURM ``--job-name`` to search for (exact match).
+    run_dir : str or Path
+        The replicate's run directory.
+    job_name : str, optional
+        The replicate's job name, from :func:`create_job_name`.
 
     Returns
     -------
     list of str
-        SLURM job IDs that are RUNNING or PENDING with the given name.
+        IDs of the user's RUNNING or PENDING jobs of the run.
         Empty if ``squeue`` is unavailable or returns no matches.
     """
+    user = os.environ.get("USER") or getpass.getuser()
     try:
         result = subprocess.run(
             [
                 "squeue",
                 "--noheader",
-                "--name",
-                job_name,
+                "--user",
+                user,
                 "--states",
                 "RUNNING,PENDING",
                 "--format",
-                "%i",
+                "%i|%j|%Z",
             ],
             capture_output=True,
             text=True,
@@ -95,8 +106,46 @@ def check_existing_slurm_jobs(job_name: str) -> List[str]:
         )
         return []
 
-    job_ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    job_ids = []
+    for line in result.stdout.splitlines():
+        job_id, _, rest = line.strip().partition("|")
+        name, _, work_dir = rest.partition("|")
+        if job_id and job_belongs_to_run(name, work_dir, run_dir, job_name):
+            job_ids.append(job_id)
     return job_ids
+
+
+def job_belongs_to_run(
+    name: str,
+    work_dir: Union[str, Path, None],
+    run_dir: Union[str, Path],
+    job_name: Optional[str],
+) -> bool:
+    """Return True when the job *name* working in *work_dir* runs *run_dir*.
+
+    New jobs work in the run directory (GROMACS jobs in ``<run_dir>/gromacs``).
+    Chains submitted by older PolyzyMD versions work in the folder they were
+    submitted from, so a job named *job_name* also matches, unless it works in
+    a folder with the run directory's name: that is the same-named run of
+    another condition.
+    """
+    if is_within_run_dir(work_dir, run_dir):
+        return True
+    if not job_name or name != job_name or not work_dir:
+        return False
+    folder = Path(work_dir)
+    if folder.name == "gromacs":
+        folder = folder.parent
+    return folder.name != Path(run_dir).name
+
+
+def is_within_run_dir(path: Union[str, Path, None], run_dir: Union[str, Path]) -> bool:
+    """Return True when *path* is *run_dir* or a folder inside it."""
+    if not path:
+        return False
+    target = Path(run_dir).resolve()
+    candidate = Path(path).resolve()
+    return candidate == target or target in candidate.parents
 
 
 def cancel_slurm_jobs(job_ids: List[str]) -> List[str]:
@@ -167,43 +216,11 @@ def _sanitize_slurm_job_name(job_name: object, replicate: int) -> str:
     return sanitized
 
 
-def _legacy_job_name(sim_config: SimulationConfig, replicate: int) -> str:
-    """Create a legacy synthesized job name for config-like test objects.
-
-    Parameters
-    ----------
-    sim_config : SimulationConfig
-        Simulation configuration or legacy config-like object.
-    replicate : int
-        Replicate number.
-
-    Returns
-    -------
-    str
-        Legacy formatted job name.
-    """
-
-    enzyme = sim_config.enzyme.name
-    temp = int(sim_config.thermodynamics.temperature)
-
-    polymer_info = ""
-    polymers = getattr(sim_config, "polymers", None)
-    if polymers is not None and getattr(polymers, "enabled", False) is True:
-        prefix = polymers.type_prefix
-        probs = {m.label: m.probability for m in polymers.monomers}
-        composition = "_".join(f"{lbl}{int(round(probs[lbl] * 100))}" for lbl in sorted(probs))
-        polymer_info = f"_{prefix}_{composition}"
-
-    return f"r{replicate}_{temp}K_{enzyme}{polymer_info}"
-
-
 def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
     """Create a sanitized SLURM job name for a replicate.
 
-    Real ``SimulationConfig`` objects use ``output.naming_template`` via
-    :meth:`SimulationConfig.format_run_directory_name`, so SLURM job names match
-    run directory names. Legacy config-like objects fall back to the historical
-    synthesized format.
+    The name is :meth:`SimulationConfig.format_run_directory_name`, so SLURM
+    job names match run directory names.
 
     Parameters
     ----------
@@ -217,13 +234,7 @@ def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
     str
         Formatted job name.
     """
-    formatter = getattr(sim_config, "format_run_directory_name", None)
-    if callable(formatter):
-        formatted = formatter(replicate)
-        if isinstance(formatted, str):
-            return _sanitize_slurm_job_name(formatted, replicate)
-
-    return _sanitize_slurm_job_name(_legacy_job_name(sim_config, replicate), replicate)
+    return _sanitize_slurm_job_name(sim_config.format_run_directory_name(replicate), replicate)
 
 
 @dataclass
@@ -383,7 +394,6 @@ class DaisyChainSubmitter:
         dc_config: DaisyChainConfig,
         pixi_env: str = "sim-cuda-12-4",
         openff_logs: bool = False,
-        skip_build: bool = False,
     ) -> None:
         """Initialize the submitter.
 
@@ -397,15 +407,13 @@ class DaisyChainSubmitter:
             Pixi environment name (e.g. ``"sim-cuda-12-4"``, ``"sim-cuda-12-6"``).
         openff_logs : bool
             Enable verbose OpenFF logs in generated scripts.
-        skip_build : bool
-            Skip system building in generated scripts.
         """
         self._sim_config = sim_config
         self._dc_config = dc_config
         self._openff_logs = openff_logs
-        self._skip_build = skip_build
+        # The simulation environments have no OpenFF, so jobs load the build.
         self._generator = SlurmScriptGenerator(
-            dc_config.slurm_config, pixi_env, openff_logs=openff_logs, skip_build=skip_build
+            dc_config.slurm_config, pixi_env, openff_logs=openff_logs, skip_build=True
         )
 
         # Track submitted jobs per replicate
@@ -474,8 +482,9 @@ class DaisyChainSubmitter:
         str
             Complete SLURM batch script content.
         """
-        logs_subdir = self._sim_config.output.slurm_logs_subdir
-        output_file = f"{logs_subdir}/{job_name}.%j.out"
+        # `polyzymd status` reads the logs from this folder.
+        logs_dir = self._sim_config.output.get_slurm_logs_directory()
+        output_file = str(logs_dir / f"{job_name}.%j.out")
 
         return self._generator.generate_job_script(
             config_path=self._dc_config.config_path,
@@ -568,6 +577,12 @@ class DaisyChainSubmitter:
                 is_generated_only=False,
             )
 
+        require_sbatch(script_path)
+        # The job starts in its run directory (``#SBATCH --chdir``), and sbatch
+        # does not create the folder of its log.
+        Path(self._get_scratch_dir(replicate)).mkdir(parents=True, exist_ok=True)
+        make_log_folder(script_path)
+
         # Use --export=NONE to start with clean environment, letting the
         # script's pixi shell-hook initialization work properly regardless
         # of submission context
@@ -605,8 +620,8 @@ class DaisyChainSubmitter:
         """Generate and submit the job for a single replicate.
 
         Before submitting, checks ``squeue`` for existing RUNNING/PENDING
-        jobs with the same job name.  If duplicates are found and
-        ``force`` is not set, raises ``RuntimeError``.
+        jobs of this replicate (see :func:`job_belongs_to_run`).  If duplicates are
+        found and ``force`` is not set, raises ``RuntimeError``.
 
         Parameters
         ----------
@@ -632,12 +647,13 @@ class DaisyChainSubmitter:
             and not self._dc_config.generate_only
             and not self._dc_config.force
         ):
-            existing = check_existing_slurm_jobs(job_name)
+            run_dir = self._get_scratch_dir(replicate)
+            existing = check_existing_slurm_jobs(run_dir, job_name)
             if existing:
                 ids = ", ".join(existing)
                 raise RuntimeError(
                     f"Replicate {replicate} already has RUNNING/PENDING SLURM "
-                    f"job(s): {ids} (job name '{job_name}'). "
+                    f"job(s): {ids} (run directory {run_dir}). "
                     "Use --force to submit anyway."
                 )
 
@@ -745,6 +761,58 @@ class DaisyChainSubmitter:
             )
 
 
+def _check_build(
+    working_dir: Path, sim_config: SimulationConfig, config_path: Any, replicate: int
+) -> None:
+    """Refuse a replicate whose job could not run from the files in ``working_dir``.
+
+    A replicate that has not started needs a build that matches its manifest
+    and the config. A started replicate continues from its own run files, so
+    it needs only the build files and a readable ``progress.json``; a changed
+    production length or segment setting is then allowed.
+
+    Raises
+    ------
+    FileNotFoundError
+        With the ``polyzymd build`` command to run.
+    """
+    from polyzymd.simulation.artifact_integrity import validate_build_bundle
+    from polyzymd.simulation.progress import PROGRESS_FILENAME, load_progress
+
+    progress_file = working_dir / PROGRESS_FILENAME
+    started = progress_file.exists() or any(
+        any(working_dir.glob(pattern))
+        for pattern in ("minimization*", "equilibration_*", "production*")
+    )
+    if started:
+        missing = [
+            name
+            for name in ("solvated_system.pdb", "system.xml")
+            if not (working_dir / name).is_file()
+        ]
+        if missing:
+            raise FileNotFoundError(
+                f"Replicate {replicate} has started in {working_dir}, but its build files "
+                f"{', '.join(missing)} are missing. Restore them from the same build; "
+                "a new build needs a new output directory."
+            )
+        if progress_file.exists() and load_progress(working_dir) is None:
+            raise FileNotFoundError(
+                f"Replicate {replicate}: {progress_file} cannot be read. Check it with "
+                f"polyzymd recover -c {config_path} -r {replicate}."
+            )
+        return
+    try:
+        validate_build_bundle(working_dir, sim_config)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise FileNotFoundError(
+            f"Replicate {replicate} has no usable build in {working_dir}: {exc}\n"
+            f"Fix: build it, in a compute job: polyzymd build -c {config_path} "
+            f"-r {replicate}. The replicate has not started, so the build replaces the "
+            "old files. Then submit again."
+        ) from exc
+
+
 def submit_daisy_chain(
     config_path: Union[str, Path],
     slurm_preset: str = "aa100",
@@ -767,7 +835,6 @@ def submit_daisy_chain(
     nodelist: str | None = None,
     exclude: str | None = None,
     openff_logs: bool = False,
-    skip_build: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
     """Submit daisy-chain simulation jobs from a YAML config.
 
@@ -821,8 +888,6 @@ def submit_daisy_chain(
         the preset's excluded-node list.
     openff_logs : bool
         Enable verbose OpenFF logs in generated scripts.
-    skip_build : bool
-        Skip system building in generated scripts.
 
     Returns
     -------
@@ -834,6 +899,9 @@ def submit_daisy_chain(
     ValueError
         If the SLURM account is empty on a preset that requires one
         and neither ``dry_run`` nor ``generate_only`` is set.
+    FileNotFoundError
+        If a replicate has no valid build from ``polyzymd build`` (not
+        checked for ``dry_run``).
     """
     # Load simulation config
     sim_config = SimulationConfig.from_yaml(config_path)
@@ -901,8 +969,16 @@ def submit_daisy_chain(
         config_path=str(Path(config_path).resolve()),
     )
 
+    # Jobs run in a simulation environment without OpenFF, so they cannot
+    # build. Check every replicate before any job is written or submitted.
+    if not dry_run:
+        for replicate in dc_config.replicates:
+            _check_build(
+                sim_config.get_working_directory(replicate), sim_config, config_path, replicate
+            )
+
     # Create submitter and submit
     submitter = DaisyChainSubmitter(
-        sim_config, dc_config, pixi_env=pixi_env, openff_logs=openff_logs, skip_build=skip_build
+        sim_config, dc_config, pixi_env=pixi_env, openff_logs=openff_logs
     )
     return submitter.submit_all()

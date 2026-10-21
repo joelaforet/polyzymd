@@ -1,14 +1,9 @@
-# Distance Analysis: Quick Start
+# Run distance analysis
 
-Compute inter-atomic distances with proper statistical handling in under
-5 minutes.
-
-```{note}
-**Want to understand the statistics?** This guide focuses on getting results
-quickly. For proper uncertainty quantification (autocorrelation correction,
-SEM vs. SD), see
-{doc}`../explanation/analysis_statistics_best_practices`.
-```
+Measure the distance between named atom pairs on each production frame of each
+replicate. For each pair, PolyzyMD reports the mean distance and the fraction
+of frames below a threshold. Then it compares the conditions, with one value
+per replicate.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -23,153 +18,84 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-## TL;DR
-
-```bash
-# Configure distance pairs in comparison.yaml, then run:
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
-
-# Run all enabled analyses in the same workflow
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Force recompute and machine-readable output
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns --recompute --format json
-```
-
-## Prerequisites
-
-Before running distance analysis, you need:
-
-1. **Completed production simulation(s)** — at least one replicate
-2. **Comparison config** — `comparison.yaml` with conditions and plugin settings
-3. **Trajectory files** — in the scratch directory specified in config
-
-Verify your setup:
-
-```bash
-# Check that trajectories exist
-ls $(polyzymd info -c config.yaml --scratch-dir)/production_*/
-```
-
-## What Distance Analysis Provides
-
-The distance analysis module computes:
-
-| Feature | Description |
-|---------|-------------|
-| **Mean distance** | Average distance over trajectory (equilibrated portion) |
-| **SEM** | Autocorrelation-corrected standard error of the mean |
-| **Mode (KDE peak)** | Most probable distance from kernel density estimation |
-| **Contact fraction** | % of frames below a distance threshold |
-| **Distribution** | Full histogram and KDE for visualization |
-
 ```{tip}
-**When to use distances vs. contacts vs. triad:**
-- **Distances**: Specific atom pairs with continuous distance values
-- **Contacts**: All residue-residue contacts at an interface (binary count)
-- **Triad**: Pre-defined catalytic geometry with simultaneous contact analysis
+Use the analysis that fits the question:
+
+- **Distances**: the distance between specific atoms, as a continuous value.
+- **Contacts**: the fraction of frames in which the polymer buries or touches
+  each protein residue. See {doc}`analysis_contacts_quickstart`.
+- **Catalytic triad**: the hydrogen bonds of the triad on each frame, combined
+  with these distances. See {doc}`analysis_triad_quickstart`.
 ```
 
-## Basic Usage
+## Define the pairs
 
-`````{tab-set}
-
-````{tab-item} YAML (Recommended)
-Define distance pairs in `comparison.yaml`:
+Write the pairs to a YAML (or JSON) file, for example `pairs.yaml`:
 
 ```yaml
-# comparison.yaml
-name: "distance_quickstart"
-control: "no_polymer"
-
-conditions:
-  - label: "no_polymer"
-    config: "configs/no_polymer.yaml"
-    replicates: [1, 2, 3]
-  - label: "with_polymer"
-    config: "configs/with_polymer.yaml"
-    replicates: [1, 2, 3]
-
-plugins:
-  distances:
-    pairs:
-      - label: "Ser77-His156"
-        selection_a: "protein and resid 77 and name OG"
-        selection_b: "protein and resid 156 and name NE2"
-      - label: "His156-Asp133"
-        selection_a: "protein and resid 156 and name ND1"
-        selection_b: "midpoint(protein and resid 133 and name OD1 OD2)"
+- label: "Ser76(OG)-Substrate(carbonyl C)"
+  selection_a: "protein and resid 76 and name OG"
+  selection_b: "resname RBY and name C13x"
+  threshold: 10.0
+  below_label: "Within 10 Angstrom"
+- label: "Met77(N)-Substrate(carbonyl C)"
+  selection_a: "protein and resid 77 and name N"
+  selection_b: "resname RBY and name C13x"
 ```
 
-Run analysis:
+Each pair needs `label`, `selection_a` and `selection_b`. Each pair label must
+be unique. The optional keys are:
+
+- `threshold`: the cutoff for the fraction of frames below it. A pair without
+  one uses the analysis threshold. The default is 3.5 Å. Change it with
+  `--set threshold=...`.
+- `below_label`: the name of that fraction in the report.
+
+## Run it
+
+In a {term}`study`, give the study folder. The study names the conditions,
+the control and the equilibration window. The results go to
+`<study>/results/distances/`:
 
 ```bash
-# Run distances only
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
-
-# Run all enabled analyses
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Force recompute
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns --recompute
-```
-````
-
-````{tab-item} CLI
-```bash
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
+polyzymd analyze distances --study my_study --set pairs=pairs.yaml
 ```
 
-Expected behavior:
-
-```text
-Loading comparison config from: comparison.yaml
-Running plugin: distances
-  Equilibration: 10ns
-  Conditions: no_polymer, with_polymer
-Distance comparison complete
-```
-
-Run all enabled analyses:
+For a quick look without a study, give the `config.yaml` of each condition
+instead. The results then go to the current folder:
 
 ```bash
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-```
-````
-
-`````
-
-## Add Contact-Style Thresholds
-
-Set a threshold to report the fraction of frames below a cutoff (useful for
-hydrogen-bond-style geometry checks).
-
-```yaml
-plugins:
-  distances:
-    threshold: 3.5
-    pairs:
-      - label: "Ser77-His156"
-        selection_a: "protein and resid 77 and name OG"
-        selection_b: "protein and resid 156 and name NE2"
+polyzymd analyze distances -c noPoly/config.yaml -c SBMA50/config.yaml \
+  --label "No polymer" --label "SBMA 50%" --eq 200ns --set pairs=pairs.yaml
 ```
 
-```bash
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
-```
+The first `-c` is the control. PolyzyMD measures each pair on each production
+frame of each replicate. It reports two results for each pair:
 
-## Write Robust Selections
+| Result | Meaning |
+|---|---|
+| `<label>` | The mean distance |
+| `<label> <below_label>`, or `<label> below <threshold> A` | The fraction of frames below the threshold |
 
-PolyzyMD supports standard MDAnalysis selections plus helper syntax like
-`midpoint(...)`, `com(...)`, and `pdbindex N`.
+The report shows the mean distance of the first pair. To report a different
+result, use `--run`, for example
+`--run "Ser76(OG)-Substrate(carbonyl C) Within 10 Angstrom"`. PolyzyMD stores
+the measured distances, so a second `--run` does not read the trajectory again.
+PolyzyMD compares the conditions by Welch's t test. It corrects the p values
+over the compared conditions with the {term}`Benjamini-Hochberg` method.
 
-```{warning}
-**Chain-aware selections are required**
+## Write selections
 
-Residue numbers restart by chain in PolyzyMD systems. A selection like
-`resid 141-148` can match multiple chains.
+A selection is an MDAnalysis selection string. PolyzyMD adds three forms:
+`midpoint(...)`, `com(...)` and `pdbindex N`.
 
-For protein residues, include `protein and ...`:
+````{warning}
+**Include the chain in each selection**
+
+Residue numbers restart in each chain of a PolyzyMD system. A selection such as
+`resid 141-148` can match atoms in more than one chain.
+
+For protein residues, start the selection with `protein and`:
 
 ```yaml
 # Incorrect
@@ -178,61 +104,66 @@ selection_a: "com(resid 141-148)"
 # Correct
 selection_a: "com(protein and resid 141-148)"
 ```
-```
+````
 
 Common patterns:
 
 ```yaml
 # Midpoint of Asp carboxylate oxygens
-selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+selection_a: "midpoint(protein and resid 132 and name OD1 OD2)"
 
 # Center of mass of ligand
 selection_b: "com(resname LIG)"
 
 # Single atom
-selection_a: "protein and resid 77 and name OG"
+selection_a: "protein and resid 76 and name OG"
 
-# Atom by PDB serial number
+# The 2740th atom of the system, counted from 1
 selection_a: "pdbindex 2740"
 ```
 
-## Use PBC and Alignment Defaults
+A plain selection must match exactly one atom. `pdbindex N` selects the N-th
+atom of the system, as in restraints. It is the same as the MDAnalysis
+selection `bynum N`.
 
-Distance analysis uses PBC-aware distances (`use_pbc: true`) and trajectory
-alignment (`align_trajectory: true`) by default.
+## Keep PBC on
 
-These defaults reduce artifacts from periodic wrapping and global rigid-body
-motion, so measured distances reflect local geometry.
+By default (`use_pbc: true`), PolyzyMD measures distances with the minimum
+image convention and the box of each frame. This stops PolyzyMD from measuring
+a pair the long way around the box. Keep it on, unless the trajectory is
+already unwrapped. If a frame has no valid box, PolyzyMD measures it without
+the minimum image and prints a warning. PolyzyMD does not align frames for
+distances, because a distance does not change when the system moves or
+rotates.
 
-If you need to override either behavior, see
-{doc}`../reference/analysis_distances_reference`.
+## From Python
 
-## Compare Distances Across Conditions
+```python
+import polyzymd as pz
+from polyzymd.analyses.functions import pair_distance
 
-Use the same command after defining conditions and pairs in `comparison.yaml`:
-
-```bash
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
+study = pz.Study.from_configs(
+    {"No polymer": "noPoly/config.yaml", "SBMA 50%": "SBMA50/config.yaml"},
+    equilibration="200ns",
+)
+d = study.timeseries(
+    pair_distance,
+    pz.select("protein and resid 76 and name OG"),
+    pz.select("resname RBY and name C13x"),
+    unit="A",
+)
+print(d.reduce("mean").compare(control="No polymer").to_agent_text())
+below = d.transform(lambda x, cutoff: x < cutoff, cutoff=10.0, unit=None)
+print(below.reduce("fraction").compare(control="No polymer").to_agent_text())
 ```
 
-This provides:
+`transform` computes the per-frame fraction from the stored distances. It does
+not read the trajectory again. Give values such as the cutoff as keyword
+arguments, as above. PolyzyMD then records them with the result. To measure
+your own quantity, see {doc}`study_api`.
 
-- Pair-level summaries across conditions
-- Ranking by mean distance (primary) and fraction below threshold (secondary)
-- Statistical tests (t-tests, effect sizes, ANOVA)
+## Next steps
 
-For broader multi-plugin workflows, see
-{doc}`analysis_compare_conditions`.
-
-## Reference and Troubleshooting
-
-For full field tables, output JSON schemas, plot types, CLI options, and
-troubleshooting fixes, see
-{doc}`../reference/analysis_distances_reference`.
-
-## Next Steps
-
-- Compare multiple analyses: {doc}`analysis_compare_conditions`
-- Catalytic triad workflow: {doc}`analysis_triad_quickstart`
-- Statistical interpretation: {doc}`../explanation/analysis_statistics_best_practices`
-- Contacts workflow: {doc}`analysis_contacts_quickstart`
+- **Catalytic triad analysis**: {doc}`analysis_triad_quickstart`
+- **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
+- **Contact analysis**: {doc}`analysis_contacts_quickstart`

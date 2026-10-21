@@ -7,7 +7,7 @@ PolyzyMD Documentation
 ======================
 
 PolyzyMD is a molecular dynamics toolkit for building, running, and analyzing
-enzyme-polymer simulations.
+simulations of proteins, alone or with polymers, ligands and co-solvents.
 
 Use this site by *need*:
 
@@ -28,9 +28,10 @@ Use this site by *need*:
 .. note::
 
    Stable analysis workflows for the `v1.3.0` release are RMSD, Rg, RMSF,
-   contacts, distances, catalytic triad, secondary structure, SASA, and
-   hydrogen bonds. RMSD analysis now includes automated convergence detection
-   diagnostics.
+   contacts, native contacts, distances, secondary structure, SASA, and
+   hydrogen bonds, which run through ``polyzymd analyze NAME -c config.yaml``
+   and the study API. The catalytic triad is a routine on the study API; see
+   :doc:`how_to/analysis_triad_quickstart`.
 
 Choose Your Path
 ----------------
@@ -54,12 +55,12 @@ Common Workflows
 
 - Install locally and validate the CLI:
   :doc:`Install PolyzyMD with pixi <get_started/installation>`
-- Build and submit a first simulation:
-  :doc:`Run Your First PolyzyMD Simulation <get_started/quickstart>`
+- Run a first simulation and analyze it:
+  :doc:`Run your first simulation <get_started/quickstart>`
 - Run a comparison study across multiple conditions:
   :doc:`Compare Simulation Conditions <how_to/analysis_compare_conditions>`
-- Generate comparison figures as a smoke test:
-  :doc:`Analyze a Multi-Condition Study <tutorials/analysis_complete_workflow>`
+- Add a polymer condition and compare it with water:
+  :doc:`tutorials/analysis_complete_workflow`
 
 .. IMAGE OPPORTUNITY: Add a single workflow schematic showing Build -> Submit ->
    Analyze -> Compare -> Plot, with stable and experimental analysis branches.

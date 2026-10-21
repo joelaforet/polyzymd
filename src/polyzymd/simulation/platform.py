@@ -55,3 +55,18 @@ def resolve_platform(
 
     LOGGER.info("Selected OpenMM platform %s with properties %s", normalized, properties)
     return PlatformSelection(platform=platform, properties=properties)
+
+
+def platform_record(context: Any) -> dict[str, Any]:
+    """Return the platform of an OpenMM Context and the value of each of its properties.
+
+    The values are the ones the Context uses, defaults included, such as the
+    number of CPU threads and ``DeterministicForces``.
+    """
+    platform = context.getPlatform()
+    return {
+        "name": platform.getName(),
+        "properties": {
+            key: platform.getPropertyValue(context, key) for key in platform.getPropertyNames()
+        },
+    }

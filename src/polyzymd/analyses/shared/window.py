@@ -1,8 +1,7 @@
 """Trajectory window helpers for trajectory-backed analyses.
 
-This module centralizes the frame-window logic shared by analysis plugins that
-need to combine equilibration skipping with MDAnalysis ``run()`` slice
-arguments. The helpers return a validated window that can be passed directly to
+The helpers turn an equilibration time into the first production frame of a
+replicate and combine it with MDAnalysis ``run()`` slice arguments. The helpers return a validated window that can be passed directly to
 trajectory-native runners without PolyzyMD re-owning the frame loop.
 """
 
@@ -20,6 +19,15 @@ if TYPE_CHECKING:
     from polyzymd.analyses.shared.loader import TrajectoryLoader
 
 
+#: Distance from a frame boundary, as a fraction of the timestep, within which
+#: an equilibration time counts as falling on that frame. DCD files store times
+#: in float32 AKMA units, so a timestep of 40 ps reads back as 39.9999998 ps and
+#: 200 ns lands 2.2e-5 frames past frame 5000. The offset grows with time, to
+#: 1.1e-4 frames at 1 us, so the tolerance covers trajectories up to about 90 us
+#: while staying far below any real choice of window.
+FRAME_BOUNDARY_TOLERANCE = 1e-2
+
+
 def _equilibration_start_frame(equilibration_ps: float, timestep_ps: float) -> int:
     """Return the first frame at or after equilibration.
 
@@ -34,12 +42,13 @@ def _equilibration_start_frame(equilibration_ps: float, timestep_ps: float) -> i
     -------
     int
         First frame index whose timestamp is greater than or equal to the
-        equilibration time.
+        equilibration time. A time within :data:`FRAME_BOUNDARY_TOLERANCE` of a
+        frame, in units of the timestep, counts as that frame.
     """
 
     frame_position = equilibration_ps / timestep_ps
     rounded_position = round(frame_position)
-    if math.isclose(frame_position, rounded_position, rel_tol=1e-12, abs_tol=1e-12):
+    if abs(frame_position - rounded_position) <= FRAME_BOUNDARY_TOLERANCE:
         return int(rounded_position)
     return int(math.floor(frame_position)) + 1
 
@@ -270,12 +279,7 @@ def resolve_trajectory_window(
     trajectory_ns = (n_frames_total * timestep_ps) / 1000.0
     if finite_first_frame_time_ps is not None:
         last_frame_time_ps = finite_first_frame_time_ps + (n_frames_total - 1) * timestep_ps
-        if equilibration_ps > last_frame_time_ps and not math.isclose(
-            equilibration_ps,
-            last_frame_time_ps,
-            rel_tol=1e-12,
-            abs_tol=1e-12,
-        ):
+        if equilibration_ps - last_frame_time_ps > FRAME_BOUNDARY_TOLERANCE * timestep_ps:
             raise ValueError(
                 "Equilibration time "
                 f"({equilibration_ps:.3f} ps) leaves no frame at or after equilibration "

@@ -16,6 +16,7 @@ Made by PolyzyMD, by Joseph R. Laforet Jr.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -43,15 +44,23 @@ logger = logging.getLogger(__name__)
 # Constants and Mappings
 # =============================================================================
 
-# Thermostat mapping: PolyzyMD -> GROMACS
+# Thermostat mapping: PolyzyMD -> GROMACS (integrator, tcoupl). OpenMM's
+# Langevin integrators are Langevin dynamics with friction 1/tau; GROMACS's
+# stochastic-dynamics integrator "sd" integrates the same equation with
+# tau-t = tau (its splitting differs at order dt^2), and does its own
+# temperature coupling. See docs/source/reference/gromacs_openmm.md.
 THERMOSTAT_MAP = {
-    "LangevinMiddle": "v-rescale",
-    "Langevin": "v-rescale",
-    "NoseHoover": "nose-hoover",
-    "Andersen": "andersen",
+    "LangevinMiddle": ("sd", "no"),
+    "Langevin": ("sd", "no"),
+    "NoseHoover": ("md", "nose-hoover"),
+    "Andersen": ("md-vv", "andersen"),
 }
+#: Thermostats the OpenMM engine does not implement, so the engines differ.
+NOT_IN_OPENMM = {"NoseHoover", "Andersen"}
 
-# Barostat mapping: PolyzyMD -> GROMACS (tcoupl, pcoupltype)
+# Barostat mapping: PolyzyMD -> GROMACS (pcoupl, pcoupltype). GROMACS has no
+# Monte Carlo barostat; stochastic cell rescaling samples the same NPT
+# ensemble with another algorithm, so the mapping is approximate.
 BAROSTAT_MAP = {
     "MC": ("c-rescale", "isotropic"),
     "MCA": ("c-rescale", "anisotropic"),
@@ -206,6 +215,9 @@ class MDPParameters:
     gen_vel: bool = False
     gen_temp: float = 300.0
     gen_seed: int = -1
+    #: Random seed of the stochastic-dynamics noise (integrator sd); each
+    #: stage gets its own, so no stage repeats another's noise. -1 is random.
+    ld_seed: int = -1
 
     # Energy minimization specific
     emtol: float = 500.0
@@ -241,6 +253,15 @@ class MDPParameters:
 
         return "\n".join(lines)
 
+    def _nstcalcenergy(self) -> int:
+        """Return the largest divisor of nstenergy and nstlog that is at most 100.
+
+        grompp stops with a warning when nstenergy is not a multiple of
+        nstcalcenergy, whose default is 100.
+        """
+        interval = math.gcd(self.nstenergy, self.nstlog) or 100
+        return max(n for n in range(1, min(interval, 100) + 1) if interval % n == 0)
+
     def _generate_em_section(self) -> List[str]:
         """Generate MDP content for energy minimization."""
         lines = []
@@ -251,6 +272,8 @@ class MDPParameters:
         lines.append(f"emtol           = {self.emtol}")
         lines.append(f"emstep          = {self.emstep}")
         lines.append(f"nsteps          = {self.nsteps}")
+        if self.define:
+            lines.append(f"define          = {self.define}")
         lines.append("")
 
         # Output
@@ -293,6 +316,7 @@ class MDPParameters:
         lines.append(f"nstvout         = {self.nstvout}")
         lines.append(f"nstlog          = {self.nstlog}")
         lines.append(f"nstenergy       = {self.nstenergy}")
+        lines.append(f"nstcalcenergy   = {self._nstcalcenergy()}")
         lines.append(f"nstxout-compressed = {self.nstxout_compressed}")
         if self.compressed_x_grps:
             lines.append(f"compressed-x-grps = {self.compressed_x_grps}")
@@ -317,6 +341,8 @@ class MDPParameters:
         # Temperature coupling
         lines.append("; Temperature coupling")
         lines.append(f"tcoupl          = {self.tcoupl}")
+        if self.integrator == "sd" or self.ld_seed != -1:
+            lines.append(f"ld_seed         = {self.ld_seed}")
         lines.append(f"tc-grps         = {self.tc_grps}")
         lines.append(f"tau_t           = {self.tau_t}")
         lines.append(f"ref_t           = {self.ref_t}")
@@ -339,6 +365,10 @@ class MDPParameters:
             lines.append(f"tau_p           = {self.tau_p}")
             lines.append(f"ref_p           = {self.ref_p}")
             lines.append(f"compressibility = {self.compressibility}")
+            if self.define:
+                # Restrained NPT: scale the reference center of mass with the
+                # box, as grompp asks; it refuses absolute references here.
+                lines.append("refcoord-scaling = com")
         else:
             lines.append("pcoupl          = no")
         lines.append("")
@@ -423,27 +453,80 @@ class MDPGenerator:
         >>> prod_mdp = generator.generate_production()
     """
 
-    def __init__(self, config: "SimulationConfig"):
+    def __init__(self, config: "SimulationConfig", replicate: int | None = None):
         """Initialize the MDP generator.
 
         Args:
             config: PolyzyMD SimulationConfig object containing all simulation
                 parameters including thermodynamics, simulation phases, etc.
+            replicate: The replicate number. It seeds the initial velocities
+                (``gen_seed``) and each stage's stochastic-dynamics noise
+                (``ld_seed``), one seed per stage from
+                :func:`polyzymd.simulation.seeds.dynamics_seed`, as the
+                OpenMM engine does. ``None`` leaves GROMACS's random seeds (-1).
         """
         self._config = config
+        self._replicate = replicate
         self._temperature = config.thermodynamics.temperature
         self._pressure = config.thermodynamics.pressure
+        self._warned: set[str] = set()
+
+    def _dynamics(self, thermostat: str) -> tuple[str, str]:
+        """Return GROMACS's integrator and tcoupl for a PolyzyMD thermostat, warning where they differ.
+
+        The Langevin thermostats map 1:1 to the stochastic-dynamics integrator.
+        Nose-Hoover and Andersen run in GROMACS, but the OpenMM engine runs
+        them as LangevinMiddle, so the two engines would not simulate the same
+        dynamics; a warning says so once.
+        """
+        if thermostat in NOT_IN_OPENMM and thermostat not in self._warned:
+            self._warned.add(thermostat)
+            logger.warning(
+                "Thermostat %s runs in GROMACS but not in PolyzyMD's OpenMM engine, which runs "
+                "LangevinMiddle instead: the same config gives different dynamics on the two "
+                "engines.",
+                thermostat,
+            )
+        return THERMOSTAT_MAP.get(thermostat, THERMOSTAT_MAP["LangevinMiddle"])
+
+    def _barostat(self, barostat: str, frequency: int | None = None) -> tuple[str, str]:
+        """Return GROMACS's pcoupl and pcoupltype for a PolyzyMD barostat, warning once that it is approximate.
+
+        ``barostat_frequency`` sets how often OpenMM's MC barostat tries a volume
+        move; c-rescale keeps GROMACS's own coupling interval, so a value other
+        than the default 25 gives a warning once.
+        """
+        if frequency not in (None, 25) and "barostat_frequency" not in self._warned:
+            self._warned.add("barostat_frequency")
+            logger.warning(
+                "barostat_frequency %d sets how often OpenMM's MC barostat moves the volume; "
+                "GROMACS's c-rescale barostat keeps its own coupling interval (nstpcouple).",
+                frequency,
+            )
+        if "barostat" not in self._warned:
+            self._warned.add("barostat")
+            logger.warning(
+                "GROMACS has no Monte Carlo barostat; barostat %s runs as c-rescale, which samples "
+                "the same NPT ensemble with a different algorithm. See the GROMACS and OpenMM "
+                "page of the PolyzyMD docs.",
+                barostat,
+            )
+        return BAROSTAT_MAP.get(barostat, ("c-rescale", "isotropic"))
 
     def generate_energy_minimization(
         self,
         nsteps: int = 50000,
         emtol: float = 500.0,
+        define: str = "",
     ) -> MDPParameters:
         """Generate MDP parameters for energy minimization.
 
         Args:
             nsteps: Maximum number of minimization steps.
             emtol: Energy tolerance (kJ/mol/nm) for convergence.
+            define: Preprocessor defines, such as ``"-DPOSRES_EM"`` when the
+                topology holds the minimization restraints that
+                :class:`PositionRestraintGenerator` writes.
 
         Returns:
             MDPParameters configured for steepest descent minimization.
@@ -457,6 +540,7 @@ class MDPGenerator:
             emstep=0.01,
             nstlog=500,
             nstenergy=500,
+            define=define,
         )
 
     def generate_equilibration_stages(self) -> List[Tuple[str, MDPParameters]]:
@@ -515,11 +599,13 @@ class MDPGenerator:
                     thermostat=(stage.thermostat.value if stage.thermostat else "LangevinMiddle"),
                     thermostat_timescale=stage.thermostat_timescale or 1.0,
                     barostat=stage.barostat.value if stage.barostat else None,
+                    barostat_frequency=stage.barostat_frequency,
                     is_first_stage=is_first,
                     continuation=not is_first,
                     posres_defines=posres_defines,
                 )
 
+            self._seed(params, f"equilibration:{i}")
             filename = f"eq_{stage_num:02d}_{stage.name}.mdp"
             result.append((filename, params))
 
@@ -539,6 +625,7 @@ class MDPGenerator:
         is_first_stage: bool,
         continuation: bool,
         posres_defines: str = "",
+        barostat_frequency: int | None = None,
     ) -> MDPParameters:
         """Create MDPParameters for an equilibration stage.
 
@@ -555,6 +642,8 @@ class MDPGenerator:
             is_first_stage: Whether this is the first equilibration stage.
             continuation: Whether continuing from previous simulation.
             posres_defines: Position restraint defines string.
+            barostat_frequency: The stage's barostat_frequency, for the warning
+                that GROMACS keeps its own coupling interval.
 
         Returns:
             Configured MDPParameters object.
@@ -564,12 +653,12 @@ class MDPGenerator:
         output_interval = max(1, nsteps // samples) if samples > 0 else 5000
 
         # Map thermostat
-        tcoupl = THERMOSTAT_MAP.get(thermostat, "v-rescale")
+        integrator, tcoupl = self._dynamics(thermostat)
 
         # Map barostat
         is_npt = ensemble == "NPT"
         if is_npt and barostat:
-            pcoupl, pcoupltype = BAROSTAT_MAP.get(barostat, ("c-rescale", "isotropic"))
+            pcoupl, pcoupltype = self._barostat(barostat, barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
@@ -579,7 +668,7 @@ class MDPGenerator:
         return MDPParameters(
             title=f"{ensemble} Equilibration: {name}",
             stage_type="eq",
-            integrator="md",
+            integrator=integrator,
             dt=dt_ps,
             nsteps=nsteps,
             nstxout=output_interval,
@@ -639,13 +728,13 @@ class MDPGenerator:
 
         # Map thermostat
         thermostat = stage.thermostat.value if stage.thermostat else "LangevinMiddle"
-        tcoupl = THERMOSTAT_MAP.get(thermostat, "v-rescale")
+        integrator, tcoupl = self._dynamics(thermostat)
 
         # Map barostat
         is_npt = stage.ensemble.value == "NPT"
         barostat = stage.barostat.value if stage.barostat else None
         if is_npt and barostat:
-            pcoupl, pcoupltype = BAROSTAT_MAP.get(barostat, ("c-rescale", "isotropic"))
+            pcoupl, pcoupltype = self._barostat(barostat, stage.barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
@@ -672,7 +761,7 @@ class MDPGenerator:
         return MDPParameters(
             title=f"Temperature Ramping: {stage.name} ({t_start}K -> {t_end}K)",
             stage_type="eq",
-            integrator="md",
+            integrator=integrator,
             dt=dt_ps,
             nsteps=nsteps,
             nstxout=output_interval,
@@ -732,6 +821,15 @@ class MDPGenerator:
 
         return " ".join(unique_defines)
 
+    def _seed(self, params: MDPParameters, phase: str) -> None:
+        """Set the velocity and noise seeds of one stage from the replicate number."""
+        if self._replicate is None:
+            return
+        from polyzymd.simulation.seeds import dynamics_seed
+
+        params.ld_seed = dynamics_seed(self._replicate, phase)
+        params.gen_seed = dynamics_seed(self._replicate, f"velocities:{phase}")
+
     def generate_production(self) -> MDPParameters:
         """Generate MDP parameters for production MD.
 
@@ -746,22 +844,22 @@ class MDPGenerator:
 
         # Map thermostat
         thermostat = prod.thermostat.value if prod.thermostat else "LangevinMiddle"
-        tcoupl = THERMOSTAT_MAP.get(thermostat, "v-rescale")
+        integrator, tcoupl = self._dynamics(thermostat)
 
         # Map barostat
         is_npt = prod.ensemble.value == "NPT"
         barostat = prod.barostat.value if prod.barostat else None
         if is_npt and barostat:
-            pcoupl, pcoupltype = BAROSTAT_MAP.get(barostat, ("c-rescale", "isotropic"))
+            pcoupl, pcoupltype = self._barostat(barostat, prod.barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
         ref_p = self._pressure * 1.01325  # GROMACS uses bar internally, convert from atm
 
-        return MDPParameters(
+        params = MDPParameters(
             title=f"Production MD ({prod.duration} ns)",
             stage_type="prod",
-            integrator="md",
+            integrator=integrator,
             dt=dt_ps,
             nsteps=nsteps,
             nstxout=0,  # Don't write full precision coords
@@ -779,6 +877,8 @@ class MDPGenerator:
             ref_p=ref_p,
             gen_vel=False,
         )
+        self._seed(params, "production:0")
+        return params
 
 
 # =============================================================================
@@ -820,6 +920,14 @@ class PositionRestraintGenerator:
     >>> generator = PositionRestraintGenerator(topology, component_info)
     >>> generator.add_posres_to_itp_files(config, output_dir, "MySystem")
     """
+
+    #: Restraint force constant during minimization, in kJ/mol/nm^2. With it,
+    #: a typical steepest-descent force moves a restrained heavy atom by
+    #: about 0.01 nm, so the solute holds its place as OpenMM's frozen
+    #: minimization holds it.
+    MINIMIZATION_FORCE_CONSTANT = 1.0e5
+    #: Define of the minimization restraints on the protein and ligand heavy atoms.
+    MINIMIZATION_DEFINE = "POSRES_EM"
 
     # Maps atom group names to (component_type, posres_define)
     GROUP_MAPPING: Dict[str, Tuple[str, str]] = {
@@ -877,6 +985,28 @@ class PositionRestraintGenerator:
         """
         phases = config.simulation_phases
         posres_defines: Dict[str, str] = {}
+
+        # With freeze_solute, minimization restrains the protein and ligand
+        # heavy atoms, whatever the equilibration stages restrain: OpenMM
+        # freezes those atoms.
+        if phases.minimization.freeze_solute:
+            written = sum(
+                self._add_posres_to_component_itps(
+                    output_dir,
+                    prefix,
+                    component_type,
+                    group_name,
+                    self.MINIMIZATION_FORCE_CONSTANT,
+                    self.MINIMIZATION_DEFINE,
+                )
+                for component_type, group_name in (
+                    ("protein", "protein_heavy"),
+                    ("ligand", "ligand_heavy"),
+                )
+                if self._find_component_itps(output_dir, prefix, component_type)
+            )
+            if written:
+                posres_defines["minimization"] = self.MINIMIZATION_DEFINE
 
         # Collect all unique (group, force_constant) pairs, keeping max fc
         restraints_needed: Dict[str, float] = {}
@@ -1196,62 +1326,6 @@ class PositionRestraintGenerator:
     # ------------------------------------------------------------------
     # Multi-ITP path (polymers)
     # ------------------------------------------------------------------
-
-    def _add_posres_to_polymer_itps(
-        self,
-        output_dir: Path,
-        prefix: str,
-        force_constant: float,
-        posres_define: str,
-        group_name: str,
-    ) -> int:
-        """Add position restraints to polymer ITP files.
-
-        This compatibility helper uses topology-based component classification
-        when possible and falls back to historical polymer discovery only when
-        the topology layout is unavailable.
-
-        Parameters
-        ----------
-        output_dir : Path
-            Directory containing ITP files.
-        prefix : str
-            Filename prefix.
-        force_constant : float
-            Position restraint force constant in kJ/mol/nm^2.
-        posres_define : str
-            POSRES define name, such as ``"POSRES_POLYMER"``.
-        group_name : str
-            Atom group name for comment headers.
-
-        Returns
-        -------
-        int
-            Number of ITP files that received position restraints.
-        """
-        polymer_itps = self._find_component_itps(output_dir, prefix, "polymer")
-        if not polymer_itps:
-            logger.warning("No polymer ITP files found - skipping polymer position restraints")
-            return 0
-
-        count = 0
-        for itp_path in polymer_itps:
-            heavy_indices = self._get_heavy_atom_indices_from_itp(itp_path)
-            if not heavy_indices:
-                logger.warning(f"No heavy atoms found in {itp_path.name} - skipping")
-                continue
-
-            self._append_posres_to_itp(
-                itp_path, heavy_indices, force_constant, posres_define, group_name
-            )
-            count += 1
-            logger.info(
-                f"Added {len(heavy_indices)} position restraints to "
-                f"{itp_path.name} (#ifdef {posres_define})"
-            )
-
-        logger.info(f"Position restraints added to {count}/{len(polymer_itps)} polymer ITP files")
-        return count
 
     def _find_all_polymer_itps(
         self,
@@ -1646,37 +1720,6 @@ class RunScriptGenerator:
         for mdp_name in self._eq_mdps:
             _validate_local_shell_token(mdp_name, "equilibration_mdp")
 
-    def _generate_header(self) -> List[str]:
-        """Generate script header with configuration."""
-        return [
-            "#!/bin/bash",
-            "# GROMACS Workflow Script",
-            f"# {POLYZYMD_BRANDING}",
-            f"# Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            "#",
-            "# Usage: ./run_gromacs.sh",
-            "#",
-            "# This script runs the complete MD workflow:",
-            "#   1. Energy minimization",
-            "#   2. Equilibration (multiple stages if configured)",
-            "#   3. Production MD",
-            "#   4. Trajectory post-processing",
-            "",
-            "set -e  # Exit on error",
-            "",
-            "# Configuration",
-            f'GMX="{self._gmx}"',
-            f'PREFIX="{self._prefix}"',
-            "",
-            'echo "========================================"',
-            'echo "GROMACS Workflow for ${PREFIX}"',
-            'echo "========================================"',
-            f'echo "{SHORT_CREDIT_LINE}"',
-            'echo "Using GROMACS: $GMX"',
-            'echo ""',
-            "",
-        ]
-
     def _generate_energy_minimization(self) -> List[str]:
         """Generate energy minimization commands."""
         return [
@@ -1688,7 +1731,7 @@ class RunScriptGenerator:
             "if [ ! -f em.gro ]; then",
             '    echo "=== Step 1: Energy Minimization ==="',
             "",
-            "    $GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro -p ${PREFIX}.top -o em.tpr -maxwarn 1",
+            "    $GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro -p ${PREFIX}.top -o em.tpr",
             "    $GMX mdrun -deffnm em -v",
             "",
             "    # Check if standard minimization succeeded",
@@ -1739,7 +1782,7 @@ class RunScriptGenerator:
             grompp_cmd = f"$GMX grompp -f {mdp_file} -c {prev_output}.gro -r em.gro"
             if prev_output != "em":
                 grompp_cmd += f" -t {prev_output}.cpt"
-            grompp_cmd += f" -p ${{PREFIX}}.top -o {output_name}.tpr -maxwarn 1"
+            grompp_cmd += f" -p ${{PREFIX}}.top -o {output_name}.tpr"
 
             lines.extend(
                 [
@@ -1772,7 +1815,7 @@ class RunScriptGenerator:
             "# ========================================",
             'echo "=== Step 3: Production MD ==="',
             "",
-            "$GMX grompp -f prod.mdp -c ${LAST_EQ}.gro -t ${LAST_EQ}.cpt -p ${PREFIX}.top -o prod.tpr -maxwarn 1",
+            "$GMX grompp -f prod.mdp -c ${LAST_EQ}.gro -t ${LAST_EQ}.cpt -p ${PREFIX}.top -o prod.tpr",
             "$GMX mdrun -deffnm prod -v",
             "",
             'echo "Production complete: prod.xtc"',
@@ -1849,6 +1892,7 @@ class GromacsExporter:
         interchange: "Interchange",
         config: "SimulationConfig",
         component_info: Optional["SystemComponentInfo"] = None,
+        replicate: int | None = None,
     ):
         """Initialize the GROMACS exporter.
 
@@ -1857,10 +1901,12 @@ class GromacsExporter:
             config: PolyzyMD SimulationConfig with simulation parameters.
             component_info: Optional SystemComponentInfo for position restraints.
                 If not provided, position restraints will be skipped.
+            replicate: The replicate number, which seeds the dynamics in the MDP files.
         """
         self._interchange = interchange
         self._config = config
         self._component_info = component_info
+        self._replicate = replicate
 
     def export(
         self,
@@ -1885,11 +1931,15 @@ class GromacsExporter:
             - "posres": Dictionary of position restraint files
             - "run_script": Run script path
         """
+        # GROMACS drops restraints that an OpenMM config may name.
+        self._config.require_engine_restraints("gromacs")
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         if prefix is None:
-            prefix = self._generate_prefix()
+            from polyzymd.analyses.shared.gromacs import system_prefix
+
+            prefix = system_prefix(self._config)
 
         result: Dict[str, any] = {}
 
@@ -1901,7 +1951,7 @@ class GromacsExporter:
 
         # Step 2: Generate MDP files
         logger.info("Generating MDP files...")
-        mdp_generator = MDPGenerator(self._config)
+        mdp_generator = MDPGenerator(self._config, replicate=self._replicate)
 
         # Energy minimization
         em_params = mdp_generator.generate_energy_minimization()
@@ -1935,6 +1985,10 @@ class GromacsExporter:
                 self._config, output_dir, prefix
             )
             result["posres_defines"] = posres_defines
+            em_define = posres_defines.get("minimization")
+            if em_define:
+                em_params = mdp_generator.generate_energy_minimization(define=f"-D{em_define}")
+                em_path.write_text(em_params.to_mdp_string())
 
             # Track which components have posres for user info
             if posres_defines:
@@ -2317,18 +2371,6 @@ class GromacsExporter:
                     else:
                         atom.metadata["residue_number"] = residue_num + 1
 
-    def _generate_prefix(self) -> str:
-        """Generate filename prefix from config."""
-        parts = []
-
-        if self._config.enzyme:
-            parts.append(self._config.enzyme.name)
-
-        if self._config.polymers and self._config.polymers.enabled:
-            parts.append(self._config.polymers.type_prefix)
-
-        return "_".join(parts) if parts else "system"
-
     def _log_summary(self, result: Dict[str, any], output_dir: Path) -> None:
         """Log summary of generated files."""
         logger.info("")
@@ -2543,8 +2585,6 @@ class GromacsRunner:
             f"{self._prefix}.top",
             "-o",
             "em.tpr",
-            "-maxwarn",
-            "1",
         ]
 
         self._run_command(
@@ -2617,8 +2657,6 @@ class GromacsRunner:
                 f"{self._prefix}.top",
                 "-o",
                 f"{output_name}.tpr",
-                "-maxwarn",
-                "1",
             ]
 
             # Add checkpoint from previous stage (except after EM)
@@ -2670,8 +2708,6 @@ class GromacsRunner:
                 f"{self._prefix}.top",
                 "-o",
                 "prod.tpr",
-                "-maxwarn",
-                "1",
             ],
             "Preparing production MD (grompp)",
         )

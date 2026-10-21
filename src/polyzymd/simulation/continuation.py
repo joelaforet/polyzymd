@@ -149,6 +149,7 @@ class ContinuationManager:
         platform: str = "CUDA",
         precision: str = "mixed",
         device_index: str | None = None,
+        replicate: int | None = None,
     ) -> None:
         """Initialize the ContinuationManager.
 
@@ -159,6 +160,11 @@ class ContinuationManager:
         segment_index : int
             Current segment index (0-based for first continuation after
             initial production, incrementing from there).
+        replicate : int, optional
+            The replicate number, which seeds this segment's thermostat
+            noise (:func:`polyzymd.simulation.seeds.dynamics_seed`). A
+            segment restored from a checkpoint keeps the checkpoint's
+            random state instead.
         """
         self._working_dir = Path(working_dir)
         self._segment_index = segment_index
@@ -166,6 +172,7 @@ class ContinuationManager:
         self._platform_name = platform
         self._platform_precision = precision
         self._platform_device_index = device_index
+        self._replicate = replicate
 
         # State
         self._system: Optional[openmm.System] = None
@@ -181,6 +188,9 @@ class ContinuationManager:
         # the reporter that tracks written frames; set by run_segment().
         self._frame_record: Dict[str, Any] = {}
         self._tracker: Any = None
+        # Step of the previous segment's last frame when this segment
+        # resumes before it; reports up to that step are not written.
+        self._skip_reports_through: int | None = None
 
     @property
     def working_dir(self) -> Path:
@@ -220,16 +230,6 @@ class ContinuationManager:
         for pdb_path in segment_paths:
             if pdb_path.exists():
                 return pdb_path
-
-        legacy_root = self._working_dir / "solvated_system.pdb"
-        if legacy_root.exists():
-            LOGGER.warning(
-                "No segment-owned topology exists for production_%s; using legacy root "
-                "topology %s after particle-count validation",
-                self._prev_segment,
-                legacy_root,
-            )
-            return legacy_root
 
         # Arbitrary recursive PDB discovery is disallowed to avoid selecting decoys or inputs
 
@@ -573,8 +573,10 @@ class ContinuationManager:
         Returns
         -------
         openmm.Integrator
-            OpenMM LangevinMiddleIntegrator.
+            The production thermostat: OpenMM LangevinMiddleIntegrator or
+            LangevinIntegrator.
         """
+
         if self._param_dict is None:
             raise RuntimeError("Parameters not loaded. Call load_previous_state first.")
 
@@ -588,11 +590,39 @@ class ContinuationManager:
 
         temperature = quantity_from_dict(thermostat_raw["temperature"])
         friction_coeff = quantity_from_dict(thermostat_raw["timescale"])
+        # Parameters written before the thermostat was recorded ran LangevinMiddle.
+        thermostat = thermostat_raw.get("thermostat", "LangevinMiddle")
+        if thermostat == "Langevin":
+            integrator = openmm.LangevinIntegrator(temperature, friction_coeff, time_step)
+        elif thermostat == "LangevinMiddle":
+            integrator = openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
+        else:
+            raise ValueError(f"OpenMM production cannot continue with thermostat {thermostat!r}")
+        if self._replicate is not None:
+            from polyzymd.simulation.seeds import dynamics_seed
 
-        return openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
+            integrator.setRandomNumberSeed(
+                dynamics_seed(self._replicate, f"production:{self._segment_index}")
+            )
+        return integrator
+
+    def saved_dynamics(self) -> Dict[str, Any]:
+        """Return the ensemble, thermostat and friction (1/ps) that segment 0 ran with.
+
+        A chain continues with these, whatever the config says now.
+        """
+        if self._param_dict is None:
+            raise RuntimeError("Parameters not loaded. Call load_previous_state first.")
+        thermo = self._param_dict["__values__"]["thermo_params"]["__values__"]
+        thermostat = thermo["thermostat_params"]["__values__"]
+        return {
+            "ensemble": "NPT" if "barostat_params" in thermo else "NVT",
+            "thermostat": thermostat.get("thermostat", "LangevinMiddle"),
+            "friction": float(thermostat["timescale"]["__values__"]["value"]),
+        }
 
     def _add_barostat_if_needed(self) -> None:
-        """Add barostat to the system if parameters specify NPT."""
+        """Add barostat to the system if parameters specify NPT, and seed it from the replicate."""
         if self._system is None or self._param_dict is None:
             raise RuntimeError("System/parameters not loaded")
 
@@ -611,16 +641,24 @@ class ContinuationManager:
 
         if has_barostat:
             LOGGER.debug("Barostat already present")
-            return
+        else:
+            barostat_raw = thermo_raw["barostat_params"]["__values__"]
+            temperature = quantity_from_dict(barostat_raw["temperature"])
+            pressure = quantity_from_dict(barostat_raw["pressure"])
+            # The runner writes "frequency"; parameters written before that read as 25.
+            frequency = barostat_raw.get("frequency", barostat_raw.get("update_frequency", 25))
 
-        barostat_raw = thermo_raw["barostat_params"]["__values__"]
-        temperature = quantity_from_dict(barostat_raw["temperature"])
-        pressure = quantity_from_dict(barostat_raw["pressure"])
-        frequency = barostat_raw.get("update_frequency", 25)
+            barostat = openmm.MonteCarloBarostat(pressure, temperature, frequency)
+            self._system.addForce(barostat)
+            LOGGER.info(f"Added barostat: {pressure} at {temperature}")
 
-        barostat = openmm.MonteCarloBarostat(pressure, temperature, frequency)
-        self._system.addForce(barostat)
-        LOGGER.info(f"Added barostat: {pressure} at {temperature}")
+        if self._replicate is not None:
+            from polyzymd.simulation.seeds import dynamics_seed
+
+            seed = dynamics_seed(self._replicate, f"barostat:production:{self._segment_index}")
+            for force in self._system.getForces():
+                if isinstance(force, openmm.MonteCarloBarostat):
+                    force.setRandomNumberSeed(seed)
 
     def _setup_reporters(
         self,
@@ -704,6 +742,14 @@ class ContinuationManager:
         LOGGER.info(f"Saved final state to {state_path}")
         LOGGER.info(f"Saved system to {system_path}")
 
+    def _dynamics_seeds(self) -> Dict[str, int] | None:
+        """Return the seeds the segment's integrator and barostat run with, or None before setup."""
+        if self._simulation is None:
+            return None
+        from polyzymd.simulation.seeds import openmm_seeds
+
+        return openmm_seeds(self._simulation)
+
     def _write_segment_started(self, total_steps: int) -> None:
         """Write a RUNNING segment record to progress.json at segment start.
 
@@ -737,6 +783,7 @@ class ContinuationManager:
             steps_requested=total_steps,
             samples_written=0,
             status=SegmentStatus.RUNNING,
+            seeds=self._dynamics_seeds(),
         )
 
         self._apply_frame_fields(record)
@@ -824,6 +871,10 @@ class ContinuationManager:
             LOGGER.warning("No progress file found — skipping progress update")
             return
 
+        from polyzymd.simulation.progress import trajectory_digest
+        from polyzymd.utils.version import record_provenance
+
+        segment_dir = self._working_dir / f"production_{self._segment_index}"
         record = SegmentRecord(
             index=self._segment_index,
             steps_completed=total_steps,
@@ -831,6 +882,9 @@ class ContinuationManager:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
+            seeds=self._dynamics_seeds(),
+            **record_provenance(self._simulation),
+            **trajectory_digest(segment_dir / f"production_{self._segment_index}_trajectory.dcd"),
         )
         from polyzymd.simulation.progress import _now_iso
 
@@ -876,6 +930,7 @@ class ContinuationManager:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _now_iso,
             _update_or_append_segment,
             load_progress,
             save_progress,
@@ -896,6 +951,8 @@ class ContinuationManager:
             samples_written=0,  # Replaced by the tracker's count when known
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
+            finished_at=_now_iso(),
+            seeds=self._dynamics_seeds(),
         )
         self._apply_frame_fields(record)
 
@@ -928,9 +985,10 @@ class ContinuationManager:
         The first frame of this segment falls at the first multiple of
         *report_interval* above *start_step*.  If that step is not after the
         previous segment's last frame, this segment rewrites steps the
-        trajectory already holds; if it is more than one interval after,
-        report steps in between have no frame.  Both cases are logged as
-        warnings and returned for ``progress.json``.
+        trajectory already holds, so its reporters skip those steps; if it is
+        more than one interval after, report steps in between have no frame.
+        Both cases are logged as warnings; the gap is returned for
+        ``progress.json``.
 
         Parameters
         ----------
@@ -950,15 +1008,15 @@ class ContinuationManager:
         if frame is None:
             return {"overlap_frames": 0, "gap_frames": 0}
         first = first_report_step(start_step, report_interval)
-        overlap = gap = 0
+        gap = 0
         if first <= frame.last_step:
-            overlap = (frame.last_step - first) // report_interval + 1
+            repeated = (frame.last_step - first) // report_interval + 1
+            self._skip_reports_through = frame.last_step
             LOGGER.warning(
                 f"Segment {self._segment_index} resumes at step {start_step}, before "
                 f"segment {frame.segment_index}'s last frame at step {frame.last_step}: "
-                f"its first {overlap} frame(s) repeat steps already in the trajectory. "
-                f"Keep one frame per step when joining: drop segment "
-                f"{frame.segment_index}'s last {overlap} frame(s)."
+                f"not writing its first {repeated} frame(s), which the trajectory "
+                f"already holds."
             )
         elif first > frame.last_step + report_interval:
             gap = (first - frame.last_step) // report_interval - 1
@@ -967,7 +1025,7 @@ class ContinuationManager:
                 f"frame is at step {first}, so {gap} report step(s) after segment "
                 f"{frame.segment_index}'s last frame at step {frame.last_step} have no frame."
             )
-        return {"overlap_frames": overlap, "gap_frames": gap}
+        return {"overlap_frames": 0, "gap_frames": gap}
 
     def _correct_previous_steps(self, start_step: int) -> None:
         """Make the previous segment's step count end at the state just loaded.
@@ -977,9 +1035,12 @@ class ContinuationManager:
         segment resumed from.  When the previous record knows its own
         ``start_step``, its ``steps_completed`` is set to
         ``start_step_of_this_segment - start_step_of_previous`` so the chain's
-        step total counts each integrated step once.
+        step total counts each integrated step once.  When the previous record
+        has no ``last_reported_step``, it and ``samples_written`` are read
+        from the segment's trajectory files.
         """
         from polyzymd.simulation.progress import load_progress, save_progress
+        from polyzymd.simulation.report_state import segment_frames
 
         progress = load_progress(self._working_dir)
         if progress is None:
@@ -987,6 +1048,7 @@ class ContinuationManager:
         for seg in progress.segments:
             if seg.index != self._prev_segment or seg.start_step is None:
                 continue
+            changed = False
             actual = start_step - seg.start_step
             if actual >= 0 and actual != seg.steps_completed:
                 LOGGER.warning(
@@ -997,8 +1059,38 @@ class ContinuationManager:
                 seg.steps_completed = actual
                 if progress.timestep_fs:
                     seg.duration_ns = actual * progress.timestep_fs / 1e6
+                changed = True
+            # A hard-killed segment never recorded its frames; read them from its files.
+            if seg.last_reported_step is None:
+                frame = segment_frames(self._working_dir, seg.index)
+                if frame is not None:
+                    seg.last_reported_step = frame.last_step
+                    seg.samples_written = frame.frames
+                    changed = True
+            if changed:
                 save_progress(self._working_dir, progress)
             return
+
+    def _planned_end_step(self, total_steps: int) -> Optional[int]:
+        """Return the integrator step at which this segment should stop.
+
+        The caller sizes the segment from the steps recorded for earlier
+        segments.  For a hard-killed segment that count is an estimate made
+        before its state is loaded, so the segment is meant to end at
+        ``origin + recorded steps + total_steps``, never past
+        ``origin + total_steps_requested``.  ``origin`` is segment 0's start
+        step.  Returns ``None`` when ``progress.json`` records no total.
+        """
+        from polyzymd.simulation.progress import load_progress
+
+        progress = load_progress(self._working_dir)
+        if progress is None or not progress.total_steps_requested:
+            return None
+        origin = next((s.start_step for s in progress.segments if s.index == 0), None) or 0
+        recorded = sum(
+            s.steps_completed for s in progress.segments if s.index < self._segment_index
+        )
+        return min(origin + recorded + total_steps, origin + progress.total_steps_requested)
 
     def run_segment(
         self,
@@ -1045,15 +1137,6 @@ class ContinuationManager:
         LOGGER.info(
             f"Starting segment {self._segment_index}: {duration_ns} ns, {num_samples} frames"
         )
-
-        # Update parameters for this segment
-        if self._param_dict:
-            integ_values = self._param_dict["__values__"]["integ_params"]["__values__"]
-            integ_values["total_time"] = {
-                "__class__": "Quantity",
-                "__values__": {"value": duration_ns, "unit": "nanosecond"},
-            }
-            integ_values["num_samples"] = num_samples
 
         # Add barostat if needed
         self._add_barostat_if_needed()
@@ -1124,8 +1207,17 @@ class ContinuationManager:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved initial system to {system_xml_path}")
 
-        # Calculate total steps
-        total_steps = int(duration_ns * 1e6 / timestep_fs)
+        # Count the steps from the step actually loaded, not from the
+        # estimate the caller sized the segment with.
+        total_steps = round(duration_ns * 1e6 / timestep_fs)
+        end_step = self._planned_end_step(total_steps)
+        if end_step is not None and end_step != start_step + total_steps:
+            LOGGER.info(
+                f"Segment {self._segment_index} starts at step {start_step}; running "
+                f"{max(0, end_step - start_step)} steps to end at step {end_step}"
+            )
+            total_steps = max(0, end_step - start_step)
+            duration_ns = total_steps * timestep_fs / 1e6
 
         if report_interval <= 0:
             raise ValueError("report_interval must be a positive integer")
@@ -1142,9 +1234,32 @@ class ContinuationManager:
         tracker = ReportedStateTracker(output_dir, seg_report_interval, start_step)
         self._simulation.reporters.append(tracker)
         self._tracker = tracker
+        skip_through = getattr(self, "_skip_reports_through", None)
+        if skip_through is not None:
+            from polyzymd.simulation.report_state import SkipReportsThrough
+
+            self._simulation.reporters[:] = [
+                SkipReportsThrough(reporter, skip_through)
+                for reporter in self._simulation.reporters
+            ]
+        first_frame_after = max(start_step, skip_through or start_step)
+        num_samples = max(
+            0,
+            (start_step + total_steps) // seg_report_interval
+            - first_frame_after // seg_report_interval,
+        )
 
         # Save parameters for this segment
         if self._param_dict:
+            integ_values = self._param_dict["__values__"]["integ_params"]["__values__"]
+            integ_values["total_time"] = {
+                "__class__": "Quantity",
+                "__values__": {"value": duration_ns, "unit": "nanosecond"},
+            }
+            integ_values["num_samples"] = num_samples
+            from polyzymd.utils.version import runtime_provenance
+
+            self._param_dict["provenance"] = runtime_provenance(self._simulation)
             reporter_params = self._param_dict["__values__"].get("reporter_params")
             if isinstance(reporter_params, dict) and "__values__" in reporter_params:
                 reporter_params["__values__"]["report_interval"] = seg_report_interval
@@ -1291,6 +1406,11 @@ class ContinuationManager:
 
         # Save final state
         self._save_final_state(output_dir)
+
+        from polyzymd.simulation.progress import flush_reporters
+
+        # The trajectory is hashed into progress.json: make sure it is all on disk.
+        flush_reporters(self._simulation)
 
         # Update progress tracker with the frames this segment actually wrote
         self._update_progress_completed(

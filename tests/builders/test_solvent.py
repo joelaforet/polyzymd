@@ -73,31 +73,19 @@ def test_config_translation_uses_mole_fraction(monkeypatch) -> None:
     assert co_solvents[1].concentration == 2.0
 
 
-def test_neutralizing_ion_counts_use_target_and_tie_toward_more_ions() -> None:
-    """Neutralization should target a concentration and prefer more ions on ties."""
-    na_count, cl_count = SolventBuilder._calculate_ion_counts(
-        nacl_to_add=43,
-        solute_charge=-15,
-        neutralize=True,
-    )
-
-    assert (na_count, cl_count) == (51, 36)
-    assert -15 + na_count - cl_count == 0
-
-
 @pytest.mark.parametrize(
     ("solute_charge", "expected_counts"),
     [
-        (-4, (12, 8)),
-        (5, (8, 13)),
+        (-4, (14, 10)),
+        (5, (10, 15)),
         (0, (10, 10)),
     ],
 )
-def test_neutralizing_ion_counts_produce_zero_net_charge(
+def test_neutralizing_ions_are_added_on_top_of_the_salt(
     solute_charge: int,
     expected_counts: tuple[int, int],
 ) -> None:
-    """Neutralizing final ion counts should exactly cancel integer solute charge."""
+    """Neutralizing ions are added to the requested salt pairs, which stay complete."""
     na_count, cl_count = SolventBuilder._calculate_ion_counts(
         nacl_to_add=10,
         solute_charge=solute_charge,
@@ -174,7 +162,7 @@ class _FakeConformer:
 
 
 class _FakeMolecule:
-    """Molecule exposing a single conformer, as get_topology_bbox expects."""
+    """Molecule exposing a single conformer, as get_topology_positions expects."""
 
     def __init__(self, coords):
         self.conformers = [_FakeConformer(coords)]
@@ -189,48 +177,84 @@ class _FakeTopology:
 
 
 def _solute_molecule():
-    """A solute spanning 10 x 20 x 30 Angstrom."""
+    """A solute spanning 10 x 20 x 30 Angstrom (diameter sqrt(1400) Angstrom)."""
     return _FakeMolecule([[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]])
 
 
-def _legacy_box_vectors(topology, padding_nm):
-    """The box the pre-fix code computed: bbox + 2*padding, shaped."""
-    import openff.packmol as packmol
-    from openff.units import Quantity
-
-    from polyzymd.utils import boxvectors
-
-    bbox = boxvectors.get_topology_bbox(topology)
-    padded = boxvectors.pad_box_vectors_uniform(bbox, Quantity(padding_nm, "nanometer"))
-    return packmol.RHOMBIC_DODECAHEDRON @ padded
-
-
-def test_compute_box_vectors_matches_legacy_for_a_solute_only_build() -> None:
-    """Control bundles must keep the box they have today (no extra padding)."""
+def _elongated_solute():
+    """A filled ellipsoid spanning 37.5 x 41.8 x 50 Angstrom, long along z like T4 lysozyme."""
     import numpy as np
 
-    topology = _FakeTopology(_solute_molecule())
-    computed = SolventBuilder().compute_box_vectors(topology, padding=1.2)
-    legacy = _legacy_box_vectors(topology, 1.2)
+    semi_axes = np.array([18.75, 20.9, 25.0])
+    grid = np.mgrid[-25:26:3, -25:26:3, -25:26:3].reshape(3, -1).T.astype(float)
+    inside = grid[np.sum((grid / semi_axes) ** 2, axis=1) <= 1.0]
+    tips = np.vstack([np.diag(semi_axes), -np.diag(semi_axes)])
+    return _FakeMolecule(np.vstack([inside, tips]))
 
-    np.testing.assert_allclose(
-        computed.m_as("nanometer"), legacy.m_as("nanometer"), rtol=0, atol=1e-12
-    )
+
+def _closest_image_distance_nm(coords_angstrom, box_nm) -> float:
+    """Smallest distance between the solute and any of its periodic copies."""
+    import itertools
+
+    import numpy as np
+    from scipy.spatial.distance import cdist
+
+    coords = np.asarray(coords_angstrom, dtype=float) / 10.0
+    closest = np.inf
+    for shift in itertools.product((-1, 0, 1), repeat=3):
+        if shift == (0, 0, 0):
+            continue
+        image = coords + np.asarray(shift, dtype=float) @ box_nm
+        closest = min(closest, float(cdist(coords, image).min()))
+    return closest
 
 
 def test_compute_box_vectors_reserves_room_for_polymers() -> None:
-    """With polymers the cell grows by 2 * packing padding in every direction."""
+    """With polymers the cell edge grows by 2 * packing padding."""
     import numpy as np
 
     topology = _FakeTopology(_solute_molecule())
     without = SolventBuilder().compute_box_vectors(topology, padding=1.2)
     with_polymers = SolventBuilder().compute_box_vectors(topology, padding=1.2, extra_padding=2.0)
-    grown = _legacy_box_vectors(topology, 1.2 + 2.0)
 
-    np.testing.assert_allclose(
-        with_polymers.m_as("nanometer"), grown.m_as("nanometer"), rtol=0, atol=1e-12
-    )
+    edge = with_polymers.m_as("nanometer")[0, 0]
+    assert edge == pytest.approx(without.m_as("nanometer")[0, 0] + 4.0)
     assert np.linalg.det(with_polymers.m_as("nanometer")) > np.linalg.det(without.m_as("nanometer"))
+
+
+@pytest.mark.parametrize("shape", ["cube", "rhombic_dodecahedron"])
+def test_solute_is_two_paddings_from_its_periodic_copies(shape: str) -> None:
+    """Padding is the solute-to-box-edge distance: copies are 2 x padding apart."""
+    solute = _elongated_solute()
+    box = SolventBuilder().compute_box_vectors(_FakeTopology(solute), padding=1.2, box_shape=shape)
+
+    distance = _closest_image_distance_nm(solute.conformers[0].m_as("angstrom"), box.m_as("nm"))
+    assert distance >= 2 * 1.2 - 1e-9
+
+
+def test_cube_box_is_cubic() -> None:
+    """shape: cube gives three equal, orthogonal edges."""
+    import numpy as np
+
+    box = SolventBuilder().compute_box_vectors(
+        _FakeTopology(_elongated_solute()), padding=1.2, box_shape="cube"
+    )
+    edge = box.m_as("nanometer")[0, 0]
+    np.testing.assert_allclose(box.m_as("nanometer"), edge * np.eye(3))
+
+
+def test_default_box_fits_an_elongated_solute_in_the_brick() -> None:
+    """The default dodecahedron brick leaves at least the Packmol tolerance on every face."""
+    import numpy as np
+
+    solute = _elongated_solute()
+    config = SolventConfig()
+    box = SolventBuilder().compute_box_vectors_from_config(_FakeTopology(solute), config)
+
+    coords = solute.conformers[0].m_as("angstrom") / 10.0
+    extent = coords.max(axis=0) - coords.min(axis=0)
+    clearance = (np.diagonal(box.m_as("nanometer")) - extent) / 2.0
+    assert np.all(clearance >= config.box.tolerance / 10.0 - 1e-9), clearance
 
 
 def test_compute_box_vectors_is_independent_of_polymer_positions() -> None:
@@ -253,7 +277,7 @@ def test_compute_box_vectors_is_independent_of_polymer_positions() -> None:
 
 
 def test_compute_box_vectors_from_config_uses_config_padding() -> None:
-    """The config wrapper must forward padding, shape and the extra padding."""
+    """The config wrapper must forward padding, shape, tolerance and the extra padding."""
     import numpy as np
 
     topology = _FakeTopology(_solute_molecule())
@@ -266,6 +290,7 @@ def test_compute_box_vectors_from_config_uses_config_padding() -> None:
         padding=config.box.padding,
         box_shape=config.box.shape.value,
         extra_padding=2.0,
+        tolerance=config.box.tolerance,
     )
     np.testing.assert_array_equal(computed.m_as("nanometer"), expected.m_as("nanometer"))
 
@@ -336,3 +361,110 @@ def test_solvate_without_box_centres_and_derives_the_box(monkeypatch) -> None:
     np.testing.assert_allclose(
         captured["box_vectors"].m_as("nanometer"), expected.m_as("nanometer")
     )
+
+
+def _packmol_counts(monkeypatch, tmp_path, composition, runs: int = 1) -> list[dict]:
+    """Solvate methane `runs` times with Packmol replaced; return what it was asked each time."""
+    from openff.toolkit import Molecule, Topology
+
+    import polyzymd.utils.packmol as packmol_utils
+    from polyzymd.data import solvent_molecules
+
+    calls: list[dict] = []
+
+    def fake_solvate_with_packmol(**kwargs):
+        calls.append(kwargs)
+        return kwargs["solute"]
+
+    monkeypatch.setattr(packmol_utils, "solvate_with_packmol", fake_solvate_with_packmol)
+    monkeypatch.setattr(solvent_molecules, "_USER_CACHE_DIR", tmp_path)
+    monkeypatch.setattr(solvent_molecules, "_loaded_molecules", {})
+    solute = Molecule.from_smiles("C")
+    solute.generate_conformers(n_conformers=1)
+    results = []
+    for _ in range(runs):
+        SolventBuilder().solvate(Topology.from_molecules([solute]), composition, padding=1.5)
+        names = ["water", "na", "cl", "cosolvent"]
+        counts = dict(zip(names, calls[-1]["number_of_copies"]))
+        counts["molecule"] = calls[-1]["molecules"][3]
+        results.append(counts)
+    return results
+
+
+def _solvate_counts(
+    monkeypatch, tmp_path, co_solvent_smiles: str, neutralize: bool = True, nacl: float = 0.0
+) -> dict:
+    """Solvate methane with one co-solvent at 0.5 M, Packmol replaced, and return what it was asked."""
+    from polyzymd.builders.solvent import CoSolvent, SolventComposition
+
+    cosolvent = CoSolvent(name="surf", smiles=co_solvent_smiles, concentration=0.5)
+    composition = SolventComposition(
+        co_solvents=[cosolvent], neutralize=neutralize, nacl_concentration=nacl
+    )
+    return _packmol_counts(monkeypatch, tmp_path, composition)[0]
+
+
+class TestCoSolventCharge:
+    def test_a_charged_cosolvent_is_neutralized(self, monkeypatch, tmp_path) -> None:
+        """An acetate SMILES carries -1 each, which the Na+ count must balance."""
+        counts = _solvate_counts(monkeypatch, tmp_path, "CC(=O)[O-]")
+        assert counts["cosolvent"] > 0
+        assert counts["na"] - counts["cl"] - counts["cosolvent"] == 0
+
+    @pytest.mark.parametrize("neutralize", [True, False])
+    def test_a_counter_ion_in_the_smiles_becomes_its_own_ion(
+        self, monkeypatch, tmp_path, neutralize
+    ) -> None:
+        """'...[O-].[Na+]' packs acetate without Na and one Na+ ion per acetate."""
+        counts = _solvate_counts(monkeypatch, tmp_path, "CC(=O)[O-].[Na+]", neutralize)
+        assert counts["cosolvent"] > 0
+        assert counts["na"] == counts["cosolvent"] and counts["cl"] == 0
+        assert 11 not in [atom.atomic_number for atom in counts["molecule"].atoms]
+
+    @pytest.mark.parametrize("smiles", ["CC(=O)[O-]", "CC(=O)[O-].[Na+]"])
+    def test_requested_salt_is_kept_beside_a_charged_cosolvent(
+        self, monkeypatch, tmp_path, smiles
+    ) -> None:
+        """Both spellings keep every requested Cl-, and the Na+ count adds one per acetate."""
+        salt = _solvate_counts(monkeypatch, tmp_path, "CCO", nacl=0.5)["cl"]
+        counts = _solvate_counts(monkeypatch, tmp_path, smiles, nacl=0.5)
+        assert salt > 0 and counts["cl"] == salt
+        assert counts["na"] == salt + counts["cosolvent"]
+
+    def test_a_net_charge_without_neutralize_is_a_warning(
+        self, monkeypatch, tmp_path, caplog
+    ) -> None:
+        """With neutralize off the build goes on, but says the system is charged."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            _solvate_counts(monkeypatch, tmp_path, "CC(=O)[O-]", neutralize=False)
+        assert any("net charge" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.parametrize("neutralize", [True, False])
+    def test_a_reused_composition_gives_the_same_counts(
+        self, monkeypatch, tmp_path, neutralize
+    ) -> None:
+        """A second solvate() with the same composition adds the same counter-ions."""
+        from polyzymd.builders.solvent import CoSolvent, SolventComposition
+
+        cosolvent = CoSolvent(name="surf", smiles="CC(=O)[O-].[Na+]", count=3)
+        composition = SolventComposition(
+            co_solvents=[cosolvent], neutralize=neutralize, nacl_concentration=0.15
+        )
+        first, second = _packmol_counts(monkeypatch, tmp_path, composition, runs=2)
+        assert first["na"] == first["cl"] + 3
+        assert [second[k] for k in ("water", "na", "cl", "cosolvent")] == [
+            first[k] for k in ("water", "na", "cl", "cosolvent")
+        ]
+
+    def test_a_mole_fraction_with_counter_ions_is_met(self, monkeypatch, tmp_path) -> None:
+        """Counter-ion mass comes out of the budget before the co-solvent count is taken."""
+        from polyzymd.builders.solvent import CoSolvent, SolventComposition
+
+        cosolvent = CoSolvent(name="surf", smiles="CC(=O)[O-].[Na+]", mole_fraction=0.1)
+        composition = SolventComposition(co_solvents=[cosolvent], nacl_concentration=0.0)
+        counts = _packmol_counts(monkeypatch, tmp_path, composition)[0]
+        assert counts["na"] == counts["cosolvent"] and counts["cl"] == 0
+        achieved = counts["cosolvent"] / (counts["cosolvent"] + counts["water"])
+        assert achieved == pytest.approx(0.1, abs=0.002)

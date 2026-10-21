@@ -1,304 +1,261 @@
-# Run Your First PolyzyMD Simulation
+# Run your first simulation
 
-This tutorial walks through one complete first run: create a project scaffold,
-add an enzyme structure, write a minimal configuration, validate it, and make
-sure PolyzyMD can build the system.
+In this tutorial you simulate the small protein Trp-cage in water, and then
+measure its radius of gyration. You start the way every PolyzyMD study
+starts: you make a {term}`project`, add a {term}`study` to it, and add a
+condition to the study. The condition is the example config in
+`examples/quickstart/` of the PolyzyMD repository. The simulation is a few
+picoseconds long, so it finishes on a laptop CPU in about two minutes.
 
-## What You Will Learn
+You learn these steps:
 
-- How to create a project scaffold with `polyzymd init`
-- How to write a minimal `config.yaml` for an enzyme-only simulation
-- How to validate your configuration and run a system build
-- How to choose between local execution and HPC submission
+1. Make a project folder with `polyzymd project init`.
+2. Add a condition with `polyzymd study add-condition`.
+3. Check the config with `polyzymd validate`.
+4. Build and run the simulation with `polyzymd run`.
+5. Analyze the project with `polyzymd analyze --project`.
 
-## Prerequisites
+## Before you start
 
-- PolyzyMD installed with `pixi` as described in {doc}`installation`
-- a simulation-ready enzyme PDB file; if you are starting from a raw PDB entry,
-  prepare and validate it first with {doc}`../tutorials/prepare_pdb_for_openff`
-- the repository available locally so `pixi run -e ...` can find `pixi.toml`
+Install PolyzyMD as {doc}`installation` describes. You need the clone of the
+repository, because the example files are in it.
 
-By the end, you will have a working project directory and a validated
-`config.yaml` that is ready for local building or HPC submission.
+:::{admonition} Environment Setup
+:class: tip
 
-```{important}
-**Resource requirements:** Lightweight commands such as `polyzymd init`,
-`validate`, `status`, and `--help` are safe to run interactively. System builds,
-simulations, and trajectory analyses can require substantial RAM, CPU/GPU time,
-and scratch I/O. On shared HPC systems, run heavy commands inside an allocated
-job or interactive compute session, not on a login node. If a tutorial command
-is killed or runs out of memory, request more resources or use the SLURM
-workflow.
-```
-
-## Step 1: Create a new project scaffold
-
-From the PolyzyMD repository root, run:
+Run every command of this tutorial in the `build` environment. It holds
+OpenMM, PACKMOL and the analysis tools. From the repository root, activate it
+once:
 
 ```bash
-pixi run -e build polyzymd init --name my_first_simulation
+pixi shell -e build
 ```
 
-This creates a directory like:
+The commands then work in any folder of this shell.
+:::
+
+## Step 1: Make the project
+
+A project holds the studies of one paper. A study holds the conditions of one
+protein that you compare with each other. Make a project with one study,
+`trpcage`:
+
+```bash
+polyzymd project init ~/pz_quickstart --study trpcage
+cd ~/pz_quickstart
+```
+
+The output is:
+
+```
+created project /home/me/pz_quickstart with studies trpcage
+next: fill description:, structures:, regions: and conditions: in each study.yaml (polyzymd study add-condition adds a condition), the analyses and metadata: in project.yaml, then polyzymd project check
+```
+
+The project folder holds `project.yaml`, which lists the studies and the
+analyses, and the study folder `trpcage/`, with its `study.yaml`. The
+command also makes the folder a git repository.
+
+## Step 2: Add the example as a condition
+
+The example folder `examples/quickstart/` holds these files:
+
+| File | What it is |
+|---|---|
+| `trpcage.pdb` | Trp-cage (PDB 1L2Y, model 1), chain A, with hydrogens, cleaned with `polyzymd clean-pdb` |
+| `config.yaml` | The simulation config for OpenMM, on the CPU platform |
+| `config_gromacs.yaml` | The same system for GROMACS |
+| `README.md` | A short description of the example |
+
+`config.yaml` puts the protein in a rhombic dodecahedron box of TIP3P water
+with 0.15 M NaCl, at 300 K and 1 atm. It has one equilibration stage of
+0.002 ns (NVT) and a production of 0.004 ns (NPT) that saves 4 frames.
+
+Add it to the study as the condition `Water`. Change `~/polyzymd` to the
+folder where you cloned the repository:
+
+```bash
+polyzymd study add-condition Water --config ~/polyzymd/examples/quickstart/config.yaml --study trpcage
+```
+
+The output is:
+
+```
+condition Water: /home/me/pz_quickstart/trpcage/conditions/water/config.yaml, listed in study.yaml
+warning: the runs go into runs/trpcage/water unless you set scratch_directory in config.yaml; trajectories can use a lot of disk space, so on a cluster set scratch_directory to scratch storage
+next: commit, and run polyzymd study check
+```
+
+`add-condition` copies the config and `trpcage.pdb` into
+`trpcage/conditions/water/`, and lists the condition in `trpcage/study.yaml`.
+The copy writes its simulations into `runs/trpcage/water/` of the project.
+
+:::{warning}
+The simulations go into the project folder, in `runs/`, unless you set
+`scratch_directory` in the config. Trajectories can use a lot of disk space.
+On a cluster, set `scratch_directory` to your scratch storage. Git ignores
+`runs/`, so the trajectories are never committed.
+:::
+
+## Step 3: Validate the config
+
+```bash
+polyzymd validate -c trpcage/conditions/water/config.yaml
+```
+
+`validate` reads the config and checks every key and value. It does not build
+anything. The output is:
+
+```
+Validating configuration: trpcage/conditions/water/config.yaml
+Configuration is valid!
+
+
+Summary:
+  Name: trpcage_water
+  Engine: openmm
+  Enzyme: trpcage
+  Substrate: None (apo simulation)
+  Polymers: Disabled
+  Co-solvents: none
+  Temperature: 300.0 K
+  Pressure: 1.0 atm
+
+Simulation phases:
+  Equilibration: 0.002000 ns across 1 stage(s)
+    - equil: 0.002 ns (NVT)
+  Production: 0.004 ns (NPT)
+```
+
+## Step 4: Build and run the simulation
+
+```bash
+polyzymd run -c trpcage/conditions/water/config.yaml -r 1
+```
+
+`-r 1` selects replicate 1. The replicate number seeds the starting structure.
+`polyzymd run` does these steps on this machine:
+
+1. It builds the system: it solvates the protein with PACKMOL, adds the ions
+   and assigns force-field parameters with OpenFF.
+2. It minimizes the energy. The protein heavy atoms stay fixed.
+3. It runs the equilibration stage.
+4. It runs production.
+
+The command prints a log of each step. It takes about one to two minutes. The
+last lines are:
+
+```
+OpenMM simulation completed successfully.
+Output directory: /home/me/pz_quickstart/runs/trpcage/water/trpcage_300K_run1
+```
+
+The {term}`replicate folder` `trpcage_300K_run1/` now holds the simulation:
 
 ```text
-my_first_simulation/
-|- config.yaml
-|- structures/
-|- job_scripts/
-`- slurm_logs/
+runs/trpcage/water/trpcage_300K_run1/
+├── build_manifest.json
+├── progress.json                # the stages and segments that have run
+├── solvated_system.pdb          # the built system, for viewers
+├── system.prmtop                # the topology that the analyses read
+├── system.xml                   # the OpenMM System
+├── minimization/
+├── equilibration_0_equil/
+└── production_0/
+    ├── production_0_trajectory.dcd
+    └── ...
 ```
 
-Move into the new project:
+## Step 5: Measure the radius of gyration
 
-```bash
-cd my_first_simulation
-```
-
-## Step 2: Add your enzyme structure
-
-Copy your prepared enzyme structure into `structures/`:
-
-```bash
-cp /path/to/enzyme.pdb structures/enzyme.pdb
-rm structures/*.placeholder.txt
-```
-
-Your PDB should already be ready for simulation:
-
-- hydrogens added
-- missing atoms or residues fixed
-- intended protonation state chosen
-- alternate conformers removed
-- all protein residues assigned to chain ID `A`
-
-If your input came directly from the Protein Data Bank, do not assume it is ready
-for PolyzyMD. Use {doc}`../tutorials/prepare_pdb_for_openff` for a worked 4CHA
-example that separates biological-system selection from mechanical cleanup.
-
-If you are also using a substrate, place its SDF file in `structures/` now, but
-this tutorial keeps the first run to an enzyme-only example.
-
-## Step 3: Replace the template with a minimal config
-
-Open `config.yaml` and replace the template contents with:
+List the analysis in `project.yaml`. Open the file and replace the line
+`analyses: {}` with these two lines:
 
 ```yaml
-name: "my_first_simulation"
-description: "First PolyzyMD tutorial run"
-
-enzyme:
-  name: "MyEnzyme"
-  pdb_path: "structures/enzyme.pdb"
-
-solvent:
-  primary:
-    type: "water"
-    model: "tip3p"
-  co_solvents: []
-  ions:
-    neutralize: true
-    nacl_concentration: 0.15  # NaCl-equivalent final ion concentration (M)
-  box:
-    padding: 1.2
-    shape: "rhombic_dodecahedron"
-    target_density: 1.0
-    tolerance: 2.0
-
-thermodynamics:
-  temperature: 300.0
-  pressure: 1.0
-
-simulation_phases:
-  equilibration_stages:
-    - name: "heating"
-      samples: 20
-      ensemble: "NVT"
-      temperature_start: 60.0
-      temperature_end: 300.0
-      temperature_increment: 1.0
-      temperature_interval_steps: 600  # increase temperature by `temperature_increment` every this many steps
-      position_restraints:
-        - group: "protein_heavy"
-          force_constant: 4184.0
-    - name: "free_equilibration"
-      duration: 0.8
-      samples: 80
-      ensemble: "NPT"
-      temperature: 300.0
-  production:
-    ensemble: "NPT"
-    duration: 10.0
-    samples: 250
-    time_step: 2.0
-    thermostat: "LangevinMiddle"
-    thermostat_timescale: 1.0
-    barostat: "MC"
-    barostat_frequency: 25
-
-output:
-  projects_directory: "."
-  scratch_directory: null
-  job_scripts_subdir: "job_scripts"
-  slurm_logs_subdir: "slurm_logs"
-  naming_template: "{enzyme}_{temperature}K_run{replicate}"
-  save_checkpoint: true
-  save_state_data: true
-  trajectory_format: "dcd"
+analyses:
+  rg: {}
 ```
 
-This is intentionally small, but it still uses the staged equilibration model
-that PolyzyMD now requires for all simulations.
-
-## Step 4: Validate the config
-
-Run:
+`rg: {}` runs the radius of gyration with its default settings in every study
+of the project. Commit the inputs, so the report can name the commit that made
+it:
 
 ```bash
-pixi run -e build polyzymd validate -c config.yaml
+git add -A
+git commit -m "Add the Water condition and the rg analysis"
 ```
 
-Success looks like a clean validation report with your enzyme name,
-temperature, and equilibration/production phases listed.
-
-If validation fails, fix the reported paths or field values before continuing.
-
-## Step 5: Check that the system can build
-
-Start with a dry run to see the full validation report:
+Then run every analysis of the project:
 
 ```bash
-pixi run -e build polyzymd build -c config.yaml --dry-run
+polyzymd analyze --project .
 ```
 
-If that succeeds, run the actual build. The commands differ depending on
-which simulation engine you plan to use:
+`analyze` measures the radius of gyration of the protein on each production
+frame, and takes the mean of each replicate. The `trpcage` study uses every
+production frame, because its `study.yaml` sets `equilibration: 0ns`. A real
+study removes the first part of production. The output is:
 
-`````{tab-set}
-````{tab-item} OpenMM (default)
-Build the system for OpenMM simulation:
-
-```bash
-pixi run -e build polyzymd build -c config.yaml
+```
+log: /home/me/pz_quickstart/logs/polyzymd-analyze-20261006-171142-pid18811.log
+== study trpcage
+== rg
+# polyzymd analyze rg  metric mean_rg  unit A  eq 0ns  conditions 1  replicates 1  protocol rg/2
+Water  n 1  mean 7.138  sem na  ci95 na  values 7.138  replicates 1  g 1  n_eff 4  eq_detected 0.001 ns
+warning: condition Water: replicates 1 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected
+warning: condition Water has one replicate, so it has no interval
+verdict: Water mean_rg 7.138 A (no interval, n 1)
 ```
 
-This prepares the solvated system (PDB + OpenMM XML) for the configured
-equilibration and production phases.
-````
+Read the lines in this order:
 
-````{tab-item} GROMACS
-Build the system and export GROMACS input files:
+1. `verdict:` gives the result: a mean radius of gyration of about 7.1 Å.
+   Your value differs a little. The replicate number fixes the starting
+   structure and the random seeds, but the CPU threads add up forces in a
+   different order on each run, so runs agree statistically, not exactly.
+2. The `Water` line gives `n 1`, one replicate. With one replicate there is
+   no confidence interval, so `sem` and `ci95` are `na`.
+3. The two `warning:` lines come from the short test: one replicate of 4
+   frames. A real study has several replicates and many frames.
 
-```bash
-pixi run -e build polyzymd build -c config.yaml --format gromacs
-```
+For the meaning of each field, see {ref}`polyzymd analyze <cli-analyze>`.
 
-This builds the solvated system and exports `.gro`, `.top`, `.itp`, `.mdp`, and
-a run script to `replicate_1/gromacs/`.
+PolyzyMD stored the result in `trpcage/results/rg/`:
 
-```{tip}
-For the full GROMACS workflow, see {doc}`../how_to/gromacs_export`.
-Use `polyzymd build --format gromacs` when you only want input files,
-`polyzymd run --engine gromacs` when you want PolyzyMD to build and run locally,
-or `polyzymd submit --engine gromacs` to submit self-resubmitting SLURM jobs.
-```
+| Path | Holds |
+|---|---|
+| `polyzymd_results/` | The value of each frame and a record of what produced it |
+| `report.json` | The full report |
+| `figures/` | The figures of the analysis |
 
-For multiple replicates (each with an independently built system):
+PolyzyMD writes the figures to files and opens no window. So `analyze`
+needs no display: it works over SSH, in a batch job and under WSL.
+`--no-plots` skips the figures.
 
-```bash
-pixi run -e build polyzymd build -c config.yaml --format gromacs --replicates 1-3
-```
-````
-`````
+If you run the command again, PolyzyMD reads the stored values and does not
+read the trajectory.
 
-## Step 6: Decide how you want to run production
+## What you did
 
-`````{tab-set}
-````{tab-item} OpenMM — local
-For a local smoke test on a GPU-enabled workstation, you can run one segment:
+You made a project, added a condition to its study, validated the config,
+simulated a protein in water and measured one quantity with its provenance.
+The steps for a real simulation are the same. Only the protein, the durations
+and the hardware change.
 
-```bash
-pixi run -e sim-cuda-12-4 polyzymd run-segment -c config.yaml -r 1
-```
-````
+## Next steps
 
-````{tab-item} OpenMM — HPC
-For an HPC workflow, generate job scripts first:
-
-```bash
-pixi run -e build polyzymd submit -c config.yaml --preset aa100 --replicates 1 --generate-only
-```
-
-Use `--dry-run` instead if you only want a preview without creating files.
-
-If the generated scripts are correct, submit them from `build`. The job
-activates the runtime selected by the site preset.
-````
-
-````{tab-item} GROMACS — local
-Run the full GROMACS workflow locally (build + EM + equilibration + production):
-
-```bash
-pixi run -e build polyzymd run -c config.yaml --engine gromacs --replicates 1
-```
-
-If you only need the input files without running GROMACS, use
-`build --format gromacs` instead (see Step 5 above).
-````
-
-````{tab-item} GROMACS — HPC
-Submit GROMACS jobs to SLURM with self-resubmitting checkpoint-based restart:
-
-```bash
-pixi run -e build polyzymd submit \
-    -c config.yaml \
-    --engine gromacs \
-    --preset aa100 \
-    --replicates 1-3
-```
-
-Add a `gromacs:` block to your `config.yaml` for GPU acceleration and module
-loading. See {doc}`../how_to/gromacs_export` for the full GROMACS HPC workflow
-with cluster-specific recipes.
-
-:::{tip}
-**CU Boulder Blanca users:** Replace `--preset aa100` with
-`--preset blanca-shirts --constraint "A40"` and run `ml slurm/blanca` first.
-See the Blanca GPU recipe in {doc}`../how_to/gromacs_export`.
-:::
-````
-`````
-
-## What you should have now
-
-At this point you should have:
-
-- a project directory created by `polyzymd init`
-- a minimal, validated `config.yaml`
-- a successful build dry run or real build
-- a clear next step for local execution or SLURM submission
-
-## Step 7: Monitor progress
-
-After submitting jobs, check simulation progress across all replicates:
-
-```bash
-pixi run -e build polyzymd status -c config.yaml
-```
-
-This shows a compact dashboard with colored progress bars, completion
-percentages, and status for each replicate. If any replicate shows
-`interrupted`, use `polyzymd recover` to resume it — see
-{doc}`../how_to/hpc_slurm` for details.
-
-## Where to go next
-
-- Add a substrate or polymers: {doc}`../reference/configuration`
-- Export to GROMACS: {doc}`../how_to/gromacs_export`
-- Add distance restraints: {doc}`../how_to/restraints`
-- Tune staged equilibration: {doc}`../how_to/equilibration`
-- Run on a cluster: {doc}`../how_to/hpc_slurm`
-
-<!-- IMAGE OPPORTUNITY: Add a screenshot of the generated project scaffold just
-after `polyzymd init`, with `config.yaml`, `structures/`, `job_scripts/`, and
-`slurm_logs/` annotated. -->
+- **Your own protein.** Follow {doc}`../tutorials/own_system`. It starts
+  from `polyzymd study add-condition --new`, which writes a template config.
+- **GROMACS.** If `gmx` is installed, add `config_gromacs.yaml` as a
+  condition and run it. See {doc}`../how_to/run_gromacs`.
+- **A cluster.** Run long simulations on GPUs with `polyzymd submit`. See
+  {doc}`../how_to/hpc_slurm` and {doc}`../how_to/monitor_simulations`.
+- **More conditions.** Copy a condition with
+  `polyzymd study add-condition NAME --from Water`, and change what differs,
+  such as a polymer or a co-solvent. See {doc}`../how_to/study_folder` and
+  {doc}`../how_to/polymers`.
+- **More studies.** Add a study for another protein with
+  `polyzymd project add-study LABEL`. See {doc}`../how_to/project`.
+- **More analyses.** The next lesson, {doc}`../tutorials/first_analysis`,
+  runs more replicates and measures their RMSF. See also
+  {doc}`../how_to/analysis_chooser`.

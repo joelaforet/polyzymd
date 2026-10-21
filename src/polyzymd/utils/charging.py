@@ -265,8 +265,12 @@ class AM1BCCCharger(MoleculeCharger):
             The molecule with AM1-BCC charges assigned.
 
         Raises:
+            ValueError: If neither AmberTools nor OpenEye is installed.
             RuntimeError: If charging fails.
         """
+        if not am1bcc_available():
+            raise ValueError(AM1BCC_NEEDS_AMBERTOOLS)
+
         # AM1-BCC requires a conformer
         self._ensure_conformer(molecule)
 
@@ -289,6 +293,20 @@ class AM1BCCCharger(MoleculeCharger):
             raise RuntimeError(f"AM1-BCC charge assignment failed: {e}") from e
 
         return molecule
+
+
+AM1BCC_NEEDS_AMBERTOOLS = (
+    "charge_method am1bcc needs AmberTools (antechamber and sqm), which no PolyzyMD pixi "
+    "environment includes. Install it into the build environment "
+    "(conda install -c conda-forge ambertools), or use charge_method: nagl."
+)
+
+
+def am1bcc_available() -> bool:
+    """Return whether a toolkit that computes AM1-BCC charges (AmberTools or OpenEye) is installed."""
+    from openff.toolkit.utils import AmberToolsToolkitWrapper, OpenEyeToolkitWrapper
+
+    return AmberToolsToolkitWrapper.is_available() or OpenEyeToolkitWrapper.is_available()
 
 
 # Registry of available chargers
@@ -328,33 +346,3 @@ def get_charger(method: str, **kwargs) -> MoleculeCharger:
 
     charger_class = _CHARGER_REGISTRY[method_lower]
     return charger_class(**kwargs)
-
-
-def register_charger(name: str, charger_class: Type[MoleculeCharger]) -> None:
-    """Register a custom charger class.
-
-    This allows users to add their own charging methods that integrate
-    with the get_charger() factory function.
-
-    Args:
-        name: Name to register the charger under (case-insensitive).
-        charger_class: A subclass of MoleculeCharger.
-
-    Raises:
-        TypeError: If charger_class is not a subclass of MoleculeCharger.
-
-    Example:
-        >>> class MyCustomCharger(MoleculeCharger):
-        ...     method_name = "custom"
-        ...     def charge_molecule(self, molecule):
-        ...         # Custom charging logic
-        ...         return molecule
-        >>> register_charger("custom", MyCustomCharger)
-        >>> charger = get_charger("custom")
-    """
-    if not isinstance(charger_class, type) or not issubclass(charger_class, MoleculeCharger):
-        raise TypeError(
-            f"charger_class must be a subclass of MoleculeCharger, got {type(charger_class)}"
-        )
-
-    _CHARGER_REGISTRY[name.lower().strip()] = charger_class

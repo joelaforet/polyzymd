@@ -36,6 +36,38 @@ EXIT_CODE_CONCURRENT = 2
 # Distinguished from exit code 1 ("work remains") to prevent infinite resubmission.
 EXIT_CODE_CHECK_ERROR = 3
 
+# Seconds before the wall-time limit at which SLURM sends SIGUSR1; must match
+# ``--signal=B:USR1@...`` in the OpenMM job template.
+WALLTIME_WARNING_SECONDS = 300
+
+
+def slurm_time_limit_seconds(time_limit: str) -> int | None:
+    """Return a SLURM ``--time`` value in seconds, or None when it is not understood.
+
+    Accepts ``M``, ``M:S``, ``H:M:S``, ``D-H``, ``D-H:M`` and ``D-H:M:S``.
+    """
+    text = str(time_limit).strip()
+    days = 0
+    if "-" in text:
+        day_text, _, text = text.partition("-")
+        if not day_text.isdigit():
+            return None
+        days = int(day_text)
+    parts = text.split(":")
+    if not parts or not all(part.isdigit() for part in parts) or len(parts) > 3:
+        return None
+    values = [int(part) for part in parts]
+    if days:
+        hours, minutes, seconds = (values + [0, 0])[:3]
+    elif len(values) == 1:
+        hours, minutes, seconds = 0, values[0], 0
+    elif len(values) == 2:
+        hours, minutes, seconds = 0, values[0], values[1]
+    else:
+        hours, minutes, seconds = values
+    return ((days * 24 + hours) * 60 + minutes) * 60 + seconds
+
+
 # Module-level flag checked by the simulation loop
 _interrupted = threading.Event()
 

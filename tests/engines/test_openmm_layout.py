@@ -123,15 +123,21 @@ class TestOpenMMTrajectorySearch:
         assert len(layout.trajectory_paths) == 1
         assert layout.trajectory_paths[0].name == "production_trajectory.dcd"
 
-    def test_rejects_empty_daisy_chain_segment(self, tmp_path: Path) -> None:
-        """Empty canonical daisy-chain trajectories are rejected."""
-        prod0 = tmp_path / "production_0"
-        prod0.mkdir()
-        (prod0 / "production_0_trajectory.dcd").write_bytes(b"")
+    def test_skips_empty_daisy_chain_segment(self, tmp_path: Path, caplog) -> None:
+        """A segment whose DCD holds no frame is left out, logged and listed as empty."""
+        for index, data in ((0, b"DCD"), (1, b""), (2, b"DCD")):
+            segment = tmp_path / f"production_{index}"
+            segment.mkdir()
+            (segment / f"production_{index}_trajectory.dcd").write_bytes(data)
 
-        engine = _make_engine()
-        with pytest.raises(ValueError, match="Empty OpenMM trajectory segment"):
-            engine.resolve_trajectory_layout(tmp_path, replicate=1)
+        with caplog.at_level("WARNING"):
+            layout = _make_engine().resolve_trajectory_layout(tmp_path, replicate=1)
+        assert [path.parent.name for path in layout.trajectory_paths] == [
+            "production_0",
+            "production_2",
+        ]
+        assert layout.empty_segments == [1] and layout.excluded_segments == []
+        assert "production_1_trajectory.dcd holds no frames" in caplog.text
 
     def test_skips_completed_zero_frame_final_segment(self, tmp_path: Path) -> None:
         """A final remainder after the last report boundary has no DCD file."""
@@ -198,4 +204,33 @@ class TestOpenMMTrajectorySearch:
         engine = _make_engine()
         layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
         assert layout.trajectory_format == "dcd"
+        assert layout.topology_format == "pdb"
+
+
+class TestOpenMMAnalysisTopology:
+    """system.prmtop is the analysis topology when the build wrote it."""
+
+    def test_prefers_prmtop_over_pdb(self, tmp_path: Path) -> None:
+        """The bond-complete file wins and the layout names its format."""
+        (tmp_path / "solvated_system.pdb").write_text("ATOM")
+        (tmp_path / "system.prmtop").write_text("%VERSION")
+        prod0 = tmp_path / "production_0"
+        prod0.mkdir()
+        (prod0 / "production_0_trajectory.dcd").write_bytes(b"x")
+
+        layout = _make_engine().resolve_trajectory_layout(tmp_path, 1)
+
+        assert layout.topology_path == tmp_path / "system.prmtop"
+        assert layout.topology_format == "prmtop"
+
+    def test_pdb_alone_keeps_pdb_format(self, tmp_path: Path) -> None:
+        """Runs built before system.prmtop existed still resolve the PDB."""
+        (tmp_path / "solvated_system.pdb").write_text("ATOM")
+        prod0 = tmp_path / "production_0"
+        prod0.mkdir()
+        (prod0 / "production_0_trajectory.dcd").write_bytes(b"x")
+
+        layout = _make_engine().resolve_trajectory_layout(tmp_path, 1)
+
+        assert layout.topology_path == tmp_path / "solvated_system.pdb"
         assert layout.topology_format == "pdb"

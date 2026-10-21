@@ -8,29 +8,16 @@ PolyzyMD, understand the codebase, or add new capabilities.
 - [Set Up a Contributor Environment](setup.md)
 - [Contributing to PolyzyMD](contributing.md)
 - [Packaging and Distribution Notes](packaging.md)
-- [Architecture](../explanation/architecture.md)
+- [Architecture](architecture.md)
 
-## New Analysis Contributor Path
+## Add an analysis
 
-Use the [New Analysis Contributor Path](analysis_plugins/index.md) if you want
-to add a new analysis plugin or modify an existing one. It gives new analysis
-contributors a recommended reading order, points to the current full extension
-guide, and highlights the public APIs to use before you start editing plugin
-code.
-
-Start there when you need to understand how a PolyzyMD analysis moves from
-MDAnalysis trajectory work to replicate artifacts, condition aggregation,
-comparison, and artifact-only plotting.
-
-## Extension Workflows
-
-- **[Extend the Analysis Framework](extending_analyses.md)** —
-  how to add an MDAnalysis-native analysis plugin with `MDAAnalysisJob`,
-  `ReplicateArtifact`, default artifact aggregation, comparison, formatting,
-  and artifact-only plotting
-- **[Store large analysis outputs with artifact sidecars](analysis_plugins/sidecars.md)** —
-  how to persist arrays, tables, and plotting inputs through registered
-  `ArtifactStore` sidecars instead of plugin-specific cache files
+An analysis is a Python function of an MDAnalysis `AtomGroup` or `Universe`,
+run on every replicate by `Study.timeseries` or `Study.per_replicate`.
+[Add an analysis](adding_an_analysis.md) shows how to write one, ship it in
+`polyzymd.analyses.functions`, expose it through `polyzymd analyze` and test
+it; [Study API](../reference/study_api.md) describes
+the study API in full.
 
 ## Contributor Mindset
 
@@ -48,6 +35,6 @@ config -> builders -> simulation -> workflow -> analyses. -->
 Contributing to PolyzyMD <contributing>
 Set Up a Contributor Environment <setup>
 Packaging and Distribution Notes <packaging>
-New Analysis Contributor Path <analysis_plugins/index>
-Extend the Analysis Framework <extending_analyses>
+Architecture <architecture>
+Add an Analysis <adding_an_analysis>
 ```

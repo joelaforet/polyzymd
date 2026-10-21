@@ -1,1 +1,0 @@
-"""PolyzyMD test sub-package."""

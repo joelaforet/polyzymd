@@ -232,21 +232,6 @@ class TestTrajectoryTimingMetadata:
         assert loader.get_first_frame_time(1) == pytest.approx(198_400.0)
         assert trajectory.frame == 1
 
-    def test_get_frame_times_prefers_raw_timestep_metadata_and_restores_frame(self) -> None:
-        """Frame-time extraction should use raw timestamps and restore reader position."""
-
-        trajectory = _FakeTrajectory(
-            [0.0, 400.0, 800.0],
-            raw_times_ps=[198_400.0, 198_800.0, 199_200.0],
-            current_frame=1,
-        )
-        loader = _loader_for_trajectory(trajectory)
-
-        times = loader.get_frame_times(1, unit="ps")
-
-        assert times.tolist() == pytest.approx([198_400.0, 198_800.0, 199_200.0])
-        assert trajectory.frame == 1
-
     def test_get_timestep_restores_current_frame(self) -> None:
         """Timestep probing should restore the previous reader frame when feasible."""
 
@@ -670,8 +655,8 @@ class TestOpenMMDaisyChain:
         for i, f in enumerate(info.trajectory_files):
             assert f.name == f"production_{i}_trajectory.dcd"
 
-    def test_rejects_zero_byte_segments(self, tmp_path):
-        """Loader should surface empty canonical OpenMM trajectory segments."""
+    def test_skips_zero_byte_segments(self, tmp_path):
+        """Loader leaves out a 0-byte OpenMM segment and records it as empty."""
         run_dir = tmp_path / "run_1"
         _create_openmm_daisy_chain(run_dir, n_segments=3)
         empty_segment = run_dir / "production_3"
@@ -680,8 +665,9 @@ class TestOpenMMDaisyChain:
         config = _make_openmm_config(tmp_path)
         loader = TrajectoryLoader(config)
 
-        with pytest.raises(FileNotFoundError, match="Empty OpenMM trajectory segment"):
-            loader.get_trajectory_info(replicate=1)
+        info = loader.get_trajectory_info(replicate=1)
+        assert info.n_segments == 3 and info.empty_segments == [3]
+        assert any("Skipped production segment(s) [3]" in text for text in info.warnings)
 
     def test_replicate_routing(self, tmp_path):
         for rep in (1, 3):
@@ -871,10 +857,10 @@ class TestEngineOverride:
 
 
 class TestFindTopologyCompat:
-    """find_topology(working_dir) works for direct plugin callers."""
+    """find_topology(working_dir) works for a caller that passes its own working_dir."""
 
     def test_arbitrary_working_dir(self, tmp_path):
-        """Plugin passes an explicit working_dir, not from config."""
+        """An explicit working_dir, not from the config, is searched."""
         arbitrary_dir = tmp_path / "some_other_dir"
         arbitrary_dir.mkdir()
         (arbitrary_dir / "solvated_system.pdb").write_text("ATOM")

@@ -34,9 +34,9 @@ non-stationary trajectories as provisional unless independent replicates and
 convergence diagnostics support the conclusion.
 ```
 
-PolyzyMD analyses may account for correlation directly where a plugin supports
-it. A generalized metric-type system for automatic correlation handling is a
-planned design direction, not a universal implemented contract.
+PolyzyMD reports the statistical inefficiency g and N_eff of the time series
+of each replicate. These values change no interval, because intervals use one
+value per replicate.
 
 ## Key concepts
 
@@ -53,21 +53,34 @@ zero. Slow decay means that many saved frames contain overlapping information.
 ### Statistical inefficiency and effective sample size
 
 For a correlated time series, the effective number of independent samples is
-often described using the statistical inefficiency $g$:
+described using the statistical inefficiency $g$:
 
 $$N_{\mathrm{eff}} = \frac{N}{g}$$
 
-For a simple exponentially decaying correlation, a useful approximation is:
+PolyzyMD estimates $g$ by summing the normalised autocorrelation function over
+positive lags,
 
-$$g \approx 1 + \frac{2\tau}{\Delta t}$$
+$$g = 1 + 2 \sum_{t \geq 1} C(t) \left(1 - \frac{t}{N}\right),$$
 
-where $\tau$ is an integrated correlation time and $\Delta t$ is the spacing
-between saved observations. The exact estimate depends on the observable, the
-trajectory length, and how the correlation function is truncated or blocked.
+following Chodera et al. (2007) as implemented in pymbar. The $(1 - t/N)$
+factor accounts for the smaller number of pairs available at long lags, and the
+sum is truncated at the first non-positive $C(t)$ so that noise in the tail does
+not accumulate. Lag zero is excluded from the sum; it is the leading 1.
 
-Spacing frames by about $2\tau$ is therefore best understood as a heuristic for
-selecting approximately independent frames, not as a universal formula for the
-true number of independent samples.
+The integrated correlation time follows from $g$ as
+
+$$\tau = \frac{g - 1}{2} \Delta t,$$
+
+where $\Delta t$ is the spacing between saved observations, which is the same
+relation read the other way round as $g = 1 + 2\tau/\Delta t$. For
+uncorrelated data $g$ approaches 1 and $\tau$ approaches 0, so $N_{\mathrm{eff}}$
+approaches $N$. $N_{\mathrm{eff}}$ is reported as a real number and is not
+rounded down to whole frames.
+
+Spacing frames by about $2\tau$ is a heuristic for selecting approximately
+independent frames. It is not a universal formula for the true number of
+independent samples, and PolyzyMD does not use it to select the frames that
+enter any estimate.
 
 ```{tip}
 A trajectory with 10,000 saved frames may contain far fewer effective samples
@@ -119,21 +132,23 @@ motions that define the fluctuation.
 
 Conservative strategies include:
 
-- estimating fluctuations from approximately independent blocks or subsamples;
 - comparing results across independent replicates;
 - checking whether the estimate changes with trajectory length or block size;
 - reporting caveats when slow motions are undersampled.
 
-Subsampling frames at roughly $2\tau$ spacing can help avoid treating adjacent
-frames as independent, but it does not rescue a trajectory that never visited
-important conformational states.
+Thinning the trajectory to roughly $2\tau$ spacing is not one of them, and
+PolyzyMD does not do it. The finite-sample bias of a variance computed from $N$
+correlated frames with inefficiency $g$ is about the same as the bias of one
+computed from $N/g$ independent frames, so discarding frames leaves the bias
+where it was and only raises the variance of the estimate. RMSF is therefore
+computed from every production frame, with the correlation time recorded beside
+it as a diagnostic and the uncertainty taken from the spread across replicates.
 
 ## How to interpret PolyzyMD analysis results
 
-PolyzyMD's analysis plugins are responsible for choosing statistically
-appropriate handling for the quantities they report. Current plugins may use
-plugin-specific logic for correlation-aware uncertainty, replicate aggregation,
-or conservative subsampling. The details can differ because contact fractions,
+Each shipped analysis chooses how one replicate's frames become one value, and
+the intervals and tests are then computed from one value per replicate. The
+reduction can differ between analyses because contact fractions,
 distances, RMSF, secondary structure, and other observables answer different
 scientific questions.
 
@@ -176,6 +191,61 @@ trapped in the same metastable basin, or if different replicates have not
 reached comparable stationary behavior, the between-replicate spread may still
 understate or misrepresent uncertainty.
 
+## From a standard error to a confidence interval
+
+A standard error is not an interval. It is the estimated standard deviation of
+the mean, and on its own it says nothing about how often a stated range would
+contain the true value. To turn it into a 95 percent confidence interval you
+multiply it by a coverage factor:
+
+```
+interval = mean +/- k(n) * SEM
+```
+
+If the standard deviation of the replicate means were known exactly, `k` would
+be 1.96. It is not known exactly. It is estimated from the same handful of
+replicates, so the factor comes from the Student t distribution with `n - 1`
+degrees of freedom. With the replicate counts an MD study can afford, that
+matters a great deal:
+
+| Replicates | `k` at 95 percent | Interval width relative to `+/- 1 SEM` |
+|---|---|---|
+| 2 | 12.71 | 12.7x |
+| 3 | 4.30 | 4.3x |
+| 5 | 2.78 | 2.8x |
+| 10 | 2.26 | 2.3x |
+| large | 1.96 | 2.0x |
+
+### Why plus or minus one SEM misleads at three replicates
+
+Suppose two conditions each have three replicates, and their `+/- 1 SEM` bars do
+not touch. It is tempting to read that as a real difference. It is not. At
+`n = 3` the 95 percent interval is over four times wider than the SEM bar, so
+the two intervals can overlap heavily while the SEM bars sit far apart. The
+gap between one-SEM bars is not evidence of anything; only the interval, or the
+t-test the comparison already runs, can answer that question.
+
+This is why PolyzyMD reports the 95 percent interval alongside the standard
+error in every table rather than the standard error alone.
+
+### Why a single replicate has no uncertainty at all
+
+With one replicate there is nothing to take a spread over. PolyzyMD writes
+`null` for the SEM, the standard deviation and both confidence limits, and
+prints `na` in the text report (for example `sem na  ci95 na`), rather than
+writing `0.0`. A zero
+would claim a measurement with no uncertainty, which is the opposite of what a
+single run supports.
+
+### What PolyzyMD does not yet estimate
+
+The interval above is the only one the package computes. There is no block
+averaging, no bootstrap and no jackknife. Fractions and occupancies are given
+the same symmetric interval as unbounded quantities, so near 0 or 1 a limit can
+fall outside the physical range; read those limits as an indication of spread
+rather than a bound. Within-replicate correlation times are reported as
+diagnostics and do not enter any condition-level interval.
+
 ## Practical interpretation principles
 
 ### Compare timescales before trusting uncertainty
@@ -189,15 +259,38 @@ error bar is not strong evidence of convergence.
 
 A statistically significant difference can be scientifically small, while a
 large apparent effect can be uncertain if replicate counts are low. Interpret
-PolyzyMD comparison output by considering the direction, magnitude, confidence
-intervals or SEMs, and the physical plausibility of the change.
+PolyzyMD comparison output by considering the direction, magnitude, the
+95 percent confidence interval, and the physical plausibility of the change.
 
 ### Treat diagnostics as evidence, not proof
 
-Autocorrelation estimates, block averages, and replicate SEMs are diagnostics.
-They summarize available sampling; they cannot reveal unsampled states that the
+Autocorrelation estimates and replicate intervals are diagnostics. They
+summarize available sampling; they cannot reveal unsampled states that the
 trajectory never visited. Use them alongside structural inspection and domain
 knowledge.
+
+## Compare conditions over comparable windows
+
+The replicate mean of a per-frame quantity summarises the window it was
+taken over. When one condition was simulated, or is available on this
+machine, for 450 ns and another for 40 ns, their means describe different
+times: a structure that drifts late, such as an active site that opens after
+100 ns, appears only in the longer runs, and the difference looks like an
+effect of the condition. PolyzyMD warns in every report that compares
+conditions whose analysed production ends more than 10% apart, names each
+condition's span, and suggests a common window:
+
+```
+warning: the conditions were analysed up to different times (No polymer 456.4 ns; SBMA 50% 38.4 ns); a difference may come from simulated time rather than the condition. Compare over a common window with until 38.4ns (--until, or until: in study.yaml)
+```
+
+`until` leaves out production after that time for every condition, so the
+comparison is over the same simulated time; alternatively, extend the short
+runs. Say which you did in the methods. The warning does not change any
+value. A replicate whose `progress.json` records production segments that
+are missing from disk is reported too, because its analysed production is
+shorter than what was simulated. `polyzymd study check` prints each
+condition's production length before you choose an equilibration window.
 
 ## Multiple comparison correction
 
@@ -210,31 +303,76 @@ increases rapidly, even when every null hypothesis is true.
 
 ### Benjamini-Hochberg FDR control
 
-When `posthoc_method` is `"ttest_bh"`, PolyzyMD uses the
-Benjamini-Hochberg procedure to control the false discovery rate: the expected
-proportion of false positives among rejected hypotheses. This is less
+PolyzyMD uses the Benjamini-Hochberg procedure to control the false discovery
+rate: the expected proportion of false positives among rejected hypotheses. This is less
 conservative than controlling the probability of any false positive, and is
 often appropriate when many related comparisons are screened together.
 
 Conceptually, the procedure ranks p-values, compares them to rank-dependent
 thresholds, and marks discoveries only up to the largest rank that satisfies the
-threshold. Adjusted p-values and CLI significance markers are based on this
+threshold. Adjusted p-values and the `significant` flag are based on this
 correction rather than on raw p-values alone.
 
-### Tukey HSD as an alternative
+### Why the family is one comparison
 
-When `posthoc_method` is `"tukey_hsd"`, PolyzyMD uses Tukey's Honestly
-Significant Difference test. Tukey HSD compares all pairs simultaneously and
-controls the family-wise error rate. It is most appropriate for balanced designs
-with similar replicate counts and approximately equal variance across
-conditions.
+A correction only means something if you can say what it corrected over. The
+package draws the boundary at one comparison: every tested row that one
+`polyzymd analyze` command, or one `compare()` call in Python, produced is one
+Benjamini-Hochberg family. For one number per replicate that is every
+condition compared with the control. For a per-residue result, such as
+`polyzymd analyze rmsf`, it is every residue of every condition compared.
 
-Choose the post-hoc method based on the scientific question:
+That boundary matches how the results are read. When you look at a per-residue
+profile over four conditions, you scan the whole table at once and pick out the
+residues that stand out. The number of chances you gave yourself to find
+something is the size of that table, not the size of one column, and a false
+discovery rate holds for the discoveries of a search only when the family is
+the set searched (Benjamini 2010).
 
-- Use BH-corrected t-tests when specific pairs are of interest or sample sizes
-  are heterogeneous.
-- Use Tukey HSD when all pairwise contrasts are part of one balanced comparison
-  family.
+Drawing the family wider would be worse in a different way. Pooling across
+separate commands, or across analyses, would make the significance of an RMSD
+comparison depend on whether somebody also ran SASA that afternoon. A
+comparison should not change its verdict because of an unrelated command.
+
+### Why Welch is the sensible default at three replicates
+
+With three replicates per condition, the variance of each condition is
+estimated from two degrees of freedom. That estimate is extremely noisy, so a
+test that assumes the two conditions share a variance is assuming something you
+cannot check: a variance-ratio test at this sample size has almost no power to
+reject equality, and passing it is not evidence of it.
+
+The assumption also fails for physical reasons in the comparisons this package
+is built for. A protein with no polymer and the same protein in a crowded
+polymer environment are not expected to fluctuate by the same amount. The
+conditions that change the mean usually change the spread as well.
+
+Welch's t-test drops the shared-variance assumption. With equal group sizes it
+gives the same t statistic as Student's test but fewer degrees of freedom, so
+it is the more cautious of the two: when the variances really do differ, the
+Student p-value is too small. The cost when the variances happen to be equal is
+a small loss of power; the cost of the Student test when they are not is a
+false positive rate above the nominal alpha.
+
+PolyzyMD therefore uses Welch's t-test by default. In Python,
+`compare(test="student")` gives Student's test for a comparison where equal
+variances are known on other grounds.
+
+### Effect sizes at small replicate counts
+
+Cohen's d is biased upward at small samples. Hedges' correction removes most of
+that bias by multiplying d by `J = 1 - 3 / (4 * (n1 + n2) - 9)`, which is about
+0.80 for three replicates per condition. PolyzyMD reports both `cohens_d` and
+`hedges_g`; quote the latter.
+
+The Cohen adjectives ("small", "medium", "large") are withheld below ten
+combined replicates. At six replicates the standard error of the effect size is
+of order one, so the boundary between "medium" and "large" is noise. The
+numbers are still reported; only the label is suppressed.
+
+For the same reason, a direction label such as "stabilizing" or "increased" is
+attached only when the corrected test is significant. A direction read off a
+one percent shift in two means is a description of the noise, not a finding.
 
 ### Within-trajectory uncertainty and multiple testing are separate
 
@@ -246,8 +384,8 @@ positives are expected when many hypotheses are tested.
 Both matter. A corrected p-value does not fix poor sampling, and a careful SEM
 does not control the false-positive rate across many condition pairs.
 
-For field-level details on post-hoc methods, configuration keys, and output
-fields, see {doc}`../reference/posthoc_testing`.
+For the tests, the correction family and the fields of each comparison row,
+see {doc}`../reference/posthoc_testing`.
 
 ## References
 
@@ -258,11 +396,55 @@ This explanation follows guidance from:
 > *Living Journal of Computational Molecular Science*, 1(1), 5067.
 > [DOI: 10.33011/livecoms.1.1.5067](https://doi.org/10.33011/livecoms.1.1.5067)
 
+The statistical inefficiency estimator follows:
+
+> **Chodera, J. D., Swope, W. C., Pitera, J. W., Seok, C., & Dill, K. A.**
+> (2007). "Use of the Weighted Histogram Analysis Method for the Analysis of
+> Simulated and Parallel Tempering Simulations."
+> *Journal of Chemical Theory and Computation*, 3(1), 26-41.
+> [DOI: 10.1021/ct0502864](https://doi.org/10.1021/ct0502864)
+
+> **Shirts, M. R., & Chodera, J. D.** (2008). "Statistically optimal analysis
+> of samples from multiple equilibrium states."
+> *The Journal of Chemical Physics*, 129(12), 124105.
+> [DOI: 10.1063/1.2978177](https://doi.org/10.1063/1.2978177)
+
+PolyzyMD calls pymbar's `timeseries.statistical_inefficiency` for this estimate rather than carrying its own copy of the algorithm, so pymbar is a dependency of the analysis environment.
+
 Useful background includes:
 
-> **Chodera, J. D., et al.** (2007). "Use of the Weighted Histogram Analysis
-> Method for the Analysis of Simulated and Parallel Tempering Simulations."
-> *Journal of Chemical Theory and Computation*, 3(1), 26-41.
+> **Janke, W.** (2002). "Statistical analysis of simulations: data correlations
+> and error estimation." In *Quantum Simulations of Complex Many-Body Systems*,
+> NIC Series vol. 10, 423-445.
 
 > **Flyvbjerg, H., & Petersen, H. G.** (1989). "Error estimates on averages
 > of correlated data." *Journal of Chemical Physics*, 91(1), 461-466.
+> [DOI: 10.1063/1.457480](https://doi.org/10.1063/1.457480). Block averaging is
+> an alternative route to the statistical inefficiency. PolyzyMD does not
+> implement it.
+
+> **Joint Committee for Guides in Metrology** (2008). "JCGM 100: Evaluation of
+> measurement data - Guide to the expression of uncertainty in measurement
+> (GUM)." BIPM.
+> [PDF](https://www.bipm.org/utils/common/documents/jcgm/JCGM_100_2008_E.pdf)
+
+The coverage factors above follow the section of Grossfield et al. (2018) on
+turning a standard uncertainty into a confidence interval, which in turn
+follows the GUM.
+
+> **Welch, B. L.** (1947). "The generalization of 'Student's' problem when
+> several different population variances are involved." *Biometrika*, 34(1-2),
+> 28-35. [DOI: 10.1093/biomet/34.1-2.28](https://doi.org/10.1093/biomet/34.1-2.28)
+
+> **Hedges, L. V.** (1981). "Distribution theory for Glass's estimator of
+> effect size and related estimators." *Journal of Educational Statistics*,
+> 6(2), 107-128.
+> [DOI: 10.3102/10769986006002107](https://doi.org/10.3102/10769986006002107)
+
+> **Benjamini, Y., & Hochberg, Y.** (1995). "Controlling the false discovery
+> rate: a practical and powerful approach to multiple testing." *Journal of the
+> Royal Statistical Society B*, 57(1), 289-300.
+
+> **Benjamini, Y.** (2010). "Discovering the false discovery rate." *Journal of
+> the Royal Statistical Society B*, 72(4), 405-416.
+> [DOI: 10.1111/j.1467-9868.2010.00746.x](https://doi.org/10.1111/j.1467-9868.2010.00746.x)

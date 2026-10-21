@@ -10,7 +10,6 @@ import pytest
 from polyzymd.analyses.shared.inferential_statistics import (
     benjamini_hochberg,
     independent_ttest,
-    one_way_anova,
 )
 
 
@@ -165,23 +164,6 @@ def test_independent_ttest_invalid_method() -> None:
         independent_ttest([1.0, 2.0], [1.5, 2.5], method="bogus")
 
 
-def test_one_way_anova_classical_method(monkeypatch) -> None:
-    """Classical ANOVA should use scipy f_oneway."""
-
-    class _Stats:
-        def f_oneway(self, *groups):
-            del groups
-            return (3.0, 0.02)
-
-    class _Scipy:
-        stats = _Stats()
-
-    monkeypatch.setitem(sys.modules, "scipy", _Scipy())
-    result = one_way_anova([1.0, 2.0], [1.5, 2.5], [2.0, 3.0])
-    assert result.f_statistic == pytest.approx(3.0)
-    assert result.p_value == pytest.approx(0.02)
-
-
 def test_bh_monotonicity_in_rank_order() -> None:
     """Adjusted p-values should be non-decreasing in BH rank order."""
     p_values = [0.07, 0.001, 0.8, 0.02, 0.04]
@@ -269,12 +251,14 @@ def test_independent_ttest_n1_returns_nan() -> None:
 
 
 def test_cohens_d_n1_returns_undefined() -> None:
-    """Cohen's d with n=1 should return NaN with undefined interpretation."""
+    """Cohen's d with n=1 should return NaN with no interpretation."""
     from polyzymd.analyses.shared.inferential_statistics import cohens_d
 
     result = cohens_d([1.0], [2.0, 3.0])
     assert math.isnan(result.cohens_d)
-    assert result.interpretation == "undefined"
+    assert math.isnan(result.hedges_g)
+    assert result.interpretation is None
+    assert result.direction == "undetermined"
 
 
 def test_cohens_d_zero_variance_equal_means() -> None:
@@ -285,19 +269,44 @@ def test_cohens_d_zero_variance_equal_means() -> None:
     assert result.cohens_d == 0.0
 
 
-def test_one_way_anova_n1_returns_nan() -> None:
-    """ANOVA with a group of n=1 should return NaN."""
-    result = one_way_anova([1.0], [2.0, 3.0], [4.0, 5.0])
-    assert math.isnan(result.f_statistic)
-    assert math.isnan(result.p_value)
+def test_bh_matches_the_step_up_definition_with_ties_and_missing_values() -> None:
+    """q_i = min over p_j >= p_i of p_j m / rank_j, capped at 1; None and NaN pass through."""
+    import numpy as np
+
+    rng = np.random.default_rng(7)
+    for _ in range(200):
+        size = int(rng.integers(1, 15))
+        values = np.round(rng.uniform(0, 1, size) ** 2, 2).tolist()  # rounding makes ties
+        for index in rng.choice(size, int(rng.integers(0, 3)), replace=True):
+            values[index] = None if rng.random() < 0.5 else math.nan
+        present = sorted(p for p in values if p is not None and not math.isnan(p))
+        m = len(present)
+
+        results = benjamini_hochberg(values)
+
+        for p, result in zip(values, results, strict=True):
+            if p is None or math.isnan(p):
+                assert result.adjusted_p_value is None and result.rank is None
+                continue
+            expected = min(min(1.0, q * m / (rank + 1)) for rank, q in enumerate(present) if q >= p)
+            assert result.adjusted_p_value == pytest.approx(expected, rel=1e-12, abs=0)
+            assert result.significant == (result.adjusted_p_value <= 0.05)
+        ranks = sorted(r.rank for r in results if r.rank is not None)
+        assert ranks == list(range(1, m + 1))
 
 
-def test_one_way_anova_numerical_regression() -> None:
-    """Classical ANOVA against known values."""
-    from scipy.stats import f_oneway
+def test_bh_ranks_ties_in_input_order() -> None:
+    """Equal p-values take consecutive ranks in the order they were given."""
+    results = benjamini_hochberg([0.2, 0.01, 0.2, None, 0.01])
+    assert [r.rank for r in results] == [3, 1, 4, None, 2]
+    assert [r.adjusted_p_value for r in results] == pytest.approx([0.2, 0.02, 0.2, None, 0.02])
 
-    g1, g2, g3 = [0.715, 0.693, 0.696], [0.517, 0.586], [0.558, 0.738, 0.496]
-    result = one_way_anova(g1, g2, g3)
-    expected = f_oneway(g1, g2, g3)
-    assert abs(result.f_statistic - expected.statistic) < 1e-10
-    assert abs(result.p_value - expected.pvalue) < 1e-10
+
+def test_bh_accepts_p_values_a_rounding_error_outside_zero_to_one() -> None:
+    """P-values one rounding error above 1 or below 0 are adjusted as 1 and 0."""
+    results = benjamini_hochberg([1.0000000000000002, -1e-17, None, 0.02], alpha=0.05)
+
+    assert results[0].adjusted_p_value == pytest.approx(1.0)
+    assert results[1].adjusted_p_value == pytest.approx(0.0)
+    assert results[2].adjusted_p_value is None
+    assert results[3].adjusted_p_value == pytest.approx(0.03)

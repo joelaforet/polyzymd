@@ -29,7 +29,8 @@ This module provides:
   ``restart_state.xml``.
 - :func:`read_state_step` and :func:`last_reported_frame`, which read the
   step of a state XML and the step and interval of the last trajectory frame
-  of a segment from file headers, without loading coordinates.
+  of a segment from the DCD header and state-data CSV, without loading
+  coordinates.
 """
 
 from __future__ import annotations
@@ -173,10 +174,15 @@ def _csv_steps(csv_path: Path) -> list[int]:
 def segment_frames(working_dir: Path, segment_index: int) -> ReportedFrame | None:
     """Return the last trajectory frame written by one production segment.
 
-    The DCD header is preferred because OpenMM writes the trajectory frame
-    before the state-data row of the same step.  When the header is missing
-    or was rescaled for steps beyond 2**31 (OpenMM then stores the interval
-    as 1), the ``Step`` column of the state-data CSV is used instead.
+    The step comes from the ``Step`` column of the state-data CSV.  The DCD
+    header gives only the frame count and interval: OpenMM's
+    ``DCDReporter`` always writes ``reportInterval`` as the first step, so
+    header steps count from the segment start, not from step 0.  OpenMM
+    writes the trajectory frame before the state-data row of the same step,
+    so when the DCD holds more frames than the CSV has rows, the missing
+    rows are added at the frame interval.  When the header is missing or
+    was rescaled for steps beyond 2**31 (OpenMM then stores the interval as
+    1), the CSV alone is used.
 
     Parameters
     ----------
@@ -188,17 +194,18 @@ def segment_frames(working_dir: Path, segment_index: int) -> ReportedFrame | Non
     Returns
     -------
     ReportedFrame or None
-        The last frame, or ``None`` when the segment wrote no frame.
+        The last frame, or ``None`` when the state-data CSV holds no row.
     """
     seg_dir = Path(working_dir) / f"production_{segment_index}"
     dcd = dcd_frame_info(seg_dir / f"production_{segment_index}_trajectory.dcd")
-    if dcd is not None and dcd[0] > 0 and dcd[2] > 1:
-        frames, first_step, interval = dcd
-        return ReportedFrame(segment_index, first_step + (frames - 1) * interval, interval, frames)
-
     steps = _csv_steps(seg_dir / f"production_{segment_index}_state_data.csv")
     if not steps:
         return None
+    if dcd is not None and dcd[0] > 0 and dcd[2] > 1:
+        frames, _, interval = dcd
+        return ReportedFrame(
+            segment_index, steps[-1] + (frames - len(steps)) * interval, interval, frames
+        )
     interval = steps[-1] - steps[-2] if len(steps) > 1 else None
     return ReportedFrame(segment_index, steps[-1], interval, len(steps))
 
@@ -238,6 +245,36 @@ def first_report_step(step: int, report_interval: int) -> int:
     step.
     """
     return (step // report_interval + 1) * report_interval
+
+
+class SkipReportsThrough:
+    """Wrap an OpenMM reporter so it writes nothing at or before *last_step*.
+
+    A segment that resumes from a state older than the previous segment's
+    last frame integrates those report steps again; wrapping its reporters
+    keeps the trajectory at one frame per step.
+
+    Parameters
+    ----------
+    reporter : object
+        OpenMM reporter to wrap.
+    last_step : int
+        Step of the last frame the trajectory already holds.
+    """
+
+    def __init__(self, reporter: Any, last_step: int) -> None:
+        self._reporter = reporter
+        self._last_step = int(last_step)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._reporter, name)
+
+    def describeNextReport(self, simulation: Any) -> Any:
+        return self._reporter.describeNextReport(simulation)
+
+    def report(self, simulation: Any, state: Any) -> None:
+        if simulation.currentStep > self._last_step:
+            self._reporter.report(simulation, state)
 
 
 class ReportedStateTracker:

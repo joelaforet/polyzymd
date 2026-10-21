@@ -1,7 +1,6 @@
 """Tests for the recover and check-progress CLI commands.
 
 Covers:
-- _find_topology_pdb helper
 - recover CLI with new self-resubmitting interface
 - check-progress CLI (exit code 0 = complete, 1 = work remains)
 - Self-resubmitting model (no afterany dependencies)
@@ -15,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from polyzymd.cli.main import _find_topology_pdb, cli
+from polyzymd.cli.main import cli
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -28,52 +27,6 @@ def _write_completed_segment(seg_dir: Path, seg_idx: int) -> None:
     (seg_dir / f"production_{seg_idx}_state.xml").write_text("<mock/>")
     (seg_dir / f"production_{seg_idx}_system.xml").write_text("<mock/>")
     (seg_dir / f"production_{seg_idx}_parameters.json").write_text("{}")
-
-
-# ---------------------------------------------------------------------------
-# _find_topology_pdb
-# ---------------------------------------------------------------------------
-
-
-class TestFindTopologyPdb:
-    """_find_topology_pdb locates a suitable PDB file."""
-
-    def test_finds_solvated_pdb(self, tmp_path):
-        (tmp_path / "solvated_system.pdb").write_text("ATOM ...")
-        result = _find_topology_pdb(tmp_path)
-        assert result.name == "solvated_system.pdb"
-
-    def test_rejects_arbitrary_equilibration_topology(self, tmp_path):
-        eq_dir = tmp_path / "equilibration_0_heating"
-        eq_dir.mkdir()
-        (eq_dir / "equilibration_0_heating_topology.pdb").write_text("ATOM ...")
-        with pytest.raises(FileNotFoundError, match="Could not find topology PDB"):
-            _find_topology_pdb(tmp_path)
-
-    def test_finds_production_0_topology(self, tmp_path):
-        prod_dir = tmp_path / "production_0"
-        prod_dir.mkdir()
-        (prod_dir / "production_0_topology.pdb").write_text("ATOM ...")
-        result = _find_topology_pdb(tmp_path)
-        assert result.name == "production_0_topology.pdb"
-
-    def test_finds_approved_old_production_topology(self, tmp_path):
-        prod_dir = tmp_path / "production"
-        prod_dir.mkdir()
-        (prod_dir / "production_topology.pdb").write_text("ATOM ...")
-        result = _find_topology_pdb(tmp_path)
-        assert result == prod_dir / "production_topology.pdb"
-
-    def test_rejects_arbitrary_recursive_pdb(self, tmp_path):
-        nested_dir = tmp_path / "nested"
-        nested_dir.mkdir()
-        (nested_dir / "decoy.pdb").write_text("ATOM ...")
-        with pytest.raises(FileNotFoundError, match="Could not find topology PDB"):
-            _find_topology_pdb(tmp_path)
-
-    def test_raises_if_no_pdb(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="Could not find topology PDB"):
-            _find_topology_pdb(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +147,63 @@ class TestRecoverStatusReport:
         result = runner.invoke(cli, ["recover", "-c", str(config_file), "-r", "1"])
         assert result.exit_code == 0
         assert "nothing to recover" in result.output.lower()
+
+    @pytest.mark.parametrize(
+        ("extra", "expected"),
+        [
+            ([], "--submit --preset PRESET\n"),
+            (
+                ["--preset", "blanca-shirts", "--engine", "openmm"],
+                "--submit --preset blanca-shirts --engine openmm",
+            ),
+        ],
+    )
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_resume_hint_is_a_runnable_command(
+        self, mock_from_yaml, mock_load, mock_save, extra, expected, tmp_path
+    ):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        mock_from_yaml.return_value = _mock_sim_config(working_dir)
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        result = CliRunner().invoke(cli, ["recover", "-c", str(config_file), "-r", "1", *extra])
+
+        assert result.exit_code == 0, result.output
+        assert f"polyzymd recover -c {config_file} -r 1 {expected}" in result.output
+        assert "<preset>" not in result.output
+        assert "[engine=" not in result.output
+
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_submit_refused_while_stop_file_present(
+        self, mock_from_yaml, mock_load, mock_save, tmp_path
+    ):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        (working_dir / "STOP").write_text("stopped\n")
+        mock_from_yaml.return_value = _mock_sim_config(working_dir)
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        with patch("subprocess.run") as sbatch:
+            result = CliRunner().invoke(
+                cli, ["recover", "-c", str(config_file), "-r", "1", "--submit"]
+            )
+
+        assert result.exit_code == 1
+        assert f"polyzymd cancel -c {config_file} -r 1 --resume" in result.output
+        sbatch.assert_not_called()
 
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_missing_working_dir_exits_with_error(self, mock_from_yaml, tmp_path):
@@ -361,7 +371,7 @@ class TestSelfResubmittingModel:
 
 
 # ---------------------------------------------------------------------------
-# recover --submit --dry-run: skip_build detection
+# recover --submit: skip_build detection
 # ---------------------------------------------------------------------------
 
 
@@ -378,6 +388,7 @@ def _mock_sim_config_for_submit(working_dir: Path):
     mock.simulation_phases.production.duration = 20.0
     mock.simulation_phases.production.samples = 250
     mock.output.slurm_logs_subdir = "slurm_logs"
+    mock.output.get_slurm_logs_directory.return_value = working_dir.parent / "slurm_logs"
     mock.enzyme.name = "CALB"
     mock.thermodynamics.temperature = 310
     mock.polymers = None  # no polymer info
@@ -386,6 +397,12 @@ def _mock_sim_config_for_submit(working_dir: Path):
 
 class TestRecoverSkipBuild:
     """recover --submit detects pre-built system and passes --skip-build."""
+
+    @pytest.fixture(autouse=True)
+    def _sbatch(self):
+        submitted = MagicMock(returncode=0, stdout="Submitted batch job 1", stderr="")
+        with patch("subprocess.run", return_value=submitted) as run:
+            yield run
 
     @patch("polyzymd.workflow.slurm._discover_manifest_path", return_value="/fake/pixi.toml")
     @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
@@ -418,7 +435,6 @@ class TestRecoverSkipBuild:
                 "-r",
                 "1",
                 "--submit",
-                "--dry-run",
                 "--preset",
                 "aa100",
             ],
@@ -461,7 +477,6 @@ class TestRecoverSkipBuild:
                 "-r",
                 "1",
                 "--submit",
-                "--dry-run",
                 "--preset",
                 "aa100",
             ],
@@ -504,7 +519,6 @@ class TestRecoverSkipBuild:
                 "-r",
                 "1",
                 "--submit",
-                "--dry-run",
                 "--preset",
                 "aa100",
             ],
@@ -543,7 +557,6 @@ class TestRecoverSkipBuild:
                 "-r",
                 "1",
                 "--submit",
-                "--dry-run",
                 "--preset",
                 "aa100",
             ],
@@ -619,10 +632,20 @@ class TestRunInitialSegmentEquilibrationSkip:
             s.name = name
             stages.append(s)
         sim_config.simulation_phases.equilibration_stages = stages
+        from polyzymd.config.schema import SimulationPhaseConfig
+
+        sim_config.simulation_phases.production = SimulationPhaseConfig(
+            ensemble="NVT",
+            duration=20.0,
+            samples=10,
+            thermostat="Langevin",
+            thermostat_timescale=2.0,
+        )
         return sim_config
 
+    @patch("polyzymd.simulation.artifact_integrity.validate_build_bundle")
     @patch("polyzymd.simulation.runner.SimulationRunner")
-    def test_skips_equilibration_when_complete(self, MockRunner, tmp_path):
+    def test_skips_equilibration_when_complete(self, MockRunner, _validate, tmp_path):
         """With skip_build=True and equilibration complete, skip minimize + eq."""
         from polyzymd.cli.main import _run_initial_segment
 
@@ -680,11 +703,14 @@ class TestRunInitialSegmentEquilibrationSkip:
         mock_runner.run_production.assert_called_once()
         call_kwargs = mock_runner.run_production.call_args[1]
         assert call_kwargs["segment_index"] == 0
+        assert (call_kwargs["ensemble"], call_kwargs["thermostat"]) == ("NVT", "Langevin")
+        assert call_kwargs["friction"] == pytest.approx(0.5)
         assert call_kwargs["temperature"] == 310.0
         assert call_kwargs["duration_ns"] == 20.0
 
+    @patch("polyzymd.simulation.artifact_integrity.validate_build_bundle")
     @patch("polyzymd.simulation.runner.SimulationRunner")
-    def test_runs_equilibration_when_eq_not_complete(self, MockRunner, tmp_path):
+    def test_runs_equilibration_when_eq_not_complete(self, MockRunner, _validate, tmp_path):
         """With skip_build=True but no eq stages recorded, run full pipeline."""
         from polyzymd.cli.main import _run_initial_segment
         from polyzymd.simulation.progress import (
@@ -746,6 +772,9 @@ class TestRunInitialSegmentEquilibrationSkip:
         mock_runner.minimize.assert_called_once()
         mock_runner.run_equilibration.assert_called_once()
         mock_runner.run_production.assert_called_once()
+        call_kwargs = mock_runner.run_production.call_args[1]
+        assert (call_kwargs["ensemble"], call_kwargs["thermostat"]) == ("NVT", "Langevin")
+        assert call_kwargs["friction"] == pytest.approx(0.5)
 
         # Should NOT have used the fast path
         mock_runner._load_eq_stage_state.assert_not_called()
@@ -976,6 +1005,12 @@ class TestRecoverEngineAware:
 class TestRecoverGromacsSubmit:
     """recover --submit supports GROMACS engine submission flow."""
 
+    @pytest.fixture(autouse=True)
+    def _sbatch(self):
+        submitted = MagicMock(returncode=0, stdout="Submitted batch job 1", stderr="")
+        with patch("polyzymd.workflow.slurm_submit.run_sbatch", return_value=submitted) as run:
+            yield run
+
     def test_recover_help_includes_build_pixi_env_choice(self):
         """recover --help should list build as an allowed pixi environment."""
         runner = CliRunner()
@@ -991,7 +1026,7 @@ class TestRecoverGromacsSubmit:
     @patch("polyzymd.engines.create_engine")
     @patch("polyzymd.simulation.progress.save_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
-    def test_gromacs_recover_dry_run_creates_script(
+    def test_gromacs_recover_writes_recovery_script(
         self,
         mock_from_yaml,
         mock_save,
@@ -999,7 +1034,7 @@ class TestRecoverGromacsSubmit:
         mock_squeue,
         tmp_path,
     ):
-        """Dry-run recover should stage a recovery script for GROMACS."""
+        """recover --submit should write the GROMACS script under recovery_scripts/."""
         _ = mock_save, mock_squeue
         config_file = tmp_path / "config.yaml"
         config_file.write_text("name: test")
@@ -1016,9 +1051,8 @@ class TestRecoverGromacsSubmit:
         )
 
         def _prepare_submission_side_effect(request):
-            daisy_dir = request.working_dir / "daisy_chain_scripts"
-            daisy_dir.mkdir(parents=True, exist_ok=True)
-            script = daisy_dir / f"run_rep{request.replicate}.sh"
+            script = request.extra["script_path"]
+            script.parent.mkdir(parents=True, exist_ok=True)
             script.write_text("#!/bin/bash\n")
             return script
 
@@ -1037,7 +1071,6 @@ class TestRecoverGromacsSubmit:
                 "--engine",
                 "gromacs",
                 "--submit",
-                "--dry-run",
                 "--preset",
                 "aa100",
             ],
@@ -1098,7 +1131,6 @@ class TestRecoverGromacsSubmit:
                 "--engine",
                 "gromacs",
                 "--submit",
-                "--dry-run",
                 "--pixi-env",
                 "sim-cuda-12-4",
             ],
@@ -1163,7 +1195,6 @@ class TestRecoverGromacsSubmit:
                 "--engine",
                 "gromacs",
                 "--submit",
-                "--dry-run",
                 "--preset",
                 "aa100",
             ],
@@ -1176,7 +1207,7 @@ class TestRecoverGromacsSubmit:
     @patch("polyzymd.engines.create_engine")
     @patch("polyzymd.simulation.progress.save_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
-    def test_gromacs_recover_partial_inputs_do_not_enable_skip_build(
+    def test_gromacs_recover_without_a_build_fails_cleanly(
         self,
         mock_from_yaml,
         mock_save,
@@ -1184,7 +1215,7 @@ class TestRecoverGromacsSubmit:
         mock_squeue,
         tmp_path,
     ):
-        """Recover should only skip build when all required inputs exist."""
+        """Recover with missing GROMACS inputs prints the build command and exits 1."""
         _ = mock_save, mock_squeue
         config_file = tmp_path / "config.yaml"
         config_file.write_text("name: test")
@@ -1204,17 +1235,9 @@ class TestRecoverGromacsSubmit:
             total_steps=10000000, completed_steps=5000000, n_segments=1
         )
 
-        captured_request = {}
-
-        def _prepare_submission_side_effect(request):
-            captured_request["request"] = request
-            daisy_dir = request.working_dir / "daisy_chain_scripts"
-            daisy_dir.mkdir(parents=True, exist_ok=True)
-            script = daisy_dir / f"run_rep{request.replicate}.sh"
-            script.write_text("#!/bin/bash\n")
-            return script
-
-        engine_mock.prepare_submission.side_effect = _prepare_submission_side_effect
+        engine_mock.prepare_submission.side_effect = FileNotFoundError(
+            "No GROMACS build for replicate 1. Build it first: polyzymd build"
+        )
         mock_create_engine.return_value = engine_mock
 
         runner = CliRunner()
@@ -1229,15 +1252,15 @@ class TestRecoverGromacsSubmit:
                 "--engine",
                 "gromacs",
                 "--submit",
-                "--dry-run",
                 "--preset",
                 "aa100",
             ],
         )
 
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert "No GROMACS build for replicate 1" in result.output
         assert "reuse" not in result.output.lower()
-        assert captured_request["request"].extra["skip_build"] is False
 
     @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
     @patch("polyzymd.engines.create_engine")
@@ -1297,14 +1320,13 @@ class TestRecoverGromacsSubmit:
                 "--engine",
                 "gromacs",
                 "--submit",
-                "--dry-run",
                 "--preset",
                 "aa100",
             ],
         )
 
         assert result.exit_code == 0, result.output
-        assert captured_request["request"].extra["skip_build"] is True
+        assert "skip_build" not in captured_request["request"].extra
         assert "no equilibration mdps" in result.output.lower()
 
     @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
@@ -1360,7 +1382,6 @@ class TestRecoverGromacsSubmit:
                 "--engine",
                 "gromacs",
                 "--submit",
-                "--dry-run",
                 "--email",
                 "user@example.com",
             ],
@@ -1422,7 +1443,6 @@ class TestRecoverGromacsSubmit:
                 "--engine",
                 "gromacs",
                 "--submit",
-                "--dry-run",
                 "--nodelist",
                 "bgpu-shirts3",
             ],
@@ -1441,7 +1461,10 @@ class TestUpdateGromacsProgressCmd:
 
         working_dir = tmp_path / "gromacs"
         working_dir.mkdir()
-        (working_dir / "prod.log").write_text("nsteps = 5000\n1000 2.0\n")
+        (working_dir / "prod.log").write_text(
+            "nsteps = 5000\n1000 2.0\nWriting checkpoint, step 1000 at Thu Oct  8 00:23:40 2026\n"
+        )
+        (working_dir / "state.cpt").write_text("cpt")
 
         runner = CliRunner()
         result = runner.invoke(
@@ -1791,6 +1814,43 @@ class TestRunSegmentHardKillGuard:
         assert initial.called
         assert not continuation.called
 
+    def test_segment_killed_seconds_ago_is_resumed(self, tmp_path):
+        """A fresh checkpoint left by a killed job does not stop the chain.
+
+        The successor holds the replicate lock, so no other process runs the
+        segment, however recently its checkpoint was written.
+        """
+        import os
+        import time
+
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            save_progress,
+        )
+
+        working_dir = tmp_path / "run_1"
+        seg_dir = _write_hard_killed_segment(working_dir)
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+        now = time.time()
+        os.utime(seg_dir / "production_0_checkpoint.chk", (now, now))
+        save_progress(
+            working_dir,
+            SimulationProgress(
+                total_steps_requested=5_000_000,
+                total_samples_requested=250,
+                timestep_fs=2.0,
+                segments=[SegmentRecord(index=0, status=SegmentStatus.RUNNING)],
+            ),
+        )
+
+        result, initial, continuation = self._invoke(tmp_path, working_dir)
+
+        assert result.exit_code == 0, result.output
+        assert continuation.called
+        assert seg_dir.exists()
+
 
 class TestRunSegmentLockRelease:
     """The replicate lock is released however run-segment ends."""
@@ -1851,3 +1911,232 @@ class TestRunSegmentLockRelease:
 
         assert result.exit_code == 0, result.output
         assert self._lock_is_free(working_dir)
+
+
+def _snapshot(directory: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(directory)): path.read_bytes()
+        for path in sorted(directory.rglob("*"))
+        if path.is_file()
+    }
+
+
+class TestRecoverWritesOnlyWhenSubmitting:
+    """recover writes nothing without a real submission, and never edits the live chain."""
+
+    def _gromacs_engine(self, working_dir: Path) -> MagicMock:
+        engine_mock = MagicMock()
+        engine_mock.get_engine_working_directory.return_value = working_dir
+        engine_mock.load_or_scan_progress.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        def _prepare_submission(request):
+            script = request.extra.get(
+                "script_path",
+                request.working_dir / "daisy_chain_scripts" / f"run_rep{request.replicate}.sh",
+            )
+            script.parent.mkdir(parents=True, exist_ok=True)
+            script.write_text("#SBATCH --partition=aa100\n")
+            return script
+
+        engine_mock.prepare_submission.side_effect = _prepare_submission
+        return engine_mock
+
+    def _invoke(self, config_file: Path, *extra: str):
+        return CliRunner().invoke(cli, ["recover", "-c", str(config_file), "-r", "1", *extra])
+
+    def test_status_only_recover_writes_nothing(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        _write_completed_segment(working_dir / "production_0", 0)
+        (working_dir / "production_1").mkdir()
+        before = _snapshot(working_dir)
+
+        with patch(
+            "polyzymd.config.schema.SimulationConfig.from_yaml",
+            return_value=_mock_sim_config(working_dir),
+        ):
+            result = self._invoke(config_file)
+
+        assert result.exit_code == 0, result.output
+        assert _snapshot(working_dir) == before
+
+    @patch("polyzymd.workflow.slurm._discover_manifest_path", return_value="/fake/pixi.toml")
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
+    def test_openmm_submit_dry_run_writes_nothing(self, _squeue, _manifest, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        _write_completed_segment(working_dir / "production_0", 0)
+        before = _snapshot(working_dir)
+
+        with patch(
+            "polyzymd.config.schema.SimulationConfig.from_yaml",
+            return_value=_mock_sim_config_for_submit(working_dir),
+        ):
+            result = self._invoke(config_file, "--submit", "--dry-run", "--preset", "aa100")
+
+        assert result.exit_code == 0, result.output
+        assert "DRY RUN" in result.output
+        assert _snapshot(working_dir) == before
+        assert not (working_dir / "recovery_scripts").exists()
+
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_gromacs_submit_dry_run_writes_nothing(
+        self, mock_from_yaml, mock_create_engine, _squeue, tmp_path
+    ):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        live = working_dir / "daisy_chain_scripts" / "run_rep1.sh"
+        live.parent.mkdir(parents=True)
+        live.write_text("#SBATCH --partition=blanca-shirts\n")
+        before = _snapshot(working_dir)
+        mock_from_yaml.return_value = _mock_sim_config_gromacs(working_dir)
+        engine_mock = self._gromacs_engine(working_dir)
+        mock_create_engine.return_value = engine_mock
+
+        result = self._invoke(
+            config_file, "--engine", "gromacs", "--submit", "--dry-run", "--preset", "aa100"
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "DRY RUN" in result.output
+        assert _snapshot(working_dir) == before
+        engine_mock.prepare_submission.assert_not_called()
+
+    @patch("polyzymd.workflow.slurm_submit.run_sbatch")
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_gromacs_recover_leaves_live_chain_script_alone(
+        self, mock_from_yaml, mock_create_engine, _squeue, mock_sbatch, tmp_path
+    ):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        live = working_dir / "daisy_chain_scripts" / "run_rep1.sh"
+        live.parent.mkdir(parents=True)
+        live.write_text("#SBATCH --partition=blanca-shirts\n")
+        mock_from_yaml.return_value = _mock_sim_config_gromacs(working_dir)
+        mock_create_engine.return_value = self._gromacs_engine(working_dir)
+        mock_sbatch.return_value = MagicMock(returncode=0, stdout="Submitted 1", stderr="")
+
+        result = self._invoke(config_file, "--engine", "gromacs", "--submit", "--preset", "aa100")
+
+        assert result.exit_code == 0, result.output
+        assert live.read_text() == "#SBATCH --partition=blanca-shirts\n"
+        recovery = working_dir / "recovery_scripts" / "recover_rep1.sh"
+        assert "aa100" in recovery.read_text()
+        mock_sbatch.assert_called_once()
+        assert mock_sbatch.call_args.args[0] == recovery
+
+
+@pytest.mark.parametrize("content", ["", '{"segments": [', "[]"])
+class TestUnreadableProgressRecord:
+    """An unreadable progress.json is reported and never rewritten."""
+
+    def _run_dir(self, tmp_path: Path, content: str) -> Path:
+        working_dir = tmp_path / "work"
+        _write_completed_segment(working_dir / "production_0", 0)
+        (working_dir / "progress.json").write_text(content)
+        return working_dir
+
+    def test_recover_reports_it_and_writes_nothing(self, tmp_path, content):
+        working_dir = self._run_dir(tmp_path, content)
+        before = _snapshot(working_dir)
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+
+        with patch(
+            "polyzymd.config.schema.SimulationConfig.from_yaml",
+            return_value=_mock_sim_config_for_submit(working_dir),
+        ):
+            result = CliRunner().invoke(
+                cli, ["recover", "-c", str(config_file), "-r", "1", "--submit", "--dry-run"]
+            )
+
+        assert result.exit_code == 1, result.output
+        assert "progress.json" in result.output and "unreadable" in result.output
+        assert _snapshot(working_dir) == before
+
+    def test_check_progress_stops_the_chain_and_writes_nothing(self, tmp_path, content):
+        working_dir = self._run_dir(tmp_path, content)
+        before = _snapshot(working_dir)
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+
+        with patch(
+            "polyzymd.config.schema.SimulationConfig.from_yaml",
+            return_value=_mock_sim_config(working_dir),
+        ):
+            result = CliRunner().invoke(
+                cli,
+                [
+                    "check-progress",
+                    "-c",
+                    str(config_file),
+                    "-r",
+                    "1",
+                    "--scratch-dir",
+                    str(working_dir),
+                ],
+            )
+
+        assert result.exit_code == 3, result.output
+        assert _snapshot(working_dir) == before
+
+
+def test_recover_rejects_an_unknown_engine(tmp_path):
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("name: test")
+
+    result = CliRunner().invoke(cli, ["recover", "-c", str(config_file), "--engine", "gromax"])
+
+    assert result.exit_code == 2
+    assert "gromax" in result.output
+    assert not isinstance(result.exception, ValueError)
+
+
+def test_a_continuation_with_other_dynamics_than_the_config_warns(tmp_path, monkeypatch, capsys):
+    """A chain keeps the dynamics it started with; a segment says so when the config differs."""
+    from polyzymd.cli.main import _run_continuation_segment
+    from polyzymd.config.schema import SimulationPhaseConfig
+    from polyzymd.simulation import continuation
+
+    class FakeManager:
+        def __init__(self, **kwargs):
+            pass
+
+        def load_previous_state(self):
+            pass
+
+        def saved_dynamics(self):
+            return {"ensemble": "NPT", "thermostat": "LangevinMiddle", "friction": 1.0}
+
+        def run_segment(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(continuation, "ContinuationManager", FakeManager)
+    sim_config = MagicMock()
+    sim_config.simulation_phases.production = SimulationPhaseConfig(
+        ensemble="NVT", duration=1.0, samples=2, thermostat="Langevin", thermostat_timescale=2.0
+    )
+    _run_continuation_segment(
+        sim_config=sim_config,
+        working_dir=tmp_path,
+        segment_index=1,
+        duration_ns=1.0,
+        num_samples=2,
+        timestep_fs=2.0,
+        replicate=1,
+        report_interval=10,
+        checkpoint_interval_s=60.0,
+    )
+    err = capsys.readouterr().err
+    assert "segment 1 continues the dynamics the chain started with (NPT, LangevinMiddle" in err
+    assert "not the config's production (NVT, Langevin, friction 0.5/ps)" in err

@@ -15,7 +15,7 @@ methanol
   2  6  1  0
 M  END
 >  <metadata>  (1) 
-{"0": {"residue_name": "MET"}, "1": {"residue_name": "MET"}, "2": {"residue_name": "MET"}, "3": {"residue_name": "MET"}, "4": {"residue_name": "MET"}, "5": {"residue_name": "MET"}}
+{"0": {"residue_name": "MOH"}, "1": {"residue_name": "MOH"}, "2": {"residue_name": "MOH"}, "3": {"residue_name": "MOH"}, "4": {"residue_name": "MOH"}, "5": {"residue_name": "MOH"}}
 
 >  <atom.dprop.PartialCharge>  (1) 
 0.11669999999999998 -0.5988 0.028699999999999989 0.028699999999999989 0.028699999999999989 0.39600000000000002

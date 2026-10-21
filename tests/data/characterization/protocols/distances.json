@@ -1,0 +1,162 @@
+{
+ "one condition": {
+  "conditions": [{"ci95":[6.99633,26.1118],"ci_method":"student_t","entry":null,"eq_detected_frame":[1,0,0],"eq_detected_ns":[0.1,0.0,0.0],"label":"A","mean":16.5541,"n_effective":[12.0,12.0,12.0],"n_replicates":3,"replicate_values":[17.7862,19.6345,12.2414],"replicates":[1,2,3],"sem":2.22136,"statistical_inefficiency":[1.0,1.0,1.0]}],
+  "frames_per_replicate": {
+   "A": [12,12,12]
+  },
+  "metric": "mean_distance",
+  "pairwise": [],
+  "provenance.output_paths.results": "<tmp>/one/polyzymd_results/distances_ser_sbm",
+  "run": "ser_sbm",
+  "text": "# polyzymd analyze distances  metric mean_distance  unit A  run ser_sbm  eq 0ns  conditions 1  replicates 3  protocol distances/2\nA  n 3  mean 16.55  sem 2.221  ci95 6.996 to 26.11  values 17.79, 19.63, 12.24  replicates 1, 2, 3  g 1, 1, 1  n_eff 12, 12, 12  eq_detected 0.1 ns\nwarning: condition A: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nverdict: A mean_distance 16.55 A (95% CI 6.996 to 26.11, n 3)\n",
+  "unit": "A"
+ },
+ "records": {
+  "distances_gln_egm": {
+   "A/replicate_1": {},
+   "A/replicate_2": {},
+   "A/replicate_3": {},
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "shared": {"files":["record.json","series.npz"],"record.json:arguments":{"args":[{"select":"resid 45 and name O"},{"select":"resname EGM"}],"kwargs":{"mode_a":"single","mode_b":"com","pbc":true}},"record.json:bounds":[0.0,null],"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"pair_distance"},"record.json:name":"distances_gln_egm","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":"A","record.json:versions":"<masked>"}
+  },
+  "distances_gln_egm_bound": {
+   "A/replicate_1": {},
+   "A/replicate_2": {},
+   "A/replicate_3": {},
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "shared": {"files":["record.json","series.npz"],"record.json:bounds":[0.0,1.0],"record.json:inputs":[{"name":"record.json","sha256":"<masked>"}],"record.json:kwargs":{"thresholds":[4.0]},"record.json:name":"distances_gln_egm_bound","record.json:transform":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"all_below"},"record.json:unit":null,"record.json:versions":"<masked>"}
+  },
+  "distances_ser_sbm": {
+   "A/replicate_1": {},
+   "A/replicate_2": {},
+   "A/replicate_3": {},
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "shared": {"files":["record.json","series.npz"],"record.json:arguments":{"args":[{"select":"resid 12 and name OG"},{"select":"resname SBM"}],"kwargs":{"mode_a":"single","mode_b":"single","pbc":true}},"record.json:bounds":[0.0,null],"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"pair_distance"},"record.json:name":"distances_ser_sbm","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":"A","record.json:versions":"<masked>"}
+  },
+  "distances_ser_sbm_below_3.5_A": {
+   "A/replicate_1": {},
+   "A/replicate_2": {},
+   "A/replicate_3": {},
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "shared": {"files":["record.json","series.npz"],"record.json:bounds":[0.0,1.0],"record.json:inputs":[{"name":"record.json","sha256":"<masked>"}],"record.json:kwargs":{"thresholds":[3.5]},"record.json:name":"distances_ser_sbm_below 3.5 A","record.json:transform":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"all_below"},"record.json:unit":null,"record.json:versions":"<masked>"}
+  }
+ },
+ "shared": {
+  "all_metrics": [],
+  "all_runs": ["ser_sbm","ser_sbm below 3.5 A","gln_egm","gln_egm bound"],
+  "analysis": "distances",
+  "equilibration": "0ns",
+  "figures": ["distances/distance_fraction_gln_egm_bound.png","distances/distance_fraction_ser_sbm_below_3.5_A.png","distances/distance_kde_gln_egm.png","distances/distance_kde_panel.png","distances/distance_kde_ser_sbm.png","distances/distance_threshold_bars.png"],
+  "frames_per_replicate": {
+   "A": [12,12,12],
+   "B": [12,12,12]
+  },
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.A": "c4429a507b8cea42",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/distances",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings": {},
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "status": "complete",
+  "stride": 1,
+  "trends": [],
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run gln_egm": {
+  "conditions": {
+   "ci95": [[15.0564,19.878],[9.11214,24.3707]],
+   "eq_detected_frame": [[0,2,0],[0,0,0]],
+   "eq_detected_ns": [[0.0,0.2,0.0],[0.0,0.0,0.0]],
+   "every row": {"ci_method":"student_t","entry":null,"n_replicates":3,"replicates":[1,2,3]},
+   "label": ["A","B"],
+   "mean": [17.4672,16.7414],
+   "n_effective": [[10.0949,4.991,12.0],[12.0,12.0,12.0]],
+   "replicate_values": [[16.784,18.5781,17.0396],[13.1959,18.5781,18.4503]],
+   "sem": [0.560305,1.77316],
+   "statistical_inefficiency": [[1.18872,2.40433,1.0],[1.0,1.0,1.0]]
+  },
+  "metric": "mean_distance",
+  "pairwise": [{"a":"A","b":"B","cohens_d":-0.318689,"correction":"BH","delta":-0.725818,"delta_ci95":[-7.58538,6.13374],"direction":"no significant change","entry":null,"family_size":1,"hedges_g":-0.254951,"p":0.728342,"p_adjusted":0.728342,"significant":false,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/distances_gln_egm",
+  "run": "gln_egm",
+  "text": "# polyzymd analyze distances  metric mean_distance  unit A  run gln_egm  eq 0ns  conditions 2  replicates 3,3  protocol distances/2\nA  n 3  mean 17.47  sem 0.5603  ci95 15.06 to 19.88  values 16.78, 18.58, 17.04  replicates 1, 2, 3  g 1.189, 2.404, 1  n_eff 10.09, 4.991, 12  eq_detected 0.2 ns\nB  n 3  mean 16.74  sem 1.773  ci95 9.112 to 24.37  values 13.2, 18.58, 18.45  replicates 1, 2, 3  g 1, 1, 1  n_eff 12, 12, 12  eq_detected 0 ns\nA vs B  delta -0.7258  ci95 -7.585 to 6.134  p 0.7283  p_adj 0.7283  test welch_t  correction BH  family 1  d -0.3187  not_significant\nwarning: condition A, condition B: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nverdict: no significant difference in mean_distance between A and B (delta -0.7258 A, 95% CI -7.585 to 6.134, p_adj 0.7283, p 0.7283, n 3 vs 3)\n",
+  "unit": "A"
+ },
+ "two conditions, run gln_egm bound": {
+  "conditions": {
+   "ci95": [[0.186037,0.425074],[-0.0252211,0.691888]],
+   "eq_detected_frame": [[0,2,0],[0,0,0]],
+   "eq_detected_ns": [[0.0,0.2,0.0],[0.0,0.0,0.0]],
+   "every row": {"ci_method":"student_t","entry":null,"n_replicates":3,"replicates":[1,2,3]},
+   "label": ["A","B"],
+   "mean": [0.305556,0.333333],
+   "n_effective": [[9.6,4.90909,12.0],[12.0,12.0,12.0]],
+   "replicate_values": [[0.333333,0.25,0.333333],[0.5,0.25,0.25]],
+   "sem": [0.0277778,0.0833333],
+   "statistical_inefficiency": [[1.25,2.44444,1.0],[1.0,1.0,1.0]]
+  },
+  "metric": "fraction_below_threshold",
+  "pairwise": [{"a":"A","b":"B","cohens_d":0.258199,"correction":"BH","delta":0.0277778,"delta_ci95":[-0.291912,0.347467],"direction":"no significant change","entry":null,"family_size":1,"hedges_g":0.206559,"p":0.776898,"p_adjusted":0.776898,"significant":false,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/distances_gln_egm_bound",
+  "run": "gln_egm bound",
+  "text": "# polyzymd analyze distances  metric fraction_below_threshold  unit none  run gln_egm bound  eq 0ns  conditions 2  replicates 3,3  protocol distances/2\nA  n 3  mean 0.3056  sem 0.02778  ci95 0.186 to 0.4251  values 0.3333, 0.25, 0.3333  replicates 1, 2, 3  g 1.25, 2.444, 1  n_eff 9.6, 4.909, 12  eq_detected 0.2 ns\nB  n 3  mean 0.3333  sem 0.08333  ci95 -0.02522 to 0.6919  values 0.5, 0.25, 0.25  replicates 1, 2, 3  g 1, 1, 1  n_eff 12, 12, 12  eq_detected 0 ns\nA vs B  delta +0.02778  ci95 -0.2919 to 0.3475  p 0.7769  p_adj 0.7769  test welch_t  correction BH  family 1  d 0.2582  not_significant\nwarning: condition A, condition B: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nwarning: the 95 percent interval of condition B extends past the bounds 0 to 1 of fraction_below_threshold, where a t interval is not reliable\nverdict: no significant difference in fraction_below_threshold between A and B (delta +0.02778, 95% CI -0.2919 to 0.3475, p_adj 0.7769, p 0.7769, n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run ser_sbm": {
+  "conditions": {
+   "ci95": [[6.99633,26.1118],[7.55582,18.1592]],
+   "eq_detected_frame": [[1,0,0],[2,0,0]],
+   "eq_detected_ns": [[0.1,0.0,0.0],[0.2,0.0,0.0]],
+   "every row": {"ci_method":"student_t","entry":null,"n_effective":[12.0,12.0,12.0],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[1.0,1.0,1.0]},
+   "label": ["A","B"],
+   "mean": [16.5541,12.8575],
+   "replicate_values": [[17.7862,19.6345,12.2414],[14.0897,10.3931,14.0897]],
+   "sem": [2.22136,1.23219]
+  },
+  "metric": "mean_distance",
+  "pairwise": [{"a":"A","b":"B","cohens_d":-1.18818,"correction":"BH","delta":-3.69656,"delta_ci95":[-11.6017,4.20857],"direction":"no significant change","entry":null,"family_size":1,"hedges_g":-0.950542,"p":0.23814,"p_adjusted":0.23814,"significant":false,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/distances_ser_sbm",
+  "run": "ser_sbm",
+  "text": "# polyzymd analyze distances  metric mean_distance  unit A  run ser_sbm  eq 0ns  conditions 2  replicates 3,3  protocol distances/2\nA  n 3  mean 16.55  sem 2.221  ci95 6.996 to 26.11  values 17.79, 19.63, 12.24  replicates 1, 2, 3  g 1, 1, 1  n_eff 12, 12, 12  eq_detected 0.1 ns\nB  n 3  mean 12.86  sem 1.232  ci95 7.556 to 18.16  values 14.09, 10.39, 14.09  replicates 1, 2, 3  g 1, 1, 1  n_eff 12, 12, 12  eq_detected 0.2 ns\nA vs B  delta -3.697  ci95 -11.6 to 4.209  p 0.2381  p_adj 0.2381  test welch_t  correction BH  family 1  d -1.188  not_significant\nwarning: condition A, condition B: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nverdict: no significant difference in mean_distance between A and B (delta -3.697 A, 95% CI -11.6 to 4.209, p_adj 0.2381, p 0.2381, n 3 vs 3)\n",
+  "unit": "A"
+ },
+ "two conditions, run ser_sbm below 3.5 A": {
+  "conditions": {
+   "ci95": [[-0.0420399,0.819818],[0.316519,0.794592]],
+   "eq_detected_frame": [[1,0,0],[2,0,0]],
+   "eq_detected_ns": [[0.1,0.0,0.0],[0.2,0.0,0.0]],
+   "every row": {"ci_method":"student_t","entry":null,"n_effective":[12.0,12.0,12.0],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[1.0,1.0,1.0]},
+   "label": ["A","B"],
+   "mean": [0.388889,0.555556],
+   "replicate_values": [[0.333333,0.25,0.583333],[0.5,0.666667,0.5]],
+   "sem": [0.100154,0.0555556]
+  },
+  "metric": "fraction_below_threshold",
+  "pairwise": [{"a":"A","b":"B","cohens_d":1.18818,"correction":"BH","delta":0.166667,"delta_ci95":[-0.189752,0.523085],"direction":"no significant change","entry":null,"family_size":1,"hedges_g":0.950542,"p":0.23814,"p_adjusted":0.23814,"significant":false,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/distances_ser_sbm_below_3.5_A",
+  "run": "ser_sbm below 3.5 A",
+  "text": "# polyzymd analyze distances  metric fraction_below_threshold  unit none  run ser_sbm below 3.5 A  eq 0ns  conditions 2  replicates 3,3  protocol distances/2\nA  n 3  mean 0.3889  sem 0.1002  ci95 -0.04204 to 0.8198  values 0.3333, 0.25, 0.5833  replicates 1, 2, 3  g 1, 1, 1  n_eff 12, 12, 12  eq_detected 0.1 ns\nB  n 3  mean 0.5556  sem 0.05556  ci95 0.3165 to 0.7946  values 0.5, 0.6667, 0.5  replicates 1, 2, 3  g 1, 1, 1  n_eff 12, 12, 12  eq_detected 0.2 ns\nA vs B  delta +0.1667  ci95 -0.1898 to 0.5231  p 0.2381  p_adj 0.2381  test welch_t  correction BH  family 1  d 1.188  not_significant\nwarning: condition A, condition B: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nwarning: the 95 percent interval of condition A extends past the bounds 0 to 1 of fraction_below_threshold, where a t interval is not reliable\nverdict: no significant difference in fraction_below_threshold between A and B (delta +0.1667, 95% CI -0.1898 to 0.5231, p_adj 0.2381, p 0.2381, n 3 vs 3)\n",
+  "unit": null
+ },
+ "unknown run": {
+  "hint": "Use --run with one of ['ser_sbm', 'ser_sbm below 3.5 A', 'gln_egm', 'gln_egm bound'].",
+  "message": "distances: no result named 'bogus'."
+ },
+ "unknown setting": {
+  "hint": "Run polyzymd analyze distances -c A/config.yaml --set pairs=pairs.yaml.",
+  "message": "distances takes no setting other than pairs, threshold, use_pbc."
+ }
+}

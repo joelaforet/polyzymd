@@ -1,12 +1,9 @@
-# SASA Analysis: Quick Start
+# Run SASA analysis
 
-Use the `sasa` plugin to measure solvent-accessible surface area for whole
-proteins, active sites, or polymer-shielded regions.
-
-```{note}
-For a guided learning path, see {doc}`../tutorials/sasa_analysis`. For settings,
-artifact paths, and output fields, see {doc}`../reference/analysis_sasa_reference`.
-```
+Measure the solvent-accessible surface area (SASA) of a set of atoms, such as
+the protein or an active site, on each production frame of each replicate. You
+can include neighbor atoms, such as the polymer, in the calculation. Then
+compare the conditions, with one value per replicate.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -21,235 +18,172 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-## TL;DR
+## What is measured
+
+PolyzyMD computes the SASA with the Shrake-Rupley method of MDTraj. Two
+selections control the calculation:
+
+- The **target** is the set of atoms whose SASA PolyzyMD reports.
+- A **context** is the set of atoms present in the calculation. It contains
+  every target atom. Context atoms outside the target, such as polymer atoms,
+  cover part of the target surface but are not counted.
+
+The calculation does not use periodic images. Values are in Å². For the steps
+of the calculation and the checks, see
+{doc}`../explanation/analysis_sasa_verification`.
+
+## From the command line
+
+In a {term}`study`, give the study folder. The study names the conditions,
+the control and the equilibration window. The results go to
+`<study>/results/sasa/`:
 
 ```bash
-# Run only SASA for conditions in comparison.yaml
-polyzymd compare run sasa -f comparison.yaml --eq-time 10ns
-
-# Run all enabled analyses, including SASA
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Force recomputation when settings or selections changed
-polyzymd compare run sasa -f comparison.yaml --eq-time 10ns --recompute
+polyzymd analyze sasa --study my_study
 ```
 
-## Prerequisites
-
-Before running SASA, confirm you have:
-
-1. completed production trajectories,
-2. a `comparison.yaml` with one or more conditions,
-3. valid simulation `config.yaml` paths for each condition, and
-4. selections that match your topology.
-
-PolyzyMD examples use the chain convention A = protein, B = substrate,
-C = polymer, and D+ = solvent/ions/other.
-
-## Configure a minimal whole-protein run
-
-Use this when you only need total protein SASA.
-
-```yaml
-plugins:
-  sasa:
-    runs:
-      - label: "protein_total"
-        target_selection: "protein"
-```
-
-When `context_selection` is omitted, it defaults to the same value as
-`target_selection`. This reports the protein's self-SASA.
-
-Run it:
+For a quick look without a study, give the `config.yaml` of each condition
+instead. The results then go to the current folder:
 
 ```bash
-polyzymd compare run sasa -f comparison.yaml --eq-time 10ns
+polyzymd analyze sasa -c noPoly/config.yaml -c SBMA50/config.yaml \
+  --label "No polymer" --label "SBMA 50%" --eq 200ns
 ```
 
-## Configure a two-run shielding comparison
+The first `-c` is the control. By default, the target is `protein`, measured
+alone, in a context named `isolated`. The command does these steps:
 
-Use this when you want a practical polymer-shielding signal.
+1. It measures the total SASA of the target on each production frame.
+2. It takes the mean over frames of each replicate.
+3. It compares each condition with the control by Welch's t test. It corrects
+   the p values with the {term}`Benjamini-Hochberg` method.
 
-```yaml
-plugins:
-  sasa:
-    runs:
-      - label: "protein_isolated"
-        target_selection: "protein"
-        context_selection: "protein"
-      - label: "protein_with_polymer"
-        target_selection: "protein"
-        context_selection: "protein or chainid C"
+To see how much surface the polymer covers, name the contexts:
+
+```bash
+polyzymd analyze sasa -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
+  --set "contexts={isolated: protein, with_polymer: protein or resname SBM EGM}" \
+  --run with_polymer
 ```
 
-Interpretation:
+Each context gives two results. Select one with `--run`:
 
-- `protein_isolated` is the baseline protein surface.
-- `protein_with_polymer` allows polymer atoms to block protein surface points.
-- A lower `protein_with_polymer` value in polymer conditions indicates
-  shielding.
+| `--run` | One value per replicate |
+|---|---|
+| `<context>` (default: the first context) | Mean over production frames of the target's total SASA |
+| `<context>_residues` | Each target residue's SASA, averaged over production frames, compared residue by residue |
 
-## Focus on active-site exposure
+PolyzyMD measures only the result that `--run` selects, because each context
+is a separate pass over every frame. Run the command once for each result that
+you need.
 
-Use residue selections when the biological question is whether polymer blocks a
-catalytic site or binding pocket.
+PolyzyMD corrects a per-residue comparison over every residue of every
+compared condition. For each condition, the text report gives the number of
+residues that are significantly lower and higher than in the control, and lists
+them. The JSON report keeps every per-residue row.
 
-```yaml
-plugins:
-  sasa:
-    runs:
-      - label: "active_site_isolated"
-        target_selection: "protein and (resid 77 or resid 156 or resid 262)"
-        context_selection: "protein"
-      - label: "active_site_with_polymer"
-        target_selection: "protein and (resid 77 or resid 156 or resid 262)"
-        context_selection: "protein or chainid C"
+Settings, passed with `--set`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `target` | `protein` | Atoms whose SASA is reported |
+| `contexts` | `{isolated: <target>}` | A mapping of names to selections of the atoms present in the calculation. Each must contain every target atom |
+| `probe_radius_nm` | `0.14` | The probe radius, in nm |
+| `n_sphere_points` | `960` | The number of points on the sphere of each atom |
+
+For example, this command measures how much the polymer covers an active
+site:
+
+```bash
+polyzymd analyze sasa -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
+  --set "target=protein and (resid 76 or resid 132 or resid 155)" \
+  --set "contexts={site_isolated: protein, site_with_polymer: protein or resname SBM EGM}" \
+  --run site_with_polymer
 ```
 
-Adjust residue IDs to match your enzyme. If the polymer-aware active-site run
-has lower SASA, polymer may be reducing access to that site.
-
-## Compare monomer-specific shielding
-
-Use monomer residue names when your polymer contains distinct monomer types.
-
-```yaml
-plugins:
-  sasa:
-    runs:
-      - label: "protein_isolated"
-        target_selection: "protein"
-        context_selection: "protein"
-      - label: "protein_with_sbma"
-        target_selection: "protein"
-        context_selection: "protein or resname SBMA"
-      - label: "protein_with_egma"
-        target_selection: "protein"
-        context_selection: "protein or resname EGMA"
-```
-
-Check topology residue names before relying on a monomer-specific selection:
+Before you use a context selection, check the residue names of the polymer in
+the topology:
 
 ```bash
 python - <<'PY'
 import MDAnalysis as mda
 
 u = mda.Universe("solvated_system.pdb")
-print(sorted(set(u.select_atoms("chainid C").residues.resnames)))
+print(sorted(set(u.select_atoms("not protein").residues.resnames)))
 PY
 ```
 
-## Use stride and chunking for long trajectories
+Useful options:
 
-SASA can be CPU-intensive. Increase `stride` to sample fewer frames, and adjust
-`chunk_size` to control memory use.
+- `--format json` prints the full report.
+- `--replicates 1-3` uses only some replicates.
+- `--recompute` ignores stored results.
 
-```yaml
-plugins:
-  sasa:
-    runs:
-      - label: "protein_with_polymer"
-        target_selection: "protein"
-        context_selection: "protein or chainid C"
-        stride: 5
-    chunk_size: 50
+The JSON report records the settings, with the contexts, under
+`provenance.settings`.
+
+```{note}
+PolyzyMD gives each frame to MDTraj in a separate call, so a large context over
+a long trajectory takes time. Add `--stride 5` to measure every fifth
+production frame. Or run the command in a SLURM job, not on a login node.
 ```
 
-Practical guidance:
-
-- Use `stride: 1` for final production analyses when feasible.
-- Use `stride: 5` or `stride: 10` for exploratory scans of long trajectories.
-- Lower `chunk_size` if memory is tight.
-- Keep the same stride across conditions when comparing means.
-
-## Run on SLURM instead of locally
-
-For large systems or many replicates, submit analysis jobs to SLURM:
-
-```bash
-polyzymd compare submit sasa -f comparison.yaml --dry-run
+```{note}
+`--stride` applies to every result of the command. PolyzyMD gives MDTraj one
+frame per call because of a defect in MDTraj 1.11.1. In one call, MDTraj
+returns about 0.1 % too much area for each frame after the first frame of each
+thread. See {doc}`../explanation/analysis_sasa_verification`.
 ```
 
-Inspect the generated jobs, then submit without `--dry-run` when the resource
-requests look right. SASA has a high execution-cost hint, so use the full HPC
-guide for scheduler options, monitoring, and troubleshooting:
-{doc}`hpc_execution`.
+## Figures
 
-## Generate plots after a completed run
+`polyzymd analyze sasa` writes these figures to `<output-dir>/figures/sasa/`.
+Add `--no-plots` to skip them.
 
-If you ran compute/compare without plots, generate plots from cached outputs:
+| Figure | What it shows |
+|---|---|
+| `sasa_timeseries_<context>` | The total SASA of each replicate against time, with the mean of each condition and its 95 % interval |
+| `sasa_comparison_<context>` | Each condition's mean with its interval and every replicate value |
+| `sasa_distribution_<context>` | Each condition's distribution of per-frame values, pooled and per replicate |
+| `sasa_profile_<context>` | For `<context>_residues`: each residue's SASA per replicate and each condition's mean with its interval |
+| `sasa_difference_<context>` | For `<context>_residues` with several conditions: each condition minus the control at every residue, with the interval of the difference and the significant residues marked |
 
-```bash
-polyzymd compare plot-all -f comparison.yaml
+## From Python
+
+```python
+import polyzymd as pz
+from polyzymd.analyses.functions import residue_sasa, sasa
+
+study = pz.Study.from_configs(
+    {"No polymer": "noPoly/config.yaml", "SBMA 50%": "SBMA50/config.yaml"},
+    equilibration="200ns",
+)
+protein, with_polymer = "protein", "protein or resname SBM EGM"
+
+total = study.timeseries(
+    sasa, pz.select(protein), pz.select(with_polymer), unit="A^2", bounds=(0.0, None)
+)
+print(total.reduce("mean").compare(control="No polymer").to_agent_text())
+
+per_residue = study.per_replicate(
+    residue_sasa,
+    pz.select(protein),
+    pz.select(with_polymer),
+    unit="A^2",
+    labels=lambda u: u.select_atoms(protein).residues.resids,
+)
+print(per_residue.compare(control="No polymer").to_agent_text())
 ```
 
-The most common SASA plot files are:
+`sasa(target, context)` returns the total of one frame. Use it with
+`Study.timeseries`. `residue_sasa(target, context, frames)` returns the mean
+over the frames of each target residue. Use it with `Study.per_replicate`.
+Both take `probe_radius_nm` and `n_sphere_points` as keyword arguments. To
+measure your own quantity, see {doc}`study_api`.
 
-- `sasa_comparison_<run>.png`
-- `sasa_normalized_comparison_<run>.png`
-- `sasa_timeseries_<run>.png`
-- `sasa_profile_<run>.png`
+## Next steps
 
-See {doc}`../reference/analysis_sasa_reference` for plot meanings and output
-paths.
-
-## Quick output checks
-
-After a run, confirm the canonical outputs exist:
-
-```bash
-ls analysis/<condition>/sasa/run_1/
-ls analysis/<condition>/sasa/aggregated/
-ls comparison/sasa/
-```
-
-Inspect condition summaries from the comparison result:
-
-```bash
-python - <<'PY'
-import json
-from pathlib import Path
-
-result = json.loads(Path("comparison/sasa/result.json").read_text())
-for condition in result["conditions"]:
-    print(condition["label"])
-    for run in condition["run_summaries"]:
-        print(f"  {run['label']}: {run['mean_sasa']:.1f} ± {run['sem_sasa']:.1f} A^2")
-PY
-```
-
-Check direction labels for pairwise comparisons:
-
-```bash
-python - <<'PY'
-import json
-from pathlib import Path
-
-result = json.loads(Path("comparison/sasa/result.json").read_text())
-for comparison in result["pairwise_comparisons"]:
-    print(
-        comparison["run_label"],
-        comparison["condition_a"], "vs", comparison["condition_b"],
-        comparison["direction"],
-        f"{comparison['percent_change']:.1f}%",
-    )
-PY
-```
-
-## Common fixes
-
-| Symptom | Fix |
-|---------|-----|
-| A run reports zero atoms | Test the `target_selection` and `context_selection` against the topology. |
-| SASA is too slow | Increase `stride`, lower `n_sphere_points` for exploration, or submit to SLURM. |
-| Memory use is too high | Lower `chunk_size`. |
-| Monomer-specific run looks empty | Verify `resname` values and chain C membership in the topology. |
-| Changed selections but results did not change | Re-run with `--recompute`. |
-
-## Where to find details
-
-- Guided shielding tutorial: {doc}`../tutorials/sasa_analysis`
-- Settings and output reference: {doc}`../reference/analysis_sasa_reference`
-- Comparison file setup: {doc}`analysis_compare_conditions`
-- SLURM execution: {doc}`hpc_execution`
+- **What each function measures**: {doc}`../reference/analysis_functions`
+- **How the values were checked**: {doc}`../explanation/analysis_sasa_verification`
+- **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
+- **Contact analysis**: {doc}`analysis_contacts_quickstart`

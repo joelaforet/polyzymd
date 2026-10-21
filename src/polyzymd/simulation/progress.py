@@ -29,17 +29,11 @@ from pydantic import BaseModel, Field, ValidationError
 
 LOGGER = logging.getLogger(__name__)
 
-# Threshold (in seconds) for checkpoint file recency.  When a segment
-# directory has a checkpoint file but no ``state.xml`` or ``INTERRUPTED``
-# marker, we check the file's modification time.  If it was written
-# within the last ``CHECKPOINT_RECENCY_SECONDS`` seconds, we assume the
-# simulation process is still alive and classify the segment as RUNNING.
-# If the checkpoint is older, the process was likely hard-killed and the
-# segment is classified as INTERRUPTED.
-#
-# NOTE: This is a **heuristic** — we do not inspect running processes or
-# query SLURM.  Checkpoints are typically written every 10-35 seconds of
-# wall time, so 600 s (10 minutes) provides a very conservative margin.
+# A segment directory with a checkpoint but no ``state.xml`` or
+# ``INTERRUPTED`` marker is RUNNING while another process holds the
+# replicate lock.  Only when the lock file cannot be opened is the segment
+# called RUNNING if its checkpoint was written in the last
+# ``CHECKPOINT_RECENCY_SECONDS`` seconds.
 CHECKPOINT_RECENCY_SECONDS: int = 600
 
 # How often (wall-clock seconds) the simulation loop should update
@@ -92,6 +86,12 @@ class EquilibrationStageRecord(BaseModel):
     polyzymd_version, openmm_version, pixi_environment : str | None
         Software provenance of the process that ran the stage. ``None`` for
         records written by PolyzyMD versions that predate these fields.
+    seeds : dict | None
+        Random seeds the stage ran with (see ``SegmentRecord.seeds``).  For a
+        stage resumed after an interruption, the seeds of the last job.
+    seeds_by_attempt : list of dict | None
+        Seeds of every job that ran the stage, oldest first, when the stage
+        was interrupted and resumed; ``None`` otherwise.
     """
 
     index: int
@@ -104,6 +104,8 @@ class EquilibrationStageRecord(BaseModel):
     polyzymd_version: str | None = None
     openmm_version: str | None = None
     pixi_environment: str | None = None
+    seeds: dict[str, int | None] | None = None
+    seeds_by_attempt: list[dict[str, int | None]] | None = None
 
 
 class SegmentRecord(BaseModel):
@@ -122,7 +124,8 @@ class SegmentRecord(BaseModel):
     started_at : str
         ISO-format timestamp when the segment started.
     finished_at : str | None
-        ISO-format timestamp when the segment finished (None if interrupted/running).
+        ISO-format timestamp when the segment stopped, by completion or
+        interruption (None while running).
     status : SegmentStatus
         Current status of this segment.
     duration_ns : float
@@ -132,6 +135,15 @@ class SegmentRecord(BaseModel):
         for records written by PolyzyMD versions that predate these fields.
         A change between consecutive segments means the restart chain
         switched environment (see the CUDA-driver routing history).
+    openmm_platform : dict | None
+        The OpenMM platform ``name`` and the ``properties`` its Context used
+        (:func:`polyzymd.simulation.platform.platform_record`), such as
+        ``DeterministicForces``. ``None`` for older records.
+    trajectory_sha256, trajectory_bytes : str | None, int | None
+        SHA-256 and size of the segment's trajectory file, recorded when the
+        segment completes, so analyses and published studies identify the
+        trajectory by its content. ``None`` for segments that were interrupted
+        or ran under PolyzyMD versions that predate these fields.
     report_interval : int | None
         Integrator steps between trajectory frames in this segment.
     start_step : int | None
@@ -149,6 +161,13 @@ class SegmentRecord(BaseModel):
     gap_frames : int
         Report steps between the previous segment's last frame and this
         segment's first frame that no segment wrote.
+    seeds : dict | None
+        Random seeds the segment ran with. OpenMM records ``integrator``
+        (thermostat noise), ``barostat`` (volume moves) and, when the
+        segment drew new velocities, ``velocities``; 0 means OpenMM chose
+        a random seed. GROMACS records ``ld_seed`` and, when the stage drew
+        new velocities, ``gen_seed``; None means GROMACS chose one that was
+        not logged. ``None`` for older records.
     """
 
     index: int
@@ -162,12 +181,90 @@ class SegmentRecord(BaseModel):
     polyzymd_version: str | None = None
     openmm_version: str | None = None
     pixi_environment: str | None = None
+    openmm_platform: dict[str, Any] | None = None
+    trajectory_sha256: str | None = None
+    trajectory_bytes: int | None = None
     report_interval: int | None = None
     start_step: int | None = None
     last_reported_step: int | None = None
     resumed_from: str | None = None
     overlap_frames: int = 0
     gap_frames: int = 0
+    seeds: dict[str, int | None] | None = None
+
+
+def flush_reporters(simulation: Any) -> None:
+    """Flush the files of a simulation's reporters to disk, so a finished trajectory is complete.
+
+    OpenMM's DCD reporter writes through a buffered file object, which it
+    closes only when the reporter is deleted; a trajectory read or hashed
+    before then can miss its last frames.
+    """
+    for reporter in getattr(simulation, "reporters", []):
+        out = getattr(reporter, "_out", None)
+        if out is not None and not getattr(out, "closed", True):
+            out.flush()
+            try:
+                os.fsync(out.fileno())
+            except (OSError, ValueError, AttributeError):
+                pass
+
+
+def trajectory_digest(path: str | Path) -> dict[str, Any]:
+    """Return ``trajectory_sha256`` and ``trajectory_bytes`` of a finished trajectory file.
+
+    An absent file gives ``None`` for both. Reading a 10 GB trajectory takes
+    of order ten seconds, once, when its segment completes.
+    """
+    import hashlib
+
+    file = Path(path)
+    if not file.is_file():
+        return {"trajectory_sha256": None, "trajectory_bytes": None}
+    digest = hashlib.sha256()
+    with file.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 22), b""):
+            digest.update(block)
+    return {"trajectory_sha256": digest.hexdigest(), "trajectory_bytes": file.stat().st_size}
+
+
+#: File in an engine working directory where ``polyzymd hash-trajectories``
+#: records trajectory hashes. Only the runner writes ``progress.json``.
+TRAJECTORY_HASHES_FILE = "trajectory_hashes.json"
+
+
+class TrajectoryHash(BaseModel):
+    """SHA-256 and size of one trajectory file."""
+
+    sha256: str
+    bytes: int
+
+
+class TrajectoryHashes(BaseModel):
+    """Contents of ``trajectory_hashes.json``: hashes by path relative to the engine working directory."""
+
+    files: Dict[str, TrajectoryHash] = Field(default_factory=dict)
+
+
+def load_trajectory_hashes(working_dir: Path) -> Dict[str, TrajectoryHash]:
+    """Return the hashes recorded in ``working_dir/trajectory_hashes.json``; empty when it is absent."""
+    path = Path(working_dir) / TRAJECTORY_HASHES_FILE
+    if not path.is_file():
+        return {}
+    return TrajectoryHashes.model_validate_json(path.read_text()).files
+
+
+def save_trajectory_hashes(working_dir: Path, files: Dict[str, TrajectoryHash]) -> None:
+    """Write ``working_dir/trajectory_hashes.json`` atomically, sorted by path."""
+    import tempfile
+
+    working_dir = Path(working_dir)
+    text = TrajectoryHashes(files=dict(sorted(files.items()))).model_dump_json(indent=2) + "\n"
+    with tempfile.NamedTemporaryFile(
+        "w", dir=working_dir, prefix=f".{TRAJECTORY_HASHES_FILE}.", suffix=".tmp", delete=False
+    ) as handle:
+        handle.write(text)
+    os.replace(handle.name, working_dir / TRAJECTORY_HASHES_FILE)
 
 
 #: SegmentRecord fields that describe trajectory frames and the resume point.
@@ -317,6 +414,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _mtime_iso(path: Path) -> str | None:
+    """Return the modification time of ``path`` as an ISO timestamp, or None if it is missing."""
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+    except OSError:
+        return None
+
+
 def _progress_path(working_dir: Path) -> Path:
     """Return the path to the progress file."""
     return working_dir / PROGRESS_FILENAME
@@ -352,6 +457,31 @@ def load_progress(working_dir: str | Path) -> SimulationProgress | None:
     except (json.JSONDecodeError, ValidationError) as exc:
         LOGGER.warning(f"Failed to load progress from {path}: {exc}")
         return None
+
+
+def unreadable_progress_reason(working_dir: str | Path) -> str | None:
+    """Say why ``progress.json`` in *working_dir* cannot be read.
+
+    Parameters
+    ----------
+    working_dir : str or Path
+        Simulation working directory.
+
+    Returns
+    -------
+    str or None
+        A short reason when the file exists but is not a valid progress
+        record (empty, truncated or of the wrong shape), otherwise ``None``.
+    """
+    path = _progress_path(Path(working_dir))
+    if not path.exists():
+        return None
+    try:
+        SimulationProgress.model_validate(json.loads(path.read_text()))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
+        reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        return f"{path} is unreadable ({reason})"
+    return None
 
 
 def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path:
@@ -410,9 +540,66 @@ def _update_or_append_segment(
     """
     for i, existing in enumerate(progress.segments):
         if existing.index == record.index:
+            # A segment starts once. The record written at segment end is
+            # built fresh, so its default started_at is the end time; keep
+            # the start recorded when the segment was marked RUNNING.
+            record.started_at = existing.started_at
             progress.segments[i] = record
             return
     progress.segments.append(record)
+
+
+def record_equilibration_stages(working_dir: str | Path, stages: List[Dict[str, Any]]) -> int:
+    """Record the equilibration stages of a run in ``progress.json``.
+
+    ``stages`` is the ``"stages"`` list that
+    :meth:`~polyzymd.simulation.runner.SimulationRunner.run_staged_equilibration`
+    returns. A stage the run skipped because an earlier run finished it keeps
+    the record of that run, or else the record read from its files on disk.
+    Does nothing without a ``progress.json``.
+
+    Returns
+    -------
+    int
+        Number of stage records written.
+    """
+    from polyzymd.utils.version import record_provenance
+
+    progress = load_progress(working_dir)
+    if progress is None:
+        return 0
+    earlier = {record.index: record for record in progress.equilibration_stages}
+    on_disk = {record.index: record for record in scan_equilibration_stages(working_dir)}
+    provenance = record_provenance()
+    records: List[EquilibrationStageRecord] = []
+    for stage in stages:
+        index = stage["stage_index"]
+        if stage.get("skipped"):
+            record = earlier.get(index) or on_disk.get(index)
+            if record is not None:
+                records.append(record)
+            continue
+        records.append(
+            EquilibrationStageRecord(
+                index=index,
+                name=stage["stage_name"],
+                status=SegmentStatus.COMPLETED,
+                duration_ns=stage["duration_ns"],
+                ensemble=stage.get("ensemble", "NVT"),
+                started_at=stage["started_at"],
+                finished_at=stage["finished_at"],
+                seeds=stage.get("seeds"),
+                seeds_by_attempt=(
+                    stage["seeds_by_attempt"]
+                    if len(stage.get("seeds_by_attempt") or []) > 1
+                    else None
+                ),
+                **provenance,
+            )
+        )
+    progress.equilibration_stages = records
+    save_progress(working_dir, progress)
+    return len(records)
 
 
 # ---------------------------------------------------------------------------
@@ -456,19 +643,18 @@ def scan_equilibration_stages(working_dir: str | Path) -> List[EquilibrationStag
         chk = entry / f"equilibration_{stage_idx}_{stage_name}_checkpoint.chk"
         chk_exists = chk.exists()
         status = SegmentStatus.COMPLETED if chk_exists else SegmentStatus.FAILED
-        # Use checkpoint mtime as an approximate finished_at for completed stages
-        finished_at: str | None = None
-        if chk_exists:
-            mtime = chk.stat().st_mtime
-            finished_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
-        records.append(
-            EquilibrationStageRecord(
-                index=stage_idx,
-                name=stage_name,
-                status=status,
-                finished_at=finished_at,
-            )
+        # The stage writes its topology PDB when it starts and its checkpoint
+        # when it finishes, so their mtimes approximate both times.
+        record = EquilibrationStageRecord(
+            index=stage_idx,
+            name=stage_name,
+            status=status,
+            finished_at=_mtime_iso(chk) if chk_exists else None,
         )
+        started_at = _mtime_iso(entry / f"equilibration_{stage_idx}_{stage_name}_topology.pdb")
+        if started_at is not None:
+            record.started_at = started_at
+        records.append(record)
 
     records.sort(key=lambda r: r.index)
     LOGGER.debug(
@@ -584,12 +770,12 @@ def scan_filesystem(
     return progress
 
 
-def _read_segment_provenance(params_json: Path) -> Dict[str, str | None]:
+def _read_segment_provenance(params_json: Path) -> Dict[str, Any]:
     """Read the ``provenance`` block from a segment's parameters JSON.
 
     ``production_N_parameters.json`` records ``polyzymd_version``,
-    ``openmm_version`` and ``pixi_environment`` for the process that ran the
-    segment.  A ``progress.json`` rebuilt from a filesystem scan must recover
+    ``openmm_version``, ``pixi_environment`` and ``openmm_platform`` for the
+    process that ran the segment.  A ``progress.json`` rebuilt from a filesystem scan must recover
     those fields from there, otherwise a chain that was cancelled and
     resubmitted loses the provenance of every segment it already ran.
 
@@ -618,7 +804,7 @@ def _read_segment_provenance(params_json: Path) -> Dict[str, str | None]:
         return {}
     recovered = {
         key: provenance.get(key)
-        for key in ("polyzymd_version", "openmm_version", "pixi_environment")
+        for key in ("polyzymd_version", "openmm_version", "pixi_environment", "openmm_platform")
         if provenance.get(key) is not None
     }
     return recovered
@@ -733,19 +919,18 @@ def _scan_segment_dir(
 
         if checkpoint_chk.exists():
             # Checkpoint exists but no state.xml or INTERRUPTED marker.
-            # This means either:
-            #   (a) the simulation is still running (checkpoint recently written), or
-            #   (b) the process was hard-killed (SIGKILL / OOM / node failure).
-            #
-            # We distinguish these using a **heuristic**: if the checkpoint
-            # file was modified within the last CHECKPOINT_RECENCY_SECONDS
-            # (default 10 min), the simulation is likely still alive.
-            # Checkpoints are written every ~10-35 s of wall time, so a
-            # 10-minute threshold provides a very conservative margin.
-            #
-            # NOTE: This does NOT inspect running processes or query SLURM.
+            # Either the run is still going, or its process was hard-killed
+            # (SIGKILL / OOM / node failure).  A live run holds the replicate
+            # lock for as long as its process exists, so the lock decides.
+            # Only when the lock cannot be probed is the checkpoint age used.
+            from polyzymd.simulation.artifact_integrity import replicate_lock_held_elsewhere
+
             checkpoint_age = time.time() - checkpoint_chk.stat().st_mtime
-            is_likely_running = checkpoint_age < CHECKPOINT_RECENCY_SECONDS
+            lock_held = replicate_lock_held_elsewhere(seg_dir.parent)
+            if lock_held is None:
+                is_likely_running = checkpoint_age < CHECKPOINT_RECENCY_SECONDS
+            else:
+                is_likely_running = lock_held
 
             steps_completed = (
                 _estimate_steps_from_csv(state_data_csv) if state_data_csv.exists() else 0
@@ -754,9 +939,7 @@ def _scan_segment_dir(
 
             if is_likely_running:
                 LOGGER.info(
-                    f"Segment {seg_idx} has a recent checkpoint "
-                    f"(age {checkpoint_age:.0f}s < {CHECKPOINT_RECENCY_SECONDS}s) — "
-                    f"treating as running (~{steps_completed} steps so far)"
+                    f"Segment {seg_idx} is still running " f"(~{steps_completed} steps so far)"
                 )
                 return SegmentRecord(
                     index=seg_idx,
@@ -1186,6 +1369,11 @@ def validate_progress(
                 polyzymd_version=file_rec.polyzymd_version or fs_rec.polyzymd_version,
                 openmm_version=file_rec.openmm_version or fs_rec.openmm_version,
                 pixi_environment=file_rec.pixi_environment or fs_rec.pixi_environment,
+                openmm_platform=file_rec.openmm_platform or fs_rec.openmm_platform,
+                # Only the runner records a segment's hash, so a scan never has one.
+                trajectory_sha256=file_rec.trajectory_sha256,
+                trajectory_bytes=file_rec.trajectory_bytes,
+                seeds=file_rec.seeds,
                 **{name: getattr(file_rec, name) for name in SEGMENT_FRAME_FIELDS},
             )
             reconciled.append(merged)
@@ -1201,6 +1389,17 @@ def validate_progress(
                 f"Segment {idx}: in progress file but not on filesystem — keeping record"
             )
             reconciled.append(file_rec)
+
+    # A segment ends where the next one resumed.  The scan's estimate for a
+    # hard-killed segment counts steps after its last saved state, which
+    # the next segment integrated again.
+    for current, following in zip(reconciled, reconciled[1:]):
+        if current.start_step is None or following.start_step is None:
+            continue
+        actual = following.start_step - current.start_step
+        if actual >= 0 and actual != current.steps_completed:
+            current.steps_completed = actual
+            current.duration_ns = actual * timestep_fs / 1e6
 
     progress.segments = reconciled
 

@@ -20,10 +20,13 @@
    :no-index:
 ```
 
-## Analysis SLURM Orchestration
+## Analysis SLURM Submission
+
+`polyzymd analyze NAME -c config.yaml --submit` writes and submits these jobs;
+see {doc}`../how_to/hpc_execution`.
 
 ```{eval-rst}
-.. automodule:: polyzymd.workflow.analysis_slurm
+.. automodule:: polyzymd.workflow.analysis_submit
    :members:
    :undoc-members:
    :show-inheritance:

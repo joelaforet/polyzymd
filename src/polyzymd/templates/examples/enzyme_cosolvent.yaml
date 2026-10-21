@@ -49,7 +49,7 @@ solvent:
   
   ions:
     neutralize: true
-    nacl_concentration: 0.1  # 100 mM NaCl-equivalent final ion concentration
+    nacl_concentration: 0.1  # 100 mM of NaCl pairs; neutralizing ions are added on top
   
   box:
     padding: 2.0  # nm padding (2.0 recommended for PACKMOL convergence)
@@ -148,11 +148,6 @@ output:
   
   # Naming template for run directories
   naming_template: "{enzyme}_{substrate}_DMSO10_{temperature}K_run{replicate}"
-  
-  # Output options
-  save_checkpoint: true
-  save_state_data: true
-  trajectory_format: "dcd"
 
 # ============================================================================
 # Force Field Selection

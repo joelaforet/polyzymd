@@ -17,16 +17,8 @@ from click.testing import CliRunner
 from jinja2 import UndefinedError
 
 from polyzymd.cli.main import _resolve_replicates_option, _run_openmm_impl, cli
+from polyzymd.config.schema import Ensemble, WaterModel
 from polyzymd.utils.templates import render_package_template
-
-BRANDING_LINE = "PolyzyMD: Created by Joseph R. Laforet Jr."
-
-
-def _assert_no_jinja_markers(content: str) -> None:
-    """Assert rendered content contains no unresolved Jinja syntax."""
-    assert "{{" not in content
-    assert "{%" not in content
-    assert "%}" not in content
 
 
 def _make_dry_run_config() -> SimpleNamespace:
@@ -42,9 +34,10 @@ def _make_dry_run_config() -> SimpleNamespace:
         substrate=None,
         polymers=None,
         solvent=SimpleNamespace(
-            primary=SimpleNamespace(model="tip3p"),
+            primary=SimpleNamespace(model=WaterModel.TIP3P),
             box=SimpleNamespace(padding=1.2),
-            ions=SimpleNamespace(nacl_concentration=0.15),
+            ions=SimpleNamespace(nacl_concentration=0.15, neutralize=True),
+            co_solvents=[],
         ),
         force_field=SimpleNamespace(protein="amber14", small_molecule="openff-2.2.0"),
         thermodynamics=SimpleNamespace(temperature=300.0, pressure=1.0),
@@ -53,13 +46,13 @@ def _make_dry_run_config() -> SimpleNamespace:
                 SimpleNamespace(
                     name="heating",
                     resolved_duration=0.2,
-                    ensemble="NVT",
+                    ensemble=Ensemble.NVT,
                     is_temperature_ramping=False,
                 ),
                 SimpleNamespace(
                     name="free_equilibration",
                     resolved_duration=0.8,
-                    ensemble="NPT",
+                    ensemble=Ensemble.NPT,
                     is_temperature_ramping=False,
                 ),
             ],
@@ -73,7 +66,19 @@ def _make_dry_run_config() -> SimpleNamespace:
         ),
         restraints=[],
         get_working_directory=lambda rep: Path(f"/tmp/scratch/run_{rep}"),
+        require_buildable=lambda engine=None, inputs=True: None,
     )
+
+
+_ONE_ATOM_PDB = (
+    "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\nEND\n"
+)
+
+
+def _config_with_pdb(tmp_path: Path) -> dict[str, object]:
+    """Minimal config data whose enzyme PDB exists, with one atom."""
+    (tmp_path / "enz.pdb").write_text(_ONE_ATOM_PDB)
+    return _minimal_cli_config_data(tmp_path / "enz.pdb")
 
 
 def _minimal_cli_config_data(pdb_path: str | Path) -> dict[str, object]:
@@ -286,29 +291,25 @@ class TestResolveSubmissionPixiEnv:
 class TestValidateCommandReferenceWarnings:
     """Tests for validate command runtime reference warnings."""
 
-    def test_validate_exits_zero_and_warns_for_missing_referenced_files(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        """Validate should warn about missing PDB files without failing schema validation."""
-
+    @pytest.mark.parametrize("command", [["validate"], ["build", "--dry-run"]])
+    def test_a_missing_or_empty_enzyme_pdb_is_an_error(self, tmp_path: Path, command) -> None:
+        """validate and build --dry-run exit non-zero when the enzyme PDB is missing or empty."""
         config_path = tmp_path / "config.yaml"
-        config_path.write_text(
-            yaml.safe_dump(_minimal_cli_config_data("missing.pdb")),
-            encoding="utf-8",
-        )
-        runner = CliRunner()
+        config_path.write_text(yaml.safe_dump(_minimal_cli_config_data("missing.pdb")))
 
-        result = runner.invoke(cli, ["validate", "-c", str(config_path)])
+        result = CliRunner().invoke(cli, [command[0], "-c", str(config_path), *command[1:]])
 
-        assert result.exit_code == 0
-        assert "Configuration is valid!" in result.output
-        assert "Referenced file warnings" in result.output
-        assert "Missing enzyme PDB" in result.output
+        assert result.exit_code == 1
+        assert "missing.pdb does not exist" in result.output
+        (tmp_path / "empty.pdb").write_text("END\n")
+        config_path.write_text(yaml.safe_dump(_minimal_cli_config_data(tmp_path / "empty.pdb")))
+        result = CliRunner().invoke(cli, [command[0], "-c", str(config_path), *command[1:]])
+        assert result.exit_code == 1
+        assert "has no ATOM or HETATM records" in result.output
 
     def test_validate_reports_derived_temperature_ramp_duration(self, tmp_path: Path) -> None:
         """Validation clearly reports rate-based heating duration."""
-        data = _minimal_cli_config_data("missing.pdb")
+        data = _config_with_pdb(tmp_path)
         data["simulation_phases"]["equilibration_stages"] = [
             {
                 "name": "heating",
@@ -328,6 +329,124 @@ class TestValidateCommandReferenceWarnings:
         assert result.exit_code == 0
         assert "60 -> 300 K, +1 K every 600 steps" in result.output
         assert "derived duration 0.288000 ns" in result.output
+
+    @pytest.mark.parametrize("where", ["production", "equilibration"])
+    def test_validate_refuses_anisotropic_barostat_on_openmm(self, tmp_path: Path, where) -> None:
+        """OpenMM runs no anisotropic barostat, so MCA with engine openmm is an error."""
+        data = _minimal_cli_config_data("missing.pdb")
+        phases = data["simulation_phases"]
+        phase = phases["production"] if where == "production" else phases["equilibration_stages"][0]
+        phase.update(ensemble="NPT", barostat="MCA")
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code != 0
+        assert "MCA" in result.output and "anisotropic" in result.output
+
+    def test_missing_equilibration_stages_names_the_key_without_a_pydantic_url(
+        self, tmp_path: Path
+    ) -> None:
+        data = _minimal_cli_config_data("missing.pdb")
+        del data["simulation_phases"]["equilibration_stages"]
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code == 1
+        assert "equilibration_stages is missing: list at least one stage" in result.output
+        assert "legacy" not in result.output
+        assert "errors.pydantic.dev" not in result.output
+
+    def test_validate_prints_engine_and_cosolvents(self, tmp_path: Path) -> None:
+        data = _config_with_pdb(tmp_path)
+        data["solvent"] = {
+            "primary": {"type": "water", "model": "tip3p"},
+            "co_solvents": [{"name": "dmso", "mole_fraction": 0.1}],
+        }
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "Engine: openmm" in result.output
+        assert "Co-solvents: dmso" in result.output
+
+
+_DISTANCE_RESTRAINT = {
+    "type": "flat_bottom",
+    "name": "substrate_active_site",
+    "atom1": {"selection": "protein and resid 76 and name OG"},
+    "atom2": {"selection": "resname LIG and name C1"},
+    "distance": 3.5,
+}
+
+
+@pytest.mark.parametrize("command", [["validate"], ["build", "--dry-run"], ["run", "--dry-run"]])
+def test_new_builds_refuse_a_water_model_the_build_cannot_make(
+    tmp_path: Path, command: list[str]
+) -> None:
+    """validate, build and run refuse spce, which would build SPC/E charges on TIP3P water."""
+    data = _minimal_cli_config_data("missing.pdb")
+    data["solvent"] = {"primary": {"type": "water", "model": "spce"}}
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, [command[0], "-c", str(config_path), *command[1:]])
+
+    assert result.exit_code != 0
+    assert "model: tip3p for new systems" in result.output
+
+
+def test_validate_refuses_distance_restraints_with_engine_gromacs(tmp_path: Path) -> None:
+    """GROMACS runs apply no distance restraints, so validate refuses them."""
+    data = _minimal_cli_config_data("missing.pdb")
+    data["engine"] = "gromacs"
+    data["restraints"] = [_DISTANCE_RESTRAINT]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+    assert result.exit_code != 0
+    assert "set engine: openmm" in result.output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["build", "--format", "gromacs", "--dry-run"],
+        ["run", "--engine", "gromacs", "--dry-run"],
+        ["submit", "--engine", "gromacs", "--dry-run"],
+    ],
+)
+def test_gromacs_overrides_refuse_distance_restraints(tmp_path: Path, args: list[str]) -> None:
+    """A GROMACS build, run or submit of an OpenMM config never lists a restraint it drops."""
+    data = _minimal_cli_config_data("missing.pdb")
+    data["restraints"] = [_DISTANCE_RESTRAINT]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, [args[0], "-c", str(config_path), *args[1:]])
+
+    assert result.exit_code != 0
+    assert "set engine: openmm" in result.output
+    assert "ENABLED" not in result.output
+
+
+@pytest.mark.parametrize("export_format", ["lammps", "amber"])
+def test_build_refuses_unimplemented_export_formats(tmp_path: Path, export_format: str) -> None:
+    """Only implemented export formats are offered by build --format."""
+    config = tmp_path / "config.yaml"
+    config.write_text("{}\n")
+
+    result = CliRunner().invoke(cli, ["build", "-c", str(config), "--format", export_format])
+
+    assert result.exit_code == 2
+    assert "Invalid value for '--format'" in result.output
 
 
 class TestBuildCommandReplicateFlags:
@@ -392,20 +511,23 @@ class TestBuildCommandReplicateFlags:
         assert "openmm" in result.output
 
     def test_build_dry_run_warns_for_missing_referenced_files(self, tmp_path: Path) -> None:
-        """Build dry-run should warn when schema-valid referenced files are absent."""
-
+        """Build dry-run warns about missing polymer files, which a build checks later."""
+        data = _config_with_pdb(tmp_path)
+        data["polymers"] = {
+            "type_prefix": "P",
+            "length": 5,
+            "count": 1,
+            "sdf_directory": str(tmp_path / "missing_sdfs"),
+            "monomers": [{"label": "A", "probability": 1.0}],
+        }
         config_path = tmp_path / "config.yaml"
-        config_path.write_text(
-            yaml.safe_dump(_minimal_cli_config_data("missing.pdb")),
-            encoding="utf-8",
-        )
-        runner = CliRunner()
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
-        result = runner.invoke(cli, ["build", "-c", str(config_path), "--dry-run"])
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--dry-run"])
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         assert "Referenced file warnings" in result.output
-        assert "Missing enzyme PDB" in result.output
+        assert "Missing polymer SDF directory" in result.output
 
     @pytest.mark.parametrize("option", ["--output-dir", "-o"])
     def test_build_output_dir_alias_is_rejected(self, option: str, tmp_path: Path) -> None:
@@ -557,48 +679,8 @@ class TestInternalCommandsUnchanged:
         assert "--replicate" in result.output
 
 
-class TestInitCommand:
-    """Tests for the project initialization scaffold."""
-
-    def test_init_creates_project_scaffold(self, tmp_path: Path) -> None:
-        """init should render project files with the requested project name."""
-        runner = CliRunner()
-
-        with runner.isolated_filesystem(temp_dir=tmp_path):
-            result = runner.invoke(cli, ["init", "-n", "foo"])
-
-            assert result.exit_code == 0
-            project_dir = Path("foo")
-            assert project_dir.is_dir()
-            assert (project_dir / "config.yaml").is_file()
-            assert (project_dir / "structures").is_dir()
-            assert (project_dir / "job_scripts").is_dir()
-            assert (project_dir / "slurm_logs").is_dir()
-            assert (project_dir / "structures" / "place_protein_here.placeholder.txt").is_file()
-            assert (project_dir / "structures" / "place_ligand_here.placeholder.txt").is_file()
-
-            config_content = (project_dir / "config.yaml").read_text(encoding="utf-8")
-            config_data = yaml.safe_load(config_content)
-            assert config_data["name"] == "foo"
-            assert config_content.count(BRANDING_LINE) == 1
-            _assert_no_jinja_markers(config_content)
-
-            for path in project_dir.rglob("*"):
-                if path.is_file() and path.suffix in {".yaml", ".txt"}:
-                    content = path.read_text(encoding="utf-8")
-                    assert content.count(BRANDING_LINE) == 1
-                    _assert_no_jinja_markers(content)
-
-    def test_init_existing_directory_still_errors(self, tmp_path: Path) -> None:
-        """init should preserve the existing-directory error behavior."""
-        runner = CliRunner()
-
-        with runner.isolated_filesystem(temp_dir=tmp_path):
-            Path("foo").mkdir()
-            result = runner.invoke(cli, ["init", "-n", "foo"])
-
-            assert result.exit_code != 0
-            assert "already exists" in result.output
+class TestTemplates:
+    """Tests for the package template renderer."""
 
     def test_shared_renderer_uses_strict_undefined(self) -> None:
         """Missing template context values should fail fast."""
@@ -694,6 +776,7 @@ class TestOpenMMRunImplementation:
         )
         config = SimpleNamespace(
             simulation_phases=SimpleNamespace(production=production),
+            require_engine_barostats=lambda engine: None,
             get_working_directory=lambda replicate: tmp_path / f"run_{replicate}",
         )
 
@@ -710,6 +793,153 @@ class TestOpenMMRunImplementation:
             report_interval=200000,
             checkpoint_interval_s=60.0,
         )
+
+
+class TestRunBuildManifest:
+    """The build of `polyzymd run` records its provenance like `polyzymd build`."""
+
+    @patch("polyzymd.simulation.runner.SimulationRunner")
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    def test_run_build_manifest_records_packmol_seed(
+        self, from_config, _runner, tmp_path: Path
+    ) -> None:
+        import json
+        from unittest.mock import MagicMock
+
+        from openmm import System, Vec3, unit
+        from openmm.app import Element, Topology
+
+        from polyzymd.cli.main import _run_initial_segment
+        from polyzymd.config.loader import load_config
+
+        topology = Topology()
+        residue = topology.addResidue("HOH", topology.addChain("A"))
+        system = System()
+        for index in range(2):
+            topology.addAtom(f"H{index}", Element.getByAtomicNumber(1), residue)
+            system.addParticle(1.0)
+        positions = [Vec3(float(index), 0, 0) for index in range(2)] * unit.nanometer
+        builder = MagicMock(build_provenance={"polymer_packmol_seed": 1})
+        builder.get_openmm_components.return_value = (topology, system, positions)
+        from_config.return_value = builder
+
+        config = load_config(Path(__file__).parents[2] / "examples/quickstart/config.yaml")
+        _run_initial_segment(
+            sim_config=config,
+            working_dir=tmp_path,
+            replicate=1,
+            skip_build=False,
+            duration_ns=0.004,
+            num_samples=4,
+            timestep_fs=2.0,
+            report_interval=1,
+            checkpoint_interval_s=60.0,
+        )
+
+        manifest = json.loads((tmp_path / "build_manifest.json").read_text())
+        assert manifest["provenance"] == {"polymer_packmol_seed": 1}
+
+
+class TestRunReusesBuild:
+    """`polyzymd run` reuses the build of an earlier `polyzymd build`."""
+
+    @staticmethod
+    def _config(tmp_path: Path) -> SimpleNamespace:
+        production = SimpleNamespace(
+            duration=0.004, samples=4, time_step=2.0, checkpoint_interval=60.0
+        )
+        return SimpleNamespace(
+            simulation_phases=SimpleNamespace(production=production),
+            require_engine_barostats=lambda engine: None,
+            get_working_directory=lambda replicate: tmp_path / f"run_{replicate}",
+        )
+
+    @patch("polyzymd.cli.main._run_initial_segment")
+    @patch("polyzymd.simulation.artifact_integrity.validate_build_bundle")
+    def test_openmm_run_reuses_a_valid_build(
+        self, validate, run_initial_segment, tmp_path: Path, capsys
+    ) -> None:
+        config = self._config(tmp_path)
+        _run_openmm_impl(config, replicate=1)
+
+        validate.assert_called_once_with(tmp_path / "run_1", config)
+        assert run_initial_segment.call_args.kwargs["skip_build"] is True
+        assert f"Reusing the build in {tmp_path / 'run_1'}" in capsys.readouterr().out
+
+    @patch("polyzymd.cli.main._run_initial_segment")
+    def test_openmm_run_builds_without_a_build(
+        self, run_initial_segment, tmp_path: Path, capsys
+    ) -> None:
+        _run_openmm_impl(self._config(tmp_path), replicate=1)
+
+        assert run_initial_segment.call_args.kwargs["skip_build"] is False
+        assert "Building the system in" in capsys.readouterr().out
+
+    @patch("polyzymd.exporters.gromacs.GromacsRunner")
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
+    def test_gromacs_run_reuses_exported_files(
+        self, _prefix, from_config, gromacs_runner, tmp_path: Path, capsys
+    ) -> None:
+        from polyzymd.cli.main import _run_gromacs_impl
+
+        gromacs_dir = tmp_path / "run_1" / "gromacs"
+        gromacs_dir.mkdir(parents=True)
+        for name in ("sys.top", "sys.gro", "em.mdp", "eq_00_nvt.mdp", "prod.mdp"):
+            (gromacs_dir / name).write_text("")
+
+        _run_gromacs_impl(self._config(tmp_path), replicate=1, gmx_path="gmx")
+
+        from_config.assert_not_called()
+        gromacs_runner.assert_called_once_with(
+            working_dir=gromacs_dir,
+            prefix="sys",
+            equilibration_mdps=["eq_00_nvt.mdp"],
+            gmx_command="gmx",
+        )
+        assert f"Reusing the GROMACS files in {gromacs_dir}" in capsys.readouterr().out
+
+    @patch("polyzymd.exporters.gromacs.GromacsRunner")
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
+    def test_gromacs_run_does_not_rebuild_a_started_run(
+        self, _prefix, from_config, gromacs_runner, tmp_path: Path
+    ) -> None:
+        from polyzymd.cli.main import _run_gromacs_impl
+        from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+
+        gromacs_dir = tmp_path / "run_1" / "gromacs"
+        gromacs_dir.mkdir(parents=True)
+        (gromacs_dir / "em.log").write_text("")
+
+        with pytest.raises(ArtifactIntegrityError, match="Refusing to rebuild"):
+            _run_gromacs_impl(self._config(tmp_path), replicate=1, gmx_path="gmx")
+
+        from_config.assert_not_called()
+        gromacs_runner.assert_not_called()
+
+    @patch("polyzymd.exporters.gromacs.GromacsRunner")
+    @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
+    def test_gromacs_run_records_the_polyzymd_version(
+        self, _prefix, gromacs_runner, tmp_path: Path
+    ) -> None:
+        from polyzymd import __version__
+        from polyzymd.cli.main import _run_gromacs_impl
+        from polyzymd.simulation.progress import load_progress
+
+        gromacs_dir = tmp_path / "run_1" / "gromacs"
+        gromacs_dir.mkdir(parents=True)
+        for name in ("sys.top", "sys.gro", "em.mdp", "eq_01_nvt.mdp", "eq_01.gro", "prod.mdp"):
+            (gromacs_dir / name).write_text("")
+        (gromacs_dir / "eq_02.gro").write_text("")
+        # eq_02 ran before this run; this run skipped it.
+        (gromacs_dir / "eq_02.log").write_text("Started mdrun on rank 0 Wed Oct  7 00:00:00 2020\n")
+
+        _run_gromacs_impl(self._config(tmp_path), replicate=1, gmx_path="gmx")
+
+        first, earlier = load_progress(gromacs_dir).equilibration_stages
+        assert first.polyzymd_version == __version__
+        assert earlier.polyzymd_version is None
 
 
 class TestCliExceptionHandlingNarrowing:
@@ -971,6 +1201,13 @@ class TestSubmitDryRunVsGenerateOnly:
 class TestSubmitEngineAware:
     """Tests for engine-aware submit command."""
 
+    @pytest.fixture(autouse=True)
+    def _gromacs_builds_exist(self, monkeypatch):
+        """These tests check submission options, not the build check."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.engine.GromacsEngine.check_build", lambda self, request: None
+        )
+
     def test_submit_help_includes_build_pixi_env_choice(self) -> None:
         """submit --help should list build as an allowed pixi environment."""
         runner = CliRunner()
@@ -1019,6 +1256,7 @@ class TestSubmitEngineAware:
             slurm_ntasks=None,
             ntomp=4,
             module_load=None,
+            command_prefix=None,
         )
         mock_from_yaml.return_value = mock_config
         config_path = tmp_path / "fake.yaml"
@@ -1146,6 +1384,7 @@ class TestSubmitEngineAware:
             slurm_ntasks=None,
             ntomp=4,
             module_load=None,
+            command_prefix=None,
         )
         mock_from_yaml.return_value = mock_config
 
@@ -1197,6 +1436,47 @@ class TestSubmitEngineAware:
         assert result.exit_code == 0
         mock_submit.assert_called_once()
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_submit_refuses_a_replicate_stopped_by_cancel(
+        self, mock_submit, mock_from_yaml, tmp_path: Path
+    ) -> None:
+        """A job submitted while STOP exists would exit at once, so submit says so instead."""
+        run_dir = tmp_path / "run_2"
+        run_dir.mkdir()
+        (run_dir / "STOP").write_text("stopped\n")
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_config.get_working_directory = lambda rep: tmp_path / f"run_{rep}"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["submit", "-c", str(config_path), "-r", "1-2"])
+
+        assert result.exit_code == 1
+        assert f"polyzymd cancel -c {config_path} -r 2 --resume" in result.output
+        mock_submit.assert_not_called()
+
+    @pytest.mark.parametrize("limit", ["0:05:00", "5", "0:04:30"])
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_submit_refuses_time_limit_within_the_stop_signal_margin(
+        self, mock_submit, mock_from_yaml, limit, tmp_path: Path
+    ) -> None:
+        """SLURM signals OpenMM jobs 5 minutes before the limit; a shorter limit never runs a step."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["submit", "-c", str(config_path), "--time-limit", limit])
+
+        assert result.exit_code == 2
+        assert "--time-limit" in result.output
+        mock_submit.assert_not_called()
+
     @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
     @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
@@ -1226,9 +1506,9 @@ class TestSubmitEngineAware:
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1275,9 +1555,9 @@ class TestSubmitEngineAware:
         )
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1312,6 +1592,7 @@ class TestSubmitEngineAware:
             grompp_flags="",
             mdrun_flags="",
             module_load=None,
+            command_prefix=None,
             gmx_binary=None,
             ntmpi=1,
             slurm_ntasks=None,
@@ -1344,6 +1625,13 @@ class TestSubmitEngineAware:
 
 class TestSubmitConstraintOption:
     """Tests for --constraint CLI option on submit command."""
+
+    @pytest.fixture(autouse=True)
+    def _gromacs_builds_exist(self, monkeypatch):
+        """These tests check submission options, not the build check."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.engine.GromacsEngine.check_build", lambda self, request: None
+        )
 
     def test_submit_help_shows_nodelist(self) -> None:
         """'polyzymd submit --help' should show --nodelist option."""
@@ -1509,9 +1797,9 @@ class TestSubmitConstraintOption:
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1573,9 +1861,9 @@ class TestSubmitConstraintOption:
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1702,9 +1990,9 @@ class TestSubmitConstraintOption:
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1768,6 +2056,7 @@ class TestSubmitConstraintOption:
             slurm_ntasks=None,
             ntomp=4,
             module_load=None,
+            command_prefix=None,
         )
         mock_from_yaml.return_value = mock_config
 
@@ -1817,6 +2106,13 @@ class TestSubmitConstraintOption:
 
 class TestSubmitGromacsDuplicateGuard:
     """Tests for duplicate-job detection in GROMACS submit path."""
+
+    @pytest.fixture(autouse=True)
+    def _gromacs_builds_exist(self, monkeypatch):
+        """These tests check submission options, not the build check."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.engine.GromacsEngine.check_build", lambda self, request: None
+        )
 
     @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=["12345"])
     @patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job")
@@ -1887,9 +2183,9 @@ class TestSubmitGromacsDuplicateGuard:
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1902,3 +2198,442 @@ class TestSubmitGromacsDuplicateGuard:
         )
         assert result.exit_code == 0
         mock_submit.assert_called_once()
+
+
+def test_build_follows_the_config_engine(tmp_path: Path) -> None:
+    """A GROMACS config builds GROMACS inputs, and run takes its engine from the config."""
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text(_ONE_ATOM_PDB)
+    data = yaml.safe_load(path.read_text())
+    data["engine"] = "gromacs"
+    data["solvent"] = {
+        "co_solvents": [{"name": "sds", "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]", "count": 8}]
+    }
+    path.write_text(yaml.safe_dump(data))
+    result = CliRunner().invoke(cli, ["build", "-c", str(path), "--dry-run"])
+    assert "Files to Generate (GROMACS)" in result.output, result.output
+    assert "Co-solvent sds (SDS): 8 molecules" in result.output
+    assert "Polymer seeds" not in result.output
+    dry = CliRunner().invoke(cli, ["run", "-c", str(path), "--dry-run"])
+    assert "Missing option '--engine'" not in dry.output
+
+
+def test_clean_pdb_runs_on_the_cpu(tmp_path: Path, monkeypatch) -> None:
+    """clean-pdb places hydrogens on the CPU platform, so a GPU driver mismatch cannot stop it."""
+    import os
+
+    pytest.importorskip("pdbfixer")
+
+    monkeypatch.delenv("OPENMM_DEFAULT_PLATFORM", raising=False)
+    source = Path(__file__).resolve().parents[2] / "examples" / "quickstart" / "trpcage.pdb"
+    result = CliRunner().invoke(
+        cli, ["clean-pdb", "-i", str(source), "-o", str(tmp_path / "clean.pdb")]
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "clean.pdb").is_file()
+    assert os.environ["OPENMM_DEFAULT_PLATFORM"] == "CPU"
+
+
+@pytest.mark.parametrize("text", ["garbage\n", ""], ids=["not a PDB", "empty"])
+def test_clean_pdb_refuses_a_file_without_atoms(tmp_path: Path, text: str) -> None:
+    """A PDB file with no atoms gives error: and fix:, not a traceback."""
+    pytest.importorskip("pdbfixer")
+    source = tmp_path / "in.pdb"
+    source.write_text(text)
+    result = CliRunner().invoke(cli, ["clean-pdb", "-i", str(source)])
+    assert result.exit_code == 1, result.output
+    assert isinstance(result.exception, SystemExit)
+    assert f"error: {source} has no atoms" in result.output and "fix:" in result.output
+    assert not (tmp_path / "in_clean.pdb").exists()
+
+
+class TestSubmitDryRunHardwareWarnings:
+    """The submit dry run warns when the job's hardware does not fit the config."""
+
+    QUICKSTART = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+
+    def _dry_run(self, config_name: str) -> str:
+        result = CliRunner().invoke(
+            cli, ["submit", "-c", str(self.QUICKSTART / config_name), "--dry-run"]
+        )
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    def test_cpu_openmm_config_is_told_job_scripts_need_cuda(self) -> None:
+        output = self._dry_run("config.yaml")
+        assert "generated OpenMM job scripts need CUDA" in output
+        assert "run on a CPU with `polyzymd run`" in output
+        assert "choose a CPU partition" not in output
+
+    def test_cpu_gromacs_config_is_warned_about_gpu_partition_and_gmx(self) -> None:
+        output = self._dry_run("config_gromacs.yaml")
+        assert "the job asks for no GPU, but preset aa100 is set up for GPU jobs" in output
+        assert "pass --partition with a partition that has CPU nodes" in output
+        assert "choose a CPU partition" not in output
+        assert "neither gromacs.module_load nor gromacs.command_prefix is set" in output
+
+
+class TestNoPolymerWording:
+    """Runs without polymers do not mention polymers; console text shows plain values."""
+
+    QUICKSTART = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+
+    def test_build_dry_run_shows_plain_values_and_no_polymer(self) -> None:
+        result = CliRunner().invoke(
+            cli, ["build", "-c", str(self.QUICKSTART / "config.yaml"), "--dry-run"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "TIP3P" in result.output
+        assert "WaterModel." not in result.output
+        assert "Ensemble." not in result.output
+        assert "Polymer" not in result.output
+
+    def test_info_reports_packmol_and_gmx(self) -> None:
+        result = CliRunner().invoke(cli, ["info"])
+        assert result.exit_code == 0, result.output
+        assert "packmol:" in result.output
+        assert "gmx:" in result.output
+        assert "Enzyme-Polymer" not in result.output
+
+
+@pytest.mark.parametrize("command", ["compare", "new-analysis"])
+def test_removed_commands_are_unknown(command: str) -> None:
+    """polyzymd compare and polyzymd new-analysis are not commands."""
+    result = CliRunner().invoke(cli, [command, "run"])
+
+    assert result.exit_code == 2
+    assert f"No such command '{command}'" in result.output
+
+
+def _write_elongated_pdb(path: Path) -> None:
+    """Six atoms spanning 37.5 x 41.8 x 50 Angstrom, long along z."""
+    coords = [
+        (-18.75, 0.0, 0.0),
+        (18.75, 0.0, 0.0),
+        (0.0, -20.9, 0.0),
+        (0.0, 20.9, 0.0),
+        (0.0, 0.0, -25.0),
+        (0.0, 0.0, 25.0),
+    ]
+    lines = [
+        f"ATOM  {i + 1:5d}  CA  ALA A{i + 1:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           C"
+        for i, (x, y, z) in enumerate(coords)
+    ]
+    path.write_text("\n".join(lines) + "\nEND\n")
+
+
+@pytest.mark.parametrize("command", ["build", "run"])
+def test_dry_run_reports_the_box_and_its_clearances(tmp_path: Path, command: str) -> None:
+    """Dry runs print the box the build will make, so a box that is too small shows before Packmol."""
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+
+    result = CliRunner().invoke(cli, [command, "-c", str(path), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    # diameter 5.00 nm + 2 x 1.2 nm, grown so the 5 nm z extent fits the 0.707-edge brick
+    assert "Box (rhombic_dodecahedron): edge 7.64 nm" in result.output, result.output
+    assert "clearance to the brick faces 1.94 / 1.73 / 0.20 nm" in result.output
+
+
+def test_dry_run_box_report_never_blocks(tmp_path: Path) -> None:
+    """A box that cannot be estimated gives a note, not a failed dry run."""
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+
+    with patch(
+        "polyzymd.builders.solvent.SolventBuilder._get_box_shape_matrix",
+        side_effect=AttributeError("no such shape"),
+    ):
+        result = CliRunner().invoke(cli, ["build", "-c", str(path), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "Box: not estimated (no such shape)" in result.output
+
+
+def test_dry_run_box_report_says_a_substrate_is_left_out(tmp_path: Path) -> None:
+    """The dry-run box comes from the enzyme PDB only; the line says so when a substrate is set."""
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+    from rdkit import Chem
+
+    (tmp_path / "c" / "lig.sdf").write_text(
+        Chem.MolToMolBlock(Chem.MolFromSmiles("CCO")) + "$$$$\n"
+    )
+    data = yaml.safe_load(path.read_text())
+    data["substrate"] = {"name": "lig", "sdf_path": "lig.sdf"}
+    path.write_text(yaml.safe_dump(data))
+
+    result = CliRunner().invoke(cli, ["build", "-c", str(path), "--dry-run"])
+
+    assert "from the enzyme PDB only; the substrate is not included" in result.output, result.output
+
+
+def test_failed_build_keeps_a_run_folder_with_files(tmp_path: Path) -> None:
+    """A failed build keeps the folder it made when files such as packmol_error.log are in it."""
+    from polyzymd.config.loader import load_config
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+    working_dir = load_config(path).get_working_directory(1)
+
+    def write_log_and_fail(self, config, working_dir, polymer_seed, publish_topology=True):
+        (Path(working_dir) / "packmol_error.log").write_text("Packmol failed\n")
+        raise ValueError("Packmol failed; see packmol_error.log")
+
+    with patch(
+        "polyzymd.builders.system_builder.SystemBuilder.build_from_config", write_log_and_fail
+    ):
+        result = CliRunner().invoke(cli, ["build", "-c", str(path), "-r", "1"])
+
+    assert result.exit_code == 1, result.output
+    assert (working_dir / "packmol_error.log").is_file()
+
+
+def test_build_that_cannot_take_the_lock_removes_nothing(tmp_path: Path) -> None:
+    """A second build of a replicate that is being built leaves the first one's folder alone."""
+    from polyzymd.config.loader import load_config
+    from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+    working_dir = load_config(path).get_working_directory(1)
+
+    def first_build_makes_the_folder(working_dir):
+        working_dir.mkdir(parents=True)
+        raise ArtifactIntegrityError("Another PolyzyMD build or run holds the replicate lock")
+
+    with patch(
+        "polyzymd.simulation.artifact_integrity.replicate_lock", first_build_makes_the_folder
+    ):
+        result = CliRunner().invoke(cli, ["build", "-c", str(path), "-r", "1"])
+
+    assert result.exit_code == 1, result.output
+    assert working_dir.is_dir()
+
+
+def test_failed_build_leaves_no_run_folder(tmp_path: Path) -> None:
+    """A build that fails removes the run folder it made."""
+    from polyzymd.config.loader import load_config
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+    working_dir = load_config(path).get_working_directory(1)
+
+    with patch(
+        "polyzymd.builders.system_builder.SystemBuilder.build_from_config",
+        side_effect=ValueError("atoms lie within 1.00 A of a periodic image"),
+    ):
+        result = CliRunner().invoke(cli, ["build", "-c", str(path), "-r", "1"])
+
+    assert result.exit_code == 1, result.output
+    assert "periodic image" in result.output
+    assert not working_dir.exists()
+
+
+def test_failed_gromacs_run_build_leaves_no_run_folder(tmp_path: Path) -> None:
+    """`run --engine gromacs` removes the run folder its failed build made, and keeps an old one."""
+    from polyzymd.cli.main import _run_gromacs_impl
+    from polyzymd.config.loader import load_config
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+    config = load_config(path)
+
+    def make_folder_and_fail(self, config, working_dir, polymer_seed):
+        Path(working_dir).mkdir(parents=True)
+        raise ValueError("atoms lie within 1.00 A of a periodic image")
+
+    with patch(
+        "polyzymd.builders.system_builder.SystemBuilder.build_from_config", make_folder_and_fail
+    ):
+        with pytest.raises(ValueError):
+            _run_gromacs_impl(config, replicate=1, gmx_path="gmx")
+    assert not config.get_working_directory(1).exists()
+
+    kept = config.get_working_directory(2)
+    kept.mkdir(parents=True)
+    with patch(
+        "polyzymd.builders.system_builder.SystemBuilder.build_from_config",
+        side_effect=ValueError("failed"),
+    ):
+        with pytest.raises(ValueError):
+            _run_gromacs_impl(config, replicate=2, gmx_path="gmx")
+    assert kept.is_dir()
+
+    def write_log_and_fail(self, config, working_dir, polymer_seed):
+        Path(working_dir).mkdir(parents=True)
+        (Path(working_dir) / "packmol_error.log").write_text("Packmol failed\n")
+        raise ValueError("Packmol failed; see packmol_error.log")
+
+    with patch(
+        "polyzymd.builders.system_builder.SystemBuilder.build_from_config", write_log_and_fail
+    ):
+        with pytest.raises(ValueError):
+            _run_gromacs_impl(config, replicate=3, gmx_path="gmx")
+    assert (config.get_working_directory(3) / "packmol_error.log").is_file()
+
+
+@patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
+@patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+@patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+def test_gromacs_submit_checks_every_build_before_submitting(
+    mock_from_yaml, _resolve, mock_engine_submit, tmp_path, monkeypatch
+):
+    """With replicate 2 unbuilt, replicate 1 is not submitted either."""
+    mock_config = _make_dry_run_config()
+    mock_config.engine = "gromacs"
+    mock_config.gromacs = SimpleNamespace(
+        grompp_flags="",
+        mdrun_flags="",
+        module_load=None,
+        gmx_binary=None,
+        ntmpi=1,
+        slurm_ntasks=None,
+        ntomp=4,
+        gpu=False,
+        gpus=1,
+        memory="16G",
+    )
+    mock_from_yaml.return_value = mock_config
+
+    def check_build(self, request):
+        if request.replicate == 2:
+            raise FileNotFoundError("No GROMACS build for replicate 2")
+
+    monkeypatch.setattr("polyzymd.engines.gromacs.engine.GromacsEngine.check_build", check_build)
+    config_path = tmp_path / "fake.yaml"
+    config_path.write_text("name: test\n", encoding="utf-8")
+
+    with patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[]):
+        with patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job"):
+            result = CliRunner().invoke(
+                cli, ["submit", "-c", str(config_path), "--engine", "gromacs", "-r", "1-2"]
+            )
+
+    assert result.exit_code == 1
+    assert "No GROMACS build for replicate 2" in result.output
+    mock_engine_submit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["submit", "--dry-run", "--preset", "testing"],
+        ["run", "--dry-run"],
+        ["hash-trajectories", "--dry-run"],
+        ["status"],
+    ],
+)
+@pytest.mark.parametrize("text", ["- a\n- b\n", "name: x\nenzyme:\n\tpdb_path: a.pdb\n"])
+def test_a_config_that_is_not_a_yaml_mapping_is_a_handled_error(tmp_path: Path, command, text):
+    """A list or broken YAML gives an error line, not a traceback, in every command."""
+    path = tmp_path / "config.yaml"
+    path.write_text(text)
+    result = CliRunner().invoke(cli, [command[0], "-c", str(path), *command[1:]])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert "mapping" in result.output or "not valid YAML" in result.output
+
+
+def test_validate_prints_error_and_fix_lines(tmp_path: Path) -> None:
+    data = _config_with_pdb(tmp_path)
+    data["simulation_phases"]["production"]["ensemble"] = "NVE"
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(data))
+    result = CliRunner().invoke(cli, ["validate", "-c", str(path)])
+    assert result.exit_code == 1
+    assert "error: production: ensemble NVE is not run" in result.output
+    assert "fix: use ensemble NVT or NPT." in result.output
+
+
+@pytest.mark.parametrize("command", [["run", "--dry-run"], ["submit", "--dry-run"]])
+def test_dry_runs_on_openmm_refuse_the_anisotropic_barostat(tmp_path: Path, command) -> None:
+    """The dry runs make the same engine check as the run, so MCA on OpenMM fails early."""
+    data = _config_with_pdb(tmp_path)
+    data["engine"] = "gromacs"
+    data["simulation_phases"]["production"]["barostat"] = "MCA"
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(data))
+    result = CliRunner().invoke(
+        cli, [command[0], "-c", str(path), *command[1:], "--engine", "openmm"]
+    )
+    assert result.exit_code != 0
+    assert "MCA" in result.output
+
+
+def test_submit_refuses_a_time_limit_slurm_cannot_read(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(_config_with_pdb(tmp_path)))
+    result = CliRunner().invoke(
+        cli, ["submit", "-c", str(path), "--dry-run", "--time-limit", "banana"]
+    )
+    assert result.exit_code == 2
+    assert "is not a SLURM time" in result.output
+
+
+def test_submit_does_not_check_the_inputs_of_a_build_it_does_not_make(tmp_path: Path) -> None:
+    """submit runs existing builds, so a moved enzyme PDB does not stop it."""
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(_minimal_cli_config_data(tmp_path / "moved.pdb")))
+    result = CliRunner().invoke(cli, ["submit", "-c", str(path), "--dry-run"])
+    assert "moved.pdb does not exist" not in result.output, result.output
+
+
+def _remove_thermodynamics(data: dict) -> None:
+    del data["thermodynamics"]
+
+
+@pytest.mark.parametrize("command", ["validate", "build", "run"])
+@pytest.mark.parametrize(
+    ("edit", "expected"),
+    [
+        (
+            lambda data: data.update(pdb=data["enzyme"].pop("pdb_path")),
+            ["error: pdb: unknown key; did you mean enzyme.pdb_path?"],
+        ),
+        (
+            _remove_thermodynamics,
+            [
+                "error: thermodynamics: required section missing; expected a mapping with "
+                "temperature and pressure",
+                "fix: start from the complete commented config that polyzymd study "
+                "add-condition LABEL --new writes",
+            ],
+        ),
+        (
+            lambda data: data.update(simulation_phases="10 ns production"),
+            [
+                "error: simulation_phases: expected a mapping with minimization, "
+                "equilibration_stages and production, not text"
+            ],
+        ),
+    ],
+    ids=["unknown key", "missing section", "wrong type"],
+)
+def test_config_errors_say_how_to_fix_them(tmp_path: Path, command, edit, expected) -> None:
+    """validate, build and run print the same error and fix lines for a bad config."""
+    data = _config_with_pdb(tmp_path)
+    edit(data)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(data))
+
+    result = CliRunner().invoke(cli, [command, "-c", str(config_path)])
+
+    assert result.exit_code == 1, result.output
+    for line in expected:
+        assert line in result.stderr
+    assert f"fix: correct these keys in {config_path}" in result.stderr
+    assert "Configuration error:" not in result.output

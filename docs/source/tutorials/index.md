@@ -1,41 +1,31 @@
 # Tutorials
 
-Tutorials are guided learning paths. They are the right place to start when you
-want a worked example with a clear beginning, middle, and end.
+Each tutorial is one lesson with a known result. Do them in this order.
 
-## Featured Tutorials
+1. {doc}`../get_started/quickstart`: simulate Trp-cage in water and measure its
+   radius of gyration. The input files ship with PolyzyMD.
+2. {doc}`first_analysis`: run two more replicates of the quickstart, and
+   measure their RMSF on the study.
+3. {doc}`analysis_complete_workflow`: add a condition with two short SBMA
+   chains, and compare it with water.
+4. {doc}`sasa_analysis`: measure how much of the protein surface the polymer
+   covers.
+5. {doc}`prepare_pdb_for_openff`: download a structure from the PDB and clean
+   it for OpenFF.
+6. {doc}`own_system`: make a project for your own protein, fill in a config,
+   check it, add a second condition, and run and analyze both.
 
-- [Run Your First Analysis](first_analysis.md)
-  Go from finished trajectories to RMSF results in five steps.
-- [Prepare a PDB for OpenFF and PolyzyMD](prepare_pdb_for_openff.md)
-  Inspect and clean a raw 4CHA crystal structure before simulation setup.
-- [Analyze a Multi-Condition Study](analysis_complete_workflow.md)
-  Follow the full path from finished trajectories to comparison figures.
-- [Measure Surface Accessibility with SASA](sasa_analysis.md)
-  Configure multi-run SASA analysis to quantify polymer shielding effects.
-
-## What Belongs Here
-
-Tutorials should help you learn by doing:
-
-- one main path
-- explicit prerequisites
-- visible success states
-- limited branching and digressions
-
-If you already know what you want to do, jump to
-[How-To Guides](../how_to/index.md) instead.
-
-<!-- IMAGE OPPORTUNITY: Add a compact pipeline figure for the end-to-end
-analysis workflow, from completed trajectories through analysis artifacts,
-comparison results, and figures. -->
+Tutorials 2 to 4 continue in the project folder of the quickstart. Their
+simulations run on a laptop CPU in minutes.
 
 ```{toctree}
 :hidden:
 :maxdepth: 1
 
-Run Your First Analysis <first_analysis>
-Prepare a PDB for OpenFF and PolyzyMD <prepare_pdb_for_openff>
-Analyze a Multi-Condition Study <analysis_complete_workflow>
-Measure Surface Accessibility with SASA <sasa_analysis>
+Run your first simulation <../get_started/quickstart>
+first_analysis
+analysis_complete_workflow
+sasa_analysis
+prepare_pdb_for_openff
+own_system
 ```

@@ -133,6 +133,8 @@ source_suffix = {
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
+# Redirect pages for addresses that the CLI and the init template print.
+html_extra_path = ["_extra"]
 
 # Logo configuration
 html_logo = "_static/logo.png"

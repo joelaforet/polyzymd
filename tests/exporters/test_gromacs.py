@@ -12,6 +12,7 @@ Covers:
   _parse_itp_atom_and_residue_counts, _fix_gro_residue_numbering)
 """
 
+import shutil
 from bisect import bisect_right
 from importlib import resources
 from pathlib import Path
@@ -129,11 +130,16 @@ def _protein_itp_content(mol_name: str) -> str:
     return PROTEIN_ITP_CONTENT.replace("MOL0", mol_name)
 
 
-def _posres_config(groups: list[str]) -> SimpleNamespace:
+def _posres_config(groups: list[str], freeze_solute: bool = False) -> SimpleNamespace:
     """Build a minimal config object with position restraint groups."""
     restraints = [SimpleNamespace(group=group, force_constant=1000.0) for group in groups]
     stage = SimpleNamespace(position_restraints=restraints)
-    return SimpleNamespace(simulation_phases=SimpleNamespace(equilibration_stages=[stage]))
+    return SimpleNamespace(
+        simulation_phases=SimpleNamespace(
+            equilibration_stages=[stage],
+            minimization=SimpleNamespace(freeze_solute=freeze_solute),
+        )
+    )
 
 
 def _component_info(
@@ -464,6 +470,24 @@ class TestTopologyLayoutPositionRestraints:
         assert _posres_indices(ligand_itp, "POSRES_LIGAND") == [1, 2, 4]
         _assert_posres_indices_within_atom_count(protein_itp, "POSRES_PROTEIN")
         _assert_posres_indices_within_atom_count(ligand_itp, "POSRES_LIGAND")
+
+    def test_minimization_restrains_solute_heavy_atoms_without_stage_restraints(self, tmp_path):
+        """POSRES_EM covers the protein and ligand heavy atoms even when no stage restrains them."""
+        prefix = "sys"
+        protein_itp = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        ligand_itp = _write_itp(
+            tmp_path, prefix, "MOL1", LIGAND_ITP_TEMPLATE.format(mol_name="MOL1")
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 1), ("MOL1", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=6, n_substrate_atoms=4))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config([], freeze_solute=True), tmp_path, prefix
+        )
+
+        assert defines == {"minimization": "POSRES_EM"}
+        assert _posres_indices(protein_itp, "POSRES_EM") == [1, 2, 4, 5]
+        assert _posres_indices(ligand_itp, "POSRES_EM") == [1, 2, 4]
 
     def test_distinct_dimer_mol0_mol1_plus_ligand_mol2(self, tmp_path):
         """Distinct protein ITPs should both receive protein restraints."""
@@ -1132,7 +1156,7 @@ class TestEnergyMinimizationHelpers:
         assert 'PREFIX="system"' in script_content
         assert (
             "$GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro "
-            "-p ${PREFIX}.top -o em.tpr -maxwarn 1"
+            "-p ${PREFIX}.top -o em.tpr"
         ) in script_content
         assert "$GMX mdrun -deffnm em -v" in script_content
         assert "$GMX grompp -f eq_01_nvt.mdp -c em.gro -r em.gro" in script_content
@@ -1185,3 +1209,365 @@ class TestEnergyMinimizationHelpers:
 
         with pytest.raises(RuntimeError, match="infinite forces"):
             runner._check_energy_minimization_health()
+
+
+class TestMDPThermostatAndBarostat:
+    def _generator(self, tmp_path: Path, **production):
+        import yaml
+
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.exporters.gromacs import MDPGenerator
+        from tests._support.analysis_testkit import write_simulation_config
+
+        path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+        (tmp_path / "c" / "test.pdb").write_text("END\n")
+        data = yaml.safe_load(path.read_text())
+        data["simulation_phases"]["production"].update(production)
+        path.write_text(yaml.safe_dump(data))
+        return MDPGenerator(SimulationConfig.from_yaml(path))
+
+    def test_langevin_runs_as_stochastic_dynamics(self, tmp_path: Path) -> None:
+        """LangevinMiddle is Langevin dynamics on GROMACS too."""
+        text = self._generator(tmp_path).generate_production().to_mdp_string()
+        assert "integrator      = sd" in text and "tcoupl          = no" in text
+        assert "ld_seed" in text
+
+    def test_approximate_mappings_are_warned_once(self, tmp_path: Path, monkeypatch) -> None:
+        """The Monte Carlo barostat maps to c-rescale, with a warning."""
+        from polyzymd.exporters import gromacs
+
+        messages = []
+        monkeypatch.setattr(gromacs.logger, "warning", lambda text, *a: messages.append(text % a))
+        generator = self._generator(tmp_path, barostat="MC")
+        generator.generate_production()
+        generator.generate_production()
+        assert sum("no Monte Carlo barostat" in text for text in messages) == 1
+
+
+def test_grompp_gets_no_blanket_maxwarn() -> None:
+    """-maxwarn would hide a net-charge warning, so every grompp warning stops the run."""
+    import inspect
+
+    from polyzymd.config.schema import GromacsEngineConfig
+    from polyzymd.exporters import gromacs
+
+    assert GromacsEngineConfig().grompp_flags == ""
+    assert "-maxwarn" not in inspect.getsource(gromacs)
+
+
+def _seeded_generator(tmp_path: Path, replicate):
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    return MDPGenerator(SimulationConfig.from_yaml(path), replicate=replicate)
+
+
+def test_gromacs_stages_take_seeds_from_the_replicate(tmp_path: Path) -> None:
+    """Production ld_seed is the replicate's dynamics seed and differs between replicates."""
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    production = _seeded_generator(tmp_path, 2).generate_production()
+    assert production.ld_seed == dynamics_seed(2, "production:0")
+    assert f"ld_seed         = {production.ld_seed}" in production.to_mdp_string()
+    other = _seeded_generator(tmp_path / "other", 3).generate_production()
+    assert other.ld_seed != production.ld_seed
+
+
+def test_gromacs_without_a_replicate_keeps_random_seeds(tmp_path: Path) -> None:
+    """Without a replicate number, gen_seed and ld_seed stay -1 (random)."""
+    production = _seeded_generator(tmp_path, None).generate_production()
+    assert production.ld_seed == -1 and production.gen_seed == -1
+
+
+def test_gromacs_equilibration_stages_do_not_share_noise(tmp_path: Path) -> None:
+    """Two equilibration stages get different ld_seed values."""
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    (stage,) = data["simulation_phases"]["equilibration_stages"]
+    data["simulation_phases"]["equilibration_stages"] = [stage, {**stage, "name": "eq2"}]
+    path.write_text(yaml.safe_dump(data))
+    generator = MDPGenerator(SimulationConfig.from_yaml(path), replicate=1)
+    stages = [params for _, params in generator.generate_equilibration_stages()]
+    assert len(stages) == 2
+    assert stages[0].ld_seed != stages[1].ld_seed
+
+
+def _restrained_generator(tmp_path: Path, freeze_solute: bool = True):
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    (stage,) = data["simulation_phases"]["equilibration_stages"]
+    stage["position_restraints"] = [
+        {"group": "protein_heavy", "force_constant": 4184.0},
+        {"group": "polymer_heavy", "force_constant": 4184.0},
+    ]
+    data["simulation_phases"]["minimization"] = {"freeze_solute": freeze_solute}
+    path.write_text(yaml.safe_dump(data))
+    return MDPGenerator(SimulationConfig.from_yaml(path))
+
+
+def test_minimization_restraints_do_not_follow_the_stages(tmp_path: Path) -> None:
+    """em.mdp borrows no stage restraint; it takes only the define it is given."""
+    generator = _restrained_generator(tmp_path)
+    assert "define" not in generator.generate_energy_minimization().to_mdp_string()
+    text = generator.generate_energy_minimization(define="-DPOSRES_EM").to_mdp_string()
+    assert "define          = -DPOSRES_EM\n" in text + "\n"
+
+
+def test_a_seeded_stage_writes_ld_seed_for_any_integrator() -> None:
+    """GROMACS seeds v-rescale and c-rescale noise with ld_seed, so a seeded md stage writes it."""
+    from polyzymd.exporters.gromacs import MDPParameters
+
+    params = MDPParameters(integrator="md", tcoupl="v-rescale", ld_seed=1234)
+    assert "ld_seed         = 1234" in params.to_mdp_string()
+    assert "ld_seed" not in MDPParameters(integrator="md", tcoupl="v-rescale").to_mdp_string()
+
+
+@pytest.mark.parametrize("interval", [150, 250, 9973])
+def test_nstcalcenergy_divides_every_energy_output_interval(interval: int) -> None:
+    """GROMACS stops when nstenergy is not a multiple of nstcalcenergy (default 100)."""
+    from polyzymd.exporters.gromacs import MDPParameters
+
+    text = MDPParameters(nstlog=interval, nstenergy=interval).to_mdp_string()
+    (line,) = [line for line in text.splitlines() if line.startswith("nstcalcenergy")]
+    nstcalcenergy = int(line.split("=")[1])
+    assert 1 <= nstcalcenergy <= 100
+    assert interval % nstcalcenergy == 0
+
+
+@pytest.mark.skipif(shutil.which("gmx") is None, reason="GROMACS is not installed")
+@pytest.mark.parametrize("steps_per_frame", [150, 250])
+def test_every_stage_passes_grompp_for_any_steps_per_frame(
+    tmp_path: Path, steps_per_frame: int
+) -> None:
+    """grompp accepts every stage's MDP when steps per frame is not a multiple of 100."""
+    import subprocess
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    gmx = shutil.which("gmx")
+    subprocess.run(
+        [gmx, "solvate", "-cs", "spc216.gro", "-box", "2.5", "-o", str(tmp_path / "w.gro")],
+        check=True,
+        capture_output=True,
+    )
+    n_water = int((tmp_path / "w.gro").read_text().splitlines()[1]) // 3
+    (tmp_path / "w.top").write_text(
+        '#include "oplsaa.ff/forcefield.itp"\n#include "oplsaa.ff/spc.itp"\n'
+        f"[ system ]\nwater\n[ molecules ]\nSOL {n_water}\n"
+    )
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    duration = steps_per_frame * 4 * 2e-6
+    phases = data["simulation_phases"]
+    phases["production"].update(duration=duration, samples=4, thermostat="NoseHoover")
+    phases["equilibration_stages"] = [
+        {"name": "eq1", "duration": duration, "temperature": 300.0, "samples": 4},
+        {
+            "name": "heat",
+            "temperature_start": 280.0,
+            "temperature_end": 300.0,
+            "temperature_increment": 10.0,
+            "temperature_interval_steps": steps_per_frame,
+            "samples": 4,
+        },
+    ]
+    path.write_text(yaml.safe_dump(data))
+    generator = MDPGenerator(SimulationConfig.from_yaml(path), replicate=1)
+    stages = [("em", generator.generate_energy_minimization())]
+    stages += generator.generate_equilibration_stages()
+    stages += [("prod", generator.generate_production())]
+    for name, params in stages:
+        mdp = tmp_path / f"{Path(name).stem}.mdp"
+        mdp.write_text(params.to_mdp_string())
+        result = subprocess.run(
+            [gmx, "grompp", "-f", str(mdp), "-c", str(tmp_path / "w.gro")]
+            + ["-p", str(tmp_path / "w.top"), "-o", str(tmp_path / f"{mdp.stem}.tpr")]
+            + ["-po", str(tmp_path / f"{mdp.stem}_out.mdp")],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"{name}: {result.stderr[-2000:]}"
+
+
+def test_restrained_npt_stage_scales_reference_coordinates() -> None:
+    """A stage with a barostat and position restraints writes refcoord-scaling = com."""
+    from polyzymd.exporters.gromacs import MDPParameters
+
+    npt = MDPParameters(pcoupl="C-rescale", define="-DPOSRES_PROTEIN").to_mdp_string()
+    assert "refcoord-scaling = com" in npt
+    assert "refcoord-scaling" not in MDPParameters(define="-DPOSRES_PROTEIN").to_mdp_string()
+    assert "refcoord-scaling" not in MDPParameters(pcoupl="C-rescale").to_mdp_string()
+
+
+@pytest.mark.skipif(shutil.which("gmx") is None, reason="GROMACS is not installed")
+def test_restrained_npt_stage_passes_grompp(tmp_path: Path) -> None:
+    """grompp accepts an NPT stage with position restraints without warnings."""
+    import subprocess
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    gmx = shutil.which("gmx")
+    subprocess.run(
+        [gmx, "solvate", "-cs", "spc216.gro", "-box", "2.5", "-o", str(tmp_path / "w.gro")],
+        check=True,
+        capture_output=True,
+    )
+    n_water = int((tmp_path / "w.gro").read_text().splitlines()[1]) // 3
+    (tmp_path / "w.top").write_text(
+        '#include "oplsaa.ff/forcefield.itp"\n#include "oplsaa.ff/spc.itp"\n'
+        "#ifdef POSRES_WATER\n[ position_restraints ]\n1 1 1000 1000 1000\n#endif\n"
+        f"[ system ]\nwater\n[ molecules ]\nSOL {n_water}\n"
+    )
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    data["simulation_phases"]["equilibration_stages"] = [
+        {
+            "name": "npt",
+            "ensemble": "NPT",
+            "duration": 0.001,
+            "temperature": 300.0,
+            "samples": 4,
+            "position_restraints": [{"group": "protein_backbone", "force_constant": 1000.0}],
+        }
+    ]
+    path.write_text(yaml.safe_dump(data))
+    generator = MDPGenerator(SimulationConfig.from_yaml(path), replicate=1)
+    ((_, params),) = generator.generate_equilibration_stages()
+    assert params.pcoupl != "no" and params.define
+    # The toy topology is water, whose restraints sit behind POSRES_WATER.
+    params.define = "-DPOSRES_WATER"
+    mdp = tmp_path / "npt.mdp"
+    mdp.write_text(params.to_mdp_string())
+    result = subprocess.run(
+        [gmx, "grompp", "-f", str(mdp), "-c", str(tmp_path / "w.gro")]
+        + ["-r", str(tmp_path / "w.gro"), "-p", str(tmp_path / "w.top")]
+        + ["-o", str(tmp_path / "npt.tpr"), "-po", str(tmp_path / "npt_out.mdp")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+
+
+def test_gromacs_export_refuses_distance_restraints_it_would_drop(tmp_path):
+    """Exporting an OpenMM config with distance restraints to GROMACS is refused."""
+    from polyzymd.config.schema import SimulationConfig
+
+    config = SimulationConfig(
+        name="t",
+        engine="openmm",
+        enzyme={"name": "E", "pdb_path": "e.pdb"},
+        thermodynamics={"temperature": 300.0},
+        simulation_phases={
+            "equilibration_stages": [
+                {"name": "eq", "duration": 0.1, "temperature": 300.0, "ensemble": "NVT"}
+            ],
+            "production": {"ensemble": "NPT", "duration": 1.0, "samples": 10},
+        },
+        restraints=[
+            {
+                "type": "flat_bottom",
+                "name": "site",
+                "atom1": {"selection": "resid 1 and name CA"},
+                "atom2": {"selection": "resid 2 and name CA"},
+                "distance": 3.5,
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="set engine: openmm"):
+        GromacsExporter(interchange=None, config=config).export(tmp_path)
+    assert not any(tmp_path.iterdir())
+
+
+def _phase_generator(tmp_path: Path, production: dict, stages: list | None = None):
+    """Return an MDPGenerator of the test config with the given production and stages."""
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    data["simulation_phases"]["production"].update(production)
+    if stages is not None:
+        data["simulation_phases"]["equilibration_stages"] = stages
+    path.write_text(yaml.safe_dump(data))
+    config = SimulationConfig.from_yaml(path)
+    return config, MDPGenerator(config)
+
+
+def test_an_npt_phase_without_a_barostat_couples_pressure(tmp_path: Path) -> None:
+    """NPT without a barostat key means MC (the schema fills it in), so GROMACS couples pressure."""
+    stage = {
+        "name": "npt",
+        "ensemble": "NPT",
+        "temperature": 300.0,
+        "duration": 0.001,
+        "samples": 2,
+    }
+    _, generator = _phase_generator(tmp_path, {"ensemble": "NPT", "barostat": None}, stages=[stage])
+    ((_, stage_params),) = generator.generate_equilibration_stages()
+    assert stage_params.pcoupl == "c-rescale"
+    assert generator.generate_production().pcoupl == "c-rescale"
+
+
+def test_both_engines_run_the_production_dynamics_of_the_config(tmp_path: Path) -> None:
+    """One config gives the same ensemble and thermostat coupling on OpenMM and GROMACS."""
+    from polyzymd.simulation.runner import production_dynamics
+
+    for settings, npt in [
+        ({"ensemble": "NVT", "thermostat": "Langevin", "thermostat_timescale": 2.0}, False),
+        ({"ensemble": "NPT", "barostat": "MC", "thermostat_timescale": 0.5}, True),
+    ]:
+        config, generator = _phase_generator(tmp_path / str(npt), settings)
+        openmm = production_dynamics(config.simulation_phases.production)
+        gromacs = generator.generate_production()
+        assert openmm["ensemble"] == settings["ensemble"]
+        assert gromacs.tau_t == pytest.approx(1.0 / openmm["friction"])
+        assert (gromacs.pcoupl != "no") is npt
+        assert gromacs.integrator == "sd"
+
+
+def test_a_barostat_frequency_gromacs_does_not_use_is_named_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """GROMACS's c-rescale keeps its own coupling interval, so a set frequency gives a warning."""
+    from polyzymd.exporters import gromacs
+
+    messages = []
+    monkeypatch.setattr(gromacs.logger, "warning", lambda text, *a: messages.append(text % a))
+    _, generator = _phase_generator(tmp_path, {"barostat": "MC", "barostat_frequency": 50})
+    generator.generate_production()
+    generator.generate_production()
+    assert sum("barostat_frequency 50" in text for text in messages) == 1

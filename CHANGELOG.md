@@ -9,10 +9,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`enzyme.custom_substructures_path`.**  A JSON file of residue templates for residues OpenFF's template matcher does not know, such as the N-terminal cystine of 4CHA. The path is relative to the config, checked for shape on load, passed to `Topology.from_pdb(_custom_substructures=...)`, and part of the config hash. The docs described this key before any code read it.
+
+- **Seeded dynamics.**  The replicate number now seeds the initial velocities and the thermostat noise, on both engines. Each equilibration stage and production segment gets its own seed from `polyzymd.simulation.seeds.dynamics_seed(replicate, phase)`, so no stage repeats another's noise. OpenMM sets `integrator.setRandomNumberSeed` and `setVelocitiesToTemperature(T, seed)`; GROMACS MDP files get `gen_seed` and `ld_seed`. A replicate run again gives the same trajectory only on the same platform, precision and software versions.
+
 - **Dead chains in `polyzymd status` carry an action.**  `resubmit`, `resubmit --skip-build` or
   `inspect`, decided from the last error line. The resubmit footer no longer suggests restarting
   chains that died on a NaN or a build refusal. The specific "Segment N failed" cause now outranks
   the generic "FATAL: run-segment failed" line.
+
+- **Systems without polymers.**
+  - Co-solvents take `charge_method` (default `nagl`; `am1bcc` needs AmberTools), and the build asks you to check the default.
+  - Co-solvents take `count:` for a number of molecules.
+  - A SMILES with several parts (`...[O-].[Na+]`) is charged part by part, so NAGL handles the sodium.
+  - The config hash includes the co-solvents, so a water and an SDS condition never share one.
+  - `polyzymd build` follows the config's `engine`, and `polyzymd run` takes it from the config when `--engine` is left out.
+  - The build dry run lists co-solvents and ions, and says what the replicate number seeds.
+  - `examples/quickstart/` ships Trp-cage with one config per engine. `tests/test_quickstart_example.py` runs it from config to `analyze rg`.
+  - A `polyzymd-simulate` agent skill covers setup, build, run and submit.
+
+- **Trajectory hashes, and `polyzymd hash-trajectories`.**  Each completed
+  OpenMM production segment records its trajectory's SHA-256 and size in
+  `progress.json` (`trajectory_sha256`, `trajectory_bytes`) after flushing the
+  reporters' buffered files.  `polyzymd hash-trajectories (-c CONFIG ... |
+  --study PATH) [--replicates] [--verify] [--dry-run] [--rehash-changed]`
+  records the hashes of finished trajectories of any engine that has none
+  (older OpenMM runs, downsampled copies, GROMACS runs) in
+  `trajectory_hashes.json` beside the run's files, and never writes
+  `progress.json`.  It is idempotent, writes atomically, and never overwrites
+  a recorded hash (a disagreement is a `conflict:` and exits 2;
+  `--rehash-changed` records again a file of its own that was extended).
+  `freeze` names the conditions whose runs still lack hashes.  Engines say
+  which files are their finished trajectories with
+  `SimulationEngine.trajectory_files`.
+
+- **`polyzymd analyze NAME -c ... --submit`.**  Runs the same command as a
+  SLURM array: one task per condition and replicate, each measuring and
+  storing its replicate's result with `--no-plots`, and a report job,
+  submitted with `--dependency=afterany`, that runs the full command, reads
+  every stored result, measures any replicate a task left unmeasured and
+  writes the report and figures.  The scripts go to
+  `<output-dir>/slurm/<analysis>_<YYYYmmdd-HHMMSS>/` (`tasks.tsv`,
+  `replicates.sbatch`, `report.sbatch`, `logs/`, and `report.txt`,
+  `report.json` with `--format json`, or the `-o` path).  `--preset` takes `alpine-cpu`, `blanca-shirts`,
+  `blanca-chbe-rdi` or `bridges2-rm`; `--partition`, `--account`, `--qos`,
+  `--time` (default `12:00:00`), `--mem` (`16G`) and `--cpus` (`2`) override
+  it; `--dry-run` writes the scripts without submitting.  The jobs run the
+  submitting Python interpreter and `PYTHONPATH` in the submitting directory
+  (`polyzymd.workflow.analysis_submit`).  On Blanca, two LipA conditions of
+  five replicates each gave the same report as one job.
+
+- **Hydrogen-bond functions on the study API.**  `polyzymd.analyses.functions`
+  gains `hbond_atoms` (the hydrogens bonded to N, O or S that can be donated,
+  and the acceptors: every O, and N or S bonded to at most two atoms),
+  `hydrogen_bonds` (MDAnalysis `HydrogenBondAnalysis` with those selections,
+  3.5 Å and 150° by default, giving per replicate the mean hydrogen bonds and
+  hydrogen-bonded residue pairs per frame and the fraction of frames with
+  any), `hbond_lifetimes` (the Kaplan-Meier lifetime of each residue pair's or
+  atom pair's hydrogen bonds, with `tolerance_ps`), `residue_hbond_occupancy`
+  (each residue's fraction of frames with a hydrogen bond),
+  `residue_pair_hbond_occupancy` (every residue pair joined by a hydrogen bond
+  and its fraction of frames) and `hbond_count` (the hydrogen bonds at the
+  current frame, for `Study.timeseries`).  `polyzymd analyze hydrogen_bonds -c
+  A/config.yaml -c B/config.yaml` runs them for the `groups` and `summaries`
+  settings, with `--run <summary>_mean_hbonds`, `_mean_residue_pairs`,
+  `_any_fraction`, `_mean_lifetime`, `_lifetime_events`, `_censored_fraction`,
+  `_residues` and `_pairs`, and draws `hbonds_<run>_comparison`, `_profile` and
+  `_difference`.
+
+- **Per-residue RMSF, offset and `rmsd_per_residue` on the study API.**
+  `polyzymd.analyses.functions` gains `rmsf` (`gmx rmsf -o`), `rmsd_per_residue`
+  (each residue's root mean square over frames of its atoms' distance from
+  the reference, `gmx rmsf -od`) and `rms_decomposition` (both with the
+  offset of the mean position, and their mean squares, in one pass, with
+  `rmsd_per_residue² = rmsf² + offset²`).  `rmsd_per_residue` is one number per
+  residue; `rmsd` stays one number per frame.  `polyzymd analyze rmsf` and
+  `polyzymd analyze rmsd_per_residue` report `core_`, `<region>_` and `mean_`
+  values and the per-residue profiles.
+
+- **Force-field charges and bonds in the analysis loader.**  The loader reads
+  the OpenMM system XML that PolyzyMD saves beside each run's first segment
+  (`production_0/production_0_system.xml`) and gives the universe its partial
+  charges and replaces its bonds with the system's bonds and constraints,
+  without the H-H constraint of rigid water, when the system has one particle
+  per atom.  The topology PDB records bonds only for non-standard residues,
+  so hydrogen-bond donors can now be found from the bonds of every residue.
+
+- **`Study.per_replicate(..., labels="returned")`.**  For a function that
+  returns `(labels, values)`, such as `residue_pair_hbond_occupancy`, whose
+  entries are known only once measured.  Each replicate's labels are stored in
+  `labels.json` beside its values, the labels of every replicate are lined up
+  in order of first appearance, and `missing=` fills a label a replicate
+  lacks; without `missing`, replicates with different labels are refused.
+
+- **`system.prmtop`, a bond-complete analysis topology.**  `polyzymd build`
+  now writes `system.prmtop` beside `solvated_system.pdb` and `system.xml`,
+  built from the OpenMM topology and System together with ParmEd.  It carries
+  every atom, residue, element, mass, charge and bond, including constrained
+  bonds, with no column widths and no atom limit, and MDAnalysis reads it with
+  bonds taken from the file.  The analysis loader prefers it when present and
+  falls back to the PDB for older runs.  The PDB stays for viewers: above
+  99,999 atoms OpenMM writes hex serials that MDAnalysis cannot read in CONECT
+  records, and it carries CONECT records for non-standard residues only.  A
+  new `polyzymd analysis-topology RUN_DIR...` writes the file for existing
+  runs from the two files they already have.  The build manifest records its
+  hash when it is written.  GROMACS runs get the same treatment with the file
+  they already have: analyses prefer `prod.tpr`, the compiled run input, over
+  the PDB and the GRO.
 
 - **`polyzymd status --unfinished` and per-condition counts.**  `--unfinished` omits completed
   replicates and collapses finished systems to one line, halving agent output on a 63-replicate
@@ -43,8 +146,162 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OpenMM production follows the config's dynamics.**  OpenMM production ran NPT with LangevinMiddle, friction 1/ps and a barostat move every 25 steps whatever `simulation_phases.production` said: `ensemble: NVT`, `thermostat: Langevin`, `thermostat_timescale` and `barostat_frequency` were not read. It now runs the configured ensemble (no barostat in NVT), thermostat, friction (1/`thermostat_timescale`) and barostat frequency, and so do the later segments of a chain. A later segment keeps the dynamics its chain started with and warns when the config now says otherwise; production refuses a thermostat OpenMM does not run. Equilibration stages run their `thermostat:` (`Langevin` ran as LangevinMiddle). Configs with the default production settings, such as every Paper 1 config, run as before. GROMACS warns that `barostat_frequency` does not apply to its c-rescale barostat.
+
+- **Config errors that say how to fix them.**  Every command that reads a config (`validate`, `build`, `run`, `submit`, `recover`, `cancel`, `status`, `hash-trajectories`, `study check` and `study locate`, and the job-side `run-segment` and `check-progress`) prints the same `error:` and `fix:` lines for an invalid one, from `polyzymd.cli.config_errors`; before, `build` and `run` printed a bare `Configuration error:` list, the others `Failed to load config:` with pydantic's text, and `submit` and `hash-trajectories` a traceback for a schema error. A bad config makes `hash-trajectories` exit 2, as a bad study does. An unknown key names the closest field anywhere in the schema (`pdb: unknown key; did you mean enzyme.pdb_path?`, and key by key under an unknown section such as `system:`), or lists the keys of its section when none is close. A missing section says what it holds and points to the commented template of `polyzymd study add-condition LABEL --new`. A value of the wrong type names the shape the field expects (`simulation_phases: expected a mapping with minimization, equilibration_stages and production, not text`). Validation itself is unchanged.
+
+- **A user install of PolyzyMD shadowing the environment's.**  `polyzymd info` prints the folder `polyzymd` was imported from. Every command warns when that folder is a `pip install --user` copy (in `site.getusersitepackages()`, or put on `sys.path` by a `.pth` file there, as an editable user install does), which Python loads ahead of the pixi environment's own, and gives the fix: run with `PYTHONNOUSERSITE=1`, or `pip uninstall --user polyzymd`.
+
+- **Jobs that cannot activate their pixi environment stop.**  The OpenMM and GROMACS job scripts ran `eval "$(pixi shell-hook ...)"`, which hides a failed hook from `set -e`: on Blanca, 2 of 6 GROMACS quickstart jobs started while another job updated the environment, ran without it, wrote no `gromacs/progress.json` and still completed. The scripts now try the hook three times, ten seconds apart, and stop with `FATAL: cannot activate the pixi environment of <pixi.toml>` if it never succeeds. Both templates take the lines from `polyzymd.workflow.slurm.pixi_activation_block`.
+
 - **Status ETAs no longer spike after a wall-time rollover.**  Rates come from segment file
   timestamps instead of the progress record, whose start time was rewritten at segment end.
+
+- **Residue numbers of chains joined by disulfides.**  Chains linked by a disulfide load as one protein molecule (insulin A and B). The build numbered their residues by input number and name only, so residues of equal number and name in the two chains (insulin A7 and B7 CYS, A9 and B9 SER) became one residue in `solvated_system.pdb`: 51 residues got 49 numbers. The input chain is now part of the residue identity, so chain B follows chain A (insulin: 1-21, then 22-51), as for separate molecules.
+
+- **Loading analysis functions slowed down over a session.**  Each load of a study's analysis file checked every imported module against every study folder loaded before in the process, resolving the module's path each time, so a long notebook session or the test suite spent seconds per load. Each module's path is now resolved once and its folders looked up in a set.
+
+- **Stray files in study and project folders.** PolyzyMD reads, hashes and deposits only files whose names it chooses in advance:
+  - A function's stored results depend on the Python files of its folder and the files of `data/` beside it. Notes, figures or a copied trajectory in `analyses/` recompute nothing; the analysis log names the files it leaves out.
+  - `freeze` deposits only `study.yaml`, `project.yaml`, `README*`, `LICENSE*`, the files it writes, and the folders `study init` and `project init` make (`conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`, `results/`, `environment/`), with or without git, and prints one `not deposited:` warning for the rest.
+  - GROMACS runs use `<prefix>.top`, the files it includes, `prod.tpr` and PolyzyMD's `.mdp` names, so a `backup.top` neither stops an analysis nor is deposited. `gromacs.analysis_topology` names another `.top`.
+
+- **Hydrogen placement, local runs, GROMACS cancellation and help text.**
+  - `polyzymd clean-pdb` places hydrogens on the CPU platform, so a GPU with an older driver no longer stops it with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Set `OPENMM_DEFAULT_PLATFORM` to choose another platform.
+  - A local `polyzymd run` with OpenMM writes `progress.json`, so it records each segment and its trajectory hash, as a SLURM run does.
+  - `polyzymd cancel` stops GROMACS chains: the GROMACS job script checks the `STOP` file at start and before each resubmission.
+  - The `study freeze` help says that freeze refuses uncommitted inputs. The build message names `polyzymd run`, and the "write a function" hint links to the study API how-to.
+
+- **Console and messages.**
+  - The uncommitted-inputs warning prints once per command, with a count and the first five files.
+  - Freeze merges a warning that several conditions share into one line naming them.
+  - The GROMACS TPR fallback warns once per command.
+  - `project check --production` passes `--production` to each study's check.
+  - `study check` and `project check` list the metadata gaps instead of counting them.
+  - A narrow 95 % interval prints with enough digits to show both ends.
+  - `status` shows ps for runs shorter than 1 ns, and says "SLURM not queried" with `--no-slurm` instead of "squeue unavailable".
+  - `submit --dry-run` shows the partition, QOS, time limit, account and GPUs, and warns when a CPU-platform config would go to a GPU preset.
+  - A pair that cannot be tested says why: too few replicates, or no variance.
+  - A missing Packmol is named as such.
+  - The `hash-trajectories` advice says that it writes beside the trajectories.
+  - The scaffold YAML puts comments above `{}` stubs, so filling a stub leaves no stray comment.
+  - The `init` template names its relaxation stage without "polymer", lists only thermostats both engines run, and links the quickstart page where it is.
+
+- **Simulation correctness.**
+  - Ions get atom names (`NA`, `CL`) in the built system and in `system.prmtop`. Their blank names made MDAnalysis refuse the Amber topology, so analysis of any system with ions failed. `analysis-topology --overwrite` repairs older runs.
+  - A topology that cannot be loaded is reported as such, not as an equilibration-window problem.
+  - `neutralize` counts the charge of co-solvents. A charged SMILES (`...OS(=O)(=O)[O-]`) gets counter-ions; one that carries its counter-ion (`...[O-].[Na+]`) needs none. A system left charged is an error with `neutralize: true` and a warning without it.
+  - `gmx grompp` gets no blanket `-maxwarn 1`, which hid the net-charge warning. Set `grompp_flags: "-maxwarn 1"` to accept a warning you have read.
+  - GROMACS runs the Langevin thermostats as Langevin dynamics (`integrator = sd`, `tau-t` = the thermostat timescale), as OpenMM does, not as `v-rescale`. Approximate mappings (the Monte Carlo barostat as `c-rescale`) and thermostats OpenMM does not implement are warned about. The new reference page "GROMACS and OpenMM" records how each setting runs on each engine.
+  - Solvent chain IDs never repeat those of the solute. A system that would need more chain IDs is refused, instead of solvent being labelled as protein or polymer.
+  - `pdbindex N` selects the N-th atom of the system in analyses (`bynum`), as it does in restraints.
+  - `projects_directory` and `scratch_directory` are relative to the config's folder, so commands find the runs from any folder.
+  - `checkpoint_interval` defaults to 60 s, and the quickstart config validates.
+  - Every config section refuses keys it does not define, so a misspelled key is an error instead of a silent default. Older configs with `simulation_phases.segments` must drop it.
+  - `freeze` recognises co-solvents, names a build file `build_manifest.json` lists that is missing, asks GROMACS studies to state the GROMACS version instead of reporting a missing OpenMM version, and mentions polymer parameters in the checklist only for systems with polymers.
+
+- **Stored results and replicate tables.**
+  - Reordering `parts:` recomputes instead of giving one part the values of another; `parts` is now part of the stored record.
+  - `replicate_table` keeps a `name` column, so two quantities stored in one run (two hydrogen-bond summaries) are no longer counted as two replicates.
+  - It also fills each label a replicate lacks with the run's `missing` value, as the report does, so its n and mean match the report's.
+  - A shipped analysis's record hashes its module's file and the PolyzyMD modules that file imports. A fix to a helper it calls recomputes its results.
+  - `rmsd` and `rmsf` take a given `reference_file` as the reference when `reference_mode` is left out. A file with a mode that ignores it is refused.
+  - Relative file settings of shipped analyses are relative to `study.yaml`, not to the shell's folder.
+  - `--set` values from `study.yaml` keep their type (`1e-05` stays a number).
+  - Repeated `distances` pair labels are refused.
+- **Freeze.**
+  - `freeze` refuses while inputs are uncommitted, and names them. The manifest therefore describes exactly the tagged and deposited files.
+  - It also refuses when git has no user name and email, before writing anything that names a tag.
+  - `study freeze` on a study of a project refuses and points to `project freeze`.
+  - In a project, each study's manifest lists the files git tracks and the project's commit.
+  - Manifests and reports carry no path of the machine.
+  - Configs written in flow style lose their machine paths too.
+  - The manifest no longer reports frames analysed: each analysis has its own window, and its report has `frames_per_replicate`.
+  - `CITATION.cff` carries no commit; the tag is the version.
+- **Projects and `--label`.**
+  - A project's studies must be folders directly inside it.
+  - An analysis entry that is not a mapping gets a message instead of a traceback.
+  - `analyze --study S --label L` prints its report but never saves it as the run's `report.json`. The `--submit` report job gets the same labels as its tasks, and `until: common` is resolved over the whole study.
+  - `analyze --project` writes one log, in the project's `logs/`. Log names carry the array task or process ID.
+- **`study init` and `study locate`.**
+  - `study init` records a relative scratch directory relative to its config.
+  - `study locate` no longer maps two conditions whose runs are named alike to one folder. It tells them apart by folder name or by `manifest.json`, and otherwise refuses with a fix.
+
+- **A control without polymer reports zero contact.**  In `contacts` and
+  `hydrogen_bonds`, a replicate whose polymer (a summary's second group)
+  matches no atoms has no contact and no hydrogen bond: its values are 0 (0
+  events, no lifetime), it stays in the statistics and is compared, and a
+  warning names it.  It was left out, so a no-polymer control was never
+  compared.  The measuring functions return 0 for an empty group instead of
+  `nan`; stored `contacts` and `hydrogen_bonds` results are recomputed once.
+- **`contacts` reports every monomer of the study, the same in every task.**
+  The per-monomer rows came from the polymer of one replicate, so `--submit`
+  tasks of conditions with different monomers stored different results from
+  the report job's.  `polymer_types` now names the monomers reported (default:
+  every residue name of the polymer in any condition, resolved once and passed
+  to every task), 0 in a replicate without one; it no longer narrows the
+  polymer selection, which `polymer_selection` does.
+
+- **Continuation segments record their software provenance.**  Only segment 0
+  recorded `polyzymd_version`, `openmm_version` and `pixi_environment`;
+  segments 1 and later now do too.
+- **Segment trajectory hashes survive progress reconciliation.**
+  `run-segment`, `status`, `check-progress` and `recover` re-check
+  `progress.json` and dropped each segment's recorded hash.
+- **`hash-trajectories` no longer makes runs without `progress.json`
+  unanalysable.**  It wrote a `progress.json` built from a scan of the run,
+  which marked segments of downsampled copies as failed, so `analyze` then
+  found no trajectories.  It now writes only `trajectory_hashes.json`.
+
+- **The correlation estimator every analysis plugin called was wrong.**
+  `estimate_correlation_time(method="integration")` trapezoid-integrated the
+  normalised autocorrelation function from lag zero, so applying
+  `g = 1 + 2*tau/dt` counted the lag-zero term twice, and it then floored tau
+  at one timestep.  White noise came back with `g = 3.00` instead of `1.00`,
+  and correlated series came back about `+2` too high, which inflated every
+  `sem_rmsd`, `sem_rg`, `sem_sasa`, `sem_distance` and `n_independent_frames`
+  written to an artifact.  The estimator now sums
+  `g = 1 + 2*sum C(t)*(1 - t/N)` over positive lags with the first
+  non-positive cutoff, following Chodera et al. (2007) as implemented in
+  pymbar, and derives `tau = (g - 1)/2 * dt`.  The estimator is now pymbar's own
+  `timeseries.statistical_inefficiency`, so pymbar (>= 4.0, from PyPI) is a new
+  dependency of PolyzyMD.  White noise with N = 20000 now
+  gives `g = 1.04`, AR(1) with phi = 0.5 gives `3.02` against an analytic
+  `3.00`, and phi = 0.9 gives `19.8` against an analytic `19.0`.
+
+- **RMSF is computed from every production frame.**  RMSF previously fed the
+  accumulator only autocorrelation-spaced frames, which discarded at least
+  half the production window and usually far more.  Thinning does not remove
+  the finite-sample bias of a fluctuation, it only raises the variance of the
+  profile, so all frames now reach the accumulator.  The correlation time and
+  effective sample count stay as recorded diagnostics and the uncertainty on
+  RMSF is still the standard error across replicates.  The
+  `statistical_policy` `frame_strategy` value changes from
+  `subsample_by_autocorrelation_when_estimated` to `all_production_frames`.
+
+- **Hydrogen bonds counted C-H donors and carbon acceptors.**  The plugin
+  passed the union of the configured groups to MDAnalysis as both `donors_sel`
+  and `acceptors_sel`.  MDAnalysis treats any selected heavy atom within 1.2 A
+  of a selected hydrogen as a donor, so every carbon bearing a hydrogen donated
+  and every selected atom accepted, and C-H...O and N-H...C contacts were
+  counted as hydrogen bonds.  Because the share of those geometries depends on
+  polymer chemistry, the error differed between conditions rather than
+  offsetting them equally.  Donors and acceptors are now the group union
+  intersected with the new `donor_acceptor_elements` setting, which defaults to
+  `["N", "O"]` and accepts further elements such as `"S"`.  Element spellings
+  are read from the topology, so a topology that writes `CL` is matched.  The
+  effective donor, acceptor, and hydrogen selection strings are recorded in
+  artifact provenance and metadata.  Results cached before this change are
+  invalidated by the settings fingerprint and are recomputed.
+
+- **Hydrogen bonds no longer report zero for a selection that matches
+  nothing.**  `allow_empty_groups` now defaults to `false`, so an empty group
+  selection raises `SelectionError` naming the group and its selection instead
+  of producing a zero-hydrogen-bond summary, and a donor and acceptor selection
+  that matches no atoms raises the same error.  A topology without element
+  metadata raises rather than falling back to a selection that admits every
+  atom.  Set `allow_empty_groups: true` to keep the previous warn-and-skip
+  behaviour.
 
 - **A segment resumes from the state of the last written trajectory frame.**
   `restart_state.xml` used to be written only on a wall-clock timer, so after
@@ -226,6 +483,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`polymers: {enabled: false}` alone turns polymers off.**  A disabled `polymers:` section no longer needs `type_prefix`, `monomers`, `length` and `count`; it means the same as `polymers: null`, and a warning names any other key it does not read. A disabled section with every required key is kept as written, so existing configs keep their hash.
+
+- **Stored analysis results identify their inputs by content.**  Records name
+  trajectory and topology files by path relative to the runs folder, size and
+  SHA-256, with no modification time, so moved, copied or downloaded data
+  reuses its results.  Hashes come from the runner's segment record or
+  `trajectory_hashes.json` when the recorded size matches, otherwise from a
+  per-file cache in `$POLYZYMD_CACHE_DIR/hashes` (default
+  `~/.cache/polyzymd/hashes`), valid while size and modification time are
+  unchanged; `freeze` uses the same cache.  **Every stored result recomputes
+  once** after upgrading, because the record identity changed.
+
+- **Unread config keys warn.**  `output.save_checkpoint`, `output.save_state_data` and `output.trajectory_format` are read by no code (both engines always write checkpoints and energies; OpenMM writes dcd, GROMACS xtc). Configs that give them still load, with one warning per key, and the templates and examples no longer list them. Config sections name such keys in `UNREAD_FIELDS`; `save_config` leaves them out when they hold their default, so a saved config keeps its hash.
+
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute
   bounding box plus `2 * (polymers.packing.padding + solvent.box.padding)`
@@ -296,8 +567,133 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still load), and `production_N_parameters.json` gains a `provenance` block
   with those values plus hostname and SLURM job id.  New helpers
   `polyzymd.utils.version.runtime_provenance()` / `record_provenance()`;
-  `get_polyzymd_version()` moved there and is re-exported from
-  `analyses/_framework/results_base.py`.
+  `get_polyzymd_version()` moved there.
+
+### Changed
+
+- **Modules moved out of the plugin framework.**  `UniverseProvider`,
+  `UniverseProvenance` and `FileIdentity` are in `polyzymd.analyses.universe`;
+  `compute_config_hash` is in `polyzymd.analyses.identity`, with the same
+  hash, so stored study results stay valid; `PlotSettings`, `PlotTheme`, the
+  semantic colour models and `AnalysisDefaults` are in
+  `polyzymd.config.analysis_settings` (`polyzymd.config` still exports
+  `PlotSettings` and `PlotTheme`).
+
+- **`PlotSettings` takes no per-analysis blocks and no `output_dir`.**  It
+  holds `format`, `dpi`, `style`, `color_palette`, `theme` and
+  `semantic_colors`, and refuses any other key.
+
+- **`scripts/convert_legacy.py --print-commands`** replaces
+  `--generate-comparison`, `--comparison-name` and `--enzyme-pdb`.  It groups
+  the converted runs into conditions and prints the `polyzymd analyze -c`
+  commands for rmsf, distances and contacts, control first, without writing
+  `comparison.yaml`; `--triad-pairs PATH` writes the CalB triad pairs the
+  distances command reads.
+
+- **`n_independent_frames` is now a real number, not a truncated integer.**
+  It is `N/g`, so a replicate with 9000 frames and `g = 260.4` reports
+  `34.6` rather than `34`.
+
+- **The `first_zero` and `exponential_fit` correlation-time methods were
+  withdrawn.**  Neither estimates the integrated correlation time; on an
+  AR(1) series with phi = 0.9 they were off by factors of five and two.
+  `estimate_correlation_time(..., method=...)` accepts only `"integration"`
+  and raises `ValueError` for the withdrawn names.  `get_independent_indices`
+  and the `CorrelationTimeMethod` enum were removed with them.
+
+- **Stale analysis artifacts are refused instead of silently averaged.**
+  Replicate artifacts from RMSD, Rg, SASA, distances and catalytic-triad now
+  carry `autocorrelation_estimator_version`, and RMSF artifacts carry
+  `rmsf_profile_version` `"2"`.  Aggregation raises `MDAAggregationError` when
+  a replicate is missing the key or records an older value, because the
+  settings fingerprint does not change when the estimator does.  The RMSF
+  profile version is also folded into the RMSF settings fingerprint, so RMSF
+  caches from before this change are invalidated.
+
+### Removed
+
+- **The analysis plugin framework.**  `polyzymd.analyses.base`,
+  `discovery`, `orchestrator`, `stats`, `polyzymd.analyses._framework`, the
+  `polyzymd.analyses.mda` package (jobs, collectors, artifacts, artifact
+  store, aggregation and comparison), `polyzymd.analyses.shared.selectors`,
+  `shared.paths` and `shared.multi_run_formatting` are removed, with
+  `protocols.build_report`, `run_protocol` and `get_analysis_class` and the
+  stored plugin comparison artifacts under `tests/data/comparison_artifacts/`.
+  So are the `shared` helpers only plugins called: from `shared.plotting`
+  `load_canonical_plot_artifacts`, `plugin_plot_settings`, `resolve_error_bar`,
+  `get_theme`, `get_condition_colors`, `annotate_cells`, `symmetric_clim`,
+  `annotate_uncertainty`, `suppress_singleton_errors`,
+  `scatter_stacked_segment_replicates` and `has_replicate_uncertainty`; from
+  `shared.statistics` `compute_sem`, `StatResult`, `PerResidueStats`,
+  `aggregate_per_residue_stats`, `aggregate_region_stats`,
+  `weighted_mean_with_sem`, `uncertainty_block` and `metric_summary_payload`;
+  the amino acid class tables and helpers of `shared.aa_classification`
+  (`get_max_asa` and its tables stay); `CustomGrouping`; and the exceptions
+  `PluginContractError`, `ReplicateSkippedError`, `ReplicateError`,
+  `AggregationError`, `ComparisonError`, `PlotError`, `DependencyError`,
+  `StaleCacheError` and `SelectionError`.
+  Every analysis is a function of an MDAnalysis `Universe` run with
+  `Study.timeseries` or `Study.per_replicate`
+  (https://polyzymd.readthedocs.io/en/latest/explanation/analysis_api.html).
+  `polyzymd analyze` refuses a name outside `FUNCTION_ANALYSES` with the list
+  of names, and `--stride` applies to every analysis.
+
+- **`polyzymd compare`.**  `init`, `validate`, `run`, `plot-all`, `run-all`,
+  `submit`, `submit-all`, `status`, `finalize` and the hidden worker
+  commands are removed.  A hidden `polyzymd compare` accepts any arguments,
+  exits 2 and prints `polyzymd analyze NAME -c config.yaml ... --eq 10ns`,
+  `polyzymd analyze ... --submit --preset <cluster>`,
+  https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html
+  and `.claude/skills/polyzymd-analyze/SKILL.md`.
+
+- **`polyzymd new-analysis` and its plugin scaffold.**  A hidden
+  `polyzymd new-analysis` accepts any arguments, exits 2 and points to the
+  study API page, `Study.per_replicate` and `Study.timeseries`, and the
+  agent skill.
+
+- **`comparison.yaml` and `polyzymd.config.comparison`.**  `ComparisonConfig`,
+  `ConditionConfig`, `PluginSettingsContainer`, `MDABackendPolicyConfig`,
+  `generate_comparison_template` and the comparison template are removed;
+  `polyzymd analyze -f comparison.yaml` still prints the equivalent `-c`
+  command.
+
+- **`polyzymd.workflow.analysis_slurm`**, the SLURM jobs of
+  `polyzymd compare submit`.  `polyzymd analyze --submit` replaces it.
+
+- **The `contacts` comparison plugin (`polyzymd.analyses.contacts`).**
+  `polyzymd analyze contacts -c A/config.yaml -c B/config.yaml` measures
+  polymer-protein contacts instead, through
+  `polyzymd.analyses.functions.residue_occlusion` (the default,
+  `--set method=occlusion`: a residue is in contact when the polymer occludes
+  its SASA), `residue_contacts` (`--set method=distance`: a polymer atom within
+  `cutoff` Å) and `contact_lifetimes` (`--run mean_lifetime`,
+  `lifetime_events` and `censored_fraction`, how long contacts last).
+  `--set method=distance --set cutoff=4.5 --set heavy_atoms=false` gives the
+  coverage and contact fractions the plugin computed.
+
+- **The `hydrogen_bonds` comparison plugin (`polyzymd.analyses.hydrogen_bonds`,
+  `HydrogenBondsAnalysis`).**  `polyzymd analyze hydrogen_bonds -c
+  A/config.yaml -c B/config.yaml` measures hydrogen bonds instead, through the
+  functions listed under Added.  Given the plugin's donor and acceptor atoms
+  and a 3.0 Å cutoff, it reproduces the plugin's 8.849 bonds per frame on a
+  real replicate.
+
+- **`polyzymd analyze catalytic_triad`.**  The catalytic triad is a routine on
+  the study API: count each triad hydrogen bond with `functions.hbond_count`
+  and combine them with `Timeseries.transform`, as
+  https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html
+  shows, and measure the triad distances with `polyzymd analyze distances
+  --set pairs=pairs.yaml`.  `polyzymd analyze catalytic_triad` and
+  `analyze("catalytic_triad", ...)` raise a `ProtocolError` pointing to both.
+
+- **`polyzymd analyze -f comparison.yaml`.**  Every analysis reads the
+  simulation configs given with `-c`, control first.  `-f` now exits 2 with a
+  message that says `comparison.yaml` is no longer read, prints the equivalent
+  `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq
+  ...` command built from the file, and points to
+  https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html
+  and to `.claude/skills/polyzymd-analyze/SKILL.md` for an agent.  It reads
+  only the file's `conditions` and `defaults.equilibration_time`.
 
 ## [1.3.0] - 2026-04-09 — Analysis Plugin System & OCP Compliance
 
