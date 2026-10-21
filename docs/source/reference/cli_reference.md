@@ -654,7 +654,7 @@ run3   393.4/1000ns   39%  DEAD         no job  last: FATAL: resubmit manually w
 run4     0.0/1000ns    0%  NOT_STARTED  no job  last: Validation error: 354 polymer atom(s) lie within 1.00 A of the solute [build_r4_28214393.out]
 
 # dead chains — resume from checkpoint with:
-polyzymd submit -c RML/noPoly_RML_water_333K/config.yaml -r 3 --preset blanca-shirts --exclude bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24,bgpu-curc1
+polyzymd submit -c RML/noPoly_RML_water_333K/config.yaml -r 3 --preset blanca-shirts --exclude <preset nodes>,bgpu-curc1
 ```
 
 Each system header ends with `done/total completed`, which answers "does every condition have enough finished replicates" without reading the rows. When a `DEAD` replicate's newest log holds no error line, as after a node failure or power loss, its `last:` field shows the SLURM end state from one `sacct` call, for example `slurm: NODE_FAIL exit 0:0`.
@@ -672,7 +672,7 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
 | `CORRUPT` | `progress.json` exists but cannot be read (empty, truncated or of the wrong shape). The `last:` field says why. `status` leaves the file as it is; fix or remove it by hand. |
 
-Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package and anything unrecognised. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list.
+Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package and anything unrecognised. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list (`<preset nodes>` in the example above stands for that list).
 
 Throughput (`ns/d`) of OpenMM runs comes from segment file timestamps: the parameters JSON written at segment start and the state-data CSV written on every report. A running segment that has run for at least an hour sets the rate, since it reflects the GPU the chain is on now; otherwise the newest stopped segment does. GROMACS runs, and OpenMM runs without those files, use the times in `progress.json`. The ETA is remaining nanoseconds divided by that rate and is only printed for `RUNNING` and `QUEUED` replicates.
 

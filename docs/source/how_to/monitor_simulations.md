@@ -33,7 +33,7 @@ run5   708.2/1000ns   71%  RUNNING      job 28248388 R 39:13 bgpu-shirts2  324ns
 run2   112.3/1000ns   11%  DEAD         no job  last: FATAL: resubmit manually with --exclude=bgpu-curc1 once a compatible node is available [CALB_..._run2.28228845.out]  action: resubmit
 
 # dead chains — resume from checkpoint with:
-polyzymd submit -c config.yaml -r 2 --preset blanca-shirts --exclude bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24,bgpu-curc1
+polyzymd submit -c config.yaml -r 2 --preset blanca-shirts --exclude <preset nodes>,bgpu-curc1
 ```
 
 Read the fourth column first. `RUNNING` and `QUEUED` mean a SLURM job with
@@ -81,7 +81,7 @@ something other than a plain resubmit:
 
 | `last:` line | Meaning | Action |
 |---|---|---|
-| `FATAL: resubmit manually with --exclude=...` (after `FATAL: CUDA routing failed after 3 retries`) | The chain landed on nodes whose driver is too old for the pinned CUDA environment. | Resubmit with the footer's command, which excludes the preset's nodes and the ones the job names. |
+| `FATAL: resubmit manually with --exclude=...` (after `FATAL: CUDA routing failed after 3 retries`) | The chain landed on nodes whose driver is too old for the pinned CUDA environment. | Resubmit with the footer's command, which excludes the preset's nodes (`<preset nodes>` above) and the ones the job names. |
 | `CONCURRENT: Another job is already running this replicate` | A duplicate chain exited to protect the running one. | Check whether the other chain is still alive before resubmitting. |
 | `Segment N failed: Particle coordinate is NaN` | The physics blew up. | Do not resubmit blindly; inspect the system. |
 | `Validation error: ... polymer atom(s) lie within ... of the solute` | The build refused the packed coordinates. | Rebuild the replicate. |
