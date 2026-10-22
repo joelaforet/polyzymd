@@ -155,3 +155,4 @@ output:
 force_field:
   protein: "ff14sb_off_impropers_0.0.4.offxml"
   small_molecule: "openff-2.0.0.offxml"
+  nagl_model: "openff-gnn-am1bcc-1.0.0.pt"   # NAGL charge model for charge_method: nagl

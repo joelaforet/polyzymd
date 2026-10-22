@@ -485,7 +485,7 @@ class TestBuildFromConfigSharesOneBox:
             calls["extra_padding_nm"] = extra_padding_nm
             return sentinel_box
 
-        def fake_solvate(self, topology, cfg, seed=None, box_vectors=None):
+        def fake_solvate(self, topology, cfg, seed=None, box_vectors=None, nagl_model=None):
             calls["solvate_box"] = box_vectors
             return None
 

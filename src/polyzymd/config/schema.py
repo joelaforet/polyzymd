@@ -1513,6 +1513,25 @@ class ForceFieldConfig(_ConfigModel):
 
     protein: str = Field("ff14sb_off_impropers_0.0.4.offxml", description="Protein force field")
     small_molecule: str = Field("openff-2.0.0.offxml", description="Small molecule force field")
+    # Same default as polyzymd.utils.charging.DEFAULT_NAGL_MODEL.
+    nagl_model: str = Field(
+        "openff-gnn-am1bcc-1.0.0.pt",
+        description=(
+            "NAGL model for every charge_method: nagl (substrate, co-solvents, dynamic "
+            "polymers); PolyzyMD 1.3 release candidates used openff-gnn-am1bcc-0.1.0-rc.3.pt"
+        ),
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Omit nagl_model unless the config names it, so older configs keep their build hash.
+
+        The build manifest records the model a build used, with its file hash, either way.
+        """
+        data = handler(self)
+        if "nagl_model" not in self.model_fields_set:
+            data.pop("nagl_model", None)
+        return data
 
 
 # =============================================================================
