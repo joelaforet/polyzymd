@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`solvent.ions.ionic_strength`.**  Sets the ionic strength of the whole box, counter-ions included, in place of `nacl_concentration`. Na+ and Cl- split the solute charge, (N - Q)/2 and (N + Q)/2 (Machado and Pantano, J. Chem. Theory Comput. 2020), so the box is neutral and a buffer can be matched by its ionic strength; `nacl_concentration` still adds neutralizing ions on top of the pairs. The build logs the ionic strength it reached and warns when counter-ions and charged co-solvents alone exceed the target. A config without the key keeps its build hash. Charged co-solvents such as surfactants, and counter-ions in their SMILES, count toward the ionic strength with their charge squared; NaCl fills the rest. It needs `neutralize: true`.
+
 - **`enzyme.custom_substructures_path`.**  A JSON file of residue templates for residues OpenFF's template matcher does not know, such as the N-terminal cystine of 4CHA. The path is relative to the config, checked for shape on load, passed to `Topology.from_pdb(_custom_substructures=...)`, and part of the config hash. The docs described this key before any code read it.
 
 - **Seeded dynamics.**  The replicate number now seeds the initial velocities and the thermostat noise, on both engines. Each equilibration stage and production segment gets its own seed from `polyzymd.simulation.seeds.dynamics_seed(replicate, phase)`, so no stage repeats another's noise. OpenMM sets `integrator.setRandomNumberSeed` and `setVelocitiesToTemperature(T, seed)`; GROMACS MDP files get `gen_seed` and `ld_seed`. A replicate run again gives the same trajectory only on the same platform, precision and software versions.

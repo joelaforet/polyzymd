@@ -749,6 +749,11 @@ class IonConfig(_ConfigModel):
     ``nacl_concentration`` is the NaCl salt concentration. When ``neutralize``
     is true, PolyzyMD adds the Na+ or Cl- ions that cancel the charge of the
     solute and co-solvents on top of the salt.
+
+    ``ionic_strength`` instead sets the ionic strength of the whole box,
+    counter-ions included: Na+ and Cl- split the solute charge between them
+    (Machado and Pantano, J. Chem. Theory Comput. 2020, 16, 1367), so a buffer
+    can be matched by its ionic strength.
     """
 
     neutralize: bool = Field(True, description="Neutralize system charge")
@@ -757,8 +762,40 @@ class IonConfig(_ConfigModel):
         ge=0.0,
         description="NaCl salt concentration (mol/L), before neutralizing ions",
     )
+    ionic_strength: float | None = Field(
+        None,
+        gt=0.0,
+        description=(
+            "Ionic strength (mol/L) of the box, counter-ions included; replaces "
+            "nacl_concentration"
+        ),
+    )
     kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L); not built")
     mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L); not built")
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Omit an unset ionic_strength, so configs without it keep their build hash."""
+        data = handler(self)
+        if self.ionic_strength is None:
+            data.pop("ionic_strength", None)
+        return data
+
+    @model_validator(mode="after")
+    def _one_salt_target(self) -> "IonConfig":
+        """Refuse an ionic strength beside a salt concentration or without neutralizing."""
+        if self.ionic_strength is None:
+            return self
+        if self.nacl_concentration:
+            raise ValueError(
+                "give either ionic_strength or nacl_concentration, not both: ionic_strength "
+                "already sets the Na+ and Cl- counts"
+            )
+        if not self.neutralize:
+            raise ValueError(
+                "ionic_strength sets the ions of a neutral box; remove neutralize: false"
+            )
+        return self
 
 
 class BoxConfig(_ConfigModel):

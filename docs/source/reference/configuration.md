@@ -280,6 +280,23 @@ solvent:
 `nacl_concentration` sets the number of NaCl pairs. With `neutralize: true`,
 the Na+ or Cl- ions that cancel the charge of the solute and co-solvents are
 added on top of the salt, as OpenMM `Modeller` and `gmx genion -neutral` do.
+
+`ionic_strength` (mol/L) replaces `nacl_concentration` when the target is the
+ionic strength of the whole box, for example to match a buffer. The counter-ions
+then count toward it: for a total of N monovalent ions and a solute charge Q,
+the build adds (N - Q)/2 Na+ and (N + Q)/2 Cl-, the split of Machado and
+Pantano (J. Chem. Theory Comput. 2020, 16, 1367). N comes from
+I = N / (2 V N_A), with V the solvent volume taken from the same
+water-equivalent count as the NaCl pairs, and is never below |Q|, so the box
+is always neutral. Charged co-solvents, such as a surfactant, count toward it
+with their charge z (I = 1/2 sum c z^2), as do counter-ions written in their
+SMILES; NaCl fills the rest and neutralizes the box. This is the formal ionic
+strength of the molecules added: a surfactant above its critical micelle
+concentration binds part of its counter-ions, which the formula does not
+model. It needs `neutralize: true`. Example: 50 mM sodium phosphate at pH 7.5 has an
+ionic strength of about 0.13 M, so `ionic_strength: 0.13` gives the box that
+buffer's ionic strength with NaCl.
+
 NaCl is the only salt the build adds: `validate`, `build`, `run` and `submit`
 refuse a non-zero `kcl_concentration` or `mgcl2_concentration`.
 

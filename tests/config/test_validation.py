@@ -232,3 +232,13 @@ def test_a_force_field_that_is_not_installed_is_refused(tmp_path: Path) -> None:
     config = _buildable(tmp_path, force_field={"protein": "ff14sb_typo.offxml"})
     with pytest.raises(ValueError, match="not an installed force field"):
         require_inputs(config)
+
+
+@pytest.mark.parametrize("smiles", ["CC(=O)[O-]", "CC(=O)[O-].[Na+]"])
+def test_a_charged_cosolvent_with_ionic_strength_is_accepted(tmp_path: Path, smiles) -> None:
+    """Charged co-solvents count toward ionic_strength, so validate accepts them."""
+    solvent = {
+        "co_solvents": [{"name": "x", "smiles": smiles, "concentration": 0.1}],
+        "ions": {"ionic_strength": 0.13},
+    }
+    require_inputs(_buildable(tmp_path, solvent=solvent))

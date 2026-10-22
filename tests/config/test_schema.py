@@ -1188,7 +1188,6 @@ def test_openmm_runs_refuse_the_anisotropic_barostat_whatever_the_engine_key(tmp
         config.require_engine_barostats("openmm")
 
 
-
 def test_box_shape_refuses_truncated_octahedron():
     """Only the box shapes the build can make are accepted."""
     from polyzymd.config.schema import BoxConfig
@@ -1444,3 +1443,33 @@ class TestDisabledPolymers:
         config = SimulationConfig(**disabled)
 
         assert config.polymers is not None and config.polymers.enabled is False
+
+
+class TestIonicStrengthConfig:
+    def test_ionic_strength_is_optional(self) -> None:
+        """Without ionic_strength the salt is set by nacl_concentration, as before."""
+        from polyzymd.config.schema import IonConfig
+
+        assert IonConfig().ionic_strength is None
+        assert IonConfig(ionic_strength=0.13).ionic_strength == 0.13
+
+    def test_ionic_strength_and_nacl_concentration_are_exclusive(self) -> None:
+        """One config cannot ask for both a salt concentration and an ionic strength."""
+        from polyzymd.config.schema import IonConfig
+
+        with pytest.raises(ValueError, match="ionic_strength"):
+            IonConfig(ionic_strength=0.13, nacl_concentration=0.15)
+
+    def test_ionic_strength_requires_neutralize(self) -> None:
+        """Ionic strength sets the ions of a neutral box, so neutralize: false is refused."""
+        from polyzymd.config.schema import IonConfig
+
+        with pytest.raises(ValueError, match="neutralize"):
+            IonConfig(ionic_strength=0.13, neutralize=False)
+
+    def test_a_config_without_it_keeps_its_build_hash(self) -> None:
+        """An unset ionic_strength is left out of the dump, so pre-built bundles stay valid."""
+        from polyzymd.config.schema import IonConfig
+
+        assert "ionic_strength" not in IonConfig().model_dump(mode="json")
+        assert IonConfig(ionic_strength=0.13).model_dump(mode="json")["ionic_strength"] == 0.13
