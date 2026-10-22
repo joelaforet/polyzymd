@@ -25,17 +25,19 @@ Original source: https://github.com/timbernat/polymerist
 Copyright (c) 2024 Timotej Bernat
 """
 
+import hashlib
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional, Type
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional, Type
 
 if TYPE_CHECKING:
     from openff.toolkit import Molecule
 
 
-# Default NAGL model - using rc.3 to match Polymerist
-# TODO: Update to production model "openff-gnn-am1bcc-1.0.0.pt" when ready
-#       (requires openff-nagl-models >= v2025.09.0)
-DEFAULT_NAGL_MODEL = "openff-gnn-am1bcc-0.1.0-rc.3.pt"
+# Default NAGL model: the first production release of the AM1-BCC model
+# (openff-nagl-models 2025.09.0), the model OpenFF Sage 2.3.0 itself names.
+# A config chooses another with force_field.nagl_model.
+DEFAULT_NAGL_MODEL = "openff-gnn-am1bcc-1.0.0.pt"
 
 # Default Espaloma charge method - this is currently the only method supported
 # by EspalomaChargeToolkitWrapper, but we keep it configurable for future flexibility
@@ -114,8 +116,9 @@ class NAGLCharger(MoleculeCharger):
         Args:
             model_name: Name of the NAGL model. Should be a model name
                 registered in the openff-nagl-models package, such as:
-                - "openff-gnn-am1bcc-0.1.0-rc.3.pt" (default, pre-production)
-                - "openff-gnn-am1bcc-1.0.0.pt" (production, requires newer package)
+                - "openff-gnn-am1bcc-1.0.0.pt" (default, production release)
+                - "openff-gnn-am1bcc-0.1.0-rc.3.pt" (pre-production, PolyzyMD 1.3
+                  release candidates and earlier)
         """
         self.model_name = model_name
 
@@ -155,6 +158,8 @@ class NAGLCharger(MoleculeCharger):
         except Exception as e:
             raise RuntimeError(f"NAGL charge assignment failed: {e}") from e
 
+        # Written into SDFs saved from this molecule.
+        molecule.properties["nagl_model"] = self.model_name
         return molecule
 
 
@@ -346,3 +351,35 @@ def get_charger(method: str, **kwargs) -> MoleculeCharger:
 
     charger_class = _CHARGER_REGISTRY[method_lower]
     return charger_class(**kwargs)
+
+
+def installed_nagl_model(model_name: str) -> Optional[Path]:
+    """Return the file of an installed NAGL model, or None if it is not installed.
+
+    Only installed models count: openff-nagl would otherwise try to download an
+    unknown name, which fails on a compute node without network access.
+    ``model_name`` may also be the path of a model file.
+    """
+    if Path(model_name).is_file():
+        return Path(model_name)
+    try:
+        from openff.nagl_models import list_available_nagl_models
+    except ImportError:
+        return None
+    return next((path for path in list_available_nagl_models() if path.name == model_name), None)
+
+
+def nagl_model_provenance(model_name: str) -> dict[str, Any]:
+    """Return the record of the NAGL model a build charges with: name, file SHA-256, package version."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    path = installed_nagl_model(model_name)
+    try:
+        package = version("openff-nagl-models")
+    except PackageNotFoundError:
+        package = None
+    return {
+        "nagl_model": model_name,
+        "nagl_model_sha256": hashlib.sha256(path.read_bytes()).hexdigest() if path else None,
+        "openff_nagl_models": package,
+    }

@@ -119,7 +119,7 @@ openff-forcefields    = ">=2024.0"
 smirnoff99frosst      = ">=1.1"
 openff-amber-ff-ports = ">=2024.0"
 openff-nagl           = ">=0.4"
-openff-nagl-models    = ">=2024.0"
+openff-nagl-models    = ">=2025.9.0"  # first release with openff-gnn-am1bcc-1.0.0.pt
 mbuild                = ">=1.2"
 openbabel             = ">=3.1"
 rdkit                 = ">=2023.09"

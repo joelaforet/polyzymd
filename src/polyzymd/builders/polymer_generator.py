@@ -260,6 +260,7 @@ class PolymerGenerator:
         max_retries: int = 10,
         charger_type: str = "nagl",
         type_prefix: str | None = None,
+        nagl_model: str | None = None,
     ):
         """Initialize the polymer generator.
 
@@ -277,12 +278,21 @@ class PolymerGenerator:
             Filename prefix of every chain, the config's ``type_prefix``, so
             cached mode finds the files. Without it the prefix is the names of
             the monomers in the sequence.
+        nagl_model : str | None, optional
+            NAGL model for ``charger_type`` nagl; the default model when None.
+            It is part of the cache metadata, so chains charged with another
+            model are generated again.
         """
         self.monomer_group = monomer_group
         self.type_prefix = type_prefix
         self.cache_directory = Path(cache_directory)
         self.max_retries = max_retries
         self.charger_type = charger_type.lower()
+        if nagl_model is None and self.charger_type == "nagl":
+            from polyzymd.utils.charging import DEFAULT_NAGL_MODEL
+
+            nagl_model = DEFAULT_NAGL_MODEL
+        self.nagl_model = nagl_model if self.charger_type == "nagl" else None
 
         # Ensure cache directory exists
         self.cache_directory.mkdir(parents=True, exist_ok=True)
@@ -317,11 +327,10 @@ class PolymerGenerator:
             If ``charger_type`` is unknown.
         """
         if self.charger_type == "nagl":
-            from polymerist.mdtools.openfftools.partialcharge.molchargers import (
-                NAGLCharger,
-            )
+            # PolyzyMD's charger, because Polymerist's fixes the model.
+            from polyzymd.utils.charging import NAGLCharger
 
-            return NAGLCharger()
+            return NAGLCharger(model_name=self.nagl_model)
         elif self.charger_type == "espaloma":
             from polymerist.mdtools.openfftools.partialcharge.molchargers import (
                 EspalomaCharger,
@@ -458,6 +467,7 @@ class PolymerGenerator:
         return {
             "schema_version": DYNAMIC_CACHE_SCHEMA_VERSION,
             "charger_type": self.charger_type,
+            "nagl_model": self.nagl_model,
             "sequence": sequence,
             "middle_sequence": middle_sequence,
             "monomer_names_used": monomer_names_used,

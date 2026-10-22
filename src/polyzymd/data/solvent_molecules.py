@@ -83,6 +83,7 @@ def get_solvent_molecule(
     residue_name: Optional[str] = None,
     cache: bool = True,
     charge_method: str = "nagl",
+    nagl_model: Optional[str] = None,
 ) -> Molecule:
     """Get a solvent molecule with pre-computed partial charges.
 
@@ -106,6 +107,8 @@ def get_solvent_molecule(
         charge_method: How a molecule generated from SMILES is charged:
             ``nagl`` (default), ``am1bcc`` or ``espaloma``. Library and water
             molecules keep their shipped charges.
+        nagl_model: NAGL model for ``charge_method`` nagl; the default model
+            when None. It is part of the cache key.
 
     Returns:
         OpenFF Molecule with partial charges assigned.
@@ -163,10 +166,16 @@ def get_solvent_molecule(
                 f"Please provide a SMILES string to generate the molecule."
             )
 
-    # A generated molecule depends on its SMILES and charge method, so both
-    # are part of every cache key.
+    # A generated molecule depends on its SMILES, charge method and NAGL
+    # model, so all of them are part of every cache key.
     method = str(charge_method).lower().strip()
-    digest = hashlib.sha256(f"{Chem.CanonSmiles(smiles)} {method}".encode()).hexdigest()[:12]
+    method_key = method
+    if method == "nagl":
+        from polyzymd.utils.charging import DEFAULT_NAGL_MODEL
+
+        nagl_model = nagl_model or DEFAULT_NAGL_MODEL
+        method_key = f"nagl:{nagl_model}"
+    digest = hashlib.sha256(f"{Chem.CanonSmiles(smiles)} {method_key}".encode()).hexdigest()[:12]
     cache_key = f"{name_key}.{method}.{digest}"
     if cache_key in _loaded_molecules:
         LOGGER.debug(f"Returning {cache_key} from in-memory cache")
@@ -182,8 +191,8 @@ def get_solvent_molecule(
         return mol
 
     # Generate molecule with charges
-    LOGGER.info(f"Generating {name_key} from SMILES and assigning {method} charges...")
-    mol = _generate_charged_molecule(smiles, residue_name, method)
+    LOGGER.info(f"Generating {name_key} from SMILES and assigning {method_key} charges...")
+    mol = _generate_charged_molecule(smiles, residue_name, method, nagl_model)
 
     # Cache to disk if requested
     if cache:
@@ -223,7 +232,9 @@ def _create_tip3p_water() -> Molecule:
     return water
 
 
-def _generate_charged_molecule(smiles: str, residue_name: str, method: str = "nagl") -> Molecule:
+def _generate_charged_molecule(
+    smiles: str, residue_name: str, method: str = "nagl", nagl_model: Optional[str] = None
+) -> Molecule:
     """Generate a molecule from SMILES and assign partial charges with ``method``.
 
     This is used for custom solvents not in the library. The charges are
@@ -235,6 +246,7 @@ def _generate_charged_molecule(smiles: str, residue_name: str, method: str = "na
         smiles: SMILES string for the molecule.
         residue_name: 3-letter residue name.
         method: Charge assignment method.
+        nagl_model: NAGL model for method nagl; the default when None.
 
     Returns:
         OpenFF Molecule with partial charges.
@@ -246,7 +258,8 @@ def _generate_charged_molecule(smiles: str, residue_name: str, method: str = "na
     mol = Molecule.from_smiles(smiles)
     # A conformer places the molecule; AM1-BCC also needs one to compute charges.
     mol.generate_conformers(n_conformers=1)
-    mol = get_charger(method).charge_molecule(mol)
+    kwargs = {"model_name": nagl_model} if method == "nagl" and nagl_model else {}
+    mol = get_charger(method, **kwargs).charge_molecule(mol)
 
     # Set residue metadata
     for atom in mol.atoms:

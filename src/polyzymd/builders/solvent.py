@@ -163,6 +163,7 @@ class SolventComposition:
     nacl_concentration: float = 0.0  # NaCl salt concentration, mol/L
     neutralize: bool = True
     ionic_strength: Optional[float] = None  # mol/L, counter-ions included
+    nagl_model: Optional[str] = None  # NAGL model for co-solvents charged with nagl
 
     def __post_init__(self) -> None:
         """Validate co-solvent mole fractions."""
@@ -424,6 +425,7 @@ class SolventBuilder:
                     smiles=smiles,
                     residue_name=cosolvent.residue_name,
                     charge_method=cosolvent.charge_method,
+                    nagl_model=composition.nagl_model,
                 )
                 if not cosolvent.charge_method_given and not is_bundled_solvent(cosolvent.name):
                     LOGGER.warning(
@@ -628,6 +630,7 @@ class SolventBuilder:
         config: "SolventConfig",
         seed: Optional[int] = None,
         box_vectors: Optional["Quantity"] = None,
+        nagl_model: Optional[str] = None,
     ) -> Topology:
         """Solvate using configuration object.
 
@@ -663,6 +666,7 @@ class SolventBuilder:
             nacl_concentration=config.ions.nacl_concentration,
             neutralize=config.ions.neutralize,
             ionic_strength=config.ions.ionic_strength,
+            nagl_model=nagl_model,
         )
 
         return self.solvate(

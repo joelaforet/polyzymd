@@ -74,6 +74,7 @@ class SubstrateBuilder:
         conformer_index: int = 0,
         charge_method: ChargeMethodType = "nagl",
         residue_name: str = "LIG",
+        nagl_model: Optional[str] = None,
     ) -> Molecule:
         """Load a substrate conformer and assign partial charges.
 
@@ -82,6 +83,7 @@ class SubstrateBuilder:
             conformer_index: Index of the conformer to use (0-indexed).
             charge_method: Method for assigning partial charges.
             residue_name: 3-letter residue name for the substrate.
+            nagl_model: NAGL model for charge_method nagl; the default when None.
 
         Returns:
             OpenFF Molecule with assigned partial charges.
@@ -125,7 +127,7 @@ class SubstrateBuilder:
         LOGGER.info(f"Selected conformer {conformer_index}")
 
         # Assign partial charges
-        charged_mol = self._assign_charges(selected_mol, charge_method)
+        charged_mol = self._assign_charges(selected_mol, charge_method, nagl_model)
 
         # Set residue metadata
         self._set_residue_metadata(charged_mol, residue_name)
@@ -139,11 +141,14 @@ class SubstrateBuilder:
 
         return charged_mol
 
-    def build_from_config(self, config: "SubstrateConfig") -> Molecule:
+    def build_from_config(
+        self, config: "SubstrateConfig", nagl_model: Optional[str] = None
+    ) -> Molecule:
         """Load substrate from a configuration object.
 
         Args:
             config: SubstrateConfig with SDF path and options.
+            nagl_model: NAGL model for charge_method nagl; the default when None.
 
         Returns:
             OpenFF Molecule with assigned partial charges.
@@ -154,9 +159,15 @@ class SubstrateBuilder:
             conformer_index=config.conformer_index,
             charge_method=config.charge_method.value,
             residue_name=config.residue_name,
+            nagl_model=nagl_model,
         )
 
-    def _assign_charges(self, molecule: Molecule, charge_method: ChargeMethodType) -> Molecule:
+    def _assign_charges(
+        self,
+        molecule: Molecule,
+        charge_method: ChargeMethodType,
+        nagl_model: Optional[str] = None,
+    ) -> Molecule:
         """Assign partial charges to the molecule.
 
         Args:
@@ -174,7 +185,8 @@ class SubstrateBuilder:
         from polyzymd.utils import get_charger
 
         try:
-            charger = get_charger(charge_method)
+            kwargs = {"model_name": nagl_model} if charge_method == "nagl" and nagl_model else {}
+            charger = get_charger(charge_method, **kwargs)
             return charger.charge_molecule(molecule)
         except ValueError as e:
             raise ValueError(
