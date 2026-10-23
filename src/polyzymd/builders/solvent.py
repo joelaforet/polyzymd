@@ -427,7 +427,8 @@ class SolventBuilder:
                 if cosolvent.charge_method is None and not is_bundled_solvent(cosolvent.name):
                     LOGGER.warning(
                         f"Co-solvent {cosolvent.name}: partial charges are from NAGL (the "
-                        "default). Check that they suit this molecule, or pass charge_method."
+                        "default). Check that they suit this molecule, or pass charge_method "
+                        "(in a config: charges)."
                     )
             counter_ions.append((na_per_copy, cl_per_copy))
 

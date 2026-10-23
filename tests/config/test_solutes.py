@@ -206,3 +206,41 @@ def test_a_solute_name_is_a_single_folder_name(data, name) -> None:
     data["solutes"][0]["name"] = name
     with pytest.raises(ValidationError, match="non-empty, without '/'"):
         load(data)
+
+
+@pytest.mark.parametrize("name", ["solvent", "ions", "SOL", "my enzyme"])
+def test_a_solute_cannot_take_a_built_in_name_or_hold_spaces(data, name) -> None:
+    """Built-in components and GROMACS index groups need names no solute shares."""
+    data["solutes"][0]["name"] = name
+    with pytest.raises(ValidationError, match="taken by a component|spaces"):
+        load(data)
+
+
+def test_the_old_co_solvent_key_says_bundled_molecules_kept_their_charges(data) -> None:
+    """Rewriting charge_method: nagl as charges nagl on dmso would change its charges."""
+    data["solvent"]["co_solvents"] = [{"name": "dmso", "count": 1, "charge_method": "nagl"}]
+    with pytest.raises(ValidationError, match="shipped charges .* delete the key"):
+        load(data)
+
+
+def test_a_new_charge_method_on_a_bundled_co_solvent_is_a_new_analysis_identity(data) -> None:
+    """Shipped charges keep the identity runs built before rc5 had; NAGL on dmso does not."""
+    from polyzymd.analyses.identity import compute_config_hash
+
+    data["solvent"]["co_solvents"] = [{"name": "dmso", "count": 10}]
+    shipped = compute_config_hash(load(data))
+    data["solvent"]["co_solvents"][0]["charges"] = {"method": "preset"}
+    assert compute_config_hash(load(data)) == shipped
+    data["solvent"]["co_solvents"][0]["charges"] = {"method": "nagl"}
+    assert compute_config_hash(load(data)) != shipped
+
+
+def test_preset_charges_need_the_shipped_molecule() -> None:
+    """dmso with another SMILES has no shipped charges; validate says so before a build."""
+    pytest.importorskip("rdkit")
+    from polyzymd.config.schema import CoSolventSpec
+    from polyzymd.config.validation import _require_shipped_molecule
+
+    _require_shipped_molecule(CoSolventSpec(name="dmso", count=1))
+    with pytest.raises(ValueError, match="not the dmso PolyzyMD ships"):
+        _require_shipped_molecule(CoSolventSpec(name="dmso", smiles="CCO", count=1))

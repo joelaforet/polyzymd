@@ -167,6 +167,7 @@ def require_inputs(config: Any) -> None:
 
     for cosolvent in config.solvent.co_solvents:
         if cosolvent.charges.method == "preset" and is_bundled_solvent(cosolvent.name):
+            _require_shipped_molecule(cosolvent)
             continue
         what = f"co-solvent {cosolvent.name!r}"
         smiles, _, _ = split_counter_ions(cosolvent.smiles, cosolvent.name)
@@ -219,15 +220,16 @@ def require_inputs(config: Any) -> None:
     from openff.toolkit.typing.engines.smirnoff.forcefield import get_available_force_fields
 
     available = set(get_available_force_fields())
-    for key in ("protein", "small_molecule"):
-        name = getattr(config.force_field, key)
-        if name not in available and not Path(name).is_file():
-            raise ValueError(
-                f"force_field.{key} {name!r} is not an installed force field.\n"
-                "fix: correct the name (the default is "
-                f"{type(config.force_field).model_fields[key].default}), or give the path of an "
-                ".offxml file."
-            )
+    named = [(f"solute {s.name!r}", s.force_field) for s in config.solutes]
+    named.append(("solvent", config.solvent.force_field))
+    for what, files in named:
+        for name in files:
+            if name not in available and not Path(name).is_file():
+                raise ValueError(
+                    f"{what}: force_field {name!r} is not an installed force field.\n"
+                    "fix: correct the name (for example ff14sb_off_impropers_0.0.4.offxml or "
+                    "openff-2.3.0.offxml), or give the path of an .offxml file."
+                )
 
     from polyzymd.utils.charging import installed_nagl_model
 
@@ -240,6 +242,27 @@ def require_inputs(config: Any) -> None:
             f"charges model {nagl_model!r} is not an installed NAGL model.\n"
             f"fix: in each charges: {{method: nagl, model: ...}}, name one of {installed}, "
             "or give the path of a model file."
+        )
+
+
+def _require_shipped_molecule(cosolvent: Any) -> None:
+    """Raise ``ValueError`` when a preset co-solvent's SMILES is not the molecule PolyzyMD ships."""
+    from rdkit import Chem
+
+    from polyzymd.data.solvent_molecules import _SOLVENTS_DIR, split_counter_ions
+
+    library = _SOLVENTS_DIR / f"{cosolvent.name.lower().strip()}.sdf"
+    shipped = next(iter(Chem.SDMolSupplier(str(library), removeHs=False)), None)
+    smiles, _, _ = split_counter_ions(cosolvent.smiles, cosolvent.name)
+    given = Chem.MolFromSmiles(smiles)
+    if shipped is None or given is None:
+        return
+    if Chem.MolToSmiles(Chem.RemoveHs(shipped)) != Chem.MolToSmiles(given):
+        raise ValueError(
+            f"co-solvent {cosolvent.name!r}: its SMILES {cosolvent.smiles!r} is not the "
+            f"{cosolvent.name} PolyzyMD ships charges for, so charges preset cannot apply.\n"
+            "fix: remove smiles to use the shipped molecule, or set charges: {method: nagl} "
+            "(or am1bcc, espaloma)."
         )
 
 

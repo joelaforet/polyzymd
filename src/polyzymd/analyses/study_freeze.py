@@ -1160,8 +1160,8 @@ def condition_restraints(protocol: Any) -> dict[str, list[dict[str, Any]]]:
             {
                 "name": r.name,
                 "type": r.type.value,
-                "atom1": r.atom1.selection,
-                "atom2": r.atom2.selection,
+                "atom1": f"{r.atom1.component}: {r.atom1.selection}",
+                "atom2": f"{r.atom2.component}: {r.atom2.selection}",
                 "distance_A": r.distance,
                 "force_constant_kJ_mol_nm2": r.force_constant,
             }
@@ -1234,7 +1234,11 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         ),
         "3a_system_type": item(meta["system_type"] or "TODO: list (e.g. protein, polymer)"),
         "3b_model_accuracy": item(
-            "TODO: justify the force field and water model", first.get("force_field")
+            "TODO: justify the force field and water model",
+            {
+                **{s.get("name"): s.get("force_field") for s in first.get("solutes") or []},
+                "solvent": (first.get("solvent") or {}).get("force_field"),
+            },
         ),
         "3c_enhanced_sampling": _sampling(restraints),
         "4a_system_setup_table": item(SUMMARY),
