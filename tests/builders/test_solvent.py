@@ -6,7 +6,7 @@ from polyzymd.builders.solvent import AVOGADRO_CONSTANT, SolventBuilder
 from polyzymd.config.schema import CoSolventSpec, SolventConfig, WaterConfig
 
 #: The small-molecule force field SolventConfig now requires.
-SAGE = ["openff-2.0.0.offxml"]
+SAGE = ["openff-2.3.0.offxml"]
 
 #: The water model SolventConfig now requires.
 TIP3P = WaterConfig(model="tip3p")
