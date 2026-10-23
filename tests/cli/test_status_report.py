@@ -814,3 +814,29 @@ def test_live_rate_ignores_a_finished_last_segment():
     windows = {0: (NOW - timedelta(hours=36), NOW - timedelta(hours=12))}  # 172.8 ns over 24 h
     rate = estimate_rate_ns_per_day(_progress([seg]), NOW, live=True, window_fn=windows.get)
     assert rate is not None and abs(rate - 172.8) < 1.0
+
+
+def test_a_replicate_run_with_its_own_protocol_is_never_called_dead(tmp_path: Path):
+    """A user's own run has no PolyzyMD progress; status must not tell anyone to resubmit it."""
+    from polyzymd.cli.status_report import build_system_report
+
+    scratch = tmp_path / "scratch"
+    own = scratch / "SYS_run1"
+    (own / "production_0").mkdir(parents=True)
+    (own / "production_0" / "production_0_trajectory.dcd").write_bytes(b"")
+    (own / "protocol").mkdir()
+    (own / "protocol" / "run_metad.py").write_text("# the user's script\n")
+
+    cfg = _mock_cfg(scratch, tmp_path / "slurm_logs")
+    cfg.discover_replicate_dirs.return_value = [(1, own)]
+    engine = MagicMock()
+    engine.resolve_engine_working_directory.side_effect = lambda p: p
+
+    report = build_system_report(
+        cfg, "c.yaml", engine_inst=engine, jobs=[], now=NOW, job_name_fn=lambda c, r: f"SYS_run{r}"
+    )
+    assert [rep.verdict for rep in report.replicates] == ["own_protocol"]
+    engine.load_or_scan_progress.assert_not_called()
+    text = render_agent([report], now=NOW, preset_hint="p")
+    assert "OWN_PROTOCOL" in text and "does not run or resubmit it" in text
+    assert "polyzymd submit" not in text

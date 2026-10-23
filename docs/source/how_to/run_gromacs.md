@@ -58,7 +58,8 @@ pixi run -e build polyzymd build -c config.yaml --format gromacs
 The handoff is the `.gro` coordinate file, the `.top` topology file and the
 component `.itp` parameter files. PolyzyMD also writes MDP files and a run
 script from `config.yaml`. You do not need them. Use them as a starting point,
-or replace them with your own GROMACS workflow.
+or replace them with your own GROMACS workflow. To analyze a run made with
+your own `.mdp` files in the study, see {doc}`own_protocol`.
 
 ---
 
@@ -519,4 +520,5 @@ polyzymd submit -c config.yaml --engine gromacs --memory 64G ...
 - {doc}`../explanation/gromacs_parallelism` — Thread-MPI, real MPI and OpenMP threads
 - {doc}`hpc_slurm` — General SLURM submission workflow (OpenMM and GROMACS)
 - {doc}`site_cu_boulder` — CU Boulder Alpine and Blanca recipes
+- {doc}`own_protocol` — Run the build with your own protocol and analyze it in the study
 - {doc}`../get_started/quickstart` — Getting started guide
