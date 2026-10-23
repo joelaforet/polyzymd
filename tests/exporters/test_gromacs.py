@@ -1492,7 +1492,7 @@ def test_gromacs_export_refuses_distance_restraints_it_would_drop(tmp_path):
                 "charges": {"method": "library"},
             }
         ],
-        solvent={"force_field": ["openff-2.0.0.offxml"], "water": {"model": "tip3p"}},
+        solvent={"force_field": ["openff-2.3.0.offxml"], "water": {"model": "tip3p"}},
         thermodynamics={"temperature": 300.0},
         simulation_phases={
             "equilibration_stages": [
