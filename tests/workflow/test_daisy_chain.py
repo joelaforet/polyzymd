@@ -16,20 +16,23 @@ def _simulation_config_data(tmp_path: Path) -> dict:
                 "name": "LipA",
                 "pdb_path": "enzyme.pdb",
                 "force_field": ["ff14sb_off_impropers_0.0.4.offxml"],
+                "charges": {"method": "library"},
             },
             {
                 "type": "small_molecule",
                 "name": "Sub-A",
                 "sdf_path": "substrate.sdf",
                 "force_field": ["openff-2.0.0.offxml"],
-                "charges": {"method": "nagl"},
+                "charges": {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"},
             },
         ],
         "thermodynamics": {"temperature": 310.0},
         "solvent": {
             "force_field": ["openff-2.0.0.offxml"],
             "water": {"model": "tip3p"},
-            "co_solvents": [{"name": "dmso", "mole_fraction": 0.3}],
+            "co_solvents": [
+                {"name": "dmso", "mole_fraction": 0.3, "charges": {"method": "preset"}}
+            ],
         },
         "simulation_phases": {
             "equilibration_stages": [

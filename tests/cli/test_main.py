@@ -83,14 +83,22 @@ def _config_with_pdb(tmp_path: Path) -> dict[str, object]:
 
 _SMALL_MOLECULE_FF = ["openff-2.3.0.offxml"]
 
+#: NAGL charges with the model the config must name.
+_NAGL = {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"}
+
 
 def _solvent(**extra: object) -> dict[str, object]:
-    """Solvent section with the small-molecule force field and any ``extra`` keys."""
-    return {"force_field": list(_SMALL_MOLECULE_FF), **extra}
+    """Solvent section with the small-molecule force field, TIP3P water and any ``extra`` keys."""
+    return {"force_field": list(_SMALL_MOLECULE_FF), "water": {"model": "tip3p"}, **extra}
 
 
 def _solute(type_: str, **keys: object) -> dict[str, object]:
-    """A ``solutes`` entry of ``type_``; non-protein entries use the solvent force field."""
+    """A ``solutes`` entry of ``type_``; non-protein entries use the solvent force field.
+
+    A protein takes its library (ff14SB) charges unless ``keys`` name others.
+    """
+    if type_ == "protein":
+        keys = {"charges": {"method": "library"}, **keys}
     ff = ["ff14sb_off_impropers_0.0.4.offxml"] if type_ == "protein" else _SMALL_MOLECULE_FF
     return {"type": type_, **keys, "force_field": list(ff)}
 
@@ -379,7 +387,7 @@ class TestValidateCommandReferenceWarnings:
         data = _config_with_pdb(tmp_path)
         data["solvent"] = _solvent(
             water={"model": "tip3p"},
-            co_solvents=[{"name": "dmso", "mole_fraction": 0.1}],
+            co_solvents=[{"name": "dmso", "mole_fraction": 0.1, "charges": {"method": "preset"}}],
         )
         config_path = tmp_path / "config.yaml"
         config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
@@ -408,7 +416,7 @@ def _add_distance_restraint(data: dict) -> None:
             name="LIG",
             sdf_path="missing.sdf",
             residue_name="LIG",
-            charges={"method": "nagl"},
+            charges=_NAGL,
         )
     )
     data["restraints"] = [_DISTANCE_RESTRAINT]
@@ -2247,7 +2255,7 @@ def test_build_follows_the_config_engine(tmp_path: Path) -> None:
                 "name": "sds",
                 "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]",
                 "count": 8,
-                "charges": {"method": "nagl"},
+                "charges": _NAGL,
             }
         ]
     )
@@ -2409,9 +2417,7 @@ def test_dry_run_box_report_says_a_substrate_is_left_out(tmp_path: Path) -> None
         Chem.MolToMolBlock(Chem.MolFromSmiles("CCO")) + "$$$$\n"
     )
     data = yaml.safe_load(path.read_text())
-    data["solutes"].append(
-        _solute("small_molecule", name="lig", sdf_path="lig.sdf", charges={"method": "nagl"})
-    )
+    data["solutes"].append(_solute("small_molecule", name="lig", sdf_path="lig.sdf", charges=_NAGL))
     path.write_text(yaml.safe_dump(data))
 
     result = CliRunner().invoke(cli, ["build", "-c", str(path), "--dry-run"])

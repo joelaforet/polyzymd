@@ -3,10 +3,16 @@
 import pytest
 
 from polyzymd.builders.solvent import AVOGADRO_CONSTANT, SolventBuilder
-from polyzymd.config.schema import CoSolventSpec, SolventConfig
+from polyzymd.config.schema import CoSolventSpec, SolventConfig, WaterConfig
 
 #: The small-molecule force field SolventConfig now requires.
 SAGE = ["openff-2.0.0.offxml"]
+
+#: The water model SolventConfig now requires.
+TIP3P = WaterConfig(model="tip3p")
+
+#: The charges of a bundled co-solvent: the ones PolyzyMD ships with it.
+PRESET = {"method": "preset"}
 
 
 def test_concentration_count_uses_liters_and_avogadro() -> None:
@@ -60,9 +66,10 @@ def test_config_translation_uses_mole_fraction(monkeypatch) -> None:
 
     config = SolventConfig(
         force_field=SAGE,
+        water=TIP3P,
         co_solvents=[
-            CoSolventSpec(name="dmso", mole_fraction=0.10),
-            CoSolventSpec(name="urea", concentration=2.0),
+            CoSolventSpec(name="dmso", mole_fraction=0.10, charges=PRESET),
+            CoSolventSpec(name="urea", concentration=2.0, charges=PRESET),
         ],
     )
     topology = object()
@@ -131,7 +138,9 @@ def test_config_translation_forwards_packmol_seed(monkeypatch) -> None:
         return topology
 
     monkeypatch.setattr(SolventBuilder, "solvate", fake_solvate)
-    SolventBuilder().solvate_from_config(object(), SolventConfig(force_field=SAGE), seed=4)
+    SolventBuilder().solvate_from_config(
+        object(), SolventConfig(force_field=SAGE, water=TIP3P), seed=4
+    )
     assert captured["kwargs"]["seed"] == 4
 
 
@@ -144,7 +153,7 @@ def test_solvate_default_seed_is_none(monkeypatch) -> None:
         return topology
 
     monkeypatch.setattr(SolventBuilder, "solvate", fake_solvate)
-    SolventBuilder().solvate_from_config(object(), SolventConfig(force_field=SAGE))
+    SolventBuilder().solvate_from_config(object(), SolventConfig(force_field=SAGE, water=TIP3P))
     assert captured["kwargs"]["seed"] is None
 
 
@@ -252,7 +261,7 @@ def test_default_box_fits_an_elongated_solute_in_the_brick() -> None:
     import numpy as np
 
     solute = _elongated_solute()
-    config = SolventConfig(force_field=SAGE)
+    config = SolventConfig(force_field=SAGE, water=TIP3P)
     box = SolventBuilder().compute_box_vectors_from_config(_FakeTopology(solute), config)
 
     coords = solute.conformers[0].m_as("angstrom") / 10.0
@@ -285,7 +294,7 @@ def test_compute_box_vectors_from_config_uses_config_padding() -> None:
     import numpy as np
 
     topology = _FakeTopology(_solute_molecule())
-    config = SolventConfig(force_field=SAGE)
+    config = SolventConfig(force_field=SAGE, water=TIP3P)
     computed = SolventBuilder().compute_box_vectors_from_config(
         topology, config, extra_padding_nm=2.0
     )

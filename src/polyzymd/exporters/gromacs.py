@@ -1027,8 +1027,10 @@ class PositionRestraintGenerator:
         for group_name, force_constant in restraints_needed.items():
             component_type, posres_define = self.GROUP_MAPPING.get(group_name, (None, None))
             if component_type is None or posres_define is None:
-                logger.warning(f"Cannot determine component for group '{group_name}' - skipping")
-                continue
+                raise ValueError(
+                    f"Position restraint group '{group_name}' names no component GROMACS can "
+                    f"restrain (it restrains {', '.join(self.GROUP_MAPPING)})."
+                )
 
             count = self._add_posres_to_component_itps(
                 output_dir,
@@ -1080,25 +1082,28 @@ class PositionRestraintGenerator:
         """
         itp_paths = self._find_component_itps(output_dir, prefix, component_type)
         if not itp_paths:
-            logger.warning(
-                f"Cannot find valid ITP files for {component_type} - skipping position restraints"
+            # A restraint the config asks for must not silently vanish from the run.
+            raise RuntimeError(
+                f"The equilibration stages restrain '{group_name}', but no {component_type} "
+                f"molecule type was found in the exported topology {prefix}.top, so GROMACS "
+                "would run those stages unrestrained."
             )
-            return 0
 
         count = 0
         for itp_path in itp_paths:
             local_indices = self._get_local_atom_indices_from_itp(itp_path, group_name)
             if not local_indices:
-                logger.warning(f"No local indices for group '{group_name}' in {itp_path.name}")
-                continue
+                raise RuntimeError(
+                    f"Position restraint group '{group_name}' selects no atom of "
+                    f"{itp_path.name}, so GROMACS would leave that molecule unrestrained."
+                )
 
             atom_count = self._get_atom_count_from_itp(itp_path)
             if atom_count <= 0 or max(local_indices) > atom_count:
-                logger.warning(
-                    f"Skipping {itp_path.name}: restraint indices for '{group_name}' exceed "
-                    f"the ITP atom count ({atom_count})"
+                raise RuntimeError(
+                    f"Position restraints for '{group_name}' in {itp_path.name} name atoms "
+                    f"beyond its {atom_count} atoms; the ITP is not the molecule expected."
                 )
-                continue
 
             self._append_posres_to_itp(
                 itp_path, local_indices, force_constant, posres_define, group_name

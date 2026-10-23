@@ -56,7 +56,7 @@ def write_inputs(folder: Path) -> Path:
             "conformer_index": 0,
             "residue_name": "LIG",
             "force_field": sage,
-            "charges": {"method": "nagl"},
+            "charges": {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"},
         },
         {
             "type": "polymer",
@@ -74,7 +74,9 @@ def write_inputs(folder: Path) -> Path:
         },
     ]
     config["solvent"]["box"]["padding"] = 0.8
-    config["solvent"]["co_solvents"] = [{"name": "dmso", "concentration": 0.2}]
+    config["solvent"]["co_solvents"] = [
+        {"name": "dmso", "concentration": 0.2, "charges": {"method": "preset"}}
+    ]
     config["output"]["projects_directory"] = str(folder)
     config["output"]["scratch_directory"] = str(folder / "scratch")
     path = folder / "config.yaml"
