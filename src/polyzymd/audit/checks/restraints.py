@@ -131,7 +131,6 @@ def _pdb(context: AuditContext) -> Optional[str]:
         "system",
         "FAIL",
         "a restrained atom that is not the atom its selection names in its component",
-        "pdbindex off-by-one in Paper 1 restraint selections",
     )
 )
 def atom_identity(context: AuditContext) -> list[Finding]:
