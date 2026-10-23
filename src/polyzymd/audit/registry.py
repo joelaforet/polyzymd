@@ -29,7 +29,6 @@ class CheckSpec:
         severity: ``FAIL`` stops the build unless the config accepts it; ``WARN``
             and ``INFO`` are recorded only.
         catches: The modelling mistake the check catches, in one sentence.
-        origin: The real failure that motivated the check, if any.
         component_types: Component types the check applies to; None means all.
     """
 
@@ -37,7 +36,6 @@ class CheckSpec:
     scope: Scope
     severity: Severity
     catches: str
-    origin: str = ""
     component_types: Optional[tuple[str, ...]] = None
 
     def applies_to(self, component_type: str) -> bool:
