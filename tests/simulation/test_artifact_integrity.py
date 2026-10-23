@@ -97,7 +97,7 @@ def test_bundle_without_manifest_is_refused_with_rebuild_advice(tmp_path):
     topology, system, positions = _tiny_openmm_bundle()
     publish_build_bundle(tmp_path, topology, system, positions, _Config())
     (tmp_path / "build_provenance.json").unlink()
-    with pytest.raises(ArtifactIntegrityError, match="Build manifest is missing") as excinfo:
+    with pytest.raises(ArtifactIntegrityError, match="Build record is missing") as excinfo:
         validate_build_bundle(tmp_path, _Config())
     message = str(excinfo.value)
     assert "polyzymd build -c <config> -r <replicate>" in message
