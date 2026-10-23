@@ -27,9 +27,10 @@ This page is generated from PolyzyMD's check registry
 | `charges.source` | each component | FAIL | partial charges that differ from the declared source (library, NAGL model, preset file) | LipA production runs that recomputed charges |
 | `components.declared` | the system | FAIL | a component, its segment ID, force field or charge source that differs from the config | parameter checks compare with the builder's records; this ties the records to the config |
 | `composition.counts` | the system | FAIL | a molecule or chain count that differs from the config |  |
+| `composition.density` | the system | INFO | the density the box reached, against the config's target |  |
 | `composition.polymer_mass_fraction` | the system (polymer) | INFO | the polymer weight fraction of polymer plus solvent the build reached | 20 wt% decision for the Paper 1 rerun |
 | `composition.polymer_sequences` | the system (polymer) | INFO | the polymer sequences used, and the monomer fractions they reach |  |
-| `constraints.hbonds` | the system | FAIL | a bond to hydrogen left flexible at a time step that needs it constrained |  |
+| `constraints.hbonds` | the system | FAIL | a bond to hydrogen left flexible at a time step that needs it constrained, or a step above 2 fs without hydrogen mass repartitioning |  |
 | `geometry.buried_water` | the system (protein) | WARN | water buried inside the protein (may be deliberate, as a crystal water) | legacy CALB/RML builds |
 | `geometry.image_bridging` | the system (polymer) | FAIL | a polymer chain touching both the protein and the protein's periodic image |  |
 | `geometry.interchain_overlap` | the system | WARN | polymer chains clashing with each other (usually resolved by minimization; a sign of a forced Packmol result) | LipA July builds |
