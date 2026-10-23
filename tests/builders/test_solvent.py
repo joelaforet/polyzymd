@@ -535,6 +535,18 @@ class TestIonicStrength:
         )
         assert _ionic_strength(counts) == pytest.approx(0.13, abs=0.6 / (counts["water"] / 55.5))
 
+    def test_the_build_names_the_method_to_cite(self, monkeypatch, tmp_path, caplog) -> None:
+        """Whoever builds with ionic_strength is told to cite Machado and Pantano."""
+        import logging
+
+        from polyzymd.builders.solvent import SolventComposition
+
+        with caplog.at_level(logging.INFO, logger="polyzymd.builders.solvent"):
+            _packmol_counts(
+                monkeypatch, tmp_path, SolventComposition(ionic_strength=0.13), solute_smiles="C"
+            )
+        assert "doi:10.1021/acs.jctc.9b00953" in caplog.text
+
     @pytest.mark.parametrize(
         "smiles", ["CCCCCCCCCCCCOS(=O)(=O)[O-]", "CCCCCCCCCCCCOS(=O)(=O)[O-].[Na+]"]
     )
