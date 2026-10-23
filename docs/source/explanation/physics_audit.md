@@ -200,3 +200,4 @@ the config with a reason, where a reviewer sees it. `polyzymd status
 - {doc}`../reference/configuration` — solutes, charges and `modeling_exceptions`
 - {doc}`../how_to/rewrite_config_rc5` — rewrite a config for 1.3.0rc5
 - {doc}`simulation_safeguards` — the build and run safeguards that came before
+- {doc}`../how_to/own_protocol` — run an audited build with your own protocol
