@@ -353,3 +353,32 @@ def test_a_config_without_nagl_names_no_nagl_model() -> None:
         c.charges.model for c in with_nagl.solvent.co_solvents if c.charges.method == "nagl"
     } | {s.charges.model for s in with_nagl.solutes if s.charges.method == "nagl"}
     assert with_nagl.nagl_model == (models.pop() if models else None)
+
+
+def test_a_build_prints_its_audit_in_a_fixed_order_with_its_record(tmp_path, capsys) -> None:
+    from polyzymd.cli.main import _echo_audit
+
+    (tmp_path / MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "audit": {
+                    "passed": True,
+                    "counts": {"INFO": 2, "PASS": 25, "WARN": 1},
+                    "findings": [
+                        {
+                            "check": "geometry.buried_water",
+                            "component": "protein",
+                            "status": "WARN",
+                            "detail": "3 buried waters",
+                        }
+                    ],
+                }
+            }
+        )
+    )
+    _echo_audit(tmp_path, phase="build")
+    shown = capsys.readouterr()
+    text = shown.out + shown.err
+    assert "Physics audit: PASSED (25 pass, 1 warn, 2 info)" in text
+    assert "WARN geometry.buried_water (protein): 3 buried waters" in text
+    assert "build_provenance.md" in text
