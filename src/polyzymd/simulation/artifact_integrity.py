@@ -213,7 +213,20 @@ def _manifest(
         },
         "components": [c.to_dict() for c in components or []],
         "audit": audit.to_dict() if audit is not None else None,
+        "cite": methods_to_cite(config),
     }
+
+
+def methods_to_cite(config: Any) -> list[str]:
+    """Return the references of the methods this build used that its config chose.
+
+    The force fields and charge models are named in the component records;
+    this lists the other methods, such as how ``ionic_strength`` set the ions.
+    """
+    from polyzymd.builders.solvent import MACHADO_PANTANO
+
+    ions = getattr(getattr(config, "solvent", None), "ions", None)
+    return [MACHADO_PANTANO] if getattr(ions, "ionic_strength", None) is not None else []
 
 
 def _audit(realize: Any, components: Sequence[Any] | None, config: Any) -> Any:
@@ -275,6 +288,13 @@ def provenance_markdown(record: dict[str, Any], audit: Any = None) -> str:
         lines += ["", audit.to_markdown()]
     elif record.get("audit") is None:
         lines += ["", "No physics audit was recorded for this build."]
+    lines += [
+        "",
+        "## Methods to cite",
+        "",
+        "Cite the force fields and charge models of the components above, and:",
+        "",
+    ] + ([f"- {reference}" for reference in record.get("cite") or []] or ["- nothing else"])
     seeds = record.get("provenance") or {}
     if seeds:
         lines += ["", "## Inputs and seeds", ""] + [
