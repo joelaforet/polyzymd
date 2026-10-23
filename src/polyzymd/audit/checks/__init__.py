@@ -1,6 +1,6 @@
 """The registered checks; importing this package registers every one of them."""
 
-from polyzymd.audit.checks import geometry, parameters, restraints, system  # noqa: F401
+from polyzymd.audit.checks import engine, geometry, parameters, restraints, system  # noqa: F401
 from polyzymd.audit.registry import CheckSpec, register
 
 
