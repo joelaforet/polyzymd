@@ -118,6 +118,10 @@ def compare_with_build(system: Any, build_system_xml: Path) -> dict[str, Any]:
     return record
 
 
+class SystemDivergedError(RuntimeError):
+    """Raised when a segment would integrate a System other than the audited build."""
+
+
 def record_system_check(
     system: Any, working_dir: Path, phase_dir: Path, phase_name: str, segment_index: int
 ) -> dict[str, Any]:
@@ -125,7 +129,10 @@ def record_system_check(
 
     Writes ``<phase>_system_check.json`` beside the segment and the same record
     on the segment in ``progress.json`` (shown by ``polyzymd status``). A
-    divergence is logged as an error; it does not stop the run.
+    System that differs from the audited build stops the segment before its
+    first step (:class:`SystemDivergedError`). When no comparison could run
+    (no passing build record vouches for ``system.xml``, as for a run started
+    before 1.3.0rc5), the record says so and the run goes on.
     """
     import json
     import logging
@@ -150,4 +157,13 @@ def record_system_check(
             f"{phase_name}: THE SYSTEM BEING RUN IS NOT THE AUDITED BUILD: {record['detail']}"
         )
     update_segment_fields(working_dir, segment_index, system_check=record)
+    if record.get("compared") and not record["matches_build"]:
+        raise SystemDivergedError(
+            f"SYSTEM DIVERGED FROM THE AUDITED BUILD: {phase_name} would integrate a System "
+            f"that {record['detail']}; stopped before its first step (the record is in "
+            f"{Path(phase_dir) / (phase_name + SYSTEM_CHECK_SUFFIX)}).\n"
+            "fix: find what changed the System since the build (the config, the OpenMM or "
+            "PolyzyMD version, a hand-edited file) and build the replicate again, or run it "
+            "from the audited build unchanged. Do not resubmit it as it is."
+        )
     return record

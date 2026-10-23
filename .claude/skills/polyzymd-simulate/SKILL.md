@@ -176,9 +176,10 @@ polyzymd analyze --project .
   build is missing, older than 1.3.0rc5, stale for the current config, or a
   file was edited. Do what its `fix:` line says (rebuild, or restore the
   file).
-- `polyzymd status` shows `SYSTEM DIVERGED FROM THE AUDITED BUILD`: the
-  run integrated a system other than the audited one. Tell the user; do not
-  resubmit or rebuild on your own.
+- `polyzymd status` shows `SYSTEM DIVERGED FROM THE AUDITED BUILD`: a
+  production segment would have integrated a System other than the audited
+  build, so it stopped before its first step and the chain ended. Tell the
+  user what the record says differs; do not resubmit or rebuild on your own.
 - `grompp` stops on any warning: read it. A net charge means the system is
   not neutral.
 - A topology MDAnalysis cannot read: `polyzymd analysis-topology --overwrite RUN_DIR`.

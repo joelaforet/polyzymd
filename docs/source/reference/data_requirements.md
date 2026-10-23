@@ -172,7 +172,7 @@ Files written next to the record:
 |------|--------------|---------|
 | `build_provenance.failed.json`, `build_provenance.failed.md` | The audit of an OpenMM build fails | The full record of the failed build, to read. No `system.xml` is committed, so nothing can run from it. A failed GROMACS build keeps `build_provenance.json` with `audit.passed: false` and writes no `audited_files.sha256` |
 | `gromacs/audited_files.sha256` | A GROMACS build passes its audit | `sha256sum` lines for every file GROMACS reads. The local and SLURM GROMACS job scripts run `sha256sum --check` on it before `grompp` and stop if a file changed. A run that started before 1.3.0rc5 has none and continues from its own files |
-| `production_N/production_N_system_check.json` | Each OpenMM production segment starts | `compared` (whether a passing build record vouched for `system.xml`), `matches_build`, and the terms that differ. A segment whose System differs from the audited build is logged as an error and shown by `polyzymd status` as `SYSTEM DIVERGED FROM THE AUDITED BUILD`. The run goes on |
+| `production_N/production_N_system_check.json` | Each OpenMM production segment starts | `compared` (whether a passing build record vouched for `system.xml`), `matches_build`, and the terms that differ. A segment whose System differs from the audited build stops before its first step and is not resubmitted; `polyzymd status` shows `SYSTEM DIVERGED FROM THE AUDITED BUILD`. When no passing record vouches for `system.xml` (a run started before 1.3.0rc5), `compared` is false and the run goes on |
 
 When loading multi-segment trajectories, the analysis loader verifies that the
 segments form one contiguous, evenly spaced time line and raises
