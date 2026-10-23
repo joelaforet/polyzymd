@@ -235,6 +235,20 @@ while work remains. A GROMACS job resumes one production run with `-cpi` and
 `-maxh`, and centres the trajectory when production is finished.
 ```
 
+**A preempted job goes back to the queue.** Schedulers differ in how they
+preempt a job. Some send `SIGTERM` first and wait for a grace period (CURC
+documents up to 120 s on Blanca); the job's `SIGTERM` handler then queues a
+successor and the segment saves its state. Others kill the job without a
+warning, or after a grace period too short to use. PolyzyMD does not depend on
+the warning: the job script allows SLURM to requeue a preempted job
+(`#SBATCH --requeue`).
+The requeued job starts again under the same job ID and continues from the
+replicate's newest restart state, saved every minute, so a preemption costs at
+most the steps since that save. The replicate lock is a POSIX record lock,
+which the killed process releases, so the requeued job is not mistaken for a
+second chain. When the handler has also queued a successor, the lock lets only
+one of the two run the replicate at a time.
+
 **A chain must not run out of nodes.** A job pinned to a CUDA environment can
 land on a node whose driver is too old. The job then submits itself again and
 excludes that node. The list of excluded nodes passes to every following
