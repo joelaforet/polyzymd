@@ -285,7 +285,8 @@ added on top of the salt, as OpenMM `Modeller` and `gmx genion -neutral` do.
 ionic strength of the whole box, for example to match a buffer. The counter-ions
 then count toward it: for a total of N monovalent ions and a solute charge Q,
 the build adds (N - Q)/2 Na+ and (N + Q)/2 Cl-, the split of Machado and
-Pantano (J. Chem. Theory Comput. 2020, 16, 1367). N comes from
+Pantano (J. Chem. Theory Comput. 2020, 16, 1367; cite it when you use
+`ionic_strength`, see {doc}`references`). N comes from
 I = N / (2 V N_A), with V the solvent volume taken from the same
 water-equivalent count as the NaCl pairs, and is never below |Q|, so the box
 is always neutral. Charged co-solvents, such as a surfactant, count toward it
