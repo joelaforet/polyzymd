@@ -61,7 +61,7 @@ polymers:
 | Key | Meaning |
 |---|---|
 | `smiles` | The SMILES of the monomer before polymerization, with its C=C double bond. Every monomer needs one. |
-| `name` | The monomer name. Dynamic mode uses it to name the fragments, such as `SBMA_1-site` and `SBMA_2-site`, so give one for every monomer. |
+| `name` | The monomer name. Dynamic mode uses it to name the fragments, such as `SBMA_1-site` and `SBMA_2-site`, so give one for every monomer. `polyzymd validate` does not check this; the build stops instead. |
 | `residue_name` | The 3-character residue name of the monomer in the topology. Optional. If you leave it out, PolyzyMD makes one from `name`. |
 | `reactions` | The three ATRP reaction templates. `"default"` selects the templates that ship with PolyzyMD. You can also give the path of your own `.rxn` file. |
 | `charger` | The partial-charge method for the chains: `nagl` (default), `am1bcc` or `espaloma`. |
@@ -94,7 +94,7 @@ For every other key of the config, see {doc}`../reference/configuration`.
    environment:
 
    ```bash
-   polyzymd submit -c config.yaml -r 1-3 --preset aa100
+   polyzymd submit -c config.yaml -r 1 --preset aa100
    ```
 
    The jobs start the simulation environment themselves. See
@@ -120,12 +120,16 @@ For each chain, the build does these steps:
 1. It draws a sequence from the monomer probabilities. The replicate number
    seeds the draw, unless you set `random_seed`.
 2. It puts end fragments at the two ends and middle fragments between them.
-3. It builds the 3D structure with Polymerist.
+3. It builds the 3D structure with Polymerist. The sequence seeds the
+   structure, so the same sequence always gives the same coordinates.
 4. It checks that no bond passes through a ring. If one does, it builds the
    chain again, up to `max_retries` times.
 5. It assigns partial charges with `charger`.
-6. It saves the charged chain as an SDF file in `cache_directory`, with a
-   `.metadata.json` file beside it.
+6. It saves the charged chain as
+   `<type_prefix>_seq=<sequence>_<length>-mer_charged.sdf` in
+   `cache_directory`, with a `.metadata.json` file beside it. This is the name
+   that `cached` mode reads, so a later config can set
+   `generation_mode: cached` and `sdf_directory` to this folder.
 
 The next build with the same monomers loads the fragments and chains from
 `cache_directory`. It generates a chain again if the metadata does not match
@@ -164,7 +168,8 @@ rm -rf .polymer_cache
 
 ### "No monomer name configured for sequence label"
 
-A monomer has no `name`. Give every monomer a `name`.
+A monomer has no `name`. Give every monomer a `name`. `polyzymd validate`
+passes such a config, so this error first appears at build time.
 
 ### "Failed to build polymer after N attempts due to ring-piercing"
 

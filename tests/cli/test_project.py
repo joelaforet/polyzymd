@@ -68,3 +68,15 @@ def test_add_study_refuses_a_taken_label_and_one_that_is_no_folder_name(tmp_path
         assert result.exit_code == 2 and message in result.output, result.output
     assert (project / "project.yaml").read_text() == before
     assert not (project / "CalB 343").exists()
+
+
+def test_a_missing_project_path_is_an_error_and_writes_no_logs(tmp_path: Path) -> None:
+    """project check and freeze on a path that does not exist make no logs/ folder."""
+    from polyzymd.cli.main import cli
+
+    (tmp_path / "sub").mkdir()
+    for command in ("check", "freeze"):
+        result = CliRunner().invoke(cli, ["project", command, str(tmp_path / "sub" / "typo")])
+        assert result.exit_code == 2, result.output
+        assert "error:" in result.output and "fix:" in result.output
+    assert list((tmp_path / "sub").iterdir()) == []

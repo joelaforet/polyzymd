@@ -118,7 +118,6 @@ class PolymerBuilder:
         type_prefix: str,
         sdf_directory: Optional[Union[str, Path]] = None,
         cache_directory: Optional[Union[str, Path]] = None,
-        allow_generation: bool = False,
         # New parameters for dynamic generation
         generation_mode: str = "cached",
         monomer_smiles: Optional[Dict[str, str]] = None,
@@ -137,7 +136,6 @@ class PolymerBuilder:
             type_prefix: Prefix for filenames (e.g., "SBMA-EGPMA").
             sdf_directory: Directory containing pre-built polymer SDFs (cached mode).
             cache_directory: Directory for caching generated polymers.
-            allow_generation: If True, generate missing polymers (for cached mode fallback).
             generation_mode: "cached" for pre-built SDFs, "dynamic" for on-the-fly generation.
             monomer_smiles: Dictionary of monomer name -> raw SMILES (dynamic mode).
             monomer_names: Dictionary of label -> monomer name (dynamic mode).
@@ -162,7 +160,6 @@ class PolymerBuilder:
         self._type_prefix = type_prefix
         self._sdf_directory = Path(sdf_directory) if sdf_directory else None
         self._cache_directory = Path(cache_directory) if cache_directory else Path(".polymer_cache")
-        self._allow_generation = allow_generation
 
         # Dynamic generation parameters
         self._generation_mode = generation_mode.lower()
@@ -385,11 +382,6 @@ class PolymerBuilder:
         if cache_path.exists():
             return self._load_from_sdf(cache_path)
 
-        # Generate if allowed (cached mode fallback)
-        if self._allow_generation:
-            return self._generate_polymer(sequence)
-
-        # No options left - raise error
         searched_paths = []
         if self._sdf_directory:
             searched_paths.append(str(self._get_sdf_path(sequence, self._sdf_directory)))
@@ -398,7 +390,8 @@ class PolymerBuilder:
         raise FileNotFoundError(
             f"Could not find SDF file for sequence '{sequence}'. "
             f"Searched: {searched_paths}. "
-            f"Set allow_generation=True to generate missing polymers."
+            "Add the file, or set polymers.generation_mode: dynamic (with monomer smiles) "
+            "to generate missing chains."
         )
 
     def _validate_dynamic_length(self) -> None:
@@ -627,6 +620,7 @@ class PolymerBuilder:
             cache_directory=self._cache_directory,
             max_retries=self._max_retries,
             charger_type=self._charger_type,
+            type_prefix=self._type_prefix,
         )
 
         LOGGER.info("Dynamic polymer generation pipeline initialized")

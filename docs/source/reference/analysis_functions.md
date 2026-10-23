@@ -143,7 +143,7 @@ in Python.
 `polyzymd analyze contacts` runs, once per replicate between `--set
 protein_selection=...` (default null, the protein: `chainid A`) and
 `polymer_selection` (default null, the polymer: `chainid C`; a replicate where it matches no atoms, such as a control without
-polymer, has no contact: 0),
+polymer, has no contact: 0, and no comparison with its condition is tested),
 `residue_occlusion` with `exposed_threshold`, `buried_threshold`, `max_asa`, `probe_radius_nm` and
 `n_sphere_points` for `method=occlusion` (default), or `residue_contacts` with
 `cutoff` for `method=distance`, on heavy atoms only when `heavy_atoms` is true

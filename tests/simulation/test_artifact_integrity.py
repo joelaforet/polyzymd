@@ -12,9 +12,11 @@ from polyzymd.simulation.artifact_integrity import (
     MANIFEST_NAME,
     ArtifactIntegrityError,
     _absolute_path_config_hash,
+    assert_rebuild_allowed,
     config_hash,
     publish_build_bundle,
     replicate_lock,
+    replicate_lock_held_elsewhere,
     validate_build_bundle,
     validate_openmm_identity,
 )
@@ -136,6 +138,54 @@ def test_replicate_lock_blocks_concurrent_process(tmp_path):
     assert queue.get(timeout=1) == "blocked"
 
 
+def _posix_lock_is_free(path: str, queue: Queue) -> None:
+    import fcntl
+
+    with open(Path(path) / ".polyzymd.lock", "a+") as stream:
+        try:
+            fcntl.lockf(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            queue.put("free")
+        except OSError:
+            queue.put("held")
+
+
+def test_replicate_lock_is_a_posix_record_lock(tmp_path):
+    """GPFS and NFS share POSIX record locks between nodes; flock locks stay on one node."""
+    queue: Queue = Queue()
+    with replicate_lock(tmp_path):
+        process = Process(target=_posix_lock_is_free, args=(str(tmp_path), queue))
+        process.start()
+        process.join(5)
+    assert queue.get(timeout=1) == "held"
+
+
+def test_lock_probe_reports_other_holders_only(tmp_path):
+    assert replicate_lock_held_elsewhere(tmp_path) is False
+    with replicate_lock(tmp_path):
+        # The holder itself must not probe (closing a descriptor drops the lock).
+        assert replicate_lock_held_elsewhere(tmp_path) is False
+        queue: Queue = Queue()
+        process = Process(target=_contend_for_lock, args=(str(tmp_path), queue))
+        process.start()
+        process.join(5)
+        assert queue.get(timeout=1) == "blocked"
+
+
+def test_probe_through_another_path_keeps_the_lock(tmp_path):
+    """A probe through a symlink or ``..`` spelling must not drop this process's lock."""
+    run_dir = tmp_path / "run"
+    link = tmp_path / "link"
+    with replicate_lock(run_dir):
+        link.symlink_to(run_dir)
+        assert replicate_lock_held_elsewhere(link) is False
+        assert replicate_lock_held_elsewhere(tmp_path / "run" / ".." / "run") is False
+        queue: Queue = Queue()
+        process = Process(target=_posix_lock_is_free, args=(str(run_dir), queue))
+        process.start()
+        process.join(5)
+        assert queue.get(timeout=1) == "held"
+
+
 def test_manifest_records_provenance_and_versions(tmp_path):
     topology, system, positions = _tiny_openmm_bundle()
     manifest = publish_build_bundle(
@@ -242,3 +292,91 @@ def test_validation_reads_an_artifact_replaced_with_the_same_size_and_time(tmp_p
     # Staging files are deleted after the build, so their hashes are not cached.
     cached = [json.loads(p.read_text())["path"] for p in cache_dir().glob("*.json")]
     assert not any(".build-bundle-" in path for path in cached)
+
+
+def test_gromacs_build_manifest_records_the_exported_inputs(tmp_path):
+    """A GROMACS build writes build_manifest.json beside the replicate, as an OpenMM build does."""
+    from polyzymd.analyses.shared.file_hashes import file_sha256
+    from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
+
+    gromacs = tmp_path / "gromacs"
+    gromacs.mkdir()
+    (tmp_path / "solvated_system.pdb").write_text("pdb")
+    (gromacs / "system.gro").write_text("gro")
+    (gromacs / "system.top").write_text('#include "system_MOL0.itp"\n')
+    (gromacs / "system_MOL0.itp").write_text("itp")
+    (gromacs / "prod.mdp").write_text("ld_seed = 7\n")
+    (gromacs / "backup.top").write_text("not an input")
+
+    write_gromacs_build_manifest(tmp_path, gromacs, _Config(), 3, {"packmol_seed": 1})
+
+    manifest = json.loads((tmp_path / MANIFEST_NAME).read_text())
+    assert manifest["config_hash"] == config_hash(_Config())
+    assert manifest["particle_count"] == 3
+    assert manifest["openmm_version"] is None
+    assert manifest["polyzymd_version"]
+    assert manifest["provenance"] == {"packmol_seed": 1}
+    assert sorted(manifest["artifacts"]) == [
+        "gromacs/prod.mdp",
+        "gromacs/system.gro",
+        "gromacs/system.top",
+        "gromacs/system_MOL0.itp",
+        "solvated_system.pdb",
+    ]
+    assert manifest["artifacts"]["gromacs/system.gro"] == {
+        "path": "gromacs/system.gro",
+        "sha256": file_sha256(gromacs / "system.gro", use_cache=False),
+    }
+
+
+def test_a_build_manifest_records_the_openff_versions_that_built_the_system(tmp_path):
+    """Both engines' systems are parameterized by OpenFF, so either build records its versions."""
+    pytest.importorskip("openff.interchange")
+    from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
+    from polyzymd.utils.version import package_version
+
+    gromacs = tmp_path / "gromacs"
+    gromacs.mkdir()
+    write_gromacs_build_manifest(tmp_path, gromacs, _Config(), 3)
+
+    manifest = json.loads((tmp_path / MANIFEST_NAME).read_text())
+    assert manifest["openff_toolkit_version"] == package_version("openff.toolkit")
+    assert manifest["openff_interchange_version"] == package_version("openff.interchange")
+    assert manifest["openff_interchange_version"] not in (None, "0.0.0")
+
+
+@pytest.mark.parametrize(
+    "marker", ["gromacs/em.log", "gromacs/eq_01.tpr", "gromacs/prod.cpt", "gromacs/state.cpt"]
+)
+def test_rebuild_is_refused_once_a_gromacs_run_has_started(tmp_path, marker):
+    (tmp_path / "gromacs").mkdir()
+    (tmp_path / marker).write_text("")
+
+    with pytest.raises(ArtifactIntegrityError, match="Refusing to rebuild"):
+        assert_rebuild_allowed(tmp_path)
+
+
+def test_rebuild_is_allowed_over_gromacs_build_outputs(tmp_path):
+    gromacs = tmp_path / "gromacs"
+    gromacs.mkdir()
+    for name in (
+        "system.gro",
+        "system.top",
+        "system_MOL0.itp",
+        "em.mdp",
+        "eq_01_nvt.mdp",
+        "prod.mdp",
+        "run_system_gromacs.sh",
+    ):
+        (gromacs / name).write_text("")
+    (tmp_path / MANIFEST_NAME).write_text("{}")
+    (tmp_path / "progress.json").write_text("{}")
+
+    assert_rebuild_allowed(tmp_path)
+
+
+def test_rebuild_is_refused_once_an_openmm_run_has_started(tmp_path):
+    (tmp_path / "equilibration_0").mkdir()
+
+    with pytest.raises(ArtifactIntegrityError, match="equilibration_0"):
+        assert_rebuild_allowed(tmp_path)

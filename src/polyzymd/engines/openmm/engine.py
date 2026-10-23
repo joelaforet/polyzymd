@@ -169,6 +169,9 @@ class OpenMMEngine(SimulationEngine):
             replicate=request.replicate,
             working_dir=str(request.working_dir),
             job_name=request.job_name,
+            output_file=str(
+                self._config.output.get_slurm_logs_directory() / f"{request.job_name}.%j.out"
+            ),
         )
         generator.save_script(script, script_path)
         return script_path

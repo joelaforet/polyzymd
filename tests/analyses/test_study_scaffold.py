@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -146,7 +147,10 @@ def test_a_copy_drops_the_machine_path_comment_of_a_deposited_config(tmp_path: P
     created = create_study(tmp_path / "st", new_conditions=["Water"], git=False)
     first = created.conditions["Water"]
     (first.parent / "structures" / "protein_X.pdb").write_text("REMARK protein\nEND\n")
-    first.write_text(without_machine_paths(first.read_text()))
+    absolute = re.sub(
+        r"(?m)^(\s*projects_directory:).*$", rf"\1 {tmp_path / 'jobs'}", first.read_text()
+    )
+    first.write_text(without_machine_paths(absolute))
     assert "machine path removed" in first.read_text()
 
     copy = add_condition(created.root, "Water 350 K", source="Water")

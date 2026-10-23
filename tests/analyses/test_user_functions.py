@@ -56,3 +56,34 @@ def test_same_named_files_of_two_studies_are_two_modules(tmp_path: Path) -> None
     assert functions["lipa"].__module__ == "polyzymd_study.lipa.f"
     assert functions["lipb"].__module__ == "polyzymd_study.lipb.f"
     assert functions["lipa"]() == 1.0 and functions["lipb"]() == 2.0
+
+
+def test_loading_a_file_resolves_each_module_once_however_many_folders(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The purge of helper modules must not cost modules x study folders path lookups."""
+    import pathlib
+    import sys
+
+    from polyzymd.analyses import user_functions
+
+    monkeypatch.setattr(
+        user_functions, "_FOLDERS", {(tmp_path / f"old_study_{i}").resolve() for i in range(200)}
+    )
+    (tmp_path / "s").mkdir()
+    (tmp_path / "s" / "study.yaml").write_text("conditions: {}\n")
+    file = tmp_path / "s" / "f.py"
+    file.write_text("def n(atoms):\n    return 1.0\n")
+    calls = 0
+    resolve = pathlib.Path.resolve
+
+    def counting_resolve(self, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "resolve", counting_resolve)
+    modules = len(sys.modules)
+    user_functions.load_module(file)
+
+    assert calls < 2 * modules

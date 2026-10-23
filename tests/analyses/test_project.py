@@ -553,7 +553,7 @@ class TestThirdAuditFindings:
     def test_purge_spares_packages_installed_under_the_folder(self, tmp_path: Path) -> None:
         import types
 
-        from polyzymd.analyses.user_functions import _imported_from
+        from polyzymd.analyses.user_functions import _imported_through
 
         folder = tmp_path / "study"
         helper = types.ModuleType("helper")
@@ -567,10 +567,10 @@ class TestThirdAuditFindings:
         source = types.ModuleType("polyzymd")
         source.__file__ = str(folder / "src" / "polyzymd" / "__init__.py")
         resolved = folder.resolve()
-        assert _imported_from(helper, "helper", resolved)
-        assert _imported_from(package, "util.k", resolved)
-        assert not _imported_from(installed, "numpy", resolved)
-        assert not _imported_from(source, "polyzymd", resolved)
+        assert _imported_through(helper, "helper", {resolved})
+        assert _imported_through(package, "util.k", {resolved})
+        assert not _imported_through(installed, "numpy", {resolved})
+        assert not _imported_through(source, "polyzymd", {resolved})
 
     def test_machine_and_hidden_folders_stay_out_of_the_deposit(
         self, project: Path, monkeypatch

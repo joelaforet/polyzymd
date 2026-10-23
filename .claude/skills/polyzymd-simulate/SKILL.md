@@ -44,9 +44,44 @@ hardware and software.
 
 ## 2. Change the system
 
-- **Protein:** `enzyme.pdb_path`. Clean a raw PDB first with
-  `polyzymd clean-pdb -i raw.pdb -o clean.pdb`. All protein residues must be
-  in chain A.
+- **Protein:** `enzyme.pdb_path`. Prepare a raw PDB entry in this order:
+  1. Keep the protein you mean to simulate. If the file holds several copies
+     of it, keep one copy (or the assembly you want).
+  2. List the residue names of the `HETATM` records:
+     `grep "^HETATM" raw.pdb | cut -c18-20 | sort | uniq -c`. Delete the
+     waters (`HOH`), ions, crystallization additives and ligands. A ligand
+     you want goes in a `substrate:` block as its own SDF. If nothing else is
+     listed, `grep -v "^HETATM" raw.pdb > protein.pdb` does this step.
+     Modified amino acids are also `HETATM` records. PolyzyMD cannot yet
+     parameterize them (issue #228), so keep them and decide each one on
+     purpose:
+     - Selenomethionine (`MSE`) is usually a phasing substitution for the
+       native methionine. Convert it to `MET` by hand before clean-pdb,
+       which would drop the selenium without adding a sulfur: change the
+       records to `ATOM`, the residue name `MSE` to `MET`, the atom name
+       `SE` to `SD` and its element `SE` to `S`.
+     - clean-pdb replaces any other modified residue with its parent
+       residue (phosphoserine `SEP` becomes serine), which changes the
+       chemistry. Tell the user before you simulate it that way.
+  3. Run `polyzymd clean-pdb -i protein.pdb -o clean.pdb`. It replaces
+     nonstandard residues and adds hydrogens (pH 7.4 unless you give `--ph`).
+     It does not model missing residues or atoms; if `REMARK 465` or
+     `REMARK 470` lists any, see
+     `docs/source/how_to/troubleshoot_openff_pdb_ingestion.md`. For a chain
+     that only ends early, follow "Add the terminal oxygen of a chain
+     that ends early" in
+     `docs/source/tutorials/prepare_pdb_for_openff.md`.
+  4. Keep the chain IDs as they are, and a `TER` record between chains and
+     between disconnected fragments. Do not merge chains into one or give
+     them one chain ID by editing the PDB: a merged chain gets peptide bonds
+     that do not exist, and chains joined by disulfides need distinct IDs
+     for the build to number them apart. Each chain, or each group of chains
+     joined by disulfide bonds, loads as one protein molecule; the build
+     keeps every protein molecule, puts them all on chain A and numbers
+     their residues on from one molecule to the next (see
+     `docs/source/explanation/residue_assignment.md`). Take residue numbers
+     for restraints and analysis selections from the built
+     `solvated_system.pdb`, not from the raw file.
 - **Ligand:** a `substrate:` block with a docked, protonated SDF
   (`sdf_path`, `charge_method: nagl`, `residue_name`). One ligand only.
 - **Co-solvent from a SMILES:** under `solvent.co_solvents`, give `name`,

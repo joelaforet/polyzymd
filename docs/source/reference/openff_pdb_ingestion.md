@@ -24,12 +24,12 @@ analysis. These are project conventions, not OpenFF parser requirements.
 
 | Role | PolyzyMD chain convention | Notes |
 |---|---|---|
-| Protein/enzyme | `A` | The enzyme PDB passed to OpenFF is usually protein-only on chain `A`; multiple OpenFF enzyme molecules are all retained on chain `A` with continuous output residue numbering |
+| Protein/enzyme | `A` | The enzyme PDB passed to OpenFF is usually protein-only and keeps its own chain IDs; the build retains every OpenFF enzyme molecule and puts them all on chain `A` with continuous output residue numbering |
 | Substrate | `B` | Usually kept separate from the enzyme PDB and configured as substrate input |
 | Polymer | `C` | Used for conjugates and polymer-specific selections |
 | Solvent/ions/other | `D` and later | Usually generated or handled outside the enzyme PDB |
 
-An enzyme PDB can satisfy PolyzyMD chain conventions and still fail OpenFF
+An enzyme PDB can be protein-only and still fail OpenFF
 ingestion if the residue graph, hydrogens, termini, or disulfide connectivity do
 not match supported chemistry.
 
@@ -108,6 +108,7 @@ narrow custom-substructure proof of concept. Do not suppress the error.
 | `Molecule has more/fewer total formal charges than the matched substructure` | OpenFF matched a residue graph whose formal charge differs from the PDB graph | Inspect the named residue's atom list, bonds, hydrogens, TER records, and disulfide records | Correct residue chemistry or use a reviewed custom substructure proof of concept | Do not ignore; private custom substructures are not stable API |
 | Error dump names `CYS#0001`, terminal `H`, or N-terminal cysteine/cystine | N-terminal cysteine has terminal hydrogens plus disulfide chemistry that does not match OpenFF's template | Check SG-HG absence, SG-SG bond, N-terminal hydrogens, and residue naming | Curate the cystine or test a structure-specific `NCYX` custom substructure | Seen in 4CHA proof of concept; not universal |
 | Renaming disulfide cysteine to `CYX` does not resolve ingestion | `CYX` aliasing is not equivalent to a complete public template for all contexts | Validate direct OpenFF ingestion and inspect charge mismatch | Fix connectivity/hydrogens or prepare an upstream OpenFF issue/PR | Avoid relying on residue rename alone |
+| `Input residue A:LYS#0162 contains atoms matching substructures {'PEPTIDE_BOND', 'NO MATCH'}` at the last residue of a chain | The chain ends early, so its last residue has no terminal `OXT`; `polyzymd clean-pdb` does not add it | Look for `OXT` in the last residue | Add only `OXT` with PDBFixer, then run `clean-pdb` ({ref}`add-terminal-oxt`) | Seen in 181L, which lacks residues 163-164 |
 | Failure adjacent to residues listed in `REMARK 465` | Missing-coordinate residues or missing heavy atoms alter termini or local chemistry | Read PDB header and visualize gaps | Model missing regions externally if required for the study | Automatic filling is a modeling decision |
 
 ## Report a new error

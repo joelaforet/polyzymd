@@ -448,7 +448,7 @@ def open_universe(
             "MDAnalysis %s cannot read %s (%s); reading its topology from %s instead, "
             "laid out as MDAnalysis lays out a TPR. Other runs' TPRs are read the same way.",
             mda.__version__,
-            topology,
+            topology.name,
             str(error.__context__).strip(),
             top_file.name,
         )

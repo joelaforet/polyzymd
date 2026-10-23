@@ -23,7 +23,7 @@ ethylene_glycol
   4 10  1  0
 M  END
 >  <metadata>  (1) 
-{"0": {"residue_name": "ETH"}, "1": {"residue_name": "ETH"}, "2": {"residue_name": "ETH"}, "3": {"residue_name": "ETH"}, "4": {"residue_name": "ETH"}, "5": {"residue_name": "ETH"}, "6": {"residue_name": "ETH"}, "7": {"residue_name": "ETH"}, "8": {"residue_name": "ETH"}, "9": {"residue_name": "ETH"}}
+{"0": {"residue_name": "EDO"}, "1": {"residue_name": "EDO"}, "2": {"residue_name": "EDO"}, "3": {"residue_name": "EDO"}, "4": {"residue_name": "EDO"}, "5": {"residue_name": "EDO"}, "6": {"residue_name": "EDO"}, "7": {"residue_name": "EDO"}, "8": {"residue_name": "EDO"}, "9": {"residue_name": "EDO"}}
 
 >  <atom.dprop.PartialCharge>  (1) 
 0.089399999999999979 0.089399999999999979 -0.6018 -0.6018 0.050199999999999988 0.050199999999999988 0.050199999999999988 0.050199999999999988 0.41199999999999998 0.41199999999999998

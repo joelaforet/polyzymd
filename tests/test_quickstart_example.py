@@ -88,6 +88,18 @@ def test_the_quickstart_runs_and_analyzes(tmp_path: Path, config: str) -> None:
         for name in _documented_gromacs_files():
             pattern = name.replace("<prefix>", "trpcage").replace("<stage>", "equil")
             assert list(gromacs.glob(pattern)), name
+        # A GROMACS run writes build_manifest.json and progress.json, as an OpenMM run does.
+        manifest = json.loads((gromacs.parent / "build_manifest.json").read_text())
+        assert manifest["provenance"]["packmol_seed"] == 1
+        assert "gromacs/trpcage.top" in manifest["artifacts"]
+        progress = json.loads((gromacs / "progress.json").read_text())
+        assert progress["config_path"]
+        for record in (*progress["equilibration_stages"], *progress["segments"]):
+            assert record["started_at"] <= record["finished_at"]
+            assert record["seeds"]["ld_seed"] > 0
+        assert progress["equilibration_stages"][0]["seeds"]["gen_seed"] > 0
+        result = _polyzymd(folder, "status", "-c", condition, "--format", "json", "--no-slurm")
+        assert result.returncode == 0 and '"completed"' in result.stdout, result.stderr
     if config == "config.yaml":
         # A local OpenMM run records the hash of its trajectory, as a SLURM run does.
         (progress,) = folder.rglob("progress.json")

@@ -31,6 +31,10 @@ class CoSolventData:
         smiles: SMILES string for molecule generation.
         density: Liquid density in g/mL at ~25°C.
         molar_mass: Molar mass in g/mol.
+        residue_name: Residue name in built topologies. It must not be an
+            amino-acid, nucleic-acid, water or ion name, or selections such
+            as ``protein`` pick the co-solvent up; where the name clashed it
+            is the PDB chemical-component code.
         common_names: Alternative names for lookup (lowercase).
     """
 
@@ -38,6 +42,7 @@ class CoSolventData:
     smiles: str
     density: float  # g/mL
     molar_mass: float  # g/mol
+    residue_name: str
     common_names: Tuple[str, ...] = ()
 
 
@@ -61,6 +66,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="CS(=O)C",
         density=1.10,
         molar_mass=78.13,
+        residue_name="DMS",
         common_names=("dimethylsulfoxide", "dimethyl sulfoxide"),
     ),
     "dmf": CoSolventData(
@@ -68,6 +74,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="CN(C)C=O",
         density=0.95,
         molar_mass=73.09,
+        residue_name="DMF",
         common_names=("dimethylformamide", "n,n-dimethylformamide"),
     ),
     "acetonitrile": CoSolventData(
@@ -75,6 +82,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="CC#N",
         density=0.786,
         molar_mass=41.05,
+        residue_name="CCN",
         common_names=("mecn", "acn"),
     ),
     # Chaotropes / Denaturants
@@ -83,6 +91,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="C(=O)(N)N",
         density=1.32,
         molar_mass=60.06,
+        residue_name="URE",
         common_names=("carbamide",),
     ),
     # Alcohols
@@ -91,6 +100,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="CCO",
         density=0.789,
         molar_mass=46.07,
+        residue_name="ETH",
         common_names=("etoh", "ethyl alcohol"),
     ),
     "methanol": CoSolventData(
@@ -98,6 +108,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="CO",
         density=0.792,
         molar_mass=32.04,
+        residue_name="MOH",
         common_names=("meoh", "methyl alcohol"),
     ),
     "isopropanol": CoSolventData(
@@ -105,6 +116,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="CC(C)O",
         density=0.786,
         molar_mass=60.10,
+        residue_name="ISO",
         common_names=("ipa", "2-propanol", "isopropyl alcohol"),
     ),
     # Polyols
@@ -113,6 +125,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="C(C(CO)O)O",
         density=1.261,
         molar_mass=92.09,
+        residue_name="GOL",
         common_names=("glycerin", "glycerine"),
     ),
     "ethylene_glycol": CoSolventData(
@@ -120,6 +133,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="C(CO)O",
         density=1.114,
         molar_mass=62.07,
+        residue_name="EDO",
         common_names=("eg", "ethanediol"),
     ),
     # Other common co-solvents
@@ -128,6 +142,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="CC(=O)C",
         density=0.784,
         molar_mass=58.08,
+        residue_name="ACN",
         common_names=("propanone",),
     ),
     "thf": CoSolventData(
@@ -135,6 +150,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="C1CCOC1",
         density=0.883,
         molar_mass=72.11,
+        residue_name="THF",
         common_names=("tetrahydrofuran",),
     ),
     "dioxane": CoSolventData(
@@ -142,6 +158,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         smiles="C1COCCO1",
         density=1.033,
         molar_mass=88.11,
+        residue_name="DIO",
         common_names=("dioxan",),
     ),
 }
@@ -170,8 +187,9 @@ def get_cosolvent(name: str) -> Optional[CoSolventData]:
     key = name.lower().replace(" ", "").replace("-", "").replace("_", "")
 
     # Direct lookup
-    if key in COSOLVENT_LIBRARY:
-        return COSOLVENT_LIBRARY[key]
+    for library_key, data in COSOLVENT_LIBRARY.items():
+        if key == library_key.replace("_", ""):
+            return data
 
     # Search common names
     for data in COSOLVENT_LIBRARY.values():

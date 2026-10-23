@@ -11,9 +11,12 @@ Covers:
 - Unit conversion helpers (_convert_to_ns, _convert_to_fs)
 """
 
+import contextlib
 import json
 import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -1291,6 +1294,30 @@ class TestStaleInterruptedMarkerCrossCheck:
 # ---------------------------------------------------------------------------
 
 
+@contextlib.contextmanager
+def _lock_held_by_another_process(working_dir: Path):
+    """Hold the replicate lock of *working_dir* in a child process, as a live run does."""
+    code = (
+        "import fcntl, sys\n"
+        "f = open(sys.argv[1], 'a+')\n"
+        "fcntl.lockf(f.fileno(), fcntl.LOCK_EX)\n"
+        "print('held', flush=True)\n"
+        "sys.stdin.read()\n"
+    )
+    child = subprocess.Popen(
+        [sys.executable, "-c", code, str(working_dir / ".polyzymd.lock")],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert child.stdout.readline().strip() == "held"
+        yield
+    finally:
+        child.stdin.close()
+        child.wait(timeout=10)
+
+
 def _write_checkpoint_only_segment(
     working_dir: Path,
     seg_idx: int,
@@ -1364,7 +1391,8 @@ class TestCheckpointOnlySegment:
     def test_recent_checkpoint_is_running(self, tmp_path):
         """A checkpoint modified within the recency window → RUNNING."""
         _write_checkpoint_only_segment(tmp_path, 0, recent=True)
-        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        with _lock_held_by_another_process(tmp_path):
+            p = scan_filesystem(tmp_path, timestep_fs=2.0)
         assert len(p.segments) == 1
         assert p.segments[0].status == SegmentStatus.RUNNING
         assert p.segments[0].steps_completed == 0
@@ -1372,7 +1400,8 @@ class TestCheckpointOnlySegment:
     def test_recent_checkpoint_with_csv_is_running(self, tmp_path):
         """A recent checkpoint with CSV data → RUNNING with estimated steps."""
         _write_checkpoint_only_segment(tmp_path, 0, with_csv=True, csv_steps=120000, recent=True)
-        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        with _lock_held_by_another_process(tmp_path):
+            p = scan_filesystem(tmp_path, timestep_fs=2.0)
         assert len(p.segments) == 1
         assert p.segments[0].status == SegmentStatus.RUNNING
         assert p.segments[0].steps_completed == 120000
@@ -1892,9 +1921,25 @@ class TestRunningSegmentConcurrencyGuard:
         now = _time.time()
         os.utime(chk, (now, now))
 
-        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        with _lock_held_by_another_process(tmp_path):
+            progress = scan_filesystem(tmp_path, timestep_fs=2.0)
         assert len(progress.segments) == 1
         assert progress.segments[0].status == SegmentStatus.RUNNING
+
+    def test_recent_checkpoint_without_a_live_run_is_interrupted(self, tmp_path):
+        """A job killed seconds ago left a fresh checkpoint but holds no lock."""
+        _write_checkpoint_only_segment(tmp_path, 0, with_csv=True, recent=True)
+        (tmp_path / ".polyzymd.lock").touch()
+
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert progress.segments[0].status == SegmentStatus.INTERRUPTED
+
+    def test_checkpoint_age_decides_when_the_lock_cannot_be_probed(self, tmp_path, monkeypatch):
+        import polyzymd.simulation.artifact_integrity as integrity
+
+        monkeypatch.setattr(integrity, "replicate_lock_held_elsewhere", lambda _path: None)
+        _write_checkpoint_only_segment(tmp_path, 0, recent=True)
+        assert scan_filesystem(tmp_path).segments[0].status == SegmentStatus.RUNNING
 
     def test_scan_filesystem_classifies_stale_checkpoint_as_interrupted(self, tmp_path):
         """A segment with a stale checkpoint is INTERRUPTED."""
@@ -2128,3 +2173,129 @@ class TestRecordProvenanceFields:
         assert loaded is not None
         assert loaded.segments[0].polyzymd_version is None
         assert loaded.equilibration_stages[0].openmm_version is None
+
+
+def test_upsert_keeps_original_started_at():
+    from polyzymd.simulation.progress import (
+        SegmentRecord,
+        SegmentStatus,
+        SimulationProgress,
+        _update_or_append_segment,
+    )
+
+    progress = SimulationProgress(
+        config_path="c", total_steps_requested=10, total_samples_requested=1
+    )
+    start = "2026-09-29T20:00:00+00:00"
+    _update_or_append_segment(
+        progress, SegmentRecord(index=3, started_at=start, status=SegmentStatus.RUNNING)
+    )
+    _update_or_append_segment(
+        progress,
+        SegmentRecord(
+            index=3,
+            started_at="2026-09-30T19:52:00+00:00",
+            finished_at="2026-09-30T19:52:00+00:00",
+            status=SegmentStatus.INTERRUPTED,
+        ),
+    )
+    (seg,) = progress.segments
+    assert seg.started_at == start
+    assert seg.status == SegmentStatus.INTERRUPTED
+    assert seg.finished_at == "2026-09-30T19:52:00+00:00"
+
+
+def test_equilibration_stages_keep_their_own_start_and_finish(tmp_path):
+    """Each stage records when it ran; a stage an earlier run finished keeps that run's record."""
+    from polyzymd.simulation.progress import (
+        EquilibrationStageRecord,
+        SimulationProgress,
+        load_progress,
+        record_equilibration_stages,
+        save_progress,
+    )
+
+    earlier = EquilibrationStageRecord(
+        index=0,
+        name="heating",
+        started_at="2026-10-07T07:00:00+00:00",
+        finished_at="2026-10-07T07:05:00+00:00",
+        seeds={"integrator": 11, "velocities": 12},
+    )
+    save_progress(
+        tmp_path,
+        SimulationProgress(
+            config_path="c",
+            total_steps_requested=10,
+            total_samples_requested=1,
+            equilibration_stages=[earlier],
+        ),
+    )
+    ran = {
+        "stage_index": 1,
+        "stage_name": "npt",
+        "ensemble": "NPT",
+        "duration_ns": 0.01,
+        "started_at": "2026-10-07T07:10:02+00:00",
+        "finished_at": "2026-10-07T07:10:04+00:00",
+        "seeds": {"integrator": 21, "barostat": 22},
+    }
+    skipped = {"stage_index": 0, "stage_name": "heating", "skipped": True, "duration_ns": 0.01}
+
+    assert record_equilibration_stages(tmp_path, [skipped, ran]) == 2
+
+    first, second = load_progress(tmp_path).equilibration_stages
+    assert first == earlier
+    assert (second.started_at, second.finished_at) == (ran["started_at"], ran["finished_at"])
+    assert second.seeds == {"integrator": 21, "barostat": 22}
+    assert second.ensemble == "NPT"
+    assert second.seeds_by_attempt is None
+
+
+def test_resumed_equilibration_stage_keeps_the_seeds_of_every_attempt(tmp_path):
+    from polyzymd.simulation.progress import (
+        SimulationProgress,
+        load_progress,
+        record_equilibration_stages,
+        save_progress,
+    )
+
+    save_progress(
+        tmp_path,
+        SimulationProgress(config_path="c", total_steps_requested=10, total_samples_requested=1),
+    )
+    attempts = [{"integrator": 11, "velocities": 12}, {"integrator": 13}]
+    stage = {
+        "stage_index": 0,
+        "stage_name": "heating",
+        "duration_ns": 0.01,
+        "started_at": "2026-10-07T07:00:00+00:00",
+        "finished_at": "2026-10-07T07:05:00+00:00",
+        "seeds": attempts[-1],
+        "seeds_by_attempt": attempts,
+    }
+    record_equilibration_stages(tmp_path, [stage])
+
+    (record,) = load_progress(tmp_path).equilibration_stages
+    assert record.seeds == {"integrator": 13}
+    assert record.seeds_by_attempt == attempts
+
+
+def test_scanned_equilibration_stage_starts_before_it_finishes(tmp_path):
+    """Without progress.json, a stage's start is its topology PDB and its finish its checkpoint."""
+    import os
+
+    from polyzymd.simulation.progress import scan_equilibration_stages
+
+    stage = tmp_path / "equilibration_0_heating"
+    stage.mkdir()
+    pdb = stage / "equilibration_0_heating_topology.pdb"
+    chk = stage / "equilibration_0_heating_checkpoint.chk"
+    pdb.write_text("")
+    chk.write_bytes(b"")
+    os.utime(pdb, (1_790_000_000, 1_790_000_000))
+    os.utime(chk, (1_790_000_060, 1_790_000_060))
+
+    (record,) = scan_equilibration_stages(tmp_path)
+    assert record.started_at == "2026-09-21T14:13:20+00:00"
+    assert record.finished_at == "2026-09-21T14:14:20+00:00"

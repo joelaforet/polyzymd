@@ -148,11 +148,6 @@ output:
   
   # Naming template for run directories
   naming_template: "{enzyme}_{substrate}_DMSO10_{temperature}K_run{replicate}"
-  
-  # Output options
-  save_checkpoint: true
-  save_state_data: true
-  trajectory_format: "dcd"
 
 # ============================================================================
 # Force Field Selection

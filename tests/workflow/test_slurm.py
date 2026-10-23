@@ -12,6 +12,7 @@ Covers:
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -501,9 +502,10 @@ class TestGeneratedOpenMMScript:
         assert '#SBATCH --chdir="/scratch/user/run_3"' in script
         assert "REQUESTED_PIXI_ENV=sim-cuda-12-4" in script
         assert (
-            'eval "$(pixi shell-hook -e "$PIXI_ENV" '
+            '_pixi_hook="$(pixi shell-hook -e "$PIXI_ENV" '
             '--manifest-path /projects/user/polyzymd/pixi.toml)"' in script
         )
+        assert 'eval "$_pixi_hook"' in script
         assert "nvidia-smi --query-gpu=driver_version,compute_cap" in script
         assert 'openmm.Platform.getPlatformByName("CUDA")' in script
         assert "openmm.NonbondedForce()" in script
@@ -1208,3 +1210,122 @@ def test_openmm_and_gromacs_scripts_request_the_same_resources(monkeypatch):
     assert set(resources) <= set(openmm) and set(resources) <= set(gromacs)
     assert "#SBATCH --mail-type=FAIL" in openmm
     assert "#SBATCH --mail-type=FAIL,END" in gromacs
+
+
+def test_openmm_job_ignores_user_site_packages(monkeypatch):
+    """The job sets PYTHONNOUSERSITE before its first Python process."""
+    monkeypatch.setattr(slurm_module, "_discover_manifest_path", lambda: "/ws/pixi.toml")
+    lines = _make_generator(SlurmConfig.from_preset("blanca-shirts")).generate_job_script(
+        "/c.yaml", 1, "/run_1"
+    )
+    lines = lines.splitlines()
+
+    first_python = next(i for i, line in enumerate(lines) if line.startswith("if ! python"))
+    assert lines.index("export PYTHONNOUSERSITE=1") < first_python
+
+
+class TestDiscoverManifestPath:
+    """The pixi manifest is found when the environments live outside the workspace."""
+
+    def test_uses_the_manifest_of_the_active_pixi_workspace(self, monkeypatch, tmp_path):
+        manifest = tmp_path / "ws" / "pixi.toml"
+        manifest.parent.mkdir()
+        manifest.write_text("")
+        monkeypatch.setenv("PIXI_PROJECT_MANIFEST", str(manifest))
+        monkeypatch.setenv("CONDA_PREFIX", sys.prefix)
+        monkeypatch.setattr(slurm_module.shutil, "which", lambda name: "/opt/elsewhere/polyzymd")
+
+        assert slurm_module._discover_manifest_path() == str(manifest)
+
+    def test_ignores_the_manifest_of_another_active_environment(self, monkeypatch, tmp_path):
+        other = tmp_path / "other" / "pixi.toml"
+        other.parent.mkdir()
+        other.write_text("")
+        workspace = tmp_path / "ws"
+        (workspace / ".pixi" / "envs" / "build" / "bin").mkdir(parents=True)
+        (workspace / "pixi.toml").write_text("")
+        exe = workspace / ".pixi" / "envs" / "build" / "bin" / "polyzymd"
+        exe.write_text("")
+        monkeypatch.setenv("PIXI_PROJECT_MANIFEST", str(other))
+        monkeypatch.setenv("CONDA_PREFIX", str(tmp_path / "other" / ".pixi" / "envs" / "x"))
+        monkeypatch.setattr(slurm_module.shutil, "which", lambda name: str(exe))
+
+        assert slurm_module._discover_manifest_path() == str(workspace / "pixi.toml")
+
+    def test_finds_the_workspace_through_a_symlinked_pixi_folder(self, monkeypatch, tmp_path):
+        workspace = tmp_path / "ws"
+        envs = tmp_path / "scratch" / "pixi-envs"
+        (envs / "envs" / "build" / "bin").mkdir(parents=True)
+        (envs / "envs" / "build" / "bin" / "polyzymd").write_text("")
+        workspace.mkdir()
+        (workspace / "pixi.toml").write_text("")
+        (workspace / ".pixi").symlink_to(envs)
+        monkeypatch.delenv("PIXI_PROJECT_MANIFEST", raising=False)
+        exe = workspace / ".pixi" / "envs" / "build" / "bin" / "polyzymd"
+        monkeypatch.setattr(slurm_module.shutil, "which", lambda name: str(exe))
+
+        assert slurm_module._discover_manifest_path() == str(workspace / "pixi.toml")
+
+
+def _activation(tmp_path, pixi_body: str) -> subprocess.CompletedProcess:
+    """Run the pixi activation block with a fake ``pixi`` and report what follows it."""
+    from polyzymd.workflow.slurm import pixi_activation_block
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "pixi").write_text("#!/bin/bash\n" + pixi_body)
+    (bin_dir / "pixi").chmod(0o755)
+    script = tmp_path / "activate.sh"
+    script.write_text(
+        "set -e\n"
+        + pixi_activation_block('"sim-cuda-12-4"', "/projects/user/polyzymd/pixi.toml")
+        + '\necho "after activation: ${POLYZYMD_ENV_ACTIVE:-no}"\n'
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "POLYZYMD_PIXI_RETRY_SLEEP": "0",
+        "COUNT_FILE": str(tmp_path / "count"),
+    }
+    return subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+
+
+def test_a_failing_pixi_shell_hook_is_tried_again(tmp_path):
+    """A hook that fails while another job updates the environment is retried."""
+    result = _activation(
+        tmp_path,
+        'n=$(cat "$COUNT_FILE" 2>/dev/null || echo 0); echo $((n + 1)) > "$COUNT_FILE"\n'
+        'if [ "$n" -lt 2 ]; then exit 1; fi\n'
+        'echo "export POLYZYMD_ENV_ACTIVE=yes"\n',
+    )
+    assert result.returncode == 0, result.stderr
+    assert "after activation: yes" in result.stdout
+    assert result.stderr.count("pixi shell-hook failed") == 2
+
+
+def test_a_job_whose_environment_never_activates_stops(tmp_path):
+    """The job stops with an error instead of running without its environment."""
+    result = _activation(tmp_path, "exit 1\n")
+    assert result.returncode == 1
+    assert "FATAL: cannot activate the pixi environment of /projects/user/polyzymd/pixi.toml" in (
+        result.stderr
+    )
+    assert "after activation" not in result.stdout
+
+
+def test_an_openmm_job_without_its_environment_does_not_run(monkeypatch, tmp_path):
+    """The rendered OpenMM job stops before any PolyzyMD command when pixi cannot activate."""
+    working_dir = tmp_path / "run_3"
+    working_dir.mkdir()
+    script_path = TestGeneratedOpenMMScript._render_to(monkeypatch, tmp_path, working_dir)
+    bin_dir = TestGeneratedOpenMMScript._fake_cluster_bin(tmp_path)
+    (bin_dir / "pixi").write_text("#!/bin/bash\nexit 1\n")
+    (bin_dir / "polyzymd").write_text('#!/bin/bash\necho "polyzymd ran $1"\n')
+
+    result, log = TestGeneratedOpenMMScript._run_script(
+        script_path, bin_dir, tmp_path, POLYZYMD_PIXI_RETRY_SLEEP="0"
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "polyzymd ran" not in result.stdout
+    assert log == ""

@@ -9,6 +9,18 @@ PolyzyMD organizes simulations in four levels:
 | {term}`Condition <condition>` | One point in the space of independent variables: one value of each variable, such as the protein variant, the polymer composition, the co-solvent and the temperature | A simulation `config.yaml`, and optionally its `factors:`, which name its coordinates | `conditions/<name>/config.yaml` |
 | {term}`Replicate <replicate>` | One independent simulation of a condition | Its trajectories. Its number seeds its starting structure and its dynamics | The {term}`replicate folder` |
 
+The figure shows how the four levels nest, and where the runs live on disk.
+
+```{figure} ../_static/diagrams/hierarchy.svg
+:alt: A project holds studies and a study holds conditions; the replicates of a condition live in the project's git-ignored runs/<study>/<condition>/ folder, and data.local.yaml points to them.
+:width: 100%
+
+Each level is defined by one file. A condition logically holds its
+replicates, but on disk the replicate folders sit at project level in the
+git-ignored `runs/<study>/<condition>/` (or in `scratch_directory`), and
+`data.local.yaml` tells the study where they are on this machine.
+```
+
 ## A study shares one analysis frame
 
 A study is a set of conditions that you compare with each other: a part of
@@ -45,12 +57,12 @@ conditions:
 
 ```yaml
 conditions:                    # control first
-  No polymer 300 K: {config: conditions/none_300, factors: {temperature_K: 300}}
-  No polymer 330 K: {config: conditions/none_330, factors: {temperature_K: 330}}
-  No polymer 360 K: {config: conditions/none_360, factors: {temperature_K: 360}}
-  SBMA 300 K: {config: conditions/sbma_300, factors: {temperature_K: 300, polymer: SBMA}}
-  SBMA 330 K: {config: conditions/sbma_330, factors: {temperature_K: 330, polymer: SBMA}}
-  SBMA 360 K: {config: conditions/sbma_360, factors: {temperature_K: 360, polymer: SBMA}}
+  No polymer 300 K: {config: conditions/no_polymer_300_k, factors: {temperature_K: 300}}
+  No polymer 330 K: {config: conditions/no_polymer_330_k, factors: {temperature_K: 330}}
+  No polymer 360 K: {config: conditions/no_polymer_360_k, factors: {temperature_K: 360}}
+  SBMA 300 K: {config: conditions/sbma_300_k, factors: {temperature_K: 300, polymer: SBMA}}
+  SBMA 330 K: {config: conditions/sbma_330_k, factors: {temperature_K: 330, polymer: SBMA}}
+  SBMA 360 K: {config: conditions/sbma_360_k, factors: {temperature_K: 360, polymer: SBMA}}
 ```
 
 By default, PolyzyMD compares each condition with the first condition, the

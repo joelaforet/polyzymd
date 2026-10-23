@@ -53,6 +53,18 @@ assembling enzyme, substrate, polymer, solvent, and related components. The
 builder layer stays focused on construction; it does not own long-running job
 or analysis policy.
 
+The figure shows the stages of `SystemBuilder.build_from_config` and the
+module that does each one.
+
+```{figure} ../_static/diagrams/build_pipeline.svg
+:alt: The system builder turns a cleaned PDB into an enzyme, adds the charged ligand, sizes the box, optionally packs polymers, solvates, parameterizes with OpenFF Interchange and exports an OpenMM bundle or GROMACS files, each with build_manifest.json.
+:width: 100%
+
+The build runs left to right. The box is sized from the protein and ligand
+before any polymer is packed, so replicates of a condition share one box.
+Either export writes `build_manifest.json`.
+```
+
 ### Simulation and workflow execute the study
 
 `simulation/` runs local minimization, equilibration, checkpointing,

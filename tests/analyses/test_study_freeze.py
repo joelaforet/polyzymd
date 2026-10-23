@@ -376,13 +376,16 @@ class TestReproduce:
         result = freeze(study)
         copy = shutil.copytree(result.deposit / "study", tmp_path / "reproducer" / "my_study")
         download = shutil.copytree(tmp_path / "scratch", tmp_path / "download")
-        dcd = next(download.rglob("*.dcd"))
+        dcd = next((download / condition_folder("Polymer")).rglob("*.dcd"))
         dcd.write_bytes(dcd.read_bytes()[:-8] + b"\0" * 8)
         located = CliRunner().invoke(
             cli, ["study", "locate", str(download), "--study", str(copy), "--verify"]
         )
         assert located.exit_code == 2
         assert "has another SHA-256" in located.output
+        # The changed runs are not recorded, so analyze cannot read them as the deposited ones.
+        written = yaml.safe_load((copy / "data.local.yaml").read_text())
+        assert list(written) == ["No polymer"]
 
     def test_locate_verify_reads_a_file_replaced_with_the_same_size_and_time(
         self, study: Path, tmp_path: Path
@@ -394,13 +397,49 @@ class TestReproduce:
         download = shutil.copytree(tmp_path / "scratch", tmp_path / "download")
         command = ["study", "locate", str(download), "--study", str(copy), "--verify"]
         assert CliRunner().invoke(cli, command).exit_code == 0
-        dcd = next(download.rglob("*.dcd"))
+        dcd = next((download / condition_folder("Polymer")).rglob("*.dcd"))
         stat = dcd.stat()
         dcd.write_bytes(dcd.read_bytes()[:-8] + b"\0" * 8)
         os.utime(dcd, ns=(stat.st_atime_ns, stat.st_mtime_ns))
         located = CliRunner().invoke(cli, command)
         assert located.exit_code == 2
         assert "has another SHA-256" in located.output
+        # The entry the first locate wrote for the changed runs is removed.
+        written = yaml.safe_load((copy / "data.local.yaml").read_text())
+        assert list(written) == ["No polymer"]
+        assert "removed Polymer from" in located.output
+
+    def test_locate_keeps_an_entry_for_another_folder_when_its_runs_differ(
+        self, study: Path, tmp_path: Path
+    ) -> None:
+        result = freeze(study)
+        copy = shutil.copytree(result.deposit / "study", tmp_path / "reproducer" / "my_study")
+        good = shutil.copytree(tmp_path / "scratch", tmp_path / "good")
+        download = shutil.copytree(tmp_path / "scratch", tmp_path / "download")
+        data = copy / "data.local.yaml"
+        data.write_text(yaml.safe_dump({"Polymer": str(good / condition_folder("Polymer"))}))
+        dcd = next((download / condition_folder("Polymer")).rglob("*.dcd"))
+        dcd.write_bytes(dcd.read_bytes()[:-8] + b"\0" * 8)
+        command = ["study", "locate", str(download), "--study", str(copy), "--verify"]
+        located = CliRunner().invoke(cli, command)
+        assert located.exit_code == 2
+        written = yaml.safe_load(data.read_text())
+        assert written["Polymer"] == str(good / condition_folder("Polymer"))
+        assert "removed" not in located.output
+
+    @pytest.mark.parametrize("text", ["Polymer: [unclosed\n", "- a list\n"])
+    def test_locate_reports_a_malformed_data_file(
+        self, study: Path, tmp_path: Path, text: str
+    ) -> None:
+        result = freeze(study)
+        copy = shutil.copytree(result.deposit / "study", tmp_path / "reproducer" / "my_study")
+        (copy / "data.local.yaml").write_text(text)
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        located = CliRunner().invoke(cli, ["study", "locate", str(empty), "--study", str(copy)])
+        assert located.exit_code == 2
+        assert isinstance(located.exception, SystemExit)
+        assert "error: " in located.output and "data.local.yaml" in located.output
 
     def test_check_reports_metadata_gaps_and_the_next_step(self, study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(study)])
@@ -624,6 +663,50 @@ class TestGromacsFreeze:
         assert {r["simulated_with"]["gromacs_version"] for r in replicates.values()} == {"2025.2"}
         assert not any("gromacs version" in w.lower() for w in result.warnings)
 
+    def test_manifest_records_the_openff_versions_that_built_each_replicate(
+        self, gromacs_study: Path, tmp_path: Path
+    ) -> None:
+        """They come from build_manifest.json, beside the GROMACS version that ran it."""
+        built = {
+            "polyzymd_version": "1.3.0",
+            "openmm_version": None,
+            "openff_toolkit_version": "0.18.1",
+            "openff_interchange_version": "0.5.1",
+        }
+        for run in (tmp_path / "scratch").iterdir():
+            (run / "build_manifest.json").write_text(json.dumps(built))
+        result = freeze(gromacs_study)
+        for replicate in result.manifest["conditions"]["Water"]["replicates"].values():
+            assert replicate["simulated_with"]["build"] == built
+            assert replicate["simulated_with"]["gromacs_version"] == "2025.2"
+
+    def test_manifest_records_the_seeds_of_each_stage_and_segment(
+        self, gromacs_study: Path, tmp_path: Path
+    ) -> None:
+        """The seeds GROMACS ran with come from gromacs/progress.json, as OpenMM's do."""
+        from polyzymd.simulation.progress import (
+            EquilibrationStageRecord,
+            SegmentRecord,
+            SimulationProgress,
+            save_progress,
+        )
+
+        for run in (tmp_path / "scratch").iterdir():
+            progress = SimulationProgress(
+                equilibration_stages=[
+                    EquilibrationStageRecord(index=0, name="eq_01", seeds={"ld_seed": 5}),
+                ],
+                segments=[SegmentRecord(index=0, seeds={"ld_seed": 7, "gen_seed": None})],
+            )
+            save_progress(run / "gromacs", progress)
+        result = freeze(gromacs_study)
+        for replicate in result.manifest["conditions"]["Water"]["replicates"].values():
+            assert replicate["simulated_with"]["seeds"] == {
+                "equilibration": {"eq_01": {"ld_seed": 5}},
+                "production": {"0": {"ld_seed": 7, "gen_seed": None}},
+            }
+            assert replicate["simulated_with"]["segments"]
+
     def test_checklist_gives_what_gromacs_ran(self, gromacs_study: Path) -> None:
         """4b lists the GROMACS integrator and barostat; 1d has no polymers for a study without them."""
         freeze(gromacs_study)
@@ -631,6 +714,101 @@ class TestGromacsFreeze:
         ran = checklist["4b_simulation_parameters"]["evidence"]["Water"]["gromacs_production"]
         assert ran["integrator"] == "sd" and ran["pcoupl"] == "c-rescale"
         assert "polymer" not in checklist["1d_independent_starting_configurations"]["answer"]
+
+
+TPR_FALLBACK = Path(__file__).resolve().parents[1] / "data" / "gromacs" / "tpr_fallback"
+
+
+@pytest.fixture()
+def unreadable_tpr_study(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A committed, analysed GROMACS study whose prod.tpr this MDAnalysis cannot read.
+
+    Each replicate is the two methanols, sodium and five waters of
+    ``tests/data/gromacs/tpr_fallback``: the topology comes from its ``.top``,
+    and the chain IDs (methanols on A) from the build's solvated_system.pdb.
+    """
+    import MDAnalysis as mda
+    import numpy as np
+
+    from polyzymd.analyses.shared import loader
+    from polyzymd.analyses.shared.gromacs import universe_from_gromacs_top
+    from polyzymd.config.schema import SimulationConfig
+
+    # The loader warns once per process; keep these runs out of other tests' warnings.
+    monkeypatch.setattr(loader, "_WARNED_TPR_FALLBACK_PATHS", set())
+    monkeypatch.setattr(loader, "_WARNED_CHAIN_ID_PATHS", set())
+    tpr = TPR_FALLBACK / "system_gmx2026.tpr"
+    try:
+        mda.Universe(str(tpr))
+    except ValueError:
+        pass
+    else:
+        pytest.skip("this MDAnalysis reads the GROMACS 2026 TPR")
+    folder = tmp_path / "runs" / "water"
+    config = write_simulation_config(folder, scratch=tmp_path / "scratch")
+    data = yaml.safe_load(config.read_text())
+    data["engine"] = "gromacs"
+    data["gromacs"] = {"analysis_topology": "system.top"}
+    config.write_text(yaml.safe_dump(data, sort_keys=False))
+    (folder / "test.pdb").write_text("REMARK input\nEND\n")
+    for replicate in (1, 2):
+        working = SimulationConfig.from_yaml(config).get_working_directory(replicate) / "gromacs"
+        working.mkdir(parents=True)
+        for source in [*TPR_FALLBACK.glob("*.itp"), TPR_FALLBACK / "system.top"]:
+            shutil.copy(source, working / source.name)
+        shutil.copy(tpr, working / "prod.tpr")
+        universe = universe_from_gromacs_top(working / "system.top", TPR_FALLBACK / "system.gro")
+        universe.dimensions = [30.0, 30.0, 30.0, 90.0, 90.0, 90.0]
+        universe.atoms.chainIDs = np.where(universe.atoms.resnames == "MOH", "A", "B")
+        universe.atoms.write(str(working / "solvated_system.pdb"))
+        start = universe.atoms.positions.copy()
+        with mda.Writer(str(working / "prod.xtc"), n_atoms=len(start), dt=100.0) as writer:
+            for k in range(10):
+                universe.atoms.positions = start * (1.0 + 0.01 * (k + replicate))
+                universe.trajectory.ts.frame = k
+                writer.write(universe.atoms)
+    root = tmp_path / "my_study"
+    create_study(root, conditions={"Water": config}, equilibration="0.25ns")
+    text = (
+        (root / "study.yaml")
+        .read_text()
+        .replace("analyses: {}", "analyses:\n  rg: {selection: chainID A}")
+    )
+    text += METADATA.replace("[No polymer, Polymer]", "[Water]")
+    (root / "study.yaml").write_text(text)
+    _git(root, "commit", "-qam", "Add analyses and metadata")
+    result = CliRunner().invoke(
+        cli, ["analyze", "rg", "--study", str(root), "--no-eq-check", "--no-plots"]
+    )
+    assert result.exit_code == 0, result.output
+    return root
+
+
+def test_a_gromacs_deposit_reproduces_a_chain_selection_without_a_readable_tpr(
+    unreadable_tpr_study: Path, tmp_path: Path
+) -> None:
+    """The trajectory list holds the topology and chain-ID files the analysis read."""
+    import csv
+
+    result = freeze(unreadable_tpr_study)
+    authors = pz.Study(unreadable_tpr_study).results("rg").report.conditions[0].mean
+    copy = shutil.copytree(result.deposit / "study", tmp_path / "reproducer" / "my_study")
+    download = tmp_path / "download"
+    with (result.deposit / "trajectories.csv").open() as listed:
+        for row in csv.DictReader(listed):
+            target = download / row["path"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(tmp_path / "scratch" / row["path"], target)
+    located = CliRunner().invoke(
+        cli, ["study", "locate", str(download), "--study", str(copy), "--verify"]
+    )
+    assert located.exit_code == 0, located.output
+    recomputed = CliRunner().invoke(
+        cli,
+        ["analyze", "rg", "--study", str(copy), "--recompute", "--no-eq-check", "--no-plots"],
+    )
+    assert recomputed.exit_code == 0, recomputed.output
+    assert pz.Study(copy).results("rg").report.conditions[0].mean == pytest.approx(authors)
 
 
 def _zip_names(deposit: Path, part: str) -> set[str]:
@@ -774,9 +952,11 @@ def test_an_unknown_package_version_is_not_recorded_and_the_lock_file_is_hashed(
 ) -> None:
     """A package reporting version 0.0.0 is recorded as unknown; the deposited pixi.lock pins it."""
     import hashlib
+    import sys
 
     import numpy
 
+    monkeypatch.setattr(sys, "prefix", str(study.parent / "env"))
     (study / "environment" / "pixi.lock").write_text("version: 6\n")
     _git(study, "add", "environment/pixi.lock")
     _git(study, "commit", "-qm", "Lock file")
@@ -784,6 +964,39 @@ def test_an_unknown_package_version_is_not_recorded_and_the_lock_file_is_hashed(
     versions = freeze(study).manifest["versions"]
     assert versions["numpy"] is None
     assert versions["pixi.lock"] == hashlib.sha256(b"version: 6\n").hexdigest()
+    assert versions["pixi.lock_file"] == "environment/pixi.lock (deposited)"
+
+
+def test_versions_come_from_the_pixi_environment_that_runs_freeze(
+    study: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 0.0.0 package has its conda record's version, OpenMM its full version, and the
+    pixi.lock of the running workspace pins the environment when the study has none."""
+    import hashlib
+    import sys
+
+    import numpy
+
+    from polyzymd.utils.version import get_openmm_version
+
+    workspace = study.parent / "workspace"
+    prefix = workspace / ".pixi" / "envs" / "analysis"
+    (prefix / "conda-meta").mkdir(parents=True)
+    (prefix / "conda-meta" / "numpy-9.9.1-py312_0.json").write_text(
+        '{"name": "numpy", "version": "9.9.1"}'
+    )
+    (prefix / "conda-meta" / "numpy-base-1.0-py312_0.json").write_text(
+        '{"name": "numpy-base", "version": "1.0"}'
+    )
+    (prefix / "conda-meta" / "numpy-broken.json").write_text("[]")
+    (workspace / "pixi.lock").write_text("version: 6\n")
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(numpy, "__version__", "0.0.0")
+    versions = freeze(study).manifest["versions"]
+    assert versions["numpy"] == "9.9.1"
+    assert versions["openmm"] == get_openmm_version()
+    assert versions["pixi.lock"] == hashlib.sha256(b"version: 6\n").hexdigest()
+    assert "not deposited" in versions["pixi.lock_file"]
 
 
 def test_a_non_ascii_file_name_is_deposited(study: Path) -> None:
@@ -829,7 +1042,7 @@ def test_the_manifest_lists_the_gitignore_written_by_a_first_freeze(study: Path)
     _git(study, "commit", "-qm", "No .gitignore")
     result = freeze(study)
     assert ".gitignore" in result.manifest["files"]
-    assert _zip_names(result.deposit, "study") - set(GENERATED) == set(result.manifest["files"])
+    assert _zip_names(result.deposit, "study") - {"manifest.json"} == set(result.manifest["files"])
 
 
 def test_freeze_refuses_a_condition_config_outside_the_study(tmp_path: Path) -> None:
@@ -881,10 +1094,9 @@ def test_freeze_ignores_the_polymer_cache_of_a_build(study: Path) -> None:
     assert ".polymer_cache/chain.sdf" not in _git(study, "ls-tree", "-r", "--name-only", "HEAD")
 
 
-def test_the_deposited_copied_config_names_no_runs_path() -> None:
-    """The header of a copied config, which says where the runs go, leaves the deposit."""
-    text = (
-        "# Copied by polyzymd from config.yaml\n"
+def test_a_deposited_config_keeps_relative_directories() -> None:
+    """Only absolute directories and the path of an old copy header leave a deposited config."""
+    body = (
         "#   the runs go into ../../runs/water (relative to this file) unless you set\n"
         "#   scratch_directory in config.yaml.\n"
         "name: water\n"
@@ -892,6 +1104,74 @@ def test_the_deposited_copied_config_names_no_runs_path() -> None:
         '  projects_directory: "../../runs/water"\n'
         "  scratch_directory: null\n"
     )
-    deposited = without_machine_paths(text)
-    assert "../../runs" not in deposited and "the runs go into" not in deposited
-    assert deposited.startswith("# Copied by polyzymd from config.yaml\nname: water\n")
+    copied = "# Copied by polyzymd from config.yaml\n" + body
+    assert without_machine_paths(copied) == copied
+    old = "# Copied by polyzymd study init from /home/u/runs/config.yaml\n" + body
+    assert without_machine_paths(old) == copied
+    for value in ("/scratch/u/water", "$SCRATCH/water", "${SCRATCH}/water"):
+        absolute = copied.replace("null", value)
+        assert yaml.safe_load(without_machine_paths(absolute))["output"] == {
+            "projects_directory": "../../runs/water",
+            "scratch_directory": "data",
+        }
+
+
+def test_every_deposited_file_matches_its_manifest_entry(study: Path, tmp_path: Path) -> None:
+    """The deposit verifies against its manifest, configs with absolute directories included.
+
+    The polymer config gets absolute directories, which the deposit removes;
+    the other keeps the relative ones study init wrote, which it keeps.
+    """
+    import hashlib
+    import zipfile
+
+    config = study / "conditions" / "polymer" / "config.yaml"
+    data = yaml.safe_load(config.read_text())
+    data["output"] = {
+        "projects_directory": str(tmp_path / "jobs"),
+        "scratch_directory": str(tmp_path / "scratch" / "polymer"),
+    }
+    config.write_text(yaml.safe_dump(data, sort_keys=False))
+    # CRLF line ends, which the deposit keeps as the manifest hashed them.
+    other = study / "conditions" / "no_polymer" / "config.yaml"
+    kept = other.read_text().replace("\n", "\r\n").encode()
+    other.write_bytes(kept)
+    _git(study, "commit", "-qam", "Absolute directories")
+    result = freeze(study)
+    manifest = result.manifest
+
+    def entry(content: bytes) -> dict:
+        return {"size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+
+    (archive,) = result.upload.glob("*-study-v*.zip")
+    with zipfile.ZipFile(archive) as opened:
+        members = {
+            name.removeprefix("study/"): opened.read(name)
+            for name in opened.namelist()
+            if not name.endswith("/")
+        }
+    assert members["conditions/no_polymer/config.yaml"] == kept
+    assert str(tmp_path).encode() not in members["conditions/polymer/config.yaml"]
+    for name in ("md_checklist.yaml", "system_summary.csv", "CITATION.cff", ".zenodo.json"):
+        assert name in manifest["files"], name
+    for name, content in members.items():
+        if name != "manifest.json":
+            assert manifest["files"].get(name) == entry(content), name
+    replicates = [r for c in manifest["conditions"].values() for r in c["replicates"].values()]
+    # An engine input's or final frame's path names it in the deposit and in its zip.
+    recorded = {
+        f["path"]: {"size": f["size"], "sha256": f["sha256"]}
+        for r in replicates
+        for f in [*r.get("engine_inputs", []), r.get("final_frame")]
+        if f
+    }
+    zipped = {}
+    for part in ("engine_inputs", "final_frames"):
+        with zipfile.ZipFile(result.upload / f"{part}.zip") as opened:
+            for name in opened.namelist():
+                if not name.endswith("/"):
+                    zipped[name] = entry(opened.read(name))
+    assert zipped == recorded
+    for path, recorded_entry in recorded.items():
+        assert entry((result.deposit / path).read_bytes()) == recorded_entry, path
+    assert (result.upload / "CITATION.cff").read_bytes() == members["CITATION.cff"]

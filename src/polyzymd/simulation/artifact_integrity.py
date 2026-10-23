@@ -1,7 +1,8 @@
-"""Integrity checks and transactional publication for OpenMM build artifacts."""
+"""Integrity checks and transactional publication for build artifacts."""
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -73,6 +74,66 @@ def _atomic_write(path: Path, data: bytes) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
+def _manifest(
+    config: Any,
+    particle_count: int,
+    openmm_version: str | None,
+    provenance: dict[str, Any] | None,
+    artifacts: dict[str, Path],
+) -> dict[str, Any]:
+    """Return a build manifest; ``artifacts`` maps each recorded path to the file to hash."""
+    from polyzymd.utils.version import build_versions, get_polyzymd_version
+
+    return {
+        "schema_version": 1,
+        "build_uuid": str(uuid.uuid4()),
+        "config_hash": config_hash(config),
+        "particle_count": int(particle_count),
+        "openmm_version": openmm_version,
+        **build_versions(),
+        "polyzymd_version": get_polyzymd_version(),
+        "provenance": dict(provenance or {}),
+        "artifacts": {
+            name: {"path": name, "sha256": file_sha256(path, use_cache=False)}
+            for name, path in artifacts.items()
+        },
+    }
+
+
+def write_gromacs_build_manifest(
+    replicate_dir: Path,
+    gromacs_dir: Path,
+    config: Any,
+    particle_count: int,
+    provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write ``build_manifest.json`` for a GROMACS build into the replicate folder.
+
+    It has the keys of an OpenMM build's manifest, with ``openmm_version``
+    null and the OpenFF versions that parameterized the system. The artifacts are ``solvated_system.pdb``, the exported
+    ``<prefix>.gro``, and the topology, the files it includes and the MDP
+    files (:func:`polyzymd.analyses.shared.gromacs.run_input_files`), each
+    by its path relative to the replicate folder.
+    """
+    from polyzymd.analyses.shared.gromacs import run_input_files, system_prefix
+
+    candidates = [
+        replicate_dir / _BUILD_ARTIFACTS[0],
+        gromacs_dir / _BUILD_ARTIFACTS[0],
+        gromacs_dir / f"{system_prefix(config)}.gro",
+        *run_input_files(gromacs_dir, config),
+    ]
+    artifacts = {
+        path.relative_to(replicate_dir).as_posix(): path for path in candidates if path.is_file()
+    }
+    manifest = _manifest(config, particle_count, None, provenance, artifacts)
+    _atomic_write(
+        replicate_dir / MANIFEST_NAME,
+        (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
+    )
+    return manifest
+
+
 def publish_build_bundle(
     working_dir: Path,
     topology: Any,
@@ -90,8 +151,6 @@ def publish_build_bundle(
     from openmm import XmlSerializer, version
     from openmm.app import PDBFile
 
-    from polyzymd.utils.version import get_polyzymd_version
-
     working_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".build-bundle-", dir=working_dir) as staging_text:
         staging = Path(staging_text)
@@ -104,22 +163,13 @@ def publish_build_bundle(
         if write_analysis_topology(topology, system, positions, staging / ANALYSIS_TOPOLOGY_NAME):
             written.append(ANALYSIS_TOPOLOGY_NAME)
 
-        manifest = {
-            "schema_version": 1,
-            "build_uuid": str(uuid.uuid4()),
-            "config_hash": config_hash(config),
-            "particle_count": int(system.getNumParticles()),
-            "openmm_version": version.full_version,
-            "polyzymd_version": get_polyzymd_version(),
-            "provenance": dict(provenance or {}),
-            "artifacts": {
-                name: {
-                    "path": name,
-                    "sha256": file_sha256(staging / name, use_cache=False),
-                }
-                for name in written
-            },
-        }
+        manifest = _manifest(
+            config,
+            system.getNumParticles(),
+            version.full_version,
+            provenance,
+            {name: staging / name for name in written},
+        )
         previous = {
             name: (working_dir / name).read_bytes()
             for name in (*_BUILD_ARTIFACTS, *_OPTIONAL_ARTIFACTS, MANIFEST_NAME)
@@ -241,12 +291,19 @@ def validate_openmm_identity(
 
 
 def assert_rebuild_allowed(working_dir: Path) -> None:
-    """Refuse replacement once any simulation phase or production artifact exists."""
-    markers = [working_dir / "simulation_progress.json"]
-    markers.extend(working_dir.glob("minimization*"))
+    """Refuse replacement once an OpenMM or GROMACS run has written output.
+
+    GROMACS run outputs live in ``working_dir/gromacs``; the ``.mdp`` files
+    there are build outputs.
+    """
+    markers = [*working_dir.glob("minimization*")]
     markers.extend(working_dir.glob("equilibration_*"))
     markers.extend(working_dir.glob("production*"))
-    active = [path for path in markers if path.exists()]
+    for pattern in ("em.*", "eq_[0-9][0-9].*", "prod*", "state.cpt"):
+        markers.extend(
+            path for path in (working_dir / "gromacs").glob(pattern) if path.suffix != ".mdp"
+        )
+    active = sorted(markers)
     if active:
         raise ArtifactIntegrityError(
             f"Refusing to rebuild started campaign {working_dir}; found {active[0]}. "
@@ -254,19 +311,70 @@ def assert_rebuild_allowed(working_dir: Path) -> None:
         )
 
 
+# Lock files this process holds through replicate_lock().  A POSIX lock is
+# dropped when the process closes *any* descriptor of the file, so this
+# process must never open a lock file it holds.
+_HELD_LOCKS: set[Path] = set()
+
+
+# lockf() fails with one of these when another process holds the lock.
+_LOCK_HELD_ERRNOS = (errno.EAGAIN, errno.EACCES)
+
+
+def _lock_path(working_dir: Path) -> Path:
+    # resolve(): another spelling of the same folder must find the held lock.
+    return (Path(working_dir) / ".polyzymd.lock").resolve()
+
+
 @contextmanager
 def replicate_lock(working_dir: Path) -> Iterator[None]:
-    """Hold a non-blocking per-replicate build/run lock."""
+    """Hold a non-blocking per-replicate build/run lock.
+
+    The lock is a POSIX record lock (``fcntl.lockf``).  GPFS and NFS share
+    these between nodes, while ``flock`` locks are seen only on the node that
+    took them.  The kernel releases the lock when the holding process dies,
+    however it is killed.
+    """
     working_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = working_dir / ".polyzymd.lock"
+    lock_path = _lock_path(working_dir)
+    if lock_path in _HELD_LOCKS:
+        raise ArtifactIntegrityError(
+            f"Another PolyzyMD build or run holds the replicate lock: {lock_path}"
+        )
     with lock_path.open("a+") as stream:
         try:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
+            fcntl.lockf(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno not in _LOCK_HELD_ERRNOS:
+                raise
             raise ArtifactIntegrityError(
                 f"Another PolyzyMD build or run holds the replicate lock: {lock_path}"
             ) from exc
+        _HELD_LOCKS.add(lock_path)
         try:
             yield
         finally:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            _HELD_LOCKS.discard(lock_path)
+            fcntl.lockf(stream.fileno(), fcntl.LOCK_UN)
+
+
+def replicate_lock_held_elsewhere(working_dir: Path) -> bool | None:
+    """Return whether another process holds the replicate lock of *working_dir*.
+
+    A run holds this lock for as long as its process lives, so the answer
+    cannot be stale.  Returns ``False`` when this process holds the lock or
+    no lock file exists, and ``None`` when the lock file cannot be opened.
+    """
+    lock_path = _lock_path(working_dir)
+    if lock_path in _HELD_LOCKS or not lock_path.exists():
+        return False
+    try:
+        with lock_path.open("a+") as stream:
+            try:
+                fcntl.lockf(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                return True if exc.errno in _LOCK_HELD_ERRNOS else None
+            fcntl.lockf(stream.fileno(), fcntl.LOCK_UN)
+            return False
+    except OSError:
+        return None

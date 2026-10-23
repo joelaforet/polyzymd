@@ -10,7 +10,8 @@ one figure. They read the values already held by those objects,
 style each figure through :mod:`polyzymd.analyses.shared.plotting` and a
 :class:`~polyzymd.config.analysis_settings.PlotSettings`, and save it with
 :func:`~polyzymd.analyses.shared.plotting.save_figure`. Every condition and
-every replicate is drawn. matplotlib is imported only when a figure is drawn.
+every replicate is drawn. matplotlib is imported only when a figure is drawn,
+and figures are made without pyplot, so no display is needed.
 """
 
 from __future__ import annotations
@@ -72,6 +73,17 @@ def _note(fig: Any, text: str) -> None:
 _TESTS = {"welch_t": "Welch t", "student_t": "Student t (pooled variance)"}
 
 
+def _subplots(*grid: int, figsize: tuple, **kwargs: Any) -> tuple[Any, Any]:
+    """Return a new figure and its axes, made without pyplot.
+
+    The figure is only saved, so it needs no display and no GUI backend.
+    """
+    from matplotlib.figure import Figure
+
+    fig = Figure(figsize=figsize)
+    return fig, fig.subplots(*grid, **kwargs)
+
+
 def _save(fig: Any, output_dir: Path, name: str, settings: Any) -> Path:
     """Save ``fig`` as ``<output_dir>/<name>.<format>`` and close it."""
     from polyzymd.analyses.shared.plotting import get_output_path, save_figure
@@ -101,7 +113,6 @@ def plot_timeseries(
     Path
         The saved figure file.
     """
-    import matplotlib.pyplot as plt
     import numpy as np
 
     from polyzymd.analyses.shared.loader import convert_time, parse_time_string
@@ -110,7 +121,7 @@ def plot_timeseries(
     settings, labels, colors = _setup(source, plot_settings)
     equilibration = source.study[labels[0]].equilibration
     window_ns = convert_time(*parse_time_string(equilibration), "ns")
-    fig, ax = plt.subplots(figsize=(12, 5))
+    fig, ax = _subplots(figsize=(12, 5))
     starts, counts = [], set()
     for label in labels:
         items, color = source.series[label], colors[label]
@@ -308,7 +319,6 @@ def plot_distributions(
     ProtocolError
         If the series do not share one unit.
     """
-    import matplotlib.pyplot as plt
 
     from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend
 
@@ -318,7 +328,7 @@ def plot_distributions(
     titles = list(titles) if titles is not None else [item.name for item in series]
     style = _setup(series[0], plot_settings)
     settings, labels = style[0], style[1]
-    fig, axes = plt.subplots(
+    fig, axes = _subplots(
         len(series),
         1,
         figsize=(10, 6 if len(series) == 1 else 3 * len(series)),
@@ -368,7 +378,6 @@ def plot_condition_values(
     Path
         The saved figure file.
     """
-    import matplotlib.pyplot as plt
     import numpy as np
 
     from polyzymd.analyses.shared.plotting import (
@@ -383,7 +392,7 @@ def plot_condition_values(
     data = [values.values[label] for label in labels]
     stats = [mean_sem_ci(entry) for entry in data]
     positions, theme = np.arange(len(labels)), settings.theme
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = _subplots(figsize=(10, 6))
     ax.bar(
         positions,
         [item.mean for item in stats],
@@ -444,7 +453,6 @@ def plot_profile(
     Path
         The saved figure file.
     """
-    import matplotlib.pyplot as plt
     import numpy as np
 
     from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend, band_half_widths
@@ -456,7 +464,7 @@ def plot_profile(
         ticks = None
     except (TypeError, ValueError):
         x, ticks = np.arange(len(values.labels), dtype=float), [str(k) for k in values.labels]
-    fig, ax = plt.subplots(figsize=(14, 5))
+    fig, ax = _subplots(figsize=(14, 5))
     counts = set()
     for label in labels:
         matrix, color = np.vstack(values.values[label]), colors[label]
@@ -519,7 +527,6 @@ def plot_decomposition(
     Path
         The saved figure file.
     """
-    import matplotlib.pyplot as plt
     import numpy as np
 
     from polyzymd.analyses.shared.plotting import (
@@ -534,7 +541,7 @@ def plot_decomposition(
     settings, labels, _ = _setup(results[0].source, plot_settings)
     colors = get_palette_colors(len(parts), settings)
     x = np.asarray(results[0].labels, dtype=float)
-    fig, axes = plt.subplots(
+    fig, axes = _subplots(
         len(labels), 1, figsize=(14, 2.6 * len(labels) + 1), sharex=True, squeeze=False
     )
     counts = set()
@@ -592,7 +599,6 @@ def plot_differences(
     Path
         The saved figure file.
     """
-    import matplotlib.pyplot as plt
     import numpy as np
 
     from polyzymd.analyses.shared.plotting import apply_axis_style, uncertainty_footnote_text
@@ -603,7 +609,7 @@ def plot_differences(
     except (TypeError, ValueError):
         where = {str(k): float(i) for i, k in enumerate(values.labels)}
     conditions = list(dict.fromkeys(row.b for row in report.pairwise))
-    fig, axes = plt.subplots(
+    fig, axes = _subplots(
         len(conditions),
         1,
         figsize=(14, 2.6 * len(conditions) + 1),
@@ -681,7 +687,6 @@ def plot_values(
     ProtocolError
         If the results do not share one unit and one set of conditions.
     """
-    import matplotlib.pyplot as plt
     import numpy as np
 
     from polyzymd.analyses.exceptions import ProtocolError
@@ -707,7 +712,7 @@ def plot_values(
         )
         for label, row, cells in zip(conditions, data, stats, strict=True)
     ]
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = _subplots(figsize=(10, 6))
     positions = np.arange(len(results))
     grouped_bars(
         ax,

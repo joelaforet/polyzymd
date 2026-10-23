@@ -50,6 +50,7 @@ Edit `src/polyzymd/data/cosolvent_library.py` and add a new item to
     smiles="C(=O)N",
     density=1.133,
     molar_mass=45.04,
+    residue_name="FMD",
     common_names=("methanamide",),
 ),
 ```
@@ -60,6 +61,8 @@ Use:
 - a valid SMILES string
 - a literature or database-backed density
 - a molar mass in g/mol
+- a 3-letter residue name that is not an amino-acid, nucleic-acid, water or
+  ion name (the PDB chemical-component code, where there is one)
 - common alternative names that should resolve to the same solvent
 
 ### 2. Generate the solvent SDF

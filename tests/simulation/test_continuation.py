@@ -602,3 +602,125 @@ def test_continuation_seeds_the_barostat_of_the_previous_segment():
     mgr._add_barostat_if_needed()
     (barostat,) = mgr._system.getForces()
     assert barostat.getRandomNumberSeed() == dynamics_seed(3, "barostat:production:2")
+
+
+def test_interrupted_continuation_segment_records_finish_time_and_seeds(tmp_path):
+    """An interrupted segment records when it stopped and the seeds its dynamics ran with."""
+    openmm = pytest.importorskip("openmm")
+    from types import SimpleNamespace
+
+    from polyzymd.simulation.continuation import ContinuationManager
+    from polyzymd.simulation.progress import (
+        SegmentRecord,
+        SimulationProgress,
+        load_progress,
+        save_progress,
+    )
+
+    start = "2026-10-07T07:00:00+00:00"
+    save_progress(
+        tmp_path,
+        SimulationProgress(
+            config_path="c",
+            total_steps_requested=100,
+            total_samples_requested=1,
+            segments=[SegmentRecord(index=1, started_at=start)],
+        ),
+    )
+    integrator = openmm.LangevinMiddleIntegrator(300.0, 1.0, 0.002)
+    integrator.setRandomNumberSeed(41)
+    system = openmm.System()
+    barostat = openmm.MonteCarloBarostat(1.0, 300.0)
+    barostat.setRandomNumberSeed(42)
+    system.addForce(barostat)
+
+    mgr = ContinuationManager.__new__(ContinuationManager)
+    mgr._working_dir = tmp_path
+    mgr._segment_index = 1
+    mgr._simulation = SimpleNamespace(integrator=integrator, system=system)
+    mgr._frame_record = {}
+    mgr._tracker = None
+    mgr._update_progress_interrupted(
+        steps_done=10, total_steps=100, duration_ns=0.2, timestep_fs=2.0
+    )
+
+    (segment,) = load_progress(tmp_path).segments
+    assert segment.started_at == start
+    assert segment.finished_at > start
+    assert segment.seeds == {"integrator": 41, "barostat": 42}
+
+
+@pytest.mark.parametrize(
+    ("settings", "integrator_name", "barostat_frequency"),
+    [
+        (
+            {"ensemble": "NVT", "thermostat": "Langevin", "thermostat_timescale": 2.0},
+            "LangevinIntegrator",
+            None,
+        ),
+        (
+            {"ensemble": "NPT", "barostat": "MC", "barostat_frequency": 50},
+            "LangevinMiddleIntegrator",
+            50,
+        ),
+    ],
+    ids=["nvt langevin", "npt every 50 steps"],
+)
+def test_a_segment_continues_with_the_dynamics_of_production(
+    tmp_path, settings, integrator_name, barostat_frequency
+):
+    """A continuation segment rebuilds the thermostat and barostat production saved."""
+    openmm = pytest.importorskip("openmm")
+    from polyzymd.simulation.continuation import ContinuationManager
+    from tests.simulation.test_runner import _one_atom_runner, _production_phase, _run_production
+
+    runner, _, _ = _run_production(tmp_path, _production_phase(**settings))
+    manager = ContinuationManager.__new__(ContinuationManager)
+    manager._replicate = None
+    manager._segment_index = 1
+    manager._param_dict = json.loads(
+        (tmp_path / "production_0" / "production_0_parameters.json").read_text()
+    )
+    manager._system = _one_atom_runner(tmp_path / "fresh", replicate=None)._system
+
+    integrator = manager._create_integrator()
+    manager._add_barostat_if_needed()
+
+    assert type(integrator).__name__ == integrator_name
+    friction = 1.0 / settings.get("thermostat_timescale", 1.0)
+    assert integrator.getFriction()._value == pytest.approx(friction)
+    barostats = [
+        force
+        for force in manager._system.getForces()
+        if isinstance(force, openmm.MonteCarloBarostat)
+    ]
+    assert [b.getFrequency() for b in barostats] == (
+        [barostat_frequency] if barostat_frequency else []
+    )
+    saved = (tmp_path / "production_0" / "production_0_system.xml").read_text()
+    assert ("MonteCarloBarostat" in saved) is (barostat_frequency is not None)
+
+
+def test_saved_dynamics_name_what_the_chain_started_with(tmp_path):
+    """saved_dynamics reads the ensemble, thermostat and friction of segment 0's parameters."""
+    pytest.importorskip("openmm")
+    from polyzymd.simulation.continuation import ContinuationManager
+    from tests.simulation.test_runner import _production_phase, _run_production
+
+    _run_production(
+        tmp_path, _production_phase(ensemble="NVT", thermostat="Langevin", thermostat_timescale=2.0)
+    )
+    params = json.loads((tmp_path / "production_0" / "production_0_parameters.json").read_text())
+    manager = ContinuationManager.__new__(ContinuationManager)
+    manager._param_dict = params
+    assert manager.saved_dynamics() == {
+        "ensemble": "NVT",
+        "thermostat": "Langevin",
+        "friction": 0.5,
+    }
+
+    # Parameters written before the thermostat was recorded ran LangevinMiddle.
+    del params["__values__"]["thermo_params"]["__values__"]["thermostat_params"]["__values__"][
+        "thermostat"
+    ]
+    assert manager.saved_dynamics()["thermostat"] == "LangevinMiddle"

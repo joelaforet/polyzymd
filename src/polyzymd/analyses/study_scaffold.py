@@ -137,10 +137,13 @@ RESERVED_FOLDERS = (
 
 
 def check_label(label: str, what: str) -> None:
-    """Refuse a study or condition ``label`` whose folder name is in :data:`RESERVED_FOLDERS`.
+    """Refuse an empty study or condition ``label``, or one whose folder name is reserved.
 
-    ``what`` (``"study"`` or ``"condition"``) names the label in the message.
+    Reserved folder names are those in :data:`RESERVED_FOLDERS`. ``what``
+    (``"study"`` or ``"condition"``) names the label in the message.
     """
+    if not label.strip():
+        raise ProtocolError(f"The {what} label is empty.", hint=f"Give the {what} a name.")
     name = condition_folder(label)
     if name in RESERVED_FOLDERS:
         raise ProtocolError(
@@ -601,19 +604,27 @@ def add_condition(
                 hint=f"Use one of: {', '.join(map(str, conditions)) or 'none yet'}.",
             )
         config, _ = _condition(source, conditions[source], file)
-    if config is not None:
-        copy_condition(Path(config), folder, runs_folder(root, label))
-        if source is None:
-            record_data_location(root, label, Path(config))
-    else:
-        new_condition(folder, runs_folder(root, label))
+    # A failure removes the condition folder and restores study.yaml, so the
+    # study is left as it was.
+    text = file.read_text()
+    try:
+        if config is not None:
+            copy_condition(Path(config), folder, runs_folder(root, label))
+        else:
+            new_condition(folder, runs_folder(root, label))
+        _list_entry(file, "conditions", label, str((folder / "config.yaml").relative_to(root)))
+        if label not in (_read_yaml(file).get("conditions") or {}):
+            raise ProtocolError(
+                f"{file}: the condition {label!r} was not listed under conditions:.",
+                hint="Add it under conditions: by hand.",
+            )
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        file.write_text(text)
+        raise
+    if config is not None and source is None:
+        record_data_location(root, label, Path(config))
     ignore_runs(runs_home(root))
-    _list_entry(file, "conditions", label, str((folder / "config.yaml").relative_to(root)))
-    if label not in (_read_yaml(file).get("conditions") or {}):
-        raise ProtocolError(
-            f"{file}: the condition {label!r} was not listed under conditions:.",
-            hint="Add it under conditions: by hand.",
-        )
     return folder / "config.yaml"
 
 
@@ -635,12 +646,10 @@ def _read_yaml(file: Path) -> dict:
 def _list_entry(file: Path, block: str, label: str, path: str) -> None:
     """Insert ``label: path`` as the last entry of the top-level ``block:`` of ``file``, keeping the rest."""
     import json
-    import re
 
     lines = file.read_text().splitlines()
-    entry = (
-        f"  {json.dumps(label) if re.search(r'[:#{}\\[\\],&*!|>%@`]', label) else label}: {path}"
-    )
+    # A JSON string is a double-quoted YAML string, so any label and path read back as written.
+    entry = f"  {json.dumps(label, ensure_ascii=False)}: {json.dumps(path, ensure_ascii=False)}"
     for index, line in enumerate(lines):
         match = re.match(rf"^{block}:\s*(\{{\s*\}})?\s*(#.*)?$", line)
         if match:

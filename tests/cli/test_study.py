@@ -175,3 +175,102 @@ def test_check_names_the_control_of_each_stratum(tmp_path: Path) -> None:
     for kelvin in (300, 330, 360):
         assert f"control none_{kelvin}: replicates" in output
         assert f"condition SBMA_{kelvin}: replicates" in output
+
+
+@pytest.mark.parametrize(
+    "args", [["study", "check"], ["study", "locate", ".", "--study"], ["study", "freeze"]]
+)
+def test_a_missing_study_path_is_an_error_and_writes_no_logs(tmp_path: Path, args) -> None:
+    """A study path that does not exist gives error: and fix:, and no logs/ folder is made."""
+    missing = tmp_path / "sub" / "typo"
+    (tmp_path / "sub").mkdir()
+    result = CliRunner().invoke(cli, [*args, str(missing)])
+    assert result.exit_code == 2, result.output
+    assert "error:" in result.output and "fix:" in result.output
+    assert list((tmp_path / "sub").iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "text", ["- just a list\n", "name: [\n"], ids=["yaml list", "yaml syntax error"]
+)
+def test_check_reports_a_condition_config_it_cannot_read(tmp_path: Path, text: str) -> None:
+    """A condition config that is no YAML mapping is a study error with a fix, not a traceback."""
+    from polyzymd.analyses.study_scaffold import create_study
+
+    created = create_study(tmp_path / "s", new_conditions=["A", "B"], git=False)
+    created.conditions["B"].write_text(text)
+    result = CliRunner().invoke(cli, ["study", "check", str(created.root)])
+    assert result.exit_code == 2, result.output
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert "error: condition B: cannot read" in result.output
+    assert "fix: " in result.output and "polyzymd validate" in result.output
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["def other():\n    pass\n", "raise RuntimeError('boom')\n", "def f(:\n"],
+    ids=["function missing", "raises at import", "syntax error"],
+)
+def test_check_gives_a_fix_for_an_analysis_function_that_does_not_load(
+    tmp_path: Path, code: str
+) -> None:
+    """A user function that cannot be loaded gives a fix: line naming its file and function."""
+    from polyzymd.analyses.study_scaffold import create_study
+
+    created = create_study(tmp_path / "s", new_conditions=["A"], git=False)
+    (created.root / "analyses" / "metrics.py").write_text(code)
+    study = created.root / "study.yaml"
+    study.write_text(
+        study.read_text().replace(
+            "analyses: {}",
+            "analyses:\n  mine:\n    function: analyses/metrics.py:mean_rg\n    kind: per_replicate",
+        )
+    )
+    result = CliRunner().invoke(cli, ["study", "check", str(created.root)])
+    assert result.exit_code == 2, result.output
+    (fix,) = [line for line in result.output.splitlines() if line.startswith("fix:")]
+    assert "metrics.py" in fix and "mean_rg" in fix
+
+
+@pytest.mark.parametrize("label", ["x: y", "a # b", "[1, 2]", "yes", "&b"])
+def test_add_condition_quotes_any_label_in_study_yaml(tmp_path: Path, label: str) -> None:
+    """A label with YAML syntax in it is listed as a quoted string; study.yaml stays readable."""
+    from polyzymd.analyses.study_scaffold import create_study
+
+    created = create_study(tmp_path / "s", new_conditions=["A"], git=False)
+    result = CliRunner().invoke(
+        cli, ["study", "add-condition", label, "--new", "--study", str(created.root)]
+    )
+    assert result.exit_code == 0, result.output
+    assert list(load_study_file(created.root).conditions) == ["A", label]
+
+
+@pytest.mark.parametrize("label", ["", "   "])
+def test_add_condition_refuses_an_empty_label(tmp_path: Path, label: str) -> None:
+    from polyzymd.analyses.study_scaffold import create_study
+
+    created = create_study(tmp_path / "s", new_conditions=["A"], git=False)
+    before = (created.root / "study.yaml").read_text()
+    result = CliRunner().invoke(
+        cli, ["study", "add-condition", label, "--new", "--study", str(created.root)]
+    )
+    assert result.exit_code == 2, result.output
+    assert "error:" in result.output and "fix:" in result.output
+    assert (created.root / "study.yaml").read_text() == before
+    assert sorted(p.name for p in (created.root / "conditions").iterdir()) == ["README.md", "a"]
+
+
+def test_a_failed_add_condition_leaves_nothing_behind(tmp_path: Path) -> None:
+    """add-condition --config of a config that does not load removes the folder it made."""
+    from polyzymd.analyses.study_scaffold import create_study
+
+    created = create_study(tmp_path / "s", new_conditions=["A"], git=False)
+    before = (created.root / "study.yaml").read_text()
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("name: x\nengine: openmm\n")
+    result = CliRunner().invoke(
+        cli, ["study", "add-condition", "Bad", "--config", str(bad), "--study", str(created.root)]
+    )
+    assert result.exit_code == 2, result.output
+    assert not (created.root / "conditions" / "bad").exists()
+    assert (created.root / "study.yaml").read_text() == before

@@ -15,8 +15,10 @@ batch scripts for self-resubmitting MD simulation jobs.
 from __future__ import annotations
 
 import logging
+import os
 import re as _re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
@@ -219,12 +221,52 @@ def _validate_positive_replicate(value: object) -> int:
     return value
 
 
+def pixi_activation_block(env_word: str, manifest_path: str) -> str:
+    """Return the bash lines that activate a job's pixi environment, or stop the job.
+
+    ``eval "$(pixi shell-hook ...)"`` hides a failed hook: the job then runs
+    without the environment, and ``set -e`` does not see it. A job that starts
+    while another job updates the same environment can see such a failure
+    once, so the hook is tried three times, ten seconds apart, before the job
+    stops with an error.
+
+    Parameters
+    ----------
+    env_word : str
+        The environment as one shell word, already quoted (``"$PIXI_ENV"``
+        or a quoted name).
+    manifest_path : str
+        Path of the ``pixi.toml`` the job uses.
+    """
+    from polyzymd.utils.templates import shell_quote
+
+    manifest = shell_quote(manifest_path)
+    return f"""_pixi_active=0
+for _attempt in 1 2 3; do
+    if _pixi_hook="$(pixi shell-hook -e {env_word} --manifest-path {manifest})"; then
+        _pixi_active=1
+        break
+    fi
+    echo "WARNING: pixi shell-hook failed (attempt $_attempt of 3)" >&2
+    [ "$_attempt" -lt 3 ] && sleep "${{POLYZYMD_PIXI_RETRY_SLEEP:-10}}"
+done
+if [ "$_pixi_active" -ne 1 ]; then
+    echo "FATAL: cannot activate the pixi environment of" {manifest} >&2
+    exit 1
+fi
+eval "$_pixi_hook"
+unset _pixi_hook _pixi_active _attempt"""
+
+
 def _discover_manifest_path() -> str:
     """Auto-detect the pixi workspace manifest (``pixi.toml``).
 
-    Strategy: find the ``polyzymd`` executable on ``$PATH`` (installed by
-    pixi into ``.pixi/envs/<name>/bin/``), walk up the directory tree from
-    the resolved binary to locate ``pixi.toml``.
+    Uses ``PIXI_PROJECT_MANIFEST``, which pixi sets in an activated
+    environment, when that environment (``CONDA_PREFIX``) is the one running
+    this Python. Otherwise walks up from the ``polyzymd`` executable on
+    ``$PATH`` (``<workspace>/.pixi/envs/<name>/bin/``), first along the path
+    as found, so a symlinked ``.pixi`` folder still leads to the workspace,
+    then along the resolved path.
 
     Returns
     -------
@@ -236,28 +278,32 @@ def _discover_manifest_path() -> str:
     RuntimeError
         If the manifest cannot be found.
     """
+    active = os.environ.get("PIXI_PROJECT_MANIFEST")
+    prefix = os.environ.get("CONDA_PREFIX")
+    if (
+        active
+        and prefix
+        and Path(active).is_file()
+        and Path(prefix).resolve() == Path(sys.prefix).resolve()
+    ):
+        return str(Path(active).absolute())
     exe = shutil.which("polyzymd")
     if exe is None:
         raise RuntimeError(
             "Cannot auto-detect pixi manifest: 'polyzymd' is not on PATH. "
             "Are you running inside a pixi environment?"
         )
-    # Resolve symlinks → .pixi/envs/<env>/bin/polyzymd
-    exe_path = Path(exe).resolve()
-    # Walk up looking for pixi.toml
-    candidate = exe_path.parent
-    for _ in range(10):  # prevent infinite traversal
-        manifest = candidate / "pixi.toml"
-        if manifest.is_file():
-            return str(manifest)
-        if candidate.parent == candidate:
-            break
-        candidate = candidate.parent
+    exe_path = Path(exe).absolute()
+    for start in (exe_path, exe_path.resolve()):
+        for candidate in start.parents:
+            manifest = candidate / "pixi.toml"
+            if manifest.is_file():
+                return str(manifest)
 
     raise RuntimeError(
         f"Cannot auto-detect pixi manifest: walked up from {exe_path} "
-        "but no pixi.toml found. Ensure you cloned the polyzymd repo and "
-        "installed via 'pixi install'."
+        "but no pixi.toml found. Run polyzymd from the pixi workspace "
+        "(pixi run or pixi shell), or install it there with 'pixi install'."
     )
 
 
@@ -620,6 +666,7 @@ class SlurmScriptGenerator:
                 "configured_exclude": self._config.exclude or "",
                 "pixi_env": self._pixi_env,
                 "manifest_path": manifest_path,
+                "pixi_activation": pixi_activation_block('"$PIXI_ENV"', manifest_path),
                 "config_path": config_path,
                 "replicate": replicate,
                 "working_dir": working_dir,

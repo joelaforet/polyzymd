@@ -40,13 +40,15 @@ PolyzyMD has one environment for each kind of work:
 | Submit OpenMM simulations to SLURM | `build` | `pixi run -e build polyzymd submit -c config.yaml --preset aa100 --pixi-env auto` |
 | Analyze trajectories and make plots | `build`, or the smaller `analysis` | `pixi run -e analysis polyzymd analyze rmsf --study my_study` |
 | Run OpenMM inside a SLURM job on an NVIDIA GPU | a `sim-cuda-*` environment | The job scripts of `polyzymd submit` select it |
+| Run OpenMM on the NVIDIA GPU of this machine, after `polyzymd build` in `build` | a `sim-cuda-*` environment | `pixi run -e sim-cuda-12-6 polyzymd run -c config.yaml -r 1` |
 
 The `build` environment includes the analysis tools, so `polyzymd analyze`
 also runs there. To activate an environment once, instead of a prefix on each
 command, use `pixi shell -e <env>`.
 
-The SLURM job scripts for OpenMM need an NVIDIA GPU. For a CPU, an AMD GPU,
-another cluster or a new driver, see {doc}`../how_to/hardware_platforms`.
+The SLURM job scripts for OpenMM need an NVIDIA GPU. For a local NVIDIA GPU,
+a CPU, an AMD GPU, another cluster or a new driver, see
+{doc}`../how_to/hardware_platforms`.
 
 ## Where to go next
 

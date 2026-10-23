@@ -24,10 +24,12 @@ graph. Fix or curate the structure first.
 ## Check the structure first
 
 Use a small script or text inspection to answer these questions. Some checks are
-OpenFF chemistry checks; chain-ID checks are PolyzyMD input conventions that keep
-protein, substrate, polymer, and solvent roles unambiguous later in the build.
+OpenFF chemistry checks; chain checks keep protein, substrate, polymer, and
+solvent roles unambiguous later in the build.
 
-- Do protein atom records use PolyzyMD chain `A`?
+- Are the protein chains kept as they are? The build puts every protein
+  molecule on PolyzyMD chain `A`; do not join chains into one by editing the
+  PDB.
 - Are substrate, polymer, and solvent chains kept out of the enzyme PDB or placed
   on the expected chains `B`, `C`, and `D+` when relevant?
 - Are TER records present between disconnected protein fragments?
@@ -138,6 +140,7 @@ consistent model and validate it again.
 | `Molecule has more/fewer total formal charges than the matched substructure` | Residue graph, hydrogens, termini, or disulfide state differs from OpenFF's matched template | Inspect the named residue's hydrogens, bonds, and neighboring TER/SSBOND/CONECT records | Correct protonation/connectivity or use a reviewed custom substructure proof of concept | Never ignore the mismatch |
 | Failure around `CYS#0001`, terminal `H`, or N-terminal cysteine | N-terminal cysteine/cystine has terminal hydrogens and disulfide state OpenFF does not match cleanly | Check N-terminal atom names, SG-HG absence, and SG-SG bond | Curate the terminal cystine or use a narrow `NCYX` custom substructure proof of concept | Private OpenFF API; not universal |
 | Residue names include `CYX`, but OpenFF still fails | `CYX` may be treated as a cysteine alias, not a complete public template solution | Compare residue atoms and SG-SG connectivity | Add/verify disulfide connectivity and hydrogens; consider upstream issue/PR | Do not assume renaming to CYX is sufficient |
+| `Input residue A:LYS#0162 contains atoms matching substructures {'PEPTIDE_BOND', 'NO MATCH'}` at the last residue of a chain | The chain ends early (`REMARK 465` lists its last residues), so the last residue has no terminal `OXT`. `polyzymd clean-pdb` does not add it | Check for `OXT` in the last residue: `grep " OXT " file.pdb` | Add only the `OXT` atom with PDBFixer, then run `clean-pdb`: {ref}`add-terminal-oxt` | The simulated chain ends where the coordinates end |
 | Failure near residues reported in `REMARK 465` | Missing-coordinate residues or missing heavy atoms affect chemistry or termini | Read PDB header and visualize gaps | Model missing regions with an external tool when scientifically appropriate | PolyzyMD should receive a curated result |
 
 ## Disulfides
@@ -256,9 +259,10 @@ items:
 
 Tools for this work are PyMOL or ChimeraX for manual editing, PDBFixer with
 a review of each added atom, `pdb4amber`, and MODELLER, AlphaFold or
-SWISS-MODEL to rebuild missing regions. After you curate the file, keep the
-PolyzyMD conventions: all protein atoms on chain `A`, and TER records between
-disconnected fragments. Then validate again with `Topology.from_pdb()`.
+SWISS-MODEL to rebuild missing regions. After you curate the file, keep TER
+records between disconnected fragments and do not join chains into one; the
+build puts every protein molecule on chain `A`. Then validate again with
+`Topology.from_pdb()`.
 
 `polyzymd clean-pdb` only replaces nonstandard residues and adds hydrogens.
 It does not select a copy, remove molecules, set chain IDs or model missing

@@ -43,7 +43,6 @@ simulation_phases:
 output:
   projects_directory: "."
   naming_template: "{enzyme}_{temperature}K_run{replicate}"
-  trajectory_format: "xtc"
 gromacs:
   ntmpi: 1
   ntomp: 2

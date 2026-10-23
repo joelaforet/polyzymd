@@ -10,6 +10,7 @@ matplotlib Axes against the stored values.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -330,6 +331,34 @@ def test_importing_polyzymd_does_not_import_matplotlib() -> None:
         "sys.exit('matplotlib' in sys.modules)"
     )
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
+
+
+def test_figures_are_written_without_the_pyplot_backend(tmp_path) -> None:
+    """Figures are saved without the pyplot backend, so a broken display cannot stop them.
+
+    The backend is set to a module that does not exist: any figure made through
+    pyplot fails, as a Qt backend aborts the process on a broken display.
+    """
+    code = (
+        "import sys; from pathlib import Path; import polyzymd as pz; "
+        "from tests._support.analysis_testkit import replicate_values; "
+        "values = replicate_values({'A': [1.0, 1.2], 'B': [2.0, 2.1]}); "
+        "out = Path(sys.argv[1]); "
+        "values.plot(out, name='single'); pz.plot_values([values], output_dir=out)"
+    )
+    env = dict(
+        os.environ, MPLBACKEND="module://no_such_backend", PYTHONPATH=os.pathsep.join(sys.path)
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(tmp_path)],
+        cwd=Path(__file__).parents[2],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "single.png").is_file() and (tmp_path / "values.png").is_file()
 
 
 class TestReflectedKDE:

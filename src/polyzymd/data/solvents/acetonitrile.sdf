@@ -15,7 +15,7 @@ acetonitrile
   1  6  1  0
 M  END
 >  <metadata>  (1) 
-{"0": {"residue_name": "ACE"}, "1": {"residue_name": "ACE"}, "2": {"residue_name": "ACE"}, "3": {"residue_name": "ACE"}, "4": {"residue_name": "ACE"}, "5": {"residue_name": "ACE"}}
+{"0": {"residue_name": "CCN"}, "1": {"residue_name": "CCN"}, "2": {"residue_name": "CCN"}, "3": {"residue_name": "CCN"}, "4": {"residue_name": "CCN"}, "5": {"residue_name": "CCN"}}
 
 >  <atom.dprop.PartialCharge>  (1) 
 -0.044999999999999991 0.2087 -0.37580000000000002 0.070699999999999999 0.070699999999999999 0.070699999999999999

@@ -195,21 +195,21 @@ verdict: no significant difference in core_rmsf between Water and SBMA (delta +0
 # polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2
 Water  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0
 SBMA  n 3  mean 0.1  sem 0.02887  ci95 -0.02421 to 0.2242  values 0.1, 0.15, 0.05
-Water vs SBMA  delta +0.1  ci95 -0.02421 to 0.2242  p 0.07418  p_adj 0.07418  test welch_t  correction BH  family 1  d 2.828  not_significant
+Water vs SBMA  delta +0.1  ci95 -0.02421 to 0.2242  p na  p_adj na  test welch_t  correction BH  d 2.828  not_testable
 warning: condition Water has the same coverage in every replicate, so its interval is not estimable
 warning: the 95 percent interval of condition SBMA extends past the bounds 0 to 1 of coverage, where a t interval is not reliable
-warning: contacts: polymer_selection 'chainid C' matched no atoms in Water replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.
-verdict: no significant difference in coverage between Water and SBMA (delta +0.1, 95% CI -0.02421 to 0.2242, p_adj 0.07418, p 0.07418, n 3 vs 3; little power: Water has the same value in every replicate)
+warning: contacts: polymer_selection 'chainid C' matched no atoms in Water replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch) and no comparison with it is tested. Check the selection if that condition has them.
+verdict: not testable: coverage for Water vs SBMA, as Water has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3 (n 3 vs 3)
 
 == hydrogen_bonds
 # polyzymd analyze hydrogen_bonds  metric protein_polymer_mean_hbonds  unit none  run protein_polymer_mean_hbonds  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2
 Water  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0
 SBMA  n 3  mean 1.083  sem 0.5069  ci95 -1.098 to 3.264  values 2, 0.25, 1
-Water vs SBMA  delta +1.083  ci95 -1.098 to 3.264  p 0.166  p_adj 0.166  test welch_t  correction BH  family 1  d 1.745  not_significant
+Water vs SBMA  delta +1.083  ci95 -1.098 to 3.264  p na  p_adj na  test welch_t  correction BH  d 1.745  not_testable
 warning: condition Water has the same protein_polymer_mean_hbonds in every replicate, so its interval is not estimable
 warning: the 95 percent interval of condition SBMA extends past the bounds 0 to inf of protein_polymer_mean_hbonds, where a t interval is not reliable
-warning: hydrogen_bonds: second group 'chainid C' matched no atoms in Water replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.
-verdict: no significant difference in protein_polymer_mean_hbonds between Water and SBMA (delta +1.083, 95% CI -1.098 to 3.264, p_adj 0.166, p 0.166, n 3 vs 3; little power: Water has the same value in every replicate)
+warning: hydrogen_bonds: second group 'chainid C' matched no atoms in Water replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch) and no comparison with it is tested. Check the selection if that condition has them.
+verdict: not testable: protein_polymer_mean_hbonds for Water vs SBMA, as Water has no partner: second group 'chainid C' matched no atoms in replicate 1, 2, 3 (n 3 vs 3)
 ```
 
 Your values differ, because each run adds up the forces in a different
@@ -227,25 +227,28 @@ Each analysis prints one line per condition, then one comparison line,
 `Water vs SBMA`. The comparison gives the difference of the means (`delta`)
 with its 95 % interval, the p value of Welch's t test, the p value after the
 {term}`Benjamini-Hochberg` correction (`p_adj`) and the effect size `d`. The
-last word says whether the difference is significant.
+last word says whether the difference is significant, or `not_testable` when
+no test can be made.
 
 - **rg and rmsf.** The radius of gyration and the fluctuation of Trp-cage
   show no significant difference here.
 - **contacts.** `coverage` is the fraction of protein residues that the
   polymer touches on at least one frame. In this run, the chains in `SBMA`
   touch a few percent of the residues in each replicate. `Water` has no
-  polymer, so its coverage is 0.
+  polymer, so its coverage is 0 and the comparison is `not_testable`.
 - **hydrogen_bonds.** In this run, the chains in `SBMA` form about one
   hydrogen bond with the protein per frame. In a run this short, one
-  replicate can show 0.
+  replicate can show 0. As for contacts, `Water` has no polymer, so the
+  comparison is `not_testable`.
 
 Read every `warning:` line. Each says what limits the result:
 
 - `matched no atoms in Water` says that the control has no chain C, so its
-  value is 0 by definition. The warning asks you to check that this is
+  value is 0 by definition. That 0 is not a measurement, so the comparison
+  with `Water` is `not testable`. The warning asks you to check that this is
   expected. Here it is.
-- `the same ... in every replicate` says that `Water` has no variance. The
-  test then has little power, and the verdict says so.
+- `the same ... in every replicate` says that `Water` has no variance, so it
+  has no interval.
 - `extends past the bounds` says that a t interval does not suit the values,
   such as a fraction close to 0.
 - `fewer than 20 effective samples` comes from the four frames of each

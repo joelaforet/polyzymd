@@ -236,6 +236,28 @@ class TestSystemBuilderHomodimerRetention:
         assert {atom.metadata["chain_id"] for atom in enzyme_1.atoms + enzyme_2.atoms} == {"A"}
         assert {atom.metadata["residue_number"] for atom in substrate.atoms} == {"1"}
 
+    def test_chains_joined_in_one_molecule_are_numbered_one_after_the_other(
+        self,
+        fake_openff_topology: type[FakeTopology],
+    ) -> None:
+        """Insulin A and B chains, joined by disulfides, keep apart residues of equal number."""
+        del fake_openff_topology
+        builder = SystemBuilder()
+        insulin = FakeMolecule("insulin", residue_numbers=["6", "7", "7", "6", "7", "7"])
+        for atom, chain in zip(insulin.atoms, ["A", "A", "A", "B", "B", "B"], strict=True):
+            atom.metadata["chain_id"] = chain
+            atom.metadata["residue_name"] = "CYS"
+        builder._enzyme_topology = FakeTopology([insulin])
+        builder._n_enzyme_molecules = 1
+        builder._solvated_topology = builder.combine_solutes()
+
+        builder._assign_pdb_identifiers()
+        builder._assign_pdb_identifiers()
+
+        resids = [atom.metadata["residue_number"] for atom in insulin.atoms]
+        assert resids == ["1", "2", "2", "3", "4", "4"]
+        assert {atom.metadata["chain_id"] for atom in insulin.atoms} == {"A"}
+
     def test_protein_residue_numbering_is_idempotent(
         self,
         fake_openff_topology: type[FakeTopology],
@@ -448,6 +470,7 @@ class TestBuildFromConfigSharesOneBox:
         calls: dict = {}
         sentinel_box = Quantity(__import__("numpy").diag([9.0, 9.0, 9.0]), "nanometer")
 
+        monkeypatch.setattr("polyzymd.config.validation.require_inputs", lambda config: None)
         monkeypatch.setattr(SystemBuilder, "build_enzyme", lambda self, path, templates=None: None)
         monkeypatch.setattr(SystemBuilder, "combine_solutes", lambda self: None)
         monkeypatch.setattr(SystemBuilder, "build_polymers", lambda self, **kwargs: None)
@@ -498,3 +521,22 @@ class TestBuildFromConfigSharesOneBox:
         assert with_polymers["provenance"]["polymer_seed"] == 7
         assert "polymer_seed" not in without["provenance"]
         assert without["provenance"]["packmol_seed"] == 7
+
+
+@pytest.mark.parametrize(
+    ("solvent", "message"),
+    [
+        ({"primary": {"model": "spce"}}, "use model: tip3p for new systems"),
+        ({"ions": {"kcl_concentration": 0.15}}, "use nacl_concentration"),
+    ],
+)
+def test_build_from_config_refuses_what_it_cannot_build(solvent, message):
+    """The Python API refuses spce and KCl as the CLI does, before building anything."""
+    from polyzymd.config.schema import SimulationConfig
+
+    data = TestBuildFromConfigSharesOneBox._config(with_polymers=False).model_dump()
+    data["solvent"] = solvent
+    config = SimulationConfig(**data)
+
+    with pytest.raises(ValueError, match=message):
+        SystemBuilder().build_from_config(config, polymer_seed=1)

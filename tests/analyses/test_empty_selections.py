@@ -274,9 +274,10 @@ CONTACT_RUNS += ["SBM_contact_fraction_residues", "EGM_contact_fraction_residues
 
 
 @pytest.mark.parametrize("run", CONTACT_RUNS)
-def test_contacts_of_a_control_without_polymer_are_zero_and_compared(
+def test_contacts_of_a_control_without_polymer_are_zero_and_not_tested(
     contact_configs, tmp_path, run
 ) -> None:
+    """The control keeps its rows, but its 0 is no measurement, so no comparison is tested."""
     report = _contacts(contact_configs, ["N", "A", "B"], tmp_path, "zero", run)
     alone = _contacts(contact_configs, ["A", "B"], tmp_path, "ref", run)
 
@@ -290,6 +291,18 @@ def test_contacts_of_a_control_without_polymer_are_zero_and_compared(
     assert {row.a for row in report.pairwise} == {"N"}
     assert any(_zero_warning("contacts", "N replicate 1, 2, 3") in t for t in report.warnings)
     assert not any("left out" in text for text in report.warnings)
+    _assert_no_partner(report, "N", "polymer_selection")
+
+
+def _assert_no_partner(report, label: str, selection: str) -> None:
+    """``label`` is recorded as without partner, and every comparison with it is not tested."""
+    assert all(selection in row.no_partner for row in report.conditions if row.label == label)
+    assert all(row.no_partner is None for row in report.conditions if row.label != label)
+    for pair in report.pairwise:
+        assert not pair.testable and pair.p is None and not pair.significant, pair
+        assert label in pair.reason and selection in pair.reason, pair
+    assert report.verdict and all(text.startswith("not testable") for text in report.verdict)
+    assert all(selection in text for text in report.verdict), report.verdict
 
 
 def test_contacts_of_one_replicate_without_polymer_are_zero(contact_configs, tmp_path) -> None:
@@ -454,12 +467,13 @@ HB_COUNTS = ["protein_polymer_mean_hbonds", "protein_polymer_any_fraction"]
 
 
 @pytest.mark.parametrize("run", HB_COUNTS)
-def test_hbonds_of_a_control_without_polymer_are_zero(hb_configs, tmp_path, run) -> None:
+def test_hbonds_of_a_control_without_polymer_are_zero_and_not_tested(hb_configs, tmp_path, run) -> None:
     report = _hbonds(hb_configs, ["N", "A"], tmp_path, "zero", run)
 
     assert _row(report, "N").replicate_values == [0.0, 0.0, 0.0]
     assert report.pairwise and report.pairwise[0].a == "N"
     assert any(_zero_warning("hydrogen_bonds", "N replicate 1, 2, 3") in t for t in report.warnings)
+    _assert_no_partner(report, "N", "second group")
 
 
 def test_hbonds_of_one_replicate_without_polymer_are_zero(hb_configs, tmp_path) -> None:

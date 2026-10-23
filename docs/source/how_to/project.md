@@ -176,9 +176,9 @@ one protein in water varies the temperature:
 
 ```yaml
 conditions:                    # control first
-  300 K: {config: conditions/t300, factors: {temperature_K: 300}}
-  330 K: {config: conditions/t330, factors: {temperature_K: 330}}
-  360 K: {config: conditions/t360, factors: {temperature_K: 360}}
+  300 K: {config: conditions/300_k, factors: {temperature_K: 300}}
+  330 K: {config: conditions/330_k, factors: {temperature_K: 330}}
+  360 K: {config: conditions/360_k, factors: {temperature_K: 360}}
 ```
 
 This study varies the concentration of a co-solvent:
@@ -186,8 +186,8 @@ This study varies the concentration of a co-solvent:
 ```yaml
 conditions:
   Water: {config: conditions/water, factors: {urea_M: 0}}
-  Urea 2 M: {config: conditions/urea_2m, factors: {urea_M: 2}}
-  Urea 4 M: {config: conditions/urea_4m, factors: {urea_M: 4}}
+  Urea 2 M: {config: conditions/urea_2_m, factors: {urea_M: 2}}
+  Urea 4 M: {config: conditions/urea_4_m, factors: {urea_M: 4}}
 ```
 
 ### Factors of two variables
@@ -197,12 +197,12 @@ and the polymer. Each condition names both of its coordinates:
 
 ```yaml
 conditions:                    # control first
-  No polymer 300 K: {config: conditions/none_300, factors: {temperature_K: 300}}
-  No polymer 330 K: {config: conditions/none_330, factors: {temperature_K: 330}}
-  No polymer 360 K: {config: conditions/none_360, factors: {temperature_K: 360}}
-  SBMA 300 K: {config: conditions/sbma_300, factors: {temperature_K: 300, polymer: SBMA}}
-  SBMA 330 K: {config: conditions/sbma_330, factors: {temperature_K: 330, polymer: SBMA}}
-  SBMA 360 K: {config: conditions/sbma_360, factors: {temperature_K: 360, polymer: SBMA}}
+  No polymer 300 K: {config: conditions/no_polymer_300_k, factors: {temperature_K: 300}}
+  No polymer 330 K: {config: conditions/no_polymer_330_k, factors: {temperature_K: 330}}
+  No polymer 360 K: {config: conditions/no_polymer_360_k, factors: {temperature_K: 360}}
+  SBMA 300 K: {config: conditions/sbma_300_k, factors: {temperature_K: 300, polymer: SBMA}}
+  SBMA 330 K: {config: conditions/sbma_330_k, factors: {temperature_K: 330, polymer: SBMA}}
+  SBMA 360 K: {config: conditions/sbma_360_k, factors: {temperature_K: 360, polymer: SBMA}}
 ```
 
 The report compares each condition with the control, `No polymer 300 K`.
@@ -373,7 +373,7 @@ from pathlib import Path
 import polyzymd as pz
 
 root = Path(__file__).parents[1]   # the project folder, from any working directory
-table = pz.Project(root).replicate_table("core_rmsf")
+table = pz.Project(root).replicate_table("rmsf")
 ...
 tier1.to_csv(root / "stats" / "tier1.csv", index=False)
 ```

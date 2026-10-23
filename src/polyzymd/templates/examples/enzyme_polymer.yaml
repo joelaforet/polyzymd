@@ -177,11 +177,6 @@ output:
   
   # Naming template for run directories
   naming_template: "{enzyme}_{substrate}_{polymer_type}_{temperature}K_run{replicate}"
-  
-  # Output options
-  save_checkpoint: true
-  save_state_data: true
-  trajectory_format: "dcd"
 
 # ============================================================================
 # Force Field Selection

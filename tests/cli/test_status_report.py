@@ -172,7 +172,8 @@ def test_error_line_concurrent_and_segment_failed(tmp_path: Path):
         "run-segment exited with code 1\n"
         "FATAL: run-segment failed (exit code 1) — NOT resubmitting\n"
     )
-    assert last_error_line(p).startswith("FATAL: run-segment failed")
+    # The specific cause outranks the generic "run-segment failed" wrapper line.
+    assert last_error_line(p).startswith("Segment 0 failed: Particle coordinate is NaN")
     p.write_text("run-segment exited with code 2\nCONCURRENT: Another job is already running\n")
     assert last_error_line(p).startswith("CONCURRENT:")
 
@@ -589,3 +590,227 @@ def test_query_end_states_parses_sacct():
             "556": "CANCELLED exit 0:15",
         }
     assert query_end_states([]) == {}
+
+
+# ---------------------------------------------------------------------------
+# ETA from file windows (rollover regression)
+# ---------------------------------------------------------------------------
+
+
+def test_rate_uses_file_window_not_bogus_started_at():
+    """Replays CALB 75/25 run3 segment 10: 180 ns recorded as starting at its end."""
+    seg10 = SegmentRecord(
+        index=10,
+        steps_completed=90_000_000,  # 180 ns
+        started_at=(NOW - timedelta(minutes=5)).isoformat(),
+        status=SegmentStatus.INTERRUPTED,
+    )
+    seg11 = SegmentRecord(
+        index=11, steps_completed=10_000, started_at=(NOW - timedelta(minutes=4)).isoformat()
+    )
+    windows = {10: (NOW - timedelta(days=1, minutes=5), NOW - timedelta(minutes=5))}
+    rate = estimate_rate_ns_per_day(
+        _progress([seg10, seg11]), NOW, live=True, window_fn=windows.get
+    )
+    assert rate is not None and abs(rate - 180.0) < 1.0
+    # Without the file window the old path would time 180 ns over 5 minutes.
+    assert estimate_rate_ns_per_day(_progress([seg10, seg11]), NOW, live=True) is None
+
+
+def test_live_rate_needs_an_hour():
+    seg = SegmentRecord(
+        index=0,
+        steps_completed=2_000_000,
+        started_at=(NOW - timedelta(minutes=30)).isoformat(),
+        status=SegmentStatus.RUNNING,
+    )
+    assert estimate_rate_ns_per_day(_progress([seg]), NOW, live=True) is None
+    window = {0: (NOW - timedelta(minutes=30), NOW)}
+    assert estimate_rate_ns_per_day(_progress([seg]), NOW, live=True, window_fn=window.get) is None
+
+
+def test_segment_window_reads_file_mtimes(tmp_path):
+    import os
+
+    from polyzymd.cli.status_report import segment_window
+
+    seg = tmp_path / "production_4"
+    seg.mkdir()
+    (seg / "production_4_parameters.json").write_text("{}")
+    (seg / "production_4_state_data.csv").write_text("x")
+    t = NOW.timestamp()
+    os.utime(seg / "production_4_parameters.json", (t - 86400, t - 86400))
+    os.utime(seg / "production_4_state_data.csv", (t, t))
+    start, end = segment_window(tmp_path, 4)
+    assert (end - start) == timedelta(days=1)
+    assert segment_window(tmp_path, 5) is None
+
+
+# ---------------------------------------------------------------------------
+# death actions
+# ---------------------------------------------------------------------------
+
+
+def test_death_action_mapping(tmp_path):
+    from polyzymd.cli.status_report import death_action
+
+    built = tmp_path / "built"
+    built.mkdir()
+    (built / "system.xml").write_text("x")
+    (built / "solvated_system.pdb").write_text("x")
+    openff = "Segment 0 failed: No module named 'openff'"
+    cases = [
+        ("FATAL: CUDA routing failed after 3 retries", None, "resubmit"),
+        ("CONCURRENT: Another job is already running this replicate", None, "resubmit"),
+        (
+            "Segment 10 failed: Error initializing CUDA: CUDA_ERROR_NOT_INITIALIZED",
+            None,
+            "resubmit",
+        ),
+        ("Segment 2 failed: [Errno 116] Stale file handle", None, "resubmit"),
+        ("slurm: NODE_FAIL exit 0:0", None, "resubmit"),
+        ("slurm: OUT_OF_MEMORY exit 0:125", None, "inspect"),
+        ("Segment 0 failed: Particle coordinate is NaN.", None, "inspect"),
+        ("Validation error: 354 polymer atom(s) lie within 1.00 A", None, "inspect"),
+        # submit always loads the build, so a missing package dies again on resubmit.
+        (openff, str(built), "inspect"),
+        (openff, str(tmp_path / "empty"), "inspect"),
+        ("FATAL: resubmit manually with --exclude=bgpu-a,bgpu-b once a", None, "resubmit"),
+        ("FATAL: cannot activate the pixi environment of /p/pixi.toml", None, "resubmit"),
+        ("FATAL: dependent successor submission failed", None, "resubmit"),
+        (None, None, "inspect"),
+    ]
+    for err, directory, expected in cases:
+        assert death_action(err, directory) == expected, err
+
+
+def test_footer_splits_restart_and_inspect():
+    nan = _rep(
+        1, "dead", last_error="Segment 0 failed: Particle coordinate is NaN.", action="inspect"
+    )
+    gone = _rep(2, "dead", last_error="CONCURRENT: x", action="resubmit")
+    fresh = _rep(3, "dead", last_error="No module named 'openff'", action="inspect")
+    text = render_agent(
+        [SystemReport("SYS", "c.yaml", "/s", [nan, gone, fresh])], now=NOW, preset_hint="p"
+    )
+    assert "polyzymd submit -c c.yaml -r 2 --preset p\n" in text
+    assert "--skip-build" not in text
+    assert "# dead chains that need a look before restarting:\nSYS run1\nSYS run3" in text
+    assert "-r 1" not in text and "-r 3" not in text
+    assert "action: inspect" in text
+
+
+def test_settled_live_segment_beats_older_node():
+    """After a move to a slower GPU, the live rate (not the last node's) drives the ETA."""
+    old = SegmentRecord(index=0, steps_completed=90_000_000, status=SegmentStatus.INTERRUPTED)
+    cur = SegmentRecord(index=1, steps_completed=25_000_000, status=SegmentStatus.RUNNING)  # 50 ns
+    windows = {
+        0: (NOW - timedelta(days=2), NOW - timedelta(days=1)),  # 180 ns/day
+        1: (NOW - timedelta(hours=12), NOW),  # 100 ns/day so far
+    }
+    rate = estimate_rate_ns_per_day(_progress([old, cur]), NOW, live=True, window_fn=windows.get)
+    assert rate is not None and abs(rate - 100.0) < 1.0
+
+
+def test_stopped_and_killed_before_production_verdicts(tmp_path: Path):
+    """A STOP file reads as stopped; a replicate killed in equilibration reads as dead."""
+    from polyzymd.cli.status_report import build_system_report
+
+    scratch = tmp_path / "scratch"
+    logs = tmp_path / "slurm_logs"
+    stopped_dir = scratch / "SYS_run1"
+    killed_dir = scratch / "SYS_run2"
+    built_dir = scratch / "SYS_run3"
+    stopped = _write_progress(
+        stopped_dir, 60_000_000, SimulationStatus.INTERRUPTED, SegmentStatus.INTERRUPTED
+    )
+    (stopped_dir / "STOP").write_text("stopped\n")
+    (killed_dir / "equilibration_0_heating").mkdir(parents=True)
+    built_dir.mkdir(parents=True)
+    not_started = SimulationProgress(total_steps_requested=500_000_000, timestep_fs=2.0)
+
+    cfg = _mock_cfg(scratch, logs)
+    cfg.discover_replicate_dirs.return_value = [(1, stopped_dir), (2, killed_dir), (3, built_dir)]
+    engine = MagicMock()
+    engine.resolve_engine_working_directory.side_effect = lambda p: p
+    engine.load_or_scan_progress.side_effect = lambda d, r: stopped if r == 1 else not_started
+
+    report = build_system_report(
+        cfg, "c.yaml", engine_inst=engine, jobs=[], now=NOW, job_name_fn=lambda c, r: f"SYS_run{r}"
+    )
+    verdicts = [rep.verdict for rep in report.replicates]
+    assert verdicts == ["stopped", "dead", "not_started"]
+
+    text = render_agent([report], now=NOW, preset_hint="p")
+    assert "STOPPED      STOP file present" in text
+    assert "DEAD         killed before production" in text
+    assert "polyzymd cancel -c c.yaml -r 1 --resume" in text
+    assert "polyzymd submit -c c.yaml -r 1 --preset p" in text
+    assert "polyzymd submit -c c.yaml -r 2 --preset p" in text
+
+
+def test_corrupt_row_shows_the_live_job():
+    from polyzymd.cli.status_report import ReplicateReport, render_replicate_line
+
+    rep = ReplicateReport(
+        replicate=1,
+        directory="/scratch/SYS_run1",
+        progress_status="corrupt",
+        completed_ns=0.0,
+        total_ns=100.0,
+        fraction=0.0,
+        verdict="corrupt",
+        jobs=[SlurmJob("555", "SYS_run1", "R", "2:00:00", "nodeA")],
+        last_error="progress.json is unreadable (empty)",
+    )
+
+    line = render_replicate_line(rep, 4)
+
+    assert "job 555 R 2:00:00 nodeA" in line
+    assert "no job" not in line
+    assert "last: progress.json is unreadable" in line
+
+
+def test_a_cuda_routing_death_is_resubmitted_without_its_failed_nodes(tmp_path):
+    """The job prints two FATAL lines; the restart command leaves out the nodes it names."""
+    from polyzymd.cli.status_report import death_action, last_error_line
+    from polyzymd.workflow.slurm import SlurmConfig
+
+    log = tmp_path / "job.out"
+    log.write_text(
+        "FATAL: CUDA routing failed after 3 retries; incompatible nodes: bgpu-a,bgpu-b\n"
+        "FATAL: resubmit manually with --exclude=bgpu-a,bgpu-b once a compatible node is available\n"
+    )
+    err = last_error_line(log)
+    assert death_action(err, None) == "resubmit"
+    rep = _rep(4, "dead", last_error=err, action="resubmit")
+    text = render_agent(
+        [SystemReport("SYS", "c.yaml", "/s", [rep])], now=NOW, preset_hint="blanca-shirts"
+    )
+    preset_nodes = SlurmConfig.from_preset("blanca-shirts").exclude
+    assert (
+        f"polyzymd submit -c c.yaml -r 4 --preset blanca-shirts --exclude {preset_nodes},bgpu-a,bgpu-b"
+        in text
+    )
+
+
+def test_a_preemption_explains_the_fatal_lines_after_it(tmp_path):
+    """A GROMACS job killed by preemption prints a FATAL after slurmstepd's line; it is resubmitted."""
+    from polyzymd.cli.status_report import death_action, last_error_line
+
+    log = tmp_path / "job.out"
+    log.write_text(
+        "slurmstepd: error: *** JOB 42 ON bgpu-x CANCELLED AT 2026-10-20T01:00:00 DUE TO PREEMPTION ***\n"
+        "FATAL: production failed (exit code 143)\n"
+    )
+    err = last_error_line(log)
+    assert "DUE TO PREEMPTION" in err
+    assert death_action(err, None) == "resubmit"
+
+
+def test_live_rate_ignores_a_finished_last_segment():
+    """A job that has not yet written its running record does not time the queue gap."""
+    seg = SegmentRecord(index=0, steps_completed=86_400_000, status=SegmentStatus.INTERRUPTED)
+    windows = {0: (NOW - timedelta(hours=36), NOW - timedelta(hours=12))}  # 172.8 ns over 24 h
+    rate = estimate_rate_ns_per_day(_progress([seg]), NOW, live=True, window_fn=windows.get)
+    assert rate is not None and abs(rate - 172.8) < 1.0

@@ -70,28 +70,11 @@ TIP3P_CHARGES = {
     "H": 0.417,
 }
 
-# SPC/E water charges (Berendsen et al., 1987)
-SPCE_CHARGES = {
-    "O": -0.8476,
-    "H": 0.4238,
-}
-
-# TIP4P-Ew charges (Horn et al., 2004)
-# Note: TIP4P models have a virtual site, but for basic use we can
-# approximate with 3-site model or let the force field handle it
-TIP4PEW_CHARGES = {
-    "O": 0.0,  # Charge on virtual site
-    "H": 0.52422,
-    "M": -1.04844,  # Virtual site
-}
-
 
 def is_bundled_solvent(name: str) -> bool:
     """Return whether ``name`` has charges shipped with PolyzyMD (a water model or a bundled SDF)."""
     key = name.lower().strip()
-    return key in ("tip3p", "water_tip3p", "water", "spce", "spc_e", "spc/e") or (
-        _SOLVENTS_DIR / f"{key}.sdf"
-    ).exists()
+    return key in ("tip3p", "water_tip3p", "water") or (_SOLVENTS_DIR / f"{key}.sdf").exists()
 
 
 def get_solvent_molecule(
@@ -115,7 +98,7 @@ def get_solvent_molecule(
 
     Args:
         name: Solvent identifier (e.g., "dmso", "ethanol", "tip3p").
-              For water models, use "tip3p", "spce", etc.
+              For water, use "tip3p".
         smiles: SMILES string. Required if solvent is not in the library.
         residue_name: 3-letter residue name for topology. If not provided,
                      uses first 3 characters of name (uppercase).
@@ -150,11 +133,6 @@ def get_solvent_molecule(
     if name_key in ("tip3p", "water_tip3p", "water"):
         if name_key not in _loaded_molecules:
             _loaded_molecules[name_key] = _create_tip3p_water()
-        return _loaded_molecules[name_key]
-
-    if name_key in ("spce", "spc_e", "spc/e"):
-        if name_key not in _loaded_molecules:
-            _loaded_molecules[name_key] = _create_spce_water()
         return _loaded_molecules[name_key]
 
     # Set default residue name
@@ -242,35 +220,6 @@ def _create_tip3p_water() -> Molecule:
         atom.metadata["residue_name"] = "HOH"
 
     LOGGER.debug("Created TIP3P water with literature charges")
-    return water
-
-
-def _create_spce_water() -> Molecule:
-    """Create an SPC/E water molecule with literature charges.
-
-    SPC/E charges are from:
-    Berendsen, H.J.C., et al. J. Phys. Chem. 91, 6269 (1987)
-
-    Returns:
-        OpenFF Molecule for SPC/E water.
-    """
-    from openff.toolkit import Molecule
-    from openff.units import unit as offunit
-
-    water = Molecule.from_smiles("O")
-    water.name = "water_SPCE"
-
-    # Assign literature charges
-    charges = []
-    for atom in water.atoms:
-        charges.append(SPCE_CHARGES[atom.symbol])
-    water.partial_charges = charges * offunit.elementary_charge
-
-    # Set residue metadata
-    for atom in water.atoms:
-        atom.metadata["residue_name"] = "HOH"
-
-    LOGGER.debug("Created SPC/E water with literature charges")
     return water
 
 
@@ -412,7 +361,6 @@ def list_available_solvents() -> Dict[str, str]:
 
     # Water models (always available)
     available["tip3p"] = "built-in"
-    available["spce"] = "built-in"
 
     # Library solvents
     if _SOLVENTS_DIR.exists():

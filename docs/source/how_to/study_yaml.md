@@ -37,7 +37,7 @@ stride: 1                       # optional
 replicates: 1-5                 # optional; default: every replicate found
 conditions:                     # control first
   No polymer: conditions/no_polymer/config.yaml
-  SBMA 50%: conditions/sbma50/config.yaml
+  SBMA 50%: conditions/sbma_50/config.yaml
 analyses:
   rg: {}                        # a shipped analysis with its defaults
   contacts:
@@ -70,10 +70,10 @@ no-polymer condition at its own temperature:
 
 ```yaml
 conditions:
-  none 300 K: {config: conditions/none_300, factors: {temperature_K: 300, polymer: none}}
-  SBMA 300 K: {config: conditions/sbma_300, factors: {temperature_K: 300, polymer: SBMA}}
-  none 360 K: {config: conditions/none_360, factors: {temperature_K: 360, polymer: none}}
-  SBMA 360 K: {config: conditions/sbma_360, factors: {temperature_K: 360, polymer: SBMA}}
+  none 300 K: {config: conditions/none_300_k, factors: {temperature_K: 300, polymer: none}}
+  SBMA 300 K: {config: conditions/sbma_300_k, factors: {temperature_K: 300, polymer: SBMA}}
+  none 360 K: {config: conditions/none_360_k, factors: {temperature_K: 360, polymer: none}}
+  SBMA 360 K: {config: conditions/sbma_360_k, factors: {temperature_K: 360, polymer: SBMA}}
 comparison:
   within: temperature_K
   control: {polymer: none}
@@ -122,7 +122,7 @@ condition SBMA 50%: replicates [1, 2, 3, 4, 5] under /data/me/LipA_363K (from da
 analysis rg: defaults; no stored results
 analysis contacts as contacts_4A: method=distance, cutoff=4.0; no stored results
 git: commit 53cd9f37d690; inputs committed
-metadata: 3 gaps for publishing; polyzymd study freeze lists them
+metadata (study.yaml): 3 gaps for publishing: metadata.title is missing; ...
 publish: when the analyses are final, run polyzymd study freeze
 cite: Laforet, Joseph R., Jr. PolyzyMD: ... (version 1.3.0). https://github.com/joelaforet/polyzymd
 ```
@@ -130,7 +130,8 @@ cite: Laforet, Joseph R., Jr. PolyzyMD: ... (version 1.3.0). https://github.com/
 - Without `--production`, `study check` reads no trajectory.
 - With `--production`, it reads the trajectory headers and segments of each
   replicate, but no frames. This takes seconds for a few replicates and
-  minutes for long chains of segments.
+  minutes for long chains of segments. When it cannot read a replicate's
+  trajectory, the condition line has no production part and no warning.
 - The production length of each condition gives the longest equilibration
   window that you can use. It also shows whether the conditions were
   simulated for the same time.

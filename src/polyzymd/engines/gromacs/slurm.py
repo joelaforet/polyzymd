@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from polyzymd.core.branding import FULL_CREDIT_LINE
-from polyzymd.utils.templates import render_package_template
+from polyzymd.utils.templates import render_package_template, shell_quote
 from polyzymd.workflow.slurm import (
     SlurmConfig,
     _discover_manifest_path,
@@ -16,6 +16,7 @@ from polyzymd.workflow.slurm import (
     _validate_gpu_type_value,
     _validate_nodelist_value,
     _validate_script_value,
+    pixi_activation_block,
     sbatch_lines,
 )
 
@@ -61,6 +62,7 @@ class GromacsSlurmScriptGenerator:
         module_load: str | None = None,
         env_exports: dict[str, str] | None = None,
         setup_commands: list[str] | None = None,
+        checkpoint_interval_s: float = 60.0,
     ) -> None:
         """Initialize the GROMACS SLURM script generator.
 
@@ -90,6 +92,9 @@ class GromacsSlurmScriptGenerator:
             Environment variables exported in the script prior to GROMACS commands.
         setup_commands : list[str] | None, optional
             Simple environment setup commands executed after module loading and env exports.
+        checkpoint_interval_s : float, optional
+            Wall time in seconds between the checkpoints that equilibration
+            and production write (``mdrun -cpt``, which takes minutes).
         """
         self._config = slurm_config
         self._pixi_env = pixi_env
@@ -104,6 +109,7 @@ class GromacsSlurmScriptGenerator:
         self._module_load = module_load
         self._env_exports = env_exports or {}
         self._setup_commands = setup_commands or []
+        self._checkpoint_interval_s = checkpoint_interval_s
 
     def _validate_setup_command(self, command: str) -> None:
         """Validate setup command content before script interpolation.
@@ -443,12 +449,16 @@ class GromacsSlurmScriptGenerator:
                 "time_limit": self._config.time_limit,
                 "pixi_env": self._pixi_env,
                 "manifest_path": manifest_path,
+                "pixi_activation": pixi_activation_block(
+                    shell_quote(self._pixi_env), manifest_path
+                ),
                 "config_path": config_path,
                 "replicate": replicate,
                 "working_dir": working_dir,
                 "gmx_binary": gmx_base,
                 "system_prefix": system_prefix,
-                "maxh_hours": f"{maxh_hours:.2f}",
+                "maxh_hours": f"{maxh_hours:.4f}",
+                "checkpoint_minutes": f"{self._checkpoint_interval_s / 60.0:.4g}",
                 "grompp_flags": self._grompp_flags,
                 "mdrun_flags": self._mdrun_flags,
                 "mdrun_flags_eq": self._mdrun_flags_eq or "",
@@ -579,12 +589,12 @@ class GromacsSlurmScriptGenerator:
             )
             lines.append(
                 f'        run_mdrun_stage "equilibration stage {idx}" '
-                f"$MDRUN -deffnm {stage} -cpi {stage}.cpt -cpo {stage}.cpt -append $MDRUN_FLAGS_EQ -v"
+                f"$MDRUN -deffnm {stage} -cpi {stage}.cpt -cpo {stage}.cpt -append -cpt $CPT $MDRUN_FLAGS_EQ -v"
             )
             lines.append("    else")
             lines.append(
                 f'        run_mdrun_stage "equilibration stage {idx}" '
-                f"$MDRUN -deffnm {stage} -cpo {stage}.cpt $MDRUN_FLAGS_EQ -v"
+                f"$MDRUN -deffnm {stage} -cpo {stage}.cpt -cpt $CPT $MDRUN_FLAGS_EQ -v"
             )
             lines.append("    fi")
             lines.append(f"    if [ ! -f {stage}.gro ]; then")

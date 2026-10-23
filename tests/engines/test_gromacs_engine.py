@@ -225,7 +225,7 @@ class TestResolveMdrunFlagsGPU:
     """Test GPU offload flag auto-composition in _resolve_mdrun_flags."""
 
     def test_gpu_flags_auto_added(self):
-        """gpu:true should auto-add all four GPU offload flags."""
+        """gpu:true should auto-add the nonbonded, PME and bonded offload flags."""
         config = _make_config(gpu=True, ntmpi=1, ntomp=12, mdrun_flags="")
         engine = GromacsEngine(config=config, gmx_binary="gmx")
         slurm = SlurmConfig(ntasks=1, cpus_per_task=12)
@@ -233,7 +233,14 @@ class TestResolveMdrunFlagsGPU:
         assert "-nb gpu" in flags
         assert "-pme gpu" in flags
         assert "-bonded gpu" in flags
-        assert "-update gpu" in flags
+
+    def test_gpu_mode_never_requests_gpu_update(self):
+        """gpu:true leaves -update to mdrun: GPU update needs integrator md, the MDPs use sd."""
+        config = _make_config(gpu=True, ntmpi=1, ntomp=12, mdrun_flags="")
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=12)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-update" not in flags
 
     def test_gpu_flags_not_duplicated(self):
         """User-provided GPU flags should not be duplicated."""
@@ -262,7 +269,6 @@ class TestResolveMdrunFlagsGPU:
         # Other GPU flags should still be auto-added
         assert "-pme gpu" in flags
         assert "-bonded gpu" in flags
-        assert "-update gpu" in flags
 
     def test_user_override_update_cpu_respected(self):
         """-update cpu should prevent -update gpu but leave others."""
@@ -300,7 +306,6 @@ class TestResolveMdrunFlagsGPU:
         assert "-nb gpu" in flags
         assert "-pme gpu" in flags
         assert "-bonded gpu" in flags
-        assert "-update gpu" in flags
 
     def test_gpu_partial_user_override(self):
         """User specifies some GPU flags; others auto-added."""
@@ -313,19 +318,18 @@ class TestResolveMdrunFlagsGPU:
         assert "-bonded cpu" in flags
         # Non-specified GPU flags auto-added
         assert "-pme gpu" in flags
-        assert "-update gpu" in flags
         # No duplicates
         assert flags.count("-nb") == 1
         assert flags.count("-bonded") == 1
 
 
 class TestEngineSubmitModuleLoad:
-    """Tests that submit() passes module_load to run_sbatch."""
+    """Tests that submit() leaves module_load to the job script."""
 
     @patch("polyzymd.workflow.slurm_submit.run_sbatch")
-    def test_submit_passes_module_load(self, mock_run_sbatch):
-        """submit() should pass gromacs.module_load to run_sbatch."""
-        config = _make_config(module_load="module load slurm/blanca gromacs/2024.2")
+    def test_submit_does_not_load_modules_on_the_submit_host(self, mock_run_sbatch):
+        """module_load runs inside the job only; sbatch gets the script alone."""
+        config = _make_config(module_load="module load gcc/11.2.0 gromacs/2024.2")
         engine = GromacsEngine(config=config, gmx_binary="gmx")
         script_path = Path("/tmp/run_rep1.sh")
         engine.prepare_submission = MagicMock(return_value=script_path)
@@ -345,35 +349,29 @@ class TestEngineSubmitModuleLoad:
 
         result = engine.submit(request)
 
-        mock_run_sbatch.assert_called_once_with(script_path, module_load=config.gromacs.module_load)
+        mock_run_sbatch.assert_called_once_with(script_path)
         assert result["submitted"] is True
 
-    @patch("polyzymd.workflow.slurm_submit.run_sbatch")
-    @patch("polyzymd.engines.gromacs.engine.shutil.which")
-    def test_submit_no_module_load(self, mock_which, mock_run_sbatch):
-        """submit() should pass module_load=None when not configured."""
-        config = _make_config(module_load=None)
-        engine = GromacsEngine(config=config, gmx_binary="gmx")
-        script_path = Path("/tmp/run_rep2.sh")
-        engine.prepare_submission = MagicMock(return_value=script_path)
-        mock_which.return_value = "/usr/bin/sbatch"
-        mock_run_sbatch.return_value = MagicMock(
-            returncode=0,
-            stdout="Submitted batch job 456",
-            stderr="",
-        )
 
+class TestPrepareSubmissionRebuild:
+    """prepare_submission never builds; it needs the inputs from polyzymd build."""
+
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    def test_prepare_submission_refuses_without_a_build(self, from_config, tmp_path):
+        engine = GromacsEngine(config=_make_config(), gmx_binary="gmx")
+        working_dir = tmp_path / "gromacs"
         request = EngineSubmitRequest(
             replicate=2,
-            config_path=Path("/tmp/config.yaml"),
-            working_dir=Path("/tmp/work"),
+            config_path=tmp_path / "config.yaml",
+            working_dir=working_dir,
             slurm_config=SlurmConfig(),
         )
 
-        result = engine.submit(request)
+        with pytest.raises(FileNotFoundError, match="polyzymd build -c .*config.yaml -r 2"):
+            engine.prepare_submission(request)
 
-        mock_run_sbatch.assert_called_once_with(script_path, module_load=None)
-        assert result["submitted"] is True
+        from_config.assert_not_called()
+        assert not (working_dir / "daisy_chain_scripts").exists()
 
 
 class TestPrepareSubmissionPassThrough:
@@ -383,7 +381,7 @@ class TestPrepareSubmissionPassThrough:
     def test_prepare_submission_passes_env_exports_and_setup_commands(
         self, mock_generator_cls, tmp_path
     ):
-        """prepare_submission should pass env_exports and setup_commands to generator."""
+        """prepare_submission should pass env_exports, setup_commands and checkpoint_interval."""
         config = _make_config()
         config.gromacs.env_exports = {
             "GMX_GPU_DD_COMMS": "true",
@@ -397,6 +395,7 @@ class TestPrepareSubmissionPassThrough:
         config.gromacs.mdrun_flags_production = None
         config.gromacs.command_prefix = None
         config.gromacs.mpi_launcher_flags = ""
+        config.simulation_phases.production.checkpoint_interval = 90.0
 
         engine = GromacsEngine(config=config, gmx_binary="gmx")
 
@@ -428,6 +427,7 @@ class TestPrepareSubmissionPassThrough:
         assert kwargs["pixi_env"] == "build"
         assert kwargs["env_exports"] == config.gromacs.env_exports
         assert kwargs["setup_commands"] == config.gromacs.setup_commands
+        assert kwargs["checkpoint_interval_s"] == 90.0
 
     @patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator")
     def test_prepare_submission_passes_stage_specific_mdrun_flags(
@@ -585,3 +585,72 @@ class TestFromConfigBinaryResolution:
         assert engine._gmx_binary == "gmx"
         assert not any("real-MPI binary" in r.message for r in caplog.records)
         mock_resolve.assert_not_called()
+
+
+def test_job_log_goes_to_the_configured_slurm_logs_folder(tmp_path, monkeypatch):
+    """`polyzymd status` reads logs from the config's logs folder, so the job writes there."""
+    config = _make_config()
+    config.output.get_slurm_logs_directory.return_value = tmp_path / "project" / "slurm_logs"
+    work = tmp_path / "run_1" / "gromacs"
+    work.mkdir(parents=True)
+    for name in ("sys.top", "sys.gro", "em.mdp", "prod.mdp"):
+        (work / name).write_text("")
+    monkeypatch.setattr("polyzymd.analyses.shared.gromacs.system_prefix", lambda _config: "sys")
+    monkeypatch.chdir(tmp_path)
+    engine = GromacsEngine(config=config, gmx_binary="gmx")
+    monkeypatch.setattr(engine, "_resolve_mdrun_flags", lambda _slurm: "")
+    monkeypatch.setattr(engine, "_resolve_stage_mdrun_flags", lambda _slurm: ("", ""))
+    request = EngineSubmitRequest(
+        replicate=1,
+        config_path=tmp_path / "config.yaml",
+        working_dir=work,
+        slurm_config=SlurmConfig.from_preset("testing"),
+        job_name="CALB_run_1",
+    )
+    with patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator") as generator:
+        engine.prepare_submission(request)
+    output_file = generator.return_value.generate_job_script.call_args.kwargs["output_file"]
+    assert output_file == str(tmp_path / "project" / "slurm_logs" / "CALB_run_1.%j.out")
+
+
+class TestPrepareSubmissionScriptPath:
+    """A requested script path keeps the live chain script untouched."""
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator")
+    def test_script_path_is_honoured(self, mock_generator_cls, tmp_path):
+        config = _make_config()
+        config.gromacs.mdrun_flags_equilibration = None
+        config.gromacs.mdrun_flags_production = None
+        config.gromacs.command_prefix = None
+        config.gromacs.mpi_launcher_flags = ""
+        config.gromacs.env_exports = {}
+        config.gromacs.setup_commands = []
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+
+        working_dir = tmp_path / "gromacs"
+        working_dir.mkdir(parents=True)
+        for name in ("CALB_PEG.top", "CALB_PEG.gro", "em.mdp", "prod.mdp"):
+            (working_dir / name).write_text("x\n")
+        live = working_dir / "daisy_chain_scripts" / "run_rep1.sh"
+        live.parent.mkdir()
+        live.write_text("live chain\n")
+
+        mock_generator = MagicMock()
+        mock_generator.generate_job_script.return_value = "recovery\n"
+        mock_generator.save_script.side_effect = lambda text, path: (
+            path.parent.mkdir(parents=True, exist_ok=True) or path.write_text(text) or path
+        )
+        mock_generator_cls.return_value = mock_generator
+
+        target = working_dir / "recovery_scripts" / "recover_rep1.sh"
+        request = EngineSubmitRequest(
+            replicate=1,
+            config_path=tmp_path / "config.yaml",
+            working_dir=working_dir,
+            slurm_config=SlurmConfig(),
+            extra={"skip_build": True, "script_path": target},
+        )
+
+        assert engine.prepare_submission(request) == target
+        assert target.read_text() == "recovery\n"
+        assert live.read_text() == "live chain\n"

@@ -209,7 +209,7 @@ class TestStudy:
         study = pz.Study(study_dir)
         assert study.labels == ["No polymer", "Polymer"]
         assert study.settings("rg") == {"selection": "all"}
-        with pytest.raises(ProtocolError, match="no run directory"):
+        with pytest.raises(ProtocolError, match="no runs found"):
             study["Polymer"]
 
     def test_unknown_run(self, study_dir: Path) -> None:

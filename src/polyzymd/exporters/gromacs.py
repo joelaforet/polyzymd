@@ -16,6 +16,7 @@ Made by PolyzyMD, by Joseph R. Laforet Jr.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -252,6 +253,15 @@ class MDPParameters:
 
         return "\n".join(lines)
 
+    def _nstcalcenergy(self) -> int:
+        """Return the largest divisor of nstenergy and nstlog that is at most 100.
+
+        grompp stops with a warning when nstenergy is not a multiple of
+        nstcalcenergy, whose default is 100.
+        """
+        interval = math.gcd(self.nstenergy, self.nstlog) or 100
+        return max(n for n in range(1, min(interval, 100) + 1) if interval % n == 0)
+
     def _generate_em_section(self) -> List[str]:
         """Generate MDP content for energy minimization."""
         lines = []
@@ -306,6 +316,7 @@ class MDPParameters:
         lines.append(f"nstvout         = {self.nstvout}")
         lines.append(f"nstlog          = {self.nstlog}")
         lines.append(f"nstenergy       = {self.nstenergy}")
+        lines.append(f"nstcalcenergy   = {self._nstcalcenergy()}")
         lines.append(f"nstxout-compressed = {self.nstxout_compressed}")
         if self.compressed_x_grps:
             lines.append(f"compressed-x-grps = {self.compressed_x_grps}")
@@ -354,6 +365,10 @@ class MDPParameters:
             lines.append(f"tau_p           = {self.tau_p}")
             lines.append(f"ref_p           = {self.ref_p}")
             lines.append(f"compressibility = {self.compressibility}")
+            if self.define:
+                # Restrained NPT: scale the reference center of mass with the
+                # box, as grompp asks; it refuses absolute references here.
+                lines.append("refcoord-scaling = com")
         else:
             lines.append("pcoupl          = no")
         lines.append("")
@@ -474,8 +489,20 @@ class MDPGenerator:
             )
         return THERMOSTAT_MAP.get(thermostat, THERMOSTAT_MAP["LangevinMiddle"])
 
-    def _barostat(self, barostat: str) -> tuple[str, str]:
-        """Return GROMACS's pcoupl and pcoupltype for a PolyzyMD barostat, warning once that it is approximate."""
+    def _barostat(self, barostat: str, frequency: int | None = None) -> tuple[str, str]:
+        """Return GROMACS's pcoupl and pcoupltype for a PolyzyMD barostat, warning once that it is approximate.
+
+        ``barostat_frequency`` sets how often OpenMM's MC barostat tries a volume
+        move; c-rescale keeps GROMACS's own coupling interval, so a value other
+        than the default 25 gives a warning once.
+        """
+        if frequency not in (None, 25) and "barostat_frequency" not in self._warned:
+            self._warned.add("barostat_frequency")
+            logger.warning(
+                "barostat_frequency %d sets how often OpenMM's MC barostat moves the volume; "
+                "GROMACS's c-rescale barostat keeps its own coupling interval (nstpcouple).",
+                frequency,
+            )
         if "barostat" not in self._warned:
             self._warned.add("barostat")
             logger.warning(
@@ -572,6 +599,7 @@ class MDPGenerator:
                     thermostat=(stage.thermostat.value if stage.thermostat else "LangevinMiddle"),
                     thermostat_timescale=stage.thermostat_timescale or 1.0,
                     barostat=stage.barostat.value if stage.barostat else None,
+                    barostat_frequency=stage.barostat_frequency,
                     is_first_stage=is_first,
                     continuation=not is_first,
                     posres_defines=posres_defines,
@@ -597,6 +625,7 @@ class MDPGenerator:
         is_first_stage: bool,
         continuation: bool,
         posres_defines: str = "",
+        barostat_frequency: int | None = None,
     ) -> MDPParameters:
         """Create MDPParameters for an equilibration stage.
 
@@ -613,6 +642,8 @@ class MDPGenerator:
             is_first_stage: Whether this is the first equilibration stage.
             continuation: Whether continuing from previous simulation.
             posres_defines: Position restraint defines string.
+            barostat_frequency: The stage's barostat_frequency, for the warning
+                that GROMACS keeps its own coupling interval.
 
         Returns:
             Configured MDPParameters object.
@@ -627,7 +658,7 @@ class MDPGenerator:
         # Map barostat
         is_npt = ensemble == "NPT"
         if is_npt and barostat:
-            pcoupl, pcoupltype = self._barostat(barostat)
+            pcoupl, pcoupltype = self._barostat(barostat, barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
@@ -703,7 +734,7 @@ class MDPGenerator:
         is_npt = stage.ensemble.value == "NPT"
         barostat = stage.barostat.value if stage.barostat else None
         if is_npt and barostat:
-            pcoupl, pcoupltype = self._barostat(barostat)
+            pcoupl, pcoupltype = self._barostat(barostat, stage.barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
@@ -819,7 +850,7 @@ class MDPGenerator:
         is_npt = prod.ensemble.value == "NPT"
         barostat = prod.barostat.value if prod.barostat else None
         if is_npt and barostat:
-            pcoupl, pcoupltype = self._barostat(barostat)
+            pcoupl, pcoupltype = self._barostat(barostat, prod.barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
@@ -1900,6 +1931,8 @@ class GromacsExporter:
             - "posres": Dictionary of position restraint files
             - "run_script": Run script path
         """
+        # GROMACS drops restraints that an OpenMM config may name.
+        self._config.require_engine_restraints("gromacs")
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 

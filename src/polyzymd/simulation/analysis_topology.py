@@ -42,6 +42,12 @@ def write_analysis_topology(topology: Any, system: Any, positions: Any, path: Pa
         _name_unnamed_atoms(structure)
         path.parent.mkdir(parents=True, exist_ok=True)
         structure.save(str(path), format="amber", overwrite=True)
+        # ParmEd stamps the write time on the first line; a fixed stamp lets
+        # identical builds give identical files and manifest hashes.
+        first, rest = path.read_bytes().split(b"\n", 1)
+        if first.startswith(b"%VERSION"):
+            stamp = b"%VERSION  VERSION_STAMP = V0001.000  DATE = 01/01/00  00:00:00"
+            path.write_bytes(stamp + b"\n" + rest)
     except Exception as exc:  # ParmEd raises a mix of its own and builtin errors
         LOGGER.warning(
             "Could not write %s (%s: %s). Analyses will read the PDB topology instead.",

@@ -139,6 +139,18 @@ def test_open_universe_reads_the_top_when_the_tpr_is_too_new(run_dir: Path, capl
     assert list(u.segments.segids)[0] == "seg_0_MOL0"
 
 
+def test_tpr_fallback_warning_names_the_file_not_its_folder(run_dir: Path, caplog) -> None:
+    tpr = run_dir / "prod.tpr"
+    if _reads(tpr):
+        pytest.skip("this MDAnalysis reads GROMACS 2026 TPR files")
+    loader._WARNED_TPR_FALLBACK_PATHS.discard(tpr)
+    with caplog.at_level("DEBUG"):
+        loader.open_universe(tpr, [run_dir / "system.gro"])
+    (message,) = [r.getMessage() for r in caplog.records if "cannot read" in r.getMessage()]
+    assert "cannot read prod.tpr" in message
+    assert str(run_dir) not in message
+
+
 def test_open_universe_needs_one_top(run_dir: Path) -> None:
     tpr = run_dir / "prod.tpr"
     if _reads(tpr):

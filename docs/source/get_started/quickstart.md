@@ -228,6 +228,10 @@ PolyzyMD stored the result in `trpcage/results/rg/`:
 | `report.json` | The full report |
 | `figures/` | The figures of the analysis |
 
+PolyzyMD writes the figures to files and opens no window. So `analyze`
+needs no display: it works over SSH, in a batch job and under WSL.
+`--no-plots` skips the figures.
+
 If you run the command again, PolyzyMD reads the stored values and does not
 read the trajectory.
 

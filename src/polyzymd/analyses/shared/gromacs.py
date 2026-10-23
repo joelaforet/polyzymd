@@ -79,7 +79,19 @@ def run_input_files(working_dir: str | Path, config: Any) -> list[Path]:
     names += [f"eq_{i:02d}_{stage.name}.mdp" for i, stage in enumerate(stages or [], start=1)]
     names.append("prod.mdp")
     files = [folder / name for name in names if (folder / name).is_file()]
-    pending = [folder / topology_name(config)]
+    extra = [path for path in topology_files(folder / topology_name(config)) if path not in files]
+    return files + extra
+
+
+def topology_files(top_file: str | Path) -> list[Path]:
+    """Return ``top_file`` and every file it includes with ``#include "..."`` that exists.
+
+    Includes are resolved against the including file's folder, so a
+    force-field folder in the GROMACS installation is left out. Empty when
+    ``top_file`` does not exist.
+    """
+    files: list[Path] = []
+    pending = [Path(top_file)]
     while pending:
         path = pending.pop(0)
         if path in files or not path.is_file():

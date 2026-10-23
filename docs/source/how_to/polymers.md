@@ -97,19 +97,25 @@ The replicate number still seeds the PACKMOL placement.
 
 ## Build a system without polymers
 
-For a control without polymer, leave out the `polymers:` section. A section
-with `enabled: false` must still contain `type_prefix`, `monomers`, `length`
-and `count`, because the schema requires them.
+For a control without polymer, say so in the config:
+
+```yaml
+polymers:
+  enabled: false
+```
+
+`polymers: null`, or leaving out the `polymers:` section, does the same. A
+disabled section needs no other keys; a warning names any it does not read.
 
 ## How the builder places the chains
 
 The builder does these steps:
 
-1. It computes the periodic cell from the bounding box of the protein and
-   substrate. Each side gets `polymers.packing.padding` plus
-   `solvent.box.padding`.
-2. It centers the protein and substrate in the rectangular brick of that cell.
-   It holds them fixed.
+1. It computes the periodic cell from the protein and substrate. The edge is
+   their diameter plus 2 x (`polymers.packing.padding` +
+   `solvent.box.padding`).
+2. It centers the bounding box of the protein and substrate in the rectangular
+   brick of that cell. It holds them fixed.
 3. It packs the chains inside the brick and inside a sphere around the solute.
    PACKMOL keeps each polymer atom at least `polymers.packing.tolerance`
    (default 2.0 Å) from the solute and from other chains.

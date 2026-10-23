@@ -25,6 +25,19 @@ def _isolated_hash_cache(tmp_path_factory: pytest.TempPathFactory) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_pixi_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every test as if outside a pixi environment.
+
+    ``pixi run -e <env>`` sets ``PIXI_ENVIRONMENT_NAME``, and commands then
+    print an advisory when the environment is not the recommended one, which
+    lands in the output tests read. Tests of those advisories set the variable
+    themselves.
+    """
+    monkeypatch.delenv("PIXI_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _restore_root_logging() -> None:
     """Give back the root logger's handlers and level after each test.
 

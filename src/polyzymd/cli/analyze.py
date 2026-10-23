@@ -134,6 +134,24 @@ def _whole_study(
             continue
 
 
+def _runs_here(configs: Sequence[Path], labels: Sequence[str], data: dict | None) -> bool:
+    """Return whether any condition has a run directory on this machine, or a config is unreadable."""
+    from polyzymd.analyses.study import with_data_dir
+    from polyzymd.config.schema import SimulationConfig
+
+    data = data or {}
+    for label, config in zip(labels, configs, strict=True):
+        try:
+            found = with_data_dir(
+                SimulationConfig.from_yaml(config), data.get(label, data.get("*"))
+            ).discover_replicate_dirs()
+        except (OSError, ValueError):
+            return True  # the run itself reports the bad config
+        if found:
+            return True
+    return False
+
+
 def _without_commit(report_text: str) -> dict:
     """Return a saved report without the git commit its study record names."""
     import json
@@ -581,6 +599,23 @@ def analyze_command(
                     f"them; read them with Study.results({run_name!r}, folder=...)",
                     err=True,
                 )
+        here = {"*": Path(data_dir).expanduser().resolve()} if data_dir is not None else data
+        stored = Path(output_dir) / "report.json"
+        if stored.is_file() and not _runs_here(configs, labels, here):
+            # Stored numbers are never printed as the answer to this request.
+            from polyzymd.analyses.study_file import find_study_file
+
+            folder = find_study_file(study_path).parent
+            shown = stored.resolve()
+            shown = shown.relative_to(folder) if shown.is_relative_to(folder) else shown
+            click.echo(f"error: no runs of study {folder.name} are on this machine.", err=True)
+            click.echo(
+                f"fix: The stored report is {shown}, readable with "
+                f"pz.Study(...).results({run_name!r}); to analyse again, give the runs with "
+                "polyzymd study locate DIR --verify or --data.",
+                err=True,
+            )
+            sys.exit(EXIT_ANALYSIS_ERROR)
     stride = stride or 1
     if study_path is not None and until is None:
         until = study_until
@@ -759,7 +794,18 @@ def analyze_command(
             text = report.model_dump_json(indent=2) + "\n"
             # A rerun on unchanged inputs keeps the report it made before, so
             # committing between the runs leaves nothing new to commit.
-            if not saved.is_file() or _without_commit(saved.read_text()) != _without_commit(text):
+            new = _without_commit(text)
+            old = _without_commit(saved.read_text()) if saved.is_file() else None
+            if old != new:
+                # Say so when the result itself changes, such as another --run.
+                if old is not None and {**old, "provenance": None} != {**new, "provenance": None}:
+                    shown = saved.resolve()
+                    if shown.is_relative_to(study_root):
+                        shown = shown.relative_to(study_root)
+                    click.echo(
+                        f"note: replaced the stored {shown}, which reported {old.get('metric')}",
+                        err=True,
+                    )
                 saved.write_text(text)
             # Records of replicates the study no longer lists would be read and
             # deposited; the replicates this report used stay.
@@ -772,6 +818,8 @@ def analyze_command(
                     number = folder.name.removeprefix("replicate_")
                     if number.isdigit() and int(number) not in keep:
                         shutil.rmtree(folder)
+    if recompute:
+        click.echo("note: --recompute: values recomputed from the trajectories", err=True)
     rendered = _render(report, output_format)
     click.echo(rendered)
     if output_path is not None:

@@ -446,6 +446,12 @@ class SystemBuilder:
         # identifiers into downstream coordinate and topology exports
         self._assign_pdb_identifiers()
 
+        # Loaded last, the small-molecule force field gives every non-protein
+        # molecule its parameters, and its generic SMIRKS also override every
+        # ff14SB bonded and Lennard-Jones term of the protein; only the ff14SB
+        # library charges survive. _apply_protein_force_field restores the
+        # protein terms. Loading ff14SB last instead is no fix: its cap and
+        # amide SMIRKS then match acetone, acetates and amide polymers.
         ff = ForceField(self._protein_ff, self._sm_ff)
 
         # Get water molecule with pre-computed charges for charge_from_molecules
@@ -457,6 +463,7 @@ class SystemBuilder:
 
         LOGGER.info("Using single-call Interchange creation")
         self._interchange = self._create_interchange_single_call(ff, water_mol)
+        self._apply_protein_force_field(self._interchange)
 
         LOGGER.info("Interchange created successfully")
 
@@ -538,6 +545,108 @@ class SystemBuilder:
 
         return interchange
 
+    def _apply_protein_force_field(self, interchange: Interchange) -> None:
+        """Replace the protein's terms with those of the protein force field alone.
+
+        The protein molecules come first in the solvated topology. They are
+        parameterized on their own with the protein force field, and every
+        bonded, Lennard-Jones and constraint term wholly inside them is swapped
+        for its counterpart, so the protein no longer depends on load order.
+        Terms of other molecules and all charges stay as they are; the
+        protein's charges are already the ff14SB library charges. Constraints
+        follow the small-molecule force field's bonds-to-hydrogen policy, with
+        the protein force field's bond lengths.
+
+        Impropers are not checked for coverage, because the two force fields
+        define them differently; every other handler must cover the same
+        protein atoms as the combined force field did.
+
+        Args:
+            interchange: Interchange of the whole solvated topology, changed
+                in place.
+
+        Raises:
+            RuntimeError: If the protein force field does not cover a protein
+                term the combined force field covered, the global nonbonded
+                settings of the two force fields differ, or the first
+                molecules of the solvated topology are not the enzyme.
+        """
+        from openff.toolkit import ForceField, Topology
+
+        if self._n_enzyme_molecules == 0:
+            LOGGER.warning("No enzyme molecules recorded; the protein force field is not applied")
+            return
+        protein_atoms = sum(
+            self._solvated_topology.molecule(index).n_atoms
+            for index in range(self._n_enzyme_molecules)
+        )
+        if self._enzyme_topology is not None and protein_atoms != self._enzyme_topology.n_atoms:
+            raise RuntimeError(
+                f"The first {self._n_enzyme_molecules} molecule(s) of the solvated topology hold "
+                f"{protein_atoms} atoms, the enzyme {self._enzyme_topology.n_atoms}"
+            )
+
+        t0 = time.perf_counter()
+        protein_ff = ForceField(self._protein_ff)
+        small_molecule_ff = ForceField(self._sm_ff)
+        # The Amber port has no Constraints handler.
+        if "Constraints" not in protein_ff.registered_parameter_handlers:
+            protein_ff.register_parameter_handler(small_molecule_ff["Constraints"])
+        protein_topology = Topology.from_molecules(
+            [self._solvated_topology.molecule(index) for index in range(self._n_enzyme_molecules)]
+        )
+        reference = protein_ff.create_interchange(protein_topology)
+
+        for name in ("vdW", "Electrostatics"):
+            for attribute in ("scale_12", "scale_13", "scale_14", "scale_15"):
+                if (
+                    abs(getattr(interchange[name], attribute) - getattr(reference[name], attribute))
+                    > 1e-6
+                ):
+                    raise RuntimeError(
+                        f"{self._protein_ff} and {self._sm_ff} use different {name} {attribute}"
+                    )
+        if interchange["vdW"].mixing_rule != reference["vdW"].mixing_rule:
+            raise RuntimeError(f"{self._protein_ff} and {self._sm_ff} use different mixing rules")
+
+        for name in ("Bonds", "Angles", "ProperTorsions", "ImproperTorsions", "vdW", "Constraints"):
+            target = interchange[name]
+            source = reference[name]
+            removed = [key for key in target.key_map if max(key.atom_indices) < protein_atoms]
+            for key in removed:
+                del target.key_map[key]
+            for key, potential_key in source.key_map.items():
+                # A potential is keyed by its SMIRKS. The prefix keeps a SMIRKS
+                # the two force fields share from replacing the potential that
+                # non-protein molecules use.
+                copied = potential_key.model_copy(
+                    update={"id": f"{self._protein_ff}::{potential_key.id}"}
+                )
+                target.key_map[key] = copied
+                target.potentials[copied] = source.potentials[potential_key]
+            if name != "ImproperTorsions":
+                before = {tuple(sorted(key.atom_indices)) for key in removed}
+                after = {tuple(sorted(key.atom_indices)) for key in source.key_map}
+                if before != after:
+                    example = sorted(before - after or after - before)[0]
+                    raise RuntimeError(
+                        f"{self._protein_ff} does not cover the protein {name} terms "
+                        f"({len(before - after)} missing, {len(after - before)} extra, "
+                        f"for example atoms {example})"
+                    )
+            used = set(target.key_map.values())
+            target.potentials = {
+                key: value for key, value in target.potentials.items() if key in used
+            }
+            source_name = (
+                f"{self._sm_ff} policy at {self._protein_ff} bond lengths"
+                if name == "Constraints"
+                else self._protein_ff
+            )
+            LOGGER.info(f"  {name}: {len(source.key_map)} protein terms from {source_name}")
+
+        LOGGER.info(f"  Protein force field applied in {time.perf_counter() - t0:.1f}s")
+
     def _renumber_chains(self, topology: Topology) -> None:
         """Normalize chain IDs before canonical PDB identifier assignment.
 
@@ -549,7 +658,9 @@ class SystemBuilder:
             topology: Topology to modify.
         """
         for i, mol in enumerate(topology.molecules):
-            for atom in mol.atoms:
+            for atom_index, atom in enumerate(mol.atoms):
+                # Record the input residue, chain included, before the chain is replaced.
+                self._get_original_residue_token(atom, atom_index)
                 atom.metadata["chain_id"] = str(i + 1)
 
     def _assign_pdb_identifiers(self) -> None:
@@ -602,22 +713,18 @@ class SystemBuilder:
 
             protein_residue_num = 1
 
-            # Sometimes, we have more than one unique protein molecule in the loaded pdb file
-            # such as in loading a homodimer enzyme, as in https://www.rcsb.org/structure/1HXW
-            # We must ensure all of the protein loads into polyzymd.
-            # Here, we enforce that unique protein chains
-            # monomer 1 == Chain A, monomer 2 == Chain B
-            # have unique residue labels.
-            # So if the chains are 100 AA long, monomer 1 will be
-            # residues 1-101, and then monomer 2 will be RENUMBERED
-            # to residues 102-202. Adjust your downstream analysis accordingly!!!
+            # A PDB can hold several protein molecules (a homodimer such as
+            # https://www.rcsb.org/structure/1HXW), or several chains joined into one
+            # molecule by disulfides (insulin). All of them go on chain A, numbered one
+            # after the other: two 100-residue chains become residues 1-100 and
+            # 101-200. Adjust your downstream analysis accordingly!!!
 
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
                 residue_map: dict[str, int] = {}
                 for atom_index, atom in enumerate(mol.atoms):
-                    atom.metadata["chain_id"] = PROTEIN_CHAIN
                     residue_token = self._get_original_residue_token(atom, atom_index)
+                    atom.metadata["chain_id"] = PROTEIN_CHAIN
                     if residue_token not in residue_map:
                         residue_map[residue_token] = protein_residue_num
                         protein_residue_num += 1
@@ -709,13 +816,15 @@ class SystemBuilder:
         if residue_token is not None:
             return str(residue_token)
 
+        chain_id = metadata.get("chain_id") or ""
         residue_number = metadata.get("residue_number")
         residue_name = metadata.get("residue_name") or metadata.get("residue_name_3") or ""
         insertion_code = metadata.get("insertion_code") or ""
         if residue_number is None:
             residue_token = f"missing-residue-metadata:{atom_index}"
         else:
-            residue_token = f"{residue_number!s}|{residue_name!s}|{insertion_code!s}"
+            # Chains joined by a disulfide are one molecule; A7 and B7 are two residues.
+            residue_token = f"{chain_id!s}|{residue_number!s}|{residue_name!s}|{insertion_code!s}"
 
         metadata[_ORIGINAL_RESIDUE_TOKEN_KEY] = residue_token
         return residue_token
@@ -829,7 +938,12 @@ class SystemBuilder:
 
         Returns:
             OpenFF Interchange ready for simulation.
+
+        Raises:
+            ValueError: If the config names something the build cannot make
+                correctly (see ``SimulationConfig.require_buildable``).
         """
+        config.require_buildable()
         self._working_dir = Path(working_dir) if working_dir else None
         self._build_provenance = {"packmol_seed": polymer_seed}
         if config.polymers and config.polymers.enabled:
@@ -871,7 +985,7 @@ class SystemBuilder:
                 extra_padding_nm=config.polymers.packing.padding,
             )
             LOGGER.info(
-                "Deterministic periodic cell from the protein + substrate bounding box "
+                "Deterministic periodic cell from the protein + substrate diameter "
                 f"+ 2 x ({config.polymers.packing.padding} + {config.solvent.box.padding}) nm: "
                 f"{box_vectors}"
             )

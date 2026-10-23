@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 584" role="img" aria-labelledby="t d">
+  <title id="t">Replicate folder by engine</title>
+  <desc id="d">Both engines write build_manifest.json, solvated_system.pdb and progress.json; OpenMM keeps them and its per-segment folders in the replicate folder, while GROMACS keeps solvated_system.pdb, its engine files and progress.json in gromacs/.</desc>
+  <rect width="1040" height="584" fill="#ffffff"/>
+
+  <g font-family="Helvetica, Arial, sans-serif">
+    <!-- OpenMM column -->
+    <rect x="24" y="24" width="480" height="504" rx="6" fill="#ffffff" stroke="#2f6fdf" stroke-width="1.5"/>
+    <text x="40" y="56" font-size="16" font-weight="bold" fill="#1f2933">OpenMM</text>
+    <text x="128" y="56" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#52606d">&lt;replicate folder&gt;/</text>
+
+    <g font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">
+      <rect x="40" y="72" width="448" height="48" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+      <text x="56" y="92">build_manifest.json</text>
+      <rect x="40" y="128" width="448" height="48" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+      <text x="56" y="148">solvated_system.pdb</text>
+      <rect x="40" y="184" width="448" height="48" rx="6" fill="#e8f0fd" stroke="#2f6fdf" stroke-width="1.5"/>
+      <text x="56" y="204">system.xml · system.prmtop</text>
+      <rect x="40" y="240" width="448" height="48" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+      <text x="56" y="260">progress.json</text>
+      <rect x="40" y="296" width="448" height="48" rx="6" fill="#e8f0fd" stroke="#2f6fdf" stroke-width="1.5"/>
+      <text x="56" y="316">minimization/</text>
+      <rect x="40" y="352" width="448" height="48" rx="6" fill="#e8f0fd" stroke="#2f6fdf" stroke-width="1.5"/>
+      <text x="56" y="372">equilibration_&lt;i&gt;_&lt;name&gt;/</text>
+      <rect x="40" y="408" width="448" height="48" rx="6" fill="#e8f0fd" stroke="#2f6fdf" stroke-width="1.5"/>
+      <text x="56" y="428">production_0/ … production_N/</text>
+    </g>
+    <g font-size="12" fill="#52606d">
+      <text x="56" y="110">file hashes, config hash, seeds, box</text>
+      <text x="56" y="166">starting coordinates</text>
+      <text x="56" y="222">OpenMM System, analysis topology</text>
+      <text x="56" y="278">stages and segments: status, seeds, versions</text>
+      <text x="56" y="334">minimized state, phase.json</text>
+      <text x="56" y="390">one folder per stage: .dcd, checkpoint, phase.json</text>
+      <text x="56" y="446">one folder per segment: production_N_trajectory.dcd, state</text>
+    </g>
+
+    <!-- GROMACS column -->
+    <rect x="536" y="24" width="480" height="504" rx="6" fill="#ffffff" stroke="#c05621" stroke-width="1.5"/>
+    <text x="552" y="56" font-size="16" font-weight="bold" fill="#1f2933">GROMACS</text>
+    <text x="656" y="56" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#52606d">&lt;replicate folder&gt;/</text>
+
+    <g font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">
+      <rect x="552" y="72" width="448" height="48" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+      <text x="568" y="92">build_manifest.json</text>
+      <rect x="552" y="128" width="448" height="48" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5" stroke-dasharray="6 4"/>
+      <text x="568" y="148">solvated_system.pdb</text>
+    </g>
+    <g font-size="12" fill="#52606d">
+      <text x="568" y="110">same keys; openmm_version is null</text>
+      <text x="568" y="166">only after build --export gromacs</text>
+    </g>
+
+    <!-- gromacs/ sub-folder -->
+    <rect x="552" y="184" width="448" height="328" rx="6" fill="#fbeee4" stroke="#c05621" stroke-width="1.5"/>
+    <text x="568" y="208" font-size="13" font-weight="bold" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">gromacs/</text>
+    <text x="648" y="208" font-size="12" fill="#52606d">every engine file of the run</text>
+
+    <g font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">
+      <rect x="568" y="224" width="416" height="48" rx="6" fill="#ffffff" stroke="#c05621" stroke-width="1.5"/>
+      <text x="584" y="244">solvated_system.pdb · &lt;prefix&gt;.gro · .top · *.itp</text>
+      <rect x="568" y="280" width="416" height="48" rx="6" fill="#ffffff" stroke="#c05621" stroke-width="1.5"/>
+      <text x="584" y="300">em.mdp · eq_NN_&lt;name&gt;.mdp · prod.mdp</text>
+      <rect x="568" y="336" width="416" height="48" rx="6" fill="#ffffff" stroke="#c05621" stroke-width="1.5"/>
+      <text x="584" y="356">em · eq_NN · prod: .tpr .log · state.cpt</text>
+      <rect x="568" y="392" width="416" height="48" rx="6" fill="#ffffff" stroke="#c05621" stroke-width="1.5"/>
+      <text x="584" y="412">prod.xtc → prod_nojump.xtc → prod_centered.xtc</text>
+      <rect x="568" y="448" width="416" height="48" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+      <text x="584" y="468">progress.json</text>
+    </g>
+    <g font-size="12" fill="#52606d">
+      <text x="584" y="262">coordinates, topology, force field</text>
+      <text x="584" y="318">run parameters, seeds set per replicate</text>
+      <text x="584" y="374">one flat production run, resumed from its checkpoint</text>
+      <text x="584" y="430">trajectory; centred copy made when production ends</text>
+      <text x="584" y="486">same records as OpenMM, kept here</text>
+    </g>
+
+    <!-- Legend -->
+    <rect x="24" y="552" width="24" height="16" rx="3" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="56" y="565" font-size="12" fill="#52606d">both engines (provenance)</text>
+    <rect x="248" y="552" width="24" height="16" rx="3" fill="#e8f0fd" stroke="#2f6fdf" stroke-width="1.5"/>
+    <text x="280" y="565" font-size="12" fill="#52606d">OpenMM only</text>
+    <rect x="400" y="552" width="24" height="16" rx="3" fill="#fbeee4" stroke="#c05621" stroke-width="1.5"/>
+    <text x="432" y="565" font-size="12" fill="#52606d">GROMACS only</text>
+    <rect x="560" y="552" width="24" height="16" rx="3" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5" stroke-dasharray="6 4"/>
+    <text x="592" y="565" font-size="12" fill="#52606d">only for some commands</text>
+  </g>
+</svg>

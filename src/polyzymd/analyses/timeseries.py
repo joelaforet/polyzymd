@@ -1173,6 +1173,9 @@ class ReplicateValues:
         self.bounds: tuple[float | None, float | None] = (0.0, 1.0) if is_fraction else (None, None)
         #: One note per replicate whose missing labels were filled with ``missing``.
         self.filled: list[str] = []
+        #: The partner selection that matched no atoms, by condition; no
+        #: comparison with such a condition is tested.
+        self.no_partner: dict[str, str] = {}
 
     @property
     def values(self) -> dict[str, list]:
@@ -1443,7 +1446,17 @@ class ReplicateValues:
             values = self._column(position)
             for control, label, stratum in pairs:
                 a, b = values[control], values[label]
-                testable = min(len(a), len(b)) >= 2 and len(set(a)) + len(set(b)) > 2
+                reason = next(
+                    (
+                        f"{c} has no partner: {self.no_partner[c]}"
+                        for c in (control, label)
+                        if c in self.no_partner
+                    ),
+                    None,
+                )
+                testable = (
+                    reason is None and min(len(a), len(b)) >= 2 and len(set(a)) + len(set(b)) > 2
+                )
                 effect = cohens_d(b, a)
                 rows.append(
                     PairwiseReport(
@@ -1458,6 +1471,7 @@ class ReplicateValues:
                         cohens_d=_finite(effect.cohens_d),
                         hedges_g=_finite(effect.hedges_g),
                         testable=testable,
+                        reason=reason,
                     )
                 )
         # One Benjamini-Hochberg family per call: the conditions compared with
@@ -1514,6 +1528,7 @@ class ReplicateValues:
                 rows = self.rows[label]
                 item = _condition(label, values[label])
                 item.entry = entry
+                item.no_partner = self.no_partner.get(label)
                 item.replicates = [row[0] for row in rows]
                 if rows and rows[0][2] is not None:
                     item.statistical_inefficiency = [row[2] for row in rows]
@@ -1565,7 +1580,8 @@ class ReplicateValues:
         untestable: dict[tuple[str, str], list] = {}
         for row in pairwise:
             untestable.setdefault((row.a, row.b), [])
-            if not row.testable:
+            # A condition without partner is named by the analysis's own warning.
+            if not row.testable and row.reason is None:
                 untestable[(row.a, row.b)].append(row)
         for (a, b), rows in untestable.items():
             total = sum(1 for row in pairwise if (row.a, row.b) == (a, b))
@@ -1658,9 +1674,13 @@ def _labelled_verdict(
         tested = [row for row in rows if row.p_adjusted is not None]
         if not tested:
             n_text = f"n {replicates.get(rows[0].a, 0)} vs {replicates.get(label, 0)}"
+            why = (
+                f", as {rows[0].reason}"
+                if rows[0].reason
+                else " needs at least two replicates per condition and values that vary"
+            )
             sentences.append(
-                f"{VERDICT_NOT_TESTABLE}: {metric} for {rows[0].a} vs {label} needs at least two "
-                f"replicates per condition and values that vary ({n_text})"
+                f"{VERDICT_NOT_TESTABLE}: {metric} for {rows[0].a} vs {label}{why} ({n_text})"
             )
             continue
         larger = [row.entry for row in tested if row.significant and row.delta > 0]
