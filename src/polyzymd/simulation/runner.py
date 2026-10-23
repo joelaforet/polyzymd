@@ -1581,6 +1581,10 @@ class SimulationRunner:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved initial system to {system_xml_path}")
 
+        from polyzymd.audit.runtime import record_system_check
+
+        record_system_check(self._system, self._working_dir, phase_dir, phase_name, segment_index)
+
         # Set velocities for production
         # - If we have velocities from equilibration, use them (physical continuity)
         # - Otherwise generate new velocities at target temperature

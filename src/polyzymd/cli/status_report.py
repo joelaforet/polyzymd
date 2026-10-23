@@ -125,6 +125,8 @@ class ReplicateReport:
     last_log: str | None = None
     note: str | None = None
     action: str | None = None
+    #: Segments whose System is not the audited build (polyzymd.audit.runtime), with why.
+    diverged: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -722,6 +724,7 @@ def build_system_report(
                 last_error=last_err,
                 last_log=last_log,
                 note=note,
+                diverged=_diverged_segments(progress),
             )
         )
 
@@ -765,6 +768,16 @@ def _progress_text(done_ns: float, total_ns: float) -> str:
     return f"{done_ns:6.1f}/{total_ns:.0f}ns"
 
 
+def _diverged_segments(progress: Any) -> list[str]:
+    """Segments whose run-time System differs from the audited build."""
+    segments = getattr(progress, "segments", None) or []
+    return [
+        f"segment {seg.index}: {seg.system_check.get('detail', '')}"
+        for seg in segments
+        if seg.system_check and not seg.system_check.get("matches_build", True)
+    ]
+
+
 def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
     label = f"run{rep.replicate}"
     pct = f"{rep.fraction * 100:3.0f}%"
@@ -797,6 +810,8 @@ def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
             fields.append("no slurm log found")
         if rep.action:
             fields.append(f"action: {rep.action}")
+    if rep.diverged:
+        fields.append("SYSTEM DIVERGED FROM THE AUDITED BUILD: " + "; ".join(rep.diverged))
     return "  ".join(fields)
 
 
