@@ -57,12 +57,12 @@ The figure shows the stages of `SystemBuilder.build_from_config` and the
 module that does each one.
 
 ```{figure} ../_static/diagrams/build_pipeline.svg
-:alt: The system builder turns a cleaned PDB into an enzyme, adds the charged ligand, sizes the box, optionally packs polymers, solvates, parameterizes with OpenFF Interchange and exports an OpenMM bundle or GROMACS files, each with build_manifest.json.
+:alt: The system builder turns a cleaned PDB into an enzyme, adds the charged ligand, sizes the box, optionally packs polymers, solvates, parameterizes with OpenFF Interchange and exports an OpenMM bundle or GROMACS files, each with build_provenance.json.
 :width: 100%
 
 The build runs left to right. The box is sized from the protein and ligand
 before any polymer is packed, so replicates of a condition share one box.
-Either export writes `build_manifest.json`.
+Either export audits the system and writes `build_provenance.json`.
 ```
 
 ### Simulation and workflow execute the study

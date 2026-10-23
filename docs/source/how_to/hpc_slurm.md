@@ -232,14 +232,24 @@ replicate folder:
 - `system.prmtop`, the analysis topology. If ParmEd cannot convert the
   system, the file is missing and the build log says so.
 - `system.xml`
-- `build_manifest.json`
+- `build_provenance.json`, the build record, and `build_provenance.md`
+  beside it
+- `gromacs/audited_files.sha256`, for a GROMACS build
 
-The build writes `build_manifest.json` last. `submit`, and the job before OpenMM
-makes a simulation, check the manifest's config hash, its file hashes and its
-particle count. A missing or damaged manifest means that the build did not
-finish. A replicate folder without a manifest can still continue when the
-particle counts of the topology and the System agree. PolyzyMD then logs a
-warning. It does not write a manifest for that folder.
+The build writes `build_provenance.json` last. It replaced
+`build_manifest.json` in 1.3.0rc5, and PolyzyMD still reads the old name.
+`submit`, and the job before OpenMM makes a simulation, check the record's
+config hash, its file hashes and its particle count. A missing or damaged
+record means that the build did not finish. Build the replicate again.
+
+`submit` and `run` refuse a replicate that has not started unless a current
+record vouches for its files and records a passing physics audit. A started
+replicate continues from its own files. If the audit fails, an OpenMM build
+leaves `build_provenance.failed.json` and `build_provenance.failed.md` and
+commits no files. A GROMACS job checks `audited_files.sha256` with
+`sha256sum --check` before it runs `grompp`. For the checks, see
+{doc}`../reference/physics_checks`. For why they exist, see
+{doc}`../explanation/physics_audit`.
 
 The build and the simulation share the lock file `.polyzymd.lock` in the
 replicate folder. A second process exits and does not write. PolyzyMD refuses

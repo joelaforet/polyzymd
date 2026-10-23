@@ -155,8 +155,8 @@ Otherwise, freeze does these steps:
      in a condition whose config has no polymers, or the reverse.
    - An OpenMM replicate records no OpenMM version, or a GROMACS replicate
      has no `GROMACS version:` line in `gromacs/prod.log`.
-   - A file that `build_manifest.json` lists is missing from the replicate
-     folder.
+   - A file that `build_provenance.json` (or `build_manifest.json`, before
+     1.3.0rc5) lists is missing from the replicate folder.
 3. It hashes every trajectory and topology file on this machine (SHA-256,
    computed once per file and cached).
 4. It writes gzipped copies of the engine inputs of each replicate to
@@ -183,8 +183,8 @@ More about the manifest and the checklist:
 - The manifest records, for each replicate, the PolyzyMD, OpenMM and OpenFF
   versions that built it, the OpenMM or GROMACS version that ran it, and the
   random seeds of each equilibration stage and production segment
-  (`simulated_with`, from `build_manifest.json`, `progress.json` and the
-  GROMACS log). The deposited `build_manifest.json` of each replicate, in
+  (`simulated_with`, from `build_provenance.json`, `progress.json` and the
+  GROMACS log). The deposited `build_provenance.json` of each replicate, in
   `engine_inputs/`, also gives the Packmol seeds and the box the build made.
 - The manifest follows the JSON Schema `manifest-1.schema.json`. The schema
   ships with PolyzyMD, and freeze writes it into the deposit. `study.yaml`

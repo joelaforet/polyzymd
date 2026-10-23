@@ -87,7 +87,8 @@ AM1-BCC
 
 NAGL
   The OpenFF graph neural network that predicts AM1-BCC partial charges. It
-  needs no quantum-chemistry program. It is the default `charge_method`.
+  needs no quantum-chemistry program. A component uses it with
+  `charges: {method: nagl, model: ...}`.
   See the [NAGL docs](https://docs.openforcefield.org/projects/nagl/).
 
 PACKMOL
