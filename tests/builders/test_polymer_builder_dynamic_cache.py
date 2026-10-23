@@ -304,3 +304,36 @@ def test_missing_cached_sdf_error_names_real_config_keys(tmp_path: Path) -> None
         cached._get_or_create_molecule("AAAAA")
     assert "allow_generation" not in str(error.value)
     assert "generation_mode: dynamic" in str(error.value)
+
+
+def test_molecule_source_reports_preset_for_a_user_sdf_in_dynamic_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A user SDF that dynamic mode loads as given keeps its own charges, so they are preset."""
+    sdf_directory = tmp_path / "user"
+    sdf_directory.mkdir()
+    builder = PolymerBuilder(
+        characters=["A", "B"],
+        probabilities=[0.0, 1.0],
+        length=5,
+        type_prefix="PEGMA",
+        sdf_directory=sdf_directory,
+        cache_directory=tmp_path / "cache",
+        generation_mode="dynamic",
+        monomer_smiles={"SBMA": "C", "PEGMA": "CO"},
+        monomer_names={"A": "SBMA", "B": "PEGMA"},
+        reactions=object(),
+    )
+    user_sdf = builder._get_sdf_path("BBBBB", sdf_directory)
+    user_sdf.write_text("user molecule", encoding="utf-8")
+    monkeypatch.setattr(builder, "_is_dynamic_cache_like_sdf", lambda path, sequence: False)
+
+    assert builder.molecule_source("BBBBB") == {
+        "sdf_path": user_sdf,
+        "charge_method": "preset",
+        "nagl_model": None,
+    }
+
+    monkeypatch.setattr(builder, "_is_dynamic_cache_like_sdf", lambda path, sequence: True)
+    assert builder.molecule_source("BBBBB")["charge_method"] == builder._charger_type

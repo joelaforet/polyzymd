@@ -670,6 +670,16 @@ def _require_packmol() -> str:
     return packmol_binary
 
 
+def packing_order(number_of_copies: list[int]) -> list[int]:
+    """Return the order :func:`pack_polymers` places molecule types in.
+
+    Types go largest count first, which helps Packmol converge; equal counts
+    keep their given order. The packed topology holds the chains in this order,
+    so anything that maps atoms back to types must use it too.
+    """
+    return sorted(range(len(number_of_copies)), key=lambda i: number_of_copies[i], reverse=True)
+
+
 def pack_polymers(
     molecules: list,
     number_of_copies: list[int],
@@ -764,10 +774,9 @@ def pack_polymers(
     # --- sort molecule types by count descending ---
     # Higher-count molecules first improves Packmol convergence (fewer
     # restarts when the most-replicated species is placed first).
-    paired = list(zip(molecules, number_of_copies))
-    paired.sort(key=lambda pair: pair[1], reverse=True)
-    molecules = [p[0] for p in paired]
-    number_of_copies = [p[1] for p in paired]
+    order = packing_order(number_of_copies)
+    molecules = [molecules[i] for i in order]
+    number_of_copies = [number_of_copies[i] for i in order]
 
     logger.info(
         "Packmol molecule order (count-descending): %s",
