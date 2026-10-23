@@ -13,9 +13,9 @@ protocol is yours, and the replicate's records say so.
 The steps are the same for both engines:
 
 1. Build the replicate with PolyzyMD.
-2. Run it with your protocol, in a folder of its own.
-3. Copy the trajectory back to where analysis reads it.
-4. Copy the inputs you ran into `protocol/`.
+2. Put the inputs of your run in `protocol/`.
+3. Run it with your protocol, in a folder of its own.
+4. Copy the trajectory back to where analysis reads it.
 5. Analyze.
 
 ## 1. Build
@@ -30,7 +30,40 @@ polyzymd build -c conditions/water/config.yaml -r 1 --format gromacs    # GROMAC
 
 Do not run `polyzymd run` or `polyzymd submit` on this replicate.
 
-## 2. Run it with your protocol
+## 2. Declare the protocol, before you run
+
+Make the folder `protocol/` in the replicate folder for OpenMM, or
+`gromacs/protocol/` for GROMACS, and put the inputs of your run there: your
+scripts, `.mdp` files and PLUMED input. Make it before you run, so PolyzyMD
+leaves the replicate alone while your run is going. After the run, add any
+output a reader needs to judge it, such as `COLVAR` and `HILLS`.
+
+```bash
+mkdir protocol && cp run_metad.py protocol/                 # OpenMM
+mkdir gromacs/protocol && cp minim.mdp nvt.mdp md.mdp gromacs/protocol/   # GROMACS
+```
+
+The folder is how PolyzyMD knows the replicate is run outside it. With it:
+
+- `polyzymd run`, `submit`, `recover` and `build` refuse the replicate, and a
+  PolyzyMD job already queued for it stops without running, so your files are
+  never overwritten or deleted;
+- `polyzymd status` shows the replicate as run with its own protocol, not as
+  dead, and suggests no resubmission;
+- each analysis record of the replicate holds `run_protocol: own`;
+- a frozen study deposits the files of `protocol/` with the built topology
+  (and `prod.tpr` for GROMACS), never the `.mdp` files PolyzyMD wrote but did
+  not run; its manifest records the run as `own protocol`, and its checklist
+  marks the replicate's settings as its own.
+
+Without the folder, a frozen study warns that it cannot say how the
+replicate was run.
+
+A GROMACS job script or `run_<prefix>_gromacs.sh` written by a PolyzyMD older
+than this check runs PolyzyMD's own protocol whatever the folder holds: do
+not run one in this replicate, and cancel any of its jobs still queued.
+
+## 3. Run it with your protocol
 
 Run in a new folder inside the replicate folder, such as `own/`, so the built
 files stay as they were audited.
@@ -65,26 +98,34 @@ simulation.reporters.append(app.DCDReporter("traj.dcd", 100))
 simulation.step(10000)
 ```
 
+Save it as `protocol/run_metad.py` and run it from `own/`:
+
+```bash
+mkdir own && cd own
+python ../protocol/run_metad.py
+cp COLVAR HILLS ../protocol/
+```
+
 **GROMACS.** Use the exported topology and coordinates in `gromacs/` with
 your own `.mdp` files:
 
 ```bash
 cd gromacs
 mkdir own
-gmx grompp -f own/minim.mdp -c trpcage.gro -p trpcage.top -o own/em.tpr
+gmx grompp -f protocol/minim.mdp -c trpcage.gro -p trpcage.top -o own/em.tpr
 gmx mdrun -deffnm own/em
-gmx grompp -f own/nvt.mdp -c own/em.gro -p trpcage.top -o own/nvt.tpr
+gmx grompp -f protocol/nvt.mdp -c own/em.gro -p trpcage.top -o own/nvt.tpr
 gmx mdrun -deffnm own/nvt
-gmx grompp -f own/md.mdp -c own/nvt.gro -t own/nvt.cpt -p trpcage.top -o own/md.tpr
+gmx grompp -f protocol/md.mdp -c own/nvt.gro -t own/nvt.cpt -p trpcage.top -o own/md.tpr
 gmx mdrun -deffnm own/md
 ```
 
 Use the exported `.top` and `.itp` files as they are. If your protocol
 changes the system itself, such as a bias, an extra restraint or a changed
 parameter, that change is part of your protocol: keep its input in
-`protocol/` (step 4).
+`protocol/`.
 
-## 3. Copy the trajectory back
+## 4. Copy the trajectory back
 
 Analysis finds trajectories by name.
 
@@ -115,31 +156,6 @@ echo -e "Protein\nSystem" | gmx trjconv -s prod.tpr -f prod_nojump.xtc \
     -o prod_centered.xtc -center -pbc mol -ur compact
 ```
 
-## 4. Declare the protocol
-
-Copy every input you ran into `protocol/` in the replicate folder for OpenMM,
-or `gromacs/protocol/` for GROMACS: your scripts, `.mdp` files, PLUMED input,
-and any output a reader needs to judge the run, such as `COLVAR` and `HILLS`.
-
-```bash
-mkdir protocol && cp own/run_metad.py own/COLVAR own/HILLS protocol/   # OpenMM
-mkdir gromacs/protocol && cp gromacs/own/*.mdp gromacs/protocol/        # GROMACS
-```
-
-The folder is how PolyzyMD knows the replicate was run outside it. With it:
-
-- `polyzymd status` shows the replicate as `OWN_PROTOCOL`, not as dead, and
-  suggests no resubmission;
-- `polyzymd run`, `submit` and `recover` refuse the replicate, so they never
-  overwrite or delete your trajectories;
-- each analysis record of the replicate holds `run_protocol: own`;
-- a frozen study deposits the files of `protocol/` with the built topology
-  (and `prod.tpr` for GROMACS), never the `.mdp` files PolyzyMD wrote but did
-  not run, and its manifest records the run as `own protocol`.
-
-Without the folder, a frozen study warns that it cannot say how the
-replicate was run.
-
 ## 5. Analyze
 
 ```bash
@@ -154,8 +170,10 @@ study's equilibration window applies to them.
 ```{warning}
 PolyzyMD analyses weight every frame equally. The frames of a biased run, such
 as metadynamics or umbrella sampling, do not sample the unbiased ensemble:
-reweight them (for example with the bias that PLUMED records) before you
-report an average from them. PolyzyMD does not reweight.
+reweight them before you report an average from them. For metadynamics the
+bias changes during the run, so the weights need its time-dependent
+correction (in PLUMED, `CALC_RCT` and the `rbias` it gives), not the bias
+alone. PolyzyMD does not reweight.
 ```
 
 ## Run the replicate with PolyzyMD instead

@@ -195,6 +195,13 @@ trap 'handle_term' TERM
 mkdir -p "$WORKING_DIR"
 cd "$WORKING_DIR"
 
+# A replicate run with the user's own protocol (its protocol/ or gromacs/protocol/
+# holds files) is never run by PolyzyMD, so its trajectories stay as they are.
+if find protocol ../protocol -type f -print -quit 2>/dev/null | grep -q .; then
+    echo "STOP: $(pwd) was run with your own protocol (protocol/): PolyzyMD does not run it and submits no successor."
+    exit 0
+fi
+
 # Run only files a passing physics audit vouched for, unchanged since: the
 # build writes their hashes only when its audit passes. A run that started
 # before PolyzyMD 1.3.0rc5 has no hashes and continues from its own files.
