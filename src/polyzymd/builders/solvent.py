@@ -39,6 +39,14 @@ if TYPE_CHECKING:
     from polyzymd.config.schema import SolventConfig
 
 LOGGER = logging.getLogger(__name__)
+
+#: The method that splits the neutralizing charge between Na+ and Cl- when
+#: ``ionic_strength`` sets the ions; cite it in the methods of such a system.
+MACHADO_PANTANO = (
+    "Machado, M. R. and Pantano, S. (2020). Split the charge difference in two! A rule of "
+    "thumb for adding proper amounts of ions in MD simulations. J. Chem. Theory Comput. "
+    "16(3), 1367-1372. doi:10.1021/acs.jctc.9b00953"
+)
 AVOGADRO_CONSTANT = 6.02214076e23
 ION_CHARGE_TOLERANCE = 1.0e-5
 
@@ -492,6 +500,10 @@ class SolventBuilder:
                 na_count, cl_count = self._calculate_ionic_strength_counts(
                     total_ions=target_ions - fixed_ionic_weight(copies, counter_na, counter_cl),
                     solute_charge=solute_int + cosolvent_int + counter_na - counter_cl,
+                )
+                LOGGER.info(
+                    "Ions set by ionic strength with the split of Machado and Pantano: cite "
+                    f"{MACHADO_PANTANO}"
                 )
             else:
                 na_count, cl_count = self._calculate_ion_counts(
