@@ -20,14 +20,17 @@ from polyzymd.audit.molecules import (
     graph_hash,
     map_molecule,
     molecule_graph,
+    molecule_maps,
     reference_system,
     system_graph,
 )
 from polyzymd.audit.realized import RealizedSystem
 from polyzymd.audit.terms import TERM_KINDS, compare
 
-#: The Constraints section lent to force fields without one (the Amber ports):
-#: bonds to hydrogen at the force field's own bond lengths, and rigid water.
+#: The Constraints section lent to a force field without one (the Amber ports)
+#: when the system names no other: bonds to hydrogen at the force field's own
+#: bond lengths, and rigid water. Callers pass the system's small-molecule force
+#: field, whose Constraints section the build lends the same way.
 CONSTRAINTS_FROM = "openff-2.3.0.offxml"
 
 
@@ -69,20 +72,31 @@ class DomainComparison:
     charges_recomputed: bool = True
 
 
-def compare_component(realized: RealizedSystem, component: Any) -> list[DomainComparison]:
-    """Compare every domain of ``component`` with its reference."""
-    return [_compare_domain(realized, component, domain) for domain in component.domains]
+def compare_component(
+    realized: RealizedSystem, component: Any, constraints_from: str = CONSTRAINTS_FROM
+) -> list[DomainComparison]:
+    """Compare every domain of ``component`` with its reference.
+
+    ``constraints_from`` lends its Constraints section to a domain whose force
+    field has none.
+    """
+    return [
+        _compare_domain(realized, component, domain, constraints_from)
+        for domain in component.domains
+    ]
 
 
-def _compare_domain(realized: RealizedSystem, component: Any, domain: Any) -> DomainComparison:
+def _compare_domain(
+    realized: RealizedSystem, component: Any, domain: Any, constraints_from: str
+) -> DomainComparison:
     ref = domain.reference or {}
     label = f"{' + '.join(domain.force_field)}, charges {_charge_label(domain.charges)}"
     result = DomainComparison(component.name, domain.name, label)
     try:
         if "pdb" in ref:
-            _compare_whole(realized, domain, ref, result)
+            _compare_whole(realized, domain, ref, result, constraints_from)
         elif "sdf" in ref or "smiles" in ref:
-            _compare_copies(realized, domain, ref, result)
+            _compare_copies(realized, domain, ref, result, constraints_from)
         else:
             result.errors.append("the component record says nothing to rebuild this domain from")
     except Exception as error:  # OpenFF raises many types; any of them means no reference
@@ -99,7 +113,11 @@ def _charge_label(charges: Any) -> str:
 
 
 def _compare_whole(
-    realized: RealizedSystem, domain: Any, ref: dict, result: DomainComparison
+    realized: RealizedSystem,
+    domain: Any,
+    ref: dict,
+    result: DomainComparison,
+    constraints_from: str,
 ) -> None:
     """A domain read from a PDB (the protein): its atoms in order are the reference's atoms."""
     from openff.toolkit import Topology
@@ -123,7 +141,7 @@ def _compare_whole(
             f"its {len(atoms)} atoms are not the {len(expected)} atoms of {ref['pdb']}, in order"
         )
         return
-    system = reference_system(domain.force_field, topology, constraints_from=CONSTRAINTS_FROM)
+    system = reference_system(domain.force_field, topology, constraints_from=constraints_from)
     expected_terms = _all_terms(system)
     actual = realized.index.extract(atoms, {s: k for k, s in enumerate(atoms)})
     for kind in TERM_KINDS:
@@ -132,7 +150,11 @@ def _compare_whole(
 
 
 def _compare_copies(
-    realized: RealizedSystem, domain: Any, ref: dict, result: DomainComparison
+    realized: RealizedSystem,
+    domain: Any,
+    ref: dict,
+    result: DomainComparison,
+    constraints_from: str,
 ) -> None:
     """A domain of copies of one molecule: compare one copy of each distinct set of terms."""
     molecule = _reference_molecule(ref)
@@ -150,14 +172,14 @@ def _compare_copies(
     charged = _charged(molecule, domain.charges, result)
     expected_terms = None
     if charged is not None:
-        expected_terms = _all_terms(_molecule_system(domain, charged))
+        expected_terms = _all_terms(_molecule_system(domain, charged, constraints_from))
     elements = realized.elements
     for members in groups.values():
         atoms = list(members[0])
         sub_graph = system_graph(index, atoms, elements)
         mapping = map_molecule(molecule, sub_graph, atoms, identity_only=True)
         if mapping is None and graph_hash(sub_graph) == expected_hash:
-            mapping = map_molecule(molecule, sub_graph, atoms)
+            mapping = _best_map(index, atoms, molecule_maps(molecule, sub_graph), expected_terms)
         if mapping is None:
             result.errors.append(
                 f"{len(members)} molecule(s) starting at atom {atoms[0]} are not the reference "
@@ -173,7 +195,7 @@ def _compare_copies(
 
             copy = Molecule(molecule)
             copy.partial_charges = [actual["charge"][k] for k in range(copy.n_atoms)] * unit.e
-            terms = _all_terms(_molecule_system(domain, copy))
+            terms = _all_terms(_molecule_system(domain, copy, constraints_from))
         for kind in TERM_KINDS:
             comparison = compare(kind, actual[kind], terms[kind])
             result.kinds[kind].add(
@@ -221,11 +243,28 @@ def _uncharged(molecule: Any) -> Any:
     return copy
 
 
-def _molecule_system(domain: Any, molecule: Any) -> Any:
+def _molecule_system(domain: Any, molecule: Any, constraints_from: str) -> Any:
     charge_from = [molecule] if molecule.partial_charges is not None else []
     return reference_system(
-        domain.force_field, molecule.to_topology(), charge_from, constraints_from=CONSTRAINTS_FROM
+        domain.force_field, molecule.to_topology(), charge_from, constraints_from=constraints_from
     )
+
+
+def _best_map(
+    index: Any, atoms: list[int], maps: list[dict[int, int]], expected: Optional[dict]
+) -> Optional[dict[int, int]]:
+    """The map under which the most terms agree with the reference (the first, without one)."""
+    if not maps or expected is None:
+        return maps[0] if maps else None
+
+    def mismatches(mapping: dict[int, int]) -> int:
+        actual = index.extract(atoms, mapping)
+        return sum(
+            comparison.total - comparison.matched
+            for comparison in (compare(kind, actual[kind], expected[kind]) for kind in TERM_KINDS)
+        )
+
+    return min(maps, key=mismatches)
 
 
 def _all_terms(system: Any) -> dict[str, dict]:
