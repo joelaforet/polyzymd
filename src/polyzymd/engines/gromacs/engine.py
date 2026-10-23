@@ -197,6 +197,9 @@ class GromacsEngine(SimulationEngine):
             With the ``polyzymd build`` command to run.
         """
         from polyzymd.analyses.shared.gromacs import system_prefix
+        from polyzymd.simulation.own_protocol import require_polyzymd_run
+
+        require_polyzymd_run(request.working_dir, "submit")
 
         prefix = system_prefix(self._config)
         required = [f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp"]

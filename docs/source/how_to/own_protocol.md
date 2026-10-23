@@ -1,0 +1,172 @@
+# Run a PolyzyMD build with your own protocol
+
+PolyzyMD builds a system, audits it, and runs a standard protocol: minimization,
+equilibration stages and production. Some simulations need more: enhanced
+sampling with PLUMED, your own GROMACS `.mdp` files, or an OpenMM script of
+your own. Run those yourself, then bring the trajectories back into the study,
+where `polyzymd analyze` reads them like any other replicate.
+
+PolyzyMD then vouches for the system it built, which the physics audit checked
+and `build_provenance.json` records. It does not vouch for the run: the
+protocol is yours, and the replicate's records say so.
+
+The steps are the same for both engines:
+
+1. Build the replicate with PolyzyMD.
+2. Run it with your protocol, in a folder of its own.
+3. Copy the trajectory back to where analysis reads it.
+4. Copy the inputs you ran into `protocol/`.
+5. Analyze.
+
+## 1. Build
+
+Build the replicate as usual. The build runs the physics audit; read
+`build_provenance.md` before you go on.
+
+```bash
+polyzymd build -c conditions/water/config.yaml -r 1                     # OpenMM
+polyzymd build -c conditions/water/config.yaml -r 1 --format gromacs    # GROMACS
+```
+
+Do not run `polyzymd run` or `polyzymd submit` on this replicate.
+
+## 2. Run it with your protocol
+
+Run in a new folder inside the replicate folder, such as `own/`, so the built
+files stay as they were audited.
+
+**OpenMM.** Load the built `system.xml` and `solvated_system.pdb`, and add
+what your protocol needs. This script runs metadynamics on the radius of
+gyration of the protein's Cα atoms with the `openmm-plumed` plugin:
+
+```python
+import openmm as mm
+import openmm.app as app
+from openmm import unit
+from openmmplumed import PlumedForce
+
+pdb = app.PDBFile("../solvated_system.pdb")
+with open("../system.xml") as f:
+    system = mm.XmlSerializer.deserialize(f.read())
+ca = [a.index + 1 for a in pdb.topology.atoms()
+      if a.name == "CA" and a.residue.name not in ("HOH", "NA", "CL")]
+system.addForce(PlumedForce(f"""
+rg: GYRATION ATOMS={",".join(map(str, ca))}
+metad: METAD ARG=rg SIGMA=0.02 HEIGHT=1.0 PACE=100 FILE=HILLS
+PRINT ARG=rg,metad.bias STRIDE=100 FILE=COLVAR
+"""))
+integrator = mm.LangevinMiddleIntegrator(300 * unit.kelvin, 1 / unit.picosecond,
+                                         2 * unit.femtoseconds)
+simulation = app.Simulation(pdb.topology, system, integrator)
+simulation.context.setPositions(pdb.positions)
+simulation.minimizeEnergy()
+simulation.context.setVelocitiesToTemperature(300 * unit.kelvin)
+simulation.reporters.append(app.DCDReporter("traj.dcd", 100))
+simulation.step(10000)
+```
+
+**GROMACS.** Use the exported topology and coordinates in `gromacs/` with
+your own `.mdp` files:
+
+```bash
+cd gromacs
+mkdir own
+gmx grompp -f own/minim.mdp -c trpcage.gro -p trpcage.top -o own/em.tpr
+gmx mdrun -deffnm own/em
+gmx grompp -f own/nvt.mdp -c own/em.gro -p trpcage.top -o own/nvt.tpr
+gmx mdrun -deffnm own/nvt
+gmx grompp -f own/md.mdp -c own/nvt.gro -t own/nvt.cpt -p trpcage.top -o own/md.tpr
+gmx mdrun -deffnm own/md
+```
+
+Use the exported `.top` and `.itp` files as they are. If your protocol
+changes the system itself, such as a bias, an extra restraint or a changed
+parameter, that change is part of your protocol: keep its input in
+`protocol/` (step 4).
+
+## 3. Copy the trajectory back
+
+Analysis finds trajectories by name.
+
+**OpenMM.** Copy the trajectory to `production_0/production_0_trajectory.dcd`
+in the replicate folder. A run in several parts goes to `production_1/`,
+`production_2/` and so on, with no gaps; their times must follow on from one
+another. Analysis reads the topology from the built `system.prmtop`.
+
+```bash
+mkdir production_0
+cp own/traj.dcd production_0/production_0_trajectory.dcd
+```
+
+**GROMACS.** Copy the production run input, trajectory and log into
+`gromacs/` as `prod.tpr`, `prod.xtc` and `prod.log`. Then make the molecules
+whole and centre the protein, as PolyzyMD does after its own runs; otherwise
+a protein split across the periodic boundary gives wrong radii of gyration,
+distances and contacts. Analysis reads `prod_centered.xtc` first, and warns
+when it can only read the raw `prod.xtc`.
+
+```bash
+cd gromacs
+cp own/md.tpr prod.tpr
+cp own/md.xtc prod.xtc
+cp own/md.log prod.log      # the deposit reads the GROMACS version from it
+echo "System" | gmx trjconv -s prod.tpr -f prod.xtc -o prod_nojump.xtc -pbc nojump
+echo -e "Protein\nSystem" | gmx trjconv -s prod.tpr -f prod_nojump.xtc \
+    -o prod_centered.xtc -center -pbc mol -ur compact
+```
+
+## 4. Declare the protocol
+
+Copy every input you ran into `protocol/` in the replicate folder for OpenMM,
+or `gromacs/protocol/` for GROMACS: your scripts, `.mdp` files, PLUMED input,
+and any output a reader needs to judge the run, such as `COLVAR` and `HILLS`.
+
+```bash
+mkdir protocol && cp own/run_metad.py own/COLVAR own/HILLS protocol/   # OpenMM
+mkdir gromacs/protocol && cp gromacs/own/*.mdp gromacs/protocol/        # GROMACS
+```
+
+The folder is how PolyzyMD knows the replicate was run outside it. With it:
+
+- `polyzymd status` shows the replicate as `OWN_PROTOCOL`, not as dead, and
+  suggests no resubmission;
+- `polyzymd run`, `submit` and `recover` refuse the replicate, so they never
+  overwrite or delete your trajectories;
+- each analysis record of the replicate holds `run_protocol: own`;
+- a frozen study deposits the files of `protocol/` with the built topology
+  (and `prod.tpr` for GROMACS), never the `.mdp` files PolyzyMD wrote but did
+  not run, and its manifest records the run as `own protocol`.
+
+Without the folder, a frozen study warns that it cannot say how the
+replicate was run.
+
+## 5. Analyze
+
+```bash
+polyzymd status -c conditions/water/config.yaml --no-slurm
+polyzymd analyze --project .
+```
+
+The replicate takes part in every analysis and comparison like the
+replicates PolyzyMD ran. Frame times come from the trajectory, and the
+study's equilibration window applies to them.
+
+```{warning}
+PolyzyMD analyses weight every frame equally. The frames of a biased run, such
+as metadynamics or umbrella sampling, do not sample the unbiased ensemble:
+reweight them (for example with the bias that PLUMED records) before you
+report an average from them. PolyzyMD does not reweight.
+```
+
+## Run the replicate with PolyzyMD instead
+
+Move `protocol/` and the trajectories (`production_N/`, or the `prod*` files
+in `gromacs/`) out of the replicate folder. It is then a built replicate that
+has not started, and `polyzymd run` or `submit` runs it with PolyzyMD's
+protocol.
+
+## Related pages
+
+- {doc}`../explanation/physics_audit` — what the build audit checks
+- {doc}`run_gromacs` — run GROMACS with PolyzyMD's protocol
+- {doc}`study_folder` — studies, conditions and replicates
