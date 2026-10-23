@@ -877,7 +877,7 @@ class TestRunBuildManifest:
             checkpoint_interval_s=60.0,
         )
 
-        manifest = json.loads((tmp_path / "build_manifest.json").read_text())
+        manifest = json.loads((tmp_path / "build_provenance.json").read_text())
         assert manifest["provenance"] == {"polymer_packmol_seed": 1}
 
 

@@ -1101,6 +1101,50 @@ class RestraintConfig(_ConfigModel):
     enabled: bool = Field(True, description="Whether restraint is active")
 
 
+#: The docs page listing every physics check and how to accept a failing one.
+CHECKS_GUIDE = "https://polyzymd.readthedocs.io/en/latest/reference/physics_checks.html"
+
+
+class ModelingException(_ConfigModel):
+    """A deliberate departure from one of PolyzyMD's physics checks.
+
+    A build runs every check; a failing check stops it unless the config
+    accepts that failure here. The reason is not read by code: it is there so
+    that a reader of a published config sees why a non-standard choice was
+    made. The build provenance records each accepted failure with its reason
+    and the components and atoms it covered.
+
+    Attributes:
+        check: The check's ID, such as ``geometry.buried_water``.
+        component: The component the exception covers (a solute name, ``solvent``,
+            ``ions`` or ``system``); every component the check runs on when left out.
+        reason: Why the departure is deliberate (required).
+    """
+
+    check: str = Field(..., description=f"Check ID (see {CHECKS_GUIDE})")
+    component: str | None = Field(None, description="Component it covers; all when left out")
+    reason: str = Field(..., min_length=1, description="Why this departure is deliberate")
+
+    @field_validator("check")
+    @classmethod
+    def _registered(cls, value: str) -> str:
+        import polyzymd.audit.checks  # noqa: F401  # registers the checks
+        from polyzymd.audit import registry
+
+        try:
+            registry.get(value)
+        except KeyError as error:  # the message names the closest IDs
+            raise ValueError(f"{error.args[0]}; every check: {CHECKS_GUIDE}") from None
+        return value
+
+    @field_validator("reason")
+    @classmethod
+    def _real_reason(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("give the reason this departure is deliberate")
+        return value
+
+
 # =============================================================================
 # Thermodynamics Configuration
 # =============================================================================
@@ -2050,6 +2094,10 @@ class SimulationConfig(_ConfigModel):
     restraints: list[RestraintConfig] = Field(
         default_factory=list, description="Restraint configurations"
     )
+    modeling_exceptions: list[ModelingException] = Field(
+        default_factory=list,
+        description=f"Deliberate departures from the physics checks, each with a reason ({CHECKS_GUIDE})",
+    )
     thermodynamics: ThermodynamicsConfig = Field(..., description="Thermodynamic conditions")
     simulation_phases: SimulationPhasesConfig = Field(..., description="Phase settings")
     output: OutputConfig = Field(default_factory=OutputConfig, description="Output settings")
@@ -2144,6 +2192,13 @@ class SimulationConfig(_ConfigModel):
                         f"restraint {restraint.name!r} names component {atom.component!r}, "
                         f"which is not a solute; solutes are {', '.join(names)}"
                     )
+        allowed = set(names) | {"solvent", "ions", "system"}
+        for exception in self.modeling_exceptions:
+            if exception.component is not None and exception.component not in allowed:
+                raise ValueError(
+                    f"modeling_exceptions: {exception.check} names component "
+                    f"{exception.component!r}; components are {', '.join(sorted(allowed))}"
+                )
         return self
 
     def _charge_specs(self) -> list[ChargeSpec]:

@@ -88,3 +88,49 @@ def implementation(check_id: str) -> Callable:
 def catalog() -> list[CheckSpec]:
     """Return every registered check, ordered by ID."""
     return [_REGISTRY[key] for key in sorted(_REGISTRY)]
+
+
+def catalog_markdown() -> str:
+    """The docs page listing every check, generated from the registry.
+
+    ``docs/source/reference/physics_checks.md`` is this text; a test keeps it
+    current, so the page cannot drift from the code.
+    """
+    import polyzymd.audit.checks  # noqa: F401  # registers the checks
+
+    lines = [
+        "# Physics checks",
+        "",
+        "Every PolyzyMD build runs each of these checks on the system the requested engine",
+        "will run (OpenMM `system.xml`, or GROMACS `.top`/`.gro` with the production `.mdp`),",
+        "and records the result in `build_provenance.json` and `build_provenance.md`.",
+        "A check whose default is FAIL stops the build; WARN and INFO are recorded only.",
+        "",
+        "To keep a deliberate departure, accept the failing check in the config with a",
+        "reason. The build record then lists the accepted finding, its reason and the",
+        "atoms it covered:",
+        "",
+        "```yaml",
+        "modeling_exceptions:",
+        "  - check: geometry.buried_water",
+        "    component: protein        # optional; every component the check runs on if left out",
+        '    reason: "Crystal waters W301 and W305 kept deliberately (PDB 4K6G)"',
+        "```",
+        "",
+        "An exception that matches no failing check is reported, so stale entries do not",
+        "linger in a published config.",
+        "",
+        "This page is generated from PolyzyMD's check registry",
+        "(`polyzymd.audit.registry.catalog_markdown`).",
+        "",
+        "| Check | Runs on | Default | Catches | Origin |",
+        "|---|---|---|---|---|",
+    ]
+    for spec in catalog():
+        scope = "each component" if spec.scope == "component" else "the system"
+        if spec.component_types:
+            scope += f" ({', '.join(spec.component_types)})"
+        catches = spec.catches.replace("|", "\\|")
+        origin = spec.origin.replace("|", "\\|")
+        lines.append(f"| `{spec.id}` | {scope} | {spec.severity} | {catches} | {origin} |")
+    return "\n".join(lines) + "\n"

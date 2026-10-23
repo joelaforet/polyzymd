@@ -212,6 +212,22 @@ solvent:
 #     enabled: true
 
 # ============================================================================
+# Modeling exceptions (OPTIONAL)
+# ============================================================================
+# Every build checks that the system is the physics this config asks for: each
+# component's force field and charges, counts, salt, constraints, clashes,
+# periodic images and restraints. A failing check stops the build. If a failure
+# is a deliberate choice, accept it here with the reason; the build record
+# (build_provenance.json) lists it with the atoms it covered.
+# Every check and what it catches:
+#   https://polyzymd.readthedocs.io/en/latest/reference/physics_checks.html
+#
+# modeling_exceptions:
+#   - check: geometry.buried_water
+#     component: protein_X              # optional; all components if left out
+#     reason: "Crystal waters kept deliberately (cite the structure)"
+
+# ============================================================================
 # Thermodynamics (REQUIRED)
 # ============================================================================
 # Temperature and pressure settings for the simulation.
