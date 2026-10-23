@@ -209,6 +209,11 @@ class Replicate:
         if self.condition.until_ns is not None:
             # Present only with a common window, so other stored records stay valid.
             identity["until_ns"] = self.condition.until_ns
+        from polyzymd.simulation.own_protocol import protocol_dir
+
+        if protocol_dir(provenance.working_directory) is not None:
+            # Present only for a run made outside PolyzyMD, as above.
+            identity["run_protocol"] = "own"
         return identity
 
 

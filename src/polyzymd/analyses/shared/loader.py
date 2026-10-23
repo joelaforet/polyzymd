@@ -1179,6 +1179,19 @@ def _segment_indices(trajectory_paths: "Sequence[Path]") -> list[int]:
     return indices
 
 
+def _expected_trajectories(engine: str) -> str:
+    """Where an engine's production trajectories must be for analysis to find them."""
+    if engine == "gromacs":
+        return (
+            "Analysis reads gromacs/prod_centered.xtc, prod_nojump.xtc or prod.xtc, with "
+            "gromacs/prod.tpr, in the replicate folder."
+        )
+    return (
+        "Analysis reads production_0/production_0_trajectory.dcd (then production_1/..., "
+        "with no gaps) in the replicate folder."
+    )
+
+
 def _segment_completeness_warning(layout: "TrajectoryLayout") -> str | None:
     """Describe production segments the engine left out or flagged.
 
@@ -1630,7 +1643,8 @@ class TrajectoryLoader:
                     available_replicates=available,
                     action=(
                         "Run or complete the production simulation for this replicate, "
-                        "then rerun analysis. Use --recompute only after trajectory files exist."
+                        "then rerun analysis. Use --recompute only after trajectory files exist. "
+                        + _expected_trajectories(self._get_engine().name)
                     ),
                 )
             )
@@ -1639,6 +1653,13 @@ class TrajectoryLoader:
         gro_warning = self._gro_topology_warning(layout)
         if gro_warning is not None:
             warnings.append(gro_warning)
+        names = {Path(path).name for path in layout.trajectory_paths}
+        if self._get_engine().name == "gromacs" and names == {"prod.xtc"}:
+            warnings.append(
+                f"Read the raw gromacs/prod.xtc of {working_dir}: molecules may be split across "
+                "the periodic boundary. Make them whole first, as PolyzyMD's own runs do "
+                "(prod_nojump.xtc, then prod_centered.xtc with gmx trjconv)."
+            )
         segment_warning = _segment_completeness_warning(layout)
         if segment_warning is not None:
             warnings.append(segment_warning)

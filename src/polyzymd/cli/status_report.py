@@ -170,8 +170,11 @@ VERDICT_STOPPED = "stopped"
 VERDICT_NOT_STARTED = "not_started"
 VERDICT_NOT_FOUND = "not_found"
 VERDICT_CORRUPT = "corrupt"
+#: Run outside PolyzyMD with the user's own protocol (``protocol/``); never resubmitted.
+VERDICT_OWN_PROTOCOL = "own_protocol"
 VERDICT_ORDER = (
     VERDICT_COMPLETED,
+    VERDICT_OWN_PROTOCOL,
     VERDICT_RUNNING,
     VERDICT_QUEUED,
     VERDICT_DEAD,
@@ -654,6 +657,26 @@ def build_system_report(
                 )
             )
             continue
+        from polyzymd.simulation.own_protocol import protocol_dir
+
+        if protocol_dir(rep_path) is not None:
+            replicates.append(
+                ReplicateReport(
+                    replicate=rep_num,
+                    directory=str(rep_path),
+                    progress_status=VERDICT_OWN_PROTOCOL,
+                    completed_ns=0.0,
+                    total_ns=total_ns,
+                    fraction=0.0,
+                    verdict=VERDICT_OWN_PROTOCOL,
+                    jobs=rep_jobs,
+                    note=(
+                        "run with its own protocol (protocol/): PolyzyMD vouches for the "
+                        "build, not the run, and does not run or resubmit it"
+                    ),
+                )
+            )
+            continue
         progress = engine_inst.load_or_scan_progress(engine_dir, rep_num)
 
         status_val = progress.status
@@ -787,7 +810,9 @@ def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
     verdict = rep.verdict.upper()
     fields = [f"{label:<{label_width}}", ns, pct, f"{verdict:<11}"]
 
-    if rep.verdict == VERDICT_COMPLETED:
+    if rep.verdict == VERDICT_OWN_PROTOCOL:
+        fields = [f"{label:<{label_width}}", f"{verdict:<11}", rep.note or ""]
+    elif rep.verdict == VERDICT_COMPLETED:
         pass
     elif rep.verdict in (VERDICT_RUNNING, VERDICT_QUEUED):
         fields.extend(_fmt_job(j) for j in rep.jobs)

@@ -524,20 +524,37 @@ def _gzip_copy(source: Path, target: Path) -> Path:
     return target
 
 
-def _engine_inputs(provenance: Any, config: Any = None) -> list[Path]:
-    """Return the engine input files of a replicate: OpenMM system XML and topology, or GROMACS files.
+def _engine_inputs(provenance: Any, config: Any = None) -> list[tuple[Path, str]]:
+    """Return the engine input files of a replicate, each with its name in the deposit.
 
-    GROMACS files are those PolyzyMD writes, by name
-    (:func:`~polyzymd.analyses.shared.gromacs.run_input_files`): another
-    ``.top`` or ``.mdp`` left in the run folder is not deposited.
+    OpenMM: the system XML and topology. GROMACS: the files PolyzyMD writes, by
+    name (:func:`~polyzymd.analyses.shared.gromacs.run_input_files`); another
+    ``.top`` or ``.mdp`` left in the run folder is not deposited. A replicate
+    run with the user's own protocol deposits its ``protocol/`` files (named
+    ``protocol/...``) and, for GROMACS, ``prod.tpr`` and the topology, never the
+    ``.mdp`` files PolyzyMD wrote but did not run; for OpenMM, the built
+    ``system.xml`` the protocol started from.
     """
-    from polyzymd.analyses.shared.gromacs import run_input_files
+    from polyzymd.analyses.shared.gromacs import run_input_files, topology_files
     from polyzymd.analyses.shared.loader import openmm_system_file
+    from polyzymd.simulation.own_protocol import protocol_dir, protocol_files
 
     topology = Path(provenance.topology.path)
+    working_dir = Path(provenance.working_directory)
+    own = protocol_dir(working_dir)
     files: list[Path] = []
-    if (provenance.config_engine or "openmm") == "gromacs":
+    gromacs = (provenance.config_engine or "openmm") == "gromacs"
+    if gromacs and own is not None:
+        from polyzymd.analyses.shared.gromacs import topology_name
+
+        folder = topology.parent
+        files.extend(path for path in [folder / "prod.tpr"] if path.is_file())
+        files.extend(topology_files(folder / topology_name(config)))
+    elif gromacs:
         files.extend(run_input_files(topology.parent, config))
+    elif own is not None:
+        files.append(topology)
+        files.append(working_dir / "system.xml")
     else:
         files.append(topology)
         for trajectory in provenance.trajectories:
@@ -547,11 +564,17 @@ def _engine_inputs(provenance: Any, config: Any = None) -> list[Path]:
     build = build_record_path(Path(provenance.working_directory))
     if build.is_file():
         files.append(build)
-    unique, seen = [], set()
+    unique: list[tuple[Path, str]] = []
+    seen: set[Path] = set()
     for path in files:
         if path.is_file() and path.resolve() not in seen:
             seen.add(path.resolve())
-            unique.append(path)
+            unique.append((path, path.name))
+    if own is not None:
+        unique += [
+            (path, f"protocol/{path.relative_to(own).as_posix()}")
+            for path in protocol_files(working_dir)
+        ]
     return unique
 
 
@@ -851,9 +874,17 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
     ``gromacs_version`` is the version that ``gmx mdrun`` wrote into
     ``gromacs/prod.log``.
     """
+    from polyzymd.simulation.own_protocol import protocol_dir, protocol_files
     from polyzymd.simulation.progress import load_progress
 
     found: dict[str, Any] = {}
+    own = protocol_dir(working_dir)
+    if own is not None:
+        # The build is PolyzyMD's and audited; the run is the user's protocol.
+        found["run_protocol"] = {
+            "run_by": "own protocol",
+            "files": [path.relative_to(own).as_posix() for path in protocol_files(working_dir)],
+        }
     build = build_record_path(working_dir)
     try:
         manifest = json.loads(build.read_text())
@@ -1031,14 +1062,16 @@ def _replicates(
                 / f"replicate_{replicate.index}"
             )
             inputs = []
-            for source in _engine_inputs(provenance, condition.config):
-                target = _gzip_copy(source, protocol.root / folder / (source.name + ".gz"))
+            for source, name in _engine_inputs(provenance, condition.config):
+                target = _gzip_copy(source, protocol.root / folder / (name + ".gz"))
                 inputs.append(
                     {
                         "path": str(
-                            "engine_inputs" / in_deposit / target.relative_to(deposit / "engine_inputs")
+                            "engine_inputs"
+                            / in_deposit
+                            / target.relative_to(deposit / "engine_inputs")
                         ),
-                        "source": source.name,
+                        "source": name,
                         **hashes(target),
                     }
                 )
@@ -1096,6 +1129,19 @@ def _replicates(
                 ]
             )
         ]
+        untold = [
+            index
+            for index, r in replicates.items()
+            if not r["simulated_with"].get("segments") and "run_protocol" not in r["simulated_with"]
+        ]
+        if untold:
+            warnings.append(
+                f"{label}: replicates {', '.join(untold)} have no PolyzyMD progress record and no "
+                "protocol/ folder, so the deposit cannot say how they were run. If they were run "
+                "with your own protocol, copy its inputs into protocol/ (gromacs/protocol/ for "
+                "GROMACS) and freeze again; if with PolyzyMD's local GROMACS script, say so in "
+                "the methods"
+            )
         unhashed = [index for index, r in replicates.items() if not r["hashes_recorded"]]
         if unhashed:
             # From a project's folder the study is named; from the study's, it is ".".

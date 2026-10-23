@@ -139,6 +139,14 @@ and write their reason, not yours. Check IDs are listed in
 Never edit an exported `.top`, `.itp`, `.mdp` or `system.xml` by hand: runs
 refuse files the audit did not vouch for. Change the config and build again.
 
+A protocol PolyzyMD does not run (PLUMED, enhanced sampling, the user's own
+`.mdp` files or OpenMM script) is run outside PolyzyMD on the audited build
+and brought back for analysis: follow
+`docs/source/how_to/own_protocol.md`. Copy the inputs that ran into
+`protocol/` (`gromacs/protocol/` for GROMACS). Do not change the config to
+imitate such a protocol, and tell the user that analyses weight frames
+equally, so a biased run needs reweighting.
+
 ## 4. Run on a cluster
 
 ```bash
