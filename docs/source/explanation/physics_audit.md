@@ -14,8 +14,8 @@ what they do not check. {doc}`../reference/physics_checks` lists every check.
 Each of these happened in a real PolyzyMD campaign. Each built, ran and gave
 plausible trajectories, and no step reported an error.
 
-**The protein ran with the wrong force field.** From January 2026 to the
-1.3.0 acceptance tests, PolyzyMD loaded ff14SB and Sage into one OpenFF
+**The protein ran with the wrong force field.** From January 2026 until testing
+of the 1.3.0 release found it, PolyzyMD loaded ff14SB and Sage into one OpenFF
 `ForceField`. In SMIRNOFF the last matching parameter wins, so Sage's generic
 parameters replaced ff14SB's on every protein bond, angle, torsion, improper
 and Lennard-Jones term. Only the ff14SB charges survived. Every protein in one 18-condition study
@@ -79,8 +79,8 @@ charge source. The audit then rebuilds each component's molecules from those
 inputs alone, with OpenFF directly. It never calls PolyzyMD's builders, so a
 mistake in the builder cannot repeat in the check. It compares the built
 system with the rebuild term by term: every bond, angle, torsion, improper,
-Lennard-Jones and 1-4 parameter, every constraint, every charge and every
-mass. A water box has thousands of copies of one molecule; the audit compares
+Lennard-Jones and 1-4 parameter, every constraint, every library, NAGL or
+preset charge and every mass. A water box has thousands of copies of one molecule; the audit compares
 each copy, so one wrong copy fails the check.
 
 The force-field order bug fails `parameters.bonded` on the protein. The test
@@ -117,13 +117,17 @@ audit takes about one minute on a cluster node.
 
 A check that fails stops the build. For OpenMM, nothing is committed: there is
 no `system.xml` to run. The full record is kept as
-`build_provenance.failed.json` and `build_provenance.failed.md`. The error
+`build_provenance.failed.json` and `build_provenance.failed.md`; a GROMACS
+build keeps its record, marked failed. The error
 lists each failing check with its component and detail, and names the two ways
 forward: correct the config or the inputs, or accept the departure.
 
-Some departures are deliberate. Crystal waters inside a protein fail
-`geometry.buried_water` by design. To accept one, add an entry under
-`modeling_exceptions` with the check, the component and the reason:
+A check can also warn: the build goes on, and the warning is recorded.
+
+Some departures are deliberate. Crystal waters kept inside a protein, for
+example, warn under `geometry.buried_water`. To accept a failure or a warning
+on purpose, add an entry under `modeling_exceptions` with the check, the
+component and the reason:
 
 ```yaml
 modeling_exceptions:
@@ -171,6 +175,9 @@ does not check that the config describes good science:
 - whether the force field, charge model or water model suits the system;
 - the protonation states and the preparation of the input structure;
 - whether the simulation is long enough, or converged;
+- AM1-BCC and Espaloma charges: they are computed for each molecule, so the
+  audit does not compute them again; `charges.source` reports a warning that
+  says so;
 - how closely GROMACS and OpenMM sample the same ensemble where their
   algorithms differ (see {doc}`../reference/gromacs_openmm`).
 

@@ -24,6 +24,21 @@ echo "{{ short_credit_line }}"
 echo "Using GROMACS: $GMX"
 echo ""
 
+# Run only files a passing physics audit vouched for, unchanged since: the
+# build writes their hashes only when its audit passes. A run that started
+# before PolyzyMD 1.3.0rc5 has no hashes and continues from its own files.
+if [ -f audited_files.sha256 ]; then
+    if ! sha256sum --check --quiet audited_files.sha256; then
+        echo "FATAL: files in $(pwd) changed since the build was audited (above). Restore them or build again."
+        exit 1
+    fi
+elif [ -f em.gro ] || compgen -G "*.cpt" > /dev/null; then
+    echo "NOTE: $(pwd) has no audited_files.sha256; this run started before PolyzyMD 1.3.0rc5 and continues from its own files."
+else
+    echo "FATAL: $(pwd) has no audited_files.sha256: no passing physics audit vouches for these files. Build again with polyzymd build --format gromacs."
+    exit 1
+fi
+
 {{ energy_minimization_block }}
 {{ equilibration_block }}
 {{ production_block }}
