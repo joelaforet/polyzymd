@@ -1334,9 +1334,10 @@ def test_an_openmm_job_without_its_environment_does_not_run(monkeypatch, tmp_pat
 def test_preempted_jobs_go_back_to_the_queue(monkeypatch):
     """Both engines let SLURM requeue a job it preempts.
 
-    Blanca preempts with PreemptMode=REQUEUE and no grace time, so the job's
-    SIGTERM handler gets no chance to submit a successor; with --no-requeue the
-    chain stopped. A requeued job resumes from the replicate's restart state.
+    Whether a preempted job gets SIGTERM and a grace period first is the
+    site's choice, so the chain cannot rely on its SIGTERM handler to submit a
+    successor; with --no-requeue, a job killed without one stopped the chain.
+    A requeued job resumes from the replicate's restart state.
     """
     from polyzymd.engines.gromacs.slurm import GromacsSlurmScriptGenerator
 

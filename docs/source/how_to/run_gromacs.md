@@ -299,10 +299,11 @@ This maps directly to `#SBATCH --constraint` in the generated script.
 
 A preempted job goes back to the queue: the script sets `#SBATCH --requeue`,
 and SLURM restarts it under the same job ID, resuming from the last `.cpt`
-checkpoint. This is what keeps a chain alive on queues that preempt without
-warning, such as Blanca's preemptable QoS.
+checkpoint. This keeps a chain alive whether or not the scheduler warns the
+job before it preempts it.
 
-When the scheduler does send `SIGTERM` first, the script also traps it:
+When the scheduler sends `SIGTERM` first (CURC documents a grace period of up
+to 120 s on Blanca), the script also traps it:
 
 1. The script forwards `SIGTERM` to `gmx mdrun`.
 2. GROMACS writes a `.cpt` checkpoint file.
