@@ -58,6 +58,32 @@ def _shown(path: object) -> str:
     return os.path.normpath(str(path))
 
 
+def _echo_audit(working_dir: Path, phase: str) -> None:
+    """Print the build's physics audit result, each warning or accepted finding,
+    and where the readable build record is."""
+    import json
+
+    from polyzymd.simulation.artifact_integrity import PROVENANCE_MARKDOWN, build_record_path
+
+    record = build_record_path(working_dir)
+    if not record.is_file():
+        return
+    audit = json.loads(record.read_text()).get("audit") or {}
+    counts = ", ".join(
+        f"{n} {status.lower()}" for status, n in audit.get("counts", {}).items() if n
+    )
+    result = "PASSED" if audit.get("passed") else "FAILED"
+    colored_echo(f"Physics audit: {result} ({counts})", phase=phase)
+    for finding in audit.get("findings", []):
+        if finding["status"] in ("WARN", "ACCEPTED"):
+            colored_echo(
+                f"  {finding['status']} {finding['check']} ({finding['component']}): "
+                f"{finding['detail']}",
+                phase=phase,
+            )
+    colored_echo(f"Build record: {_shown(Path(working_dir) / PROVENANCE_MARKDOWN)}", phase=phase)
+
+
 def _echo_branding() -> None:
     """Print the PolyzyMD ASCII logo for top-level user-facing commands."""
     echo_logo()
@@ -654,7 +680,7 @@ def build(
                     colored_echo("    - *.gro (coordinates)", phase="build")
                     colored_echo("    - *.top (topology)", phase="build")
                     colored_echo("    - *.itp (molecule parameters)", phase="build")
-                    colored_echo("    - Optional convenience MDP files:", phase="build")
+                    colored_echo("    - Run parameters from the config (audited):", phase="build")
                     colored_echo("      - em.mdp (energy minimization)", phase="build")
                     if eq_stages:
                         for i, stage in enumerate(eq_stages, 1):
@@ -667,9 +693,7 @@ def build(
                         "    - Position restraints appended to molecule *.itp files",
                         phase="build",
                     )
-                    colored_echo(
-                        "    - Optional run_*_gromacs.sh (convenience script)", phase="build"
-                    )
+                    colored_echo("    - run_*_gromacs.sh (local run script)", phase="build")
             else:
                 colored_echo("Files to Generate (OpenMM):", phase="build")
                 colored_echo("  Per replicate:", phase="build")
@@ -753,26 +777,29 @@ def build(
                 )
 
                 colored_echo(f"{export_format.upper()} export successful!", phase="export")
+                _echo_audit(working_dir, phase="export")
                 colored_echo(f"Output directory: {_shown(export_dir)}", phase="export")
                 colored_echo("Files generated:", phase="export")
                 colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
                 colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
                 colored_echo("  - *.itp (molecule parameters)", phase="export")
-                colored_echo("Convenience defaults generated:", phase="export")
+                colored_echo(
+                    "Run parameters from the config (audited; change the config, not these):",
+                    phase="export",
+                )
                 colored_echo(
                     f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export"
                 )
                 for eq_mdp in export_result.get("eq_mdps", []):
                     colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
                 colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
+                colored_echo(
+                    f"  - {export_result['run_script'].name} (local run script)", phase="export"
+                )
                 if export_result.get("posres_defines"):
                     colored_echo("Position restraints added to molecule ITP files:", phase="export")
                     for component, define in export_result["posres_defines"].items():
                         colored_echo(f"  - {component}: #ifdef {define}", phase="export")
-                colored_echo(
-                    f"  - {export_result['run_script'].name} (convenience run script)",
-                    phase="export",
-                )
                 colored_echo(phase="export")
                 colored_echo(
                     f"To run: polyzymd run -c {config} -r {rep} --engine gromacs",
@@ -862,6 +889,7 @@ def build(
                 )
 
                 colored_echo("System built successfully!", phase="build")
+                _echo_audit(working_dir, phase="build")
                 colored_echo(f"Output directory: {_shown(working_dir)}", phase="build")
                 colored_echo("Files saved:", phase="build")
                 colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
@@ -1271,6 +1299,7 @@ def _run_gromacs_impl(
         )
 
         colored_echo(f"\nGROMACS files exported to: {gromacs_dir}", phase="export")
+        _echo_audit(working_dir, phase="export")
         colored_echo("Files generated:", phase="export")
         colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
         colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
@@ -1392,7 +1421,9 @@ def _run_openmm_impl(
             reuse_build = False
             if (working_dir / "system.xml").exists():
                 # Say why the existing build is not used; never rebuild a started run.
-                colored_echo(f"Not reusing the build in {working_dir}: {reason}", phase="simulation")
+                colored_echo(
+                    f"Not reusing the build in {working_dir}: {reason}", phase="simulation"
+                )
                 from polyzymd.simulation.artifact_integrity import assert_rebuild_allowed
 
                 assert_rebuild_allowed(working_dir)

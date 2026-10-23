@@ -244,8 +244,8 @@ def require_inputs(config: Any) -> None:
 
     from polyzymd.utils.charging import installed_nagl_model
 
-    nagl_model = config.force_field.nagl_model
-    if installed_nagl_model(nagl_model) is None:
+    nagl_model = getattr(config, "nagl_model", None)
+    if nagl_model is not None and installed_nagl_model(nagl_model) is None:
         from openff.nagl_models import list_available_nagl_models
 
         installed = ", ".join(sorted(path.name for path in list_available_nagl_models()))

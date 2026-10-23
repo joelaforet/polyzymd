@@ -2,11 +2,15 @@
 
 PolyzyMD 1.3.0rc5 changed the config layout once; later 1.3 releases may only
 add. ``schema_rc5.json`` is the contract of the rc.5 schema: for every key
-reachable from ``SimulationConfig``, whether it is required, its default and
-the values it accepts. A later schema must keep every key, require no key that
-was optional, accept every value it accepted, and keep every default (a new
-default would change the physics of an rc.5 config without an edit). The
-example configs of rc.5 are kept as written and must still load.
+reachable from ``SimulationConfig``, whether it is required, its default, the
+values it accepts, its type, its YAML name (alias) and its bounds. A later
+schema must keep every key under the same name, require no key that was
+optional, accept every value and type it accepted, tighten no bound, and keep
+every default (a new default would change the physics of an rc.5 config
+without an edit). The example configs of rc.5 are kept as written; they must
+still load, and load to the same values (``rc5_loaded.json``), which also
+catches a default that a validator fills in, such as a solute's ``segid``.
+What a key means to the builder is beyond a schema test.
 
 Regenerate the contract only for a release that may break configs:
 ``python tests/config/test_schema_freeze.py --write``.
@@ -16,6 +20,7 @@ from __future__ import annotations
 
 import enum
 import json
+import re
 import sys
 import typing
 from pathlib import Path
@@ -28,6 +33,7 @@ from polyzymd.config.schema import SimulationConfig
 
 DATA = Path(__file__).parent / "data"
 CONTRACT = DATA / "schema_rc5.json"
+LOADED = DATA / "rc5_loaded.json"
 CONFIGS = sorted((DATA / "rc5_configs").glob("*.yaml"))
 
 
@@ -65,6 +71,26 @@ def _default(field: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
 
 
+#: Bounds a later release may relax but not tighten.
+_LOWER_BOUNDS = ("ge", "gt", "min_length")
+_UPPER_BOUNDS = ("le", "lt", "max_length")
+
+
+def _bounds(field: Any) -> dict[str, float]:
+    found: dict[str, float] = {}
+    for item in field.metadata:
+        for name in _LOWER_BOUNDS + _UPPER_BOUNDS:
+            value = getattr(item, name, None)
+            if value is not None:
+                found[name] = value
+    return found
+
+
+def _type_name(annotation: Any) -> str:
+    """The annotation as text, without the memory addresses of functions in it."""
+    return re.sub(r" at 0x[0-9a-f]+", "", str(annotation))
+
+
 def contract(model: type[BaseModel] = SimulationConfig, path: str = "") -> dict[str, Any]:
     """Every key reachable from ``model``, by dotted path; a solute's keys under its type."""
     keys: dict[str, Any] = {}
@@ -74,6 +100,9 @@ def contract(model: type[BaseModel] = SimulationConfig, path: str = "") -> dict[
             "required": field.is_required(),
             "default": _default(field),
             "values": _values(field.annotation),
+            "type": _type_name(field.annotation),
+            "alias": field.alias,
+            "bounds": _bounds(field),
         }
         for sub in _models(field.annotation):
             # A member of a union tagged by a one-value ``type`` (a solute) is keyed by its tag.
@@ -98,20 +127,58 @@ def test_every_rc5_key_keeps_its_meaning() -> None:
         if new["default"] != old["default"]:
             problems.append(f"{key}: default {old['default']!r} -> {new['default']!r}")
         if old["values"] is not None and not set(old["values"]) <= set(new["values"] or []):
-            problems.append(
-                f"{key}: no longer accepts {sorted(set(old['values']) - set(new['values'] or []))}"
+            dropped = sorted(set(old["values"]) - set(new["values"] or []))
+            problems.append(f"{key}: no longer accepts {dropped}")
+        if old["type"] != new["type"] and old["type"] not in new["type"]:
+            problems.append(f"{key}: type {old['type']} -> {new['type']}")
+        if new["alias"] != old["alias"]:
+            problems.append(f"{key}: read from {new['alias']!r}, not {old['alias']!r}")
+        for name, value in new["bounds"].items():
+            before = old["bounds"].get(name)
+            tighter = before is None or (
+                value > before if name in _LOWER_BOUNDS else value < before
             )
+            if tighter:
+                problems.append(f"{key}: bound {name} {before} -> {value}")
     added = [key for key in now if key not in frozen and now[key]["required"]]
     problems += [f"{key}: a new key that is required" for key in added]
     assert not problems, "an rc.5 config would need editing:\n" + "\n".join(problems)
 
 
-@pytest.mark.parametrize("path", CONFIGS, ids=[p.stem for p in CONFIGS])
-def test_the_rc5_example_configs_load_unchanged(path: Path) -> None:
+def _loaded(path: Path) -> Any:
+    """The config at ``path`` as loaded, with its own folder written as ``<config>``."""
     from polyzymd.config.loader import load_config
 
-    config = load_config(path)
-    assert config.solutes and config.solvent.water.model
+    import polyzymd
+
+    text = json.dumps(load_config(path).model_dump(mode="json"), sort_keys=True)
+    text = text.replace(str(Path(polyzymd.__file__).parent), "<polyzymd>")
+    return json.loads(text.replace(str(path.parent.resolve()), "<config>"))
+
+
+def _departures(old: Any, new: Any, where: str = "") -> list[str]:
+    """Where ``new`` differs from ``old``; keys that ``new`` adds are allowed."""
+    if isinstance(old, dict) and isinstance(new, dict):
+        lines = []
+        for key, value in old.items():
+            if key not in new:
+                lines.append(f"{where}.{key}: missing")
+            else:
+                lines += _departures(value, new[key], f"{where}.{key}")
+        return lines
+    if isinstance(old, list) and isinstance(new, list) and len(old) == len(new):
+        lines = []
+        for k, (a, b) in enumerate(zip(old, new)):
+            lines += _departures(a, b, f"{where}[{k}]")
+        return lines
+    return [] if old == new else [f"{where}: {old!r} -> {new!r}"]
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=[p.stem for p in CONFIGS])
+def test_the_rc5_example_configs_load_unchanged(path: Path) -> None:
+    frozen = json.loads(LOADED.read_text())[path.stem]
+    departures = _departures(frozen, _loaded(path))
+    assert not departures, f"{path.name} loads differently:\n" + "\n".join(departures)
 
 
 def test_the_contract_covers_the_config() -> None:
@@ -133,4 +200,7 @@ def test_the_contract_covers_the_config() -> None:
 
 if __name__ == "__main__" and "--write" in sys.argv:
     CONTRACT.write_text(json.dumps(contract(), indent=1, sort_keys=True) + "\n")
-    print(f"wrote {CONTRACT} ({len(contract())} keys)")
+    LOADED.write_text(
+        json.dumps({p.stem: _loaded(p) for p in CONFIGS}, indent=1, sort_keys=True) + "\n"
+    )
+    print(f"wrote {CONTRACT} ({len(contract())} keys) and {LOADED} ({len(CONFIGS)} configs)")
