@@ -133,3 +133,60 @@ restraints:
 
 PolyzyMD tells you when a config goes beyond these, rather than building
 something else.
+
+## Existing builds and runs
+
+- **A replicate that has started** (it has minimization, equilibration or
+  production output) continues from its own files. `submit` and the job
+  scripts do not hold it to the new checks.
+- **A replicate that has not started**, built by 1.3.0rc4 or earlier, must
+  be rebuilt. Its `build_manifest.json` records no physics audit, and `run`
+  and `submit` refuse files that no passing audit vouches for. The error
+  gives the command. Rebuild after you rewrite the config:
+  `polyzymd build -c config.yaml -r 1`.
+- **Analysis** of existing runs works as before. If you keep the old enzyme
+  and substrate names as `name:`, the analysis finds the existing results.
+
+## What the build now checks
+
+Every build ends with the physics audit: the built system is compared, term
+by term, with what the config names. The build writes
+`build_provenance.json` and `build_provenance.md` (they replace
+`build_manifest.json`). Open `build_provenance.md` after your first build: it
+lists each component with its force field and charges, and every check with
+its result. {doc}`../explanation/physics_audit` explains the checks, and
+{doc}`../reference/physics_checks` lists them.
+
+On GROMACS, the audit also reads every `.mdp` file the export wrote and
+compares it with the config. Each GROMACS job checks `audited_files.sha256`
+before `grompp`. If you edit an exported `.top`, `.itp` or `.mdp` file by
+hand, the job stops: change the config and export again instead.
+
+## If a build fails its audit
+
+The build stops and prints each failing check:
+
+```text
+The physics audit failed: the system is not what the config asks for.
+  FAIL parameters.bonded (LipA): <which terms differ, with examples>
+Details: <run folder>/build_provenance.failed.json
+fix: correct the config or the inputs and build again; if a failure is a deliberate choice, accept it under modeling_exceptions with the reason (<link to the check catalog>).
+```
+
+The full record is in `build_provenance.failed.md`. Read the detail of each
+failing check: it names the terms or atoms that differ from the config. Most
+failures are a config that does not say what you meant, such as a force field
+file you did not intend or a restraint selection that matches another atom.
+
+If the departure is deliberate, accept it in the config, with the reason:
+
+```yaml
+modeling_exceptions:
+  - check: geometry.buried_water
+    component: LipA
+    reason: "Crystal waters in the active-site pocket are kept on purpose."
+```
+
+The build record keeps the accepted finding and its reason. Please report any
+failure you think is wrong, with the `build_provenance.failed.md` file, so we
+can correct the check before 1.3.0.

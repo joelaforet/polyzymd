@@ -185,8 +185,17 @@ The build command creates:
 - `system.prmtop` - Analysis topology with every atom, element, charge and
   bond; MDAnalysis reads it directly and it has no atom limit
 - `system.xml` - OpenMM serialized system with restraints
-- `build_manifest.json` - SHA-256 hashes of the files above, the config
-  hash, OpenMM and PolyzyMD versions, and the PACKMOL seeds under `provenance`
+- `build_provenance.json` - the build record: SHA-256 hashes of the files
+  above, the config hash, OpenMM and PolyzyMD versions, the PACKMOL seeds
+  under `provenance`, a record of each component, and the physics audit with
+  any accepted `modeling_exceptions`
+- `build_provenance.md` - the same record, for people to read
+
+The record replaced `build_manifest.json` in 1.3.0rc5. PolyzyMD still reads
+the old name in older run folders. If the physics audit fails, the build
+writes `build_provenance.failed.json` and `build_provenance.failed.md` and
+keeps no other file. For the checks, see {doc}`physics_checks`. For why they
+exist, see {doc}`../explanation/physics_audit`.
 
 PACKMOL is seeded with the replicate number, so replicates start from
 independent coordinates. The build aborts with `SolvationClashError` if packed
@@ -336,8 +345,10 @@ See {doc}`../how_to/hpc_slurm` for details.
 
 `submit` does not build. Run `polyzymd build` for each replicate first, in a
 compute job. Before it writes any script, `submit` checks each replicate: an
-OpenMM build must match its `build_manifest.json` and the config, and a GROMACS
-build must have the `.top`, `.gro`, `em.mdp` and `prod.mdp` files. If a
+OpenMM build must match its `build_provenance.json` and the config, and a
+GROMACS build must have the `.top`, `.gro`, `em.mdp` and `prod.mdp` files. A
+replicate that has not started also needs a current build record whose
+physics audit passed. If a
 replicate fails the check, `submit` stops with an error that gives the
 `polyzymd build` command. `--generate-only` makes the same check.
 `--dry-run` does not.

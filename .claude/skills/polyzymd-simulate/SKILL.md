@@ -21,13 +21,27 @@ polyzymd project add-study calb --project .       # another protein
 
 `examples/quickstart/config.yaml` is a protein in water with 0.15 M NaCl
 (Trp-cage, OpenMM on the CPU; `config_gromacs.yaml` for GROMACS). Put the
-user's PDB in `<study>/conditions/<name>/structures/` and set
-`enzyme.pdb_path`. Then, with `C=trpcage/conditions/water/config.yaml`:
+user's PDB in `<study>/conditions/<name>/structures/` and set `pdb_path` on
+the `type: protein` entry of `solutes:`.
+
+**The scientific choices are the user's.** Every solute names its
+`force_field` files and its `charges` (with the NAGL `model` file for
+`method: nagl`), and `solvent` names its `force_field` and `water.model`.
+PolyzyMD fills in none of them. Take them from the user, from their earlier
+configs or from the example, and say in your reply which ones the config
+uses. Never change one to make a build pass.
+
+A config with `enzyme:`, `substrate:`, `polymers:` or `force_field:` is from
+1.3.0rc4 or earlier and is refused: rewrite it with
+`docs/source/how_to/rewrite_config_rc5.md`.
+
+Then, with `C=trpcage/conditions/water/config.yaml`:
 
 ```bash
 polyzymd validate -c $C          # check the config; names every wrong key and missing file
 polyzymd build -c $C --dry-run   # what will be built: components, counts, seeds, folders
-polyzymd run -c $C -r 1          # build and run replicate 1 here (engine from the config)
+polyzymd build -c $C -r 1        # build replicate 1 and run the physics audit
+polyzymd run -c $C -r 1          # run replicate 1 here (engine from the config)
 polyzymd status -c $C --no-slurm
 ```
 
@@ -44,13 +58,14 @@ hardware and software.
 
 ## 2. Change the system
 
-- **Protein:** `enzyme.pdb_path`. Prepare a raw PDB entry in this order:
+- **Protein:** `pdb_path` of the `type: protein` solute, with
+  `charges: {method: library}`. Prepare a raw PDB entry in this order:
   1. Keep the protein you mean to simulate. If the file holds several copies
      of it, keep one copy (or the assembly you want).
   2. List the residue names of the `HETATM` records:
      `grep "^HETATM" raw.pdb | cut -c18-20 | sort | uniq -c`. Delete the
      waters (`HOH`), ions, crystallization additives and ligands. A ligand
-     you want goes in a `substrate:` block as its own SDF. If nothing else is
+     you want goes in a `type: small_molecule` solute as its own SDF. If nothing else is
      listed, `grep -v "^HETATM" raw.pdb > protein.pdb` does this step.
      Modified amino acids are also `HETATM` records. PolyzyMD cannot yet
      parameterize them (issue #228), so keep them and decide each one on
@@ -82,21 +97,45 @@ hardware and software.
      `docs/source/explanation/residue_assignment.md`). Take residue numbers
      for restraints and analysis selections from the built
      `solvated_system.pdb`, not from the raw file.
-- **Ligand:** a `substrate:` block with a docked, protonated SDF
-  (`sdf_path`, `charge_method: nagl`, `residue_name`). One ligand only.
+- **Ligand:** a `type: small_molecule` entry of `solutes:` with a docked,
+  protonated SDF (`sdf_path`, `residue_name`, `force_field`, and `charges`
+  such as `{method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}`). One ligand
+  only.
 - **Co-solvent from a SMILES:** under `solvent.co_solvents`, give `name`,
   `smiles`, `residue_name` (3 letters) and one of `count`, `concentration`
-  (M) or `mole_fraction`. Charges are NAGL unless you set
-  `charge_method: am1bcc` (needs AmberTools); the build warns you to check
-  them. Write a charged molecule with its counter-ion
+  (M) or `mole_fraction`, and `charges`: `{method: preset}` for a co-solvent
+  PolyzyMD ships (dmso, urea, ...), otherwise `nagl` with its `model`, or
+  `am1bcc` (needs AmberTools). The build warns you to check NAGL charges. Write a charged molecule with its counter-ion
   (`CCCCCCCCCCCCOS(=O)(=O)[O-].[Na+]`), or without it and keep
   `solvent.ions.neutralize: true`: either way the system is neutral.
-- **Polymers:** see the polymers how-to; not needed for anything else.
+- **Polymers:** a `type: polymer` entry; see the polymers how-to. Cached
+  chains take `charges: {method: preset}`.
+- **Restraints:** each atom names the solute it belongs to (`component:`),
+  and the selection is matched inside that solute only.
 - **Engine:** `engine: gromacs` or `engine: openmm`. The page "GROMACS and
   OpenMM" in the reference says how each setting runs on each engine and
   which mappings are approximate.
 
-## 3. Run on a cluster
+## 3. Read the build record
+
+Every build ends with the physics audit: the built system is compared, term
+by term, with what the config names. Open `build_provenance.md` in the
+replicate folder and tell the user what it says: the components with their
+force fields and charges, and any WARN line.
+
+If the audit fails, the build stops and names each failing check
+(`FAIL <check> (<component>): <detail>`); the full record is in
+`build_provenance.failed.md`. Most failures mean the config does not say
+what the user meant: fix the config, not the check. A `modeling_exceptions`
+entry accepts a failure on purpose, and its `reason` is published with the
+config. Add one only when the user has told you the departure is deliberate,
+and write their reason, not yours. Check IDs are listed in
+`docs/source/reference/physics_checks.md`.
+
+Never edit an exported `.top`, `.itp`, `.mdp` or `system.xml` by hand: runs
+refuse files the audit did not vouch for. Change the config and build again.
+
+## 4. Run on a cluster
 
 ```bash
 polyzymd submit -c $C -r 1-5 --dry-run   # show what would be submitted first
@@ -106,7 +145,7 @@ polyzymd status -c $C
 
 Check `--preset` and its SLURM account before submitting.
 
-## 4. Analyse
+## 5. Analyse
 
 List the analyses under `analyses:` in `project.yaml` (such as `rg: {}`),
 commit, and use the `polyzymd-analyze` skill:
@@ -116,11 +155,18 @@ git add -A && git commit -m "Conditions and analyses"
 polyzymd analyze --project .
 ```
 
-## 5. When something fails
+## 6. When something fails
 
 - Read the `error:` and `fix:` lines; they name the key or file.
 - `polyzymd validate` refuses unknown keys: fix the spelling, or remove the
   key.
+- `run` or `submit` says no passing physics audit vouches for the files: the
+  build is missing, older than 1.3.0rc5, stale for the current config, or a
+  file was edited. Do what its `fix:` line says (rebuild, or restore the
+  file).
+- `polyzymd status` shows `SYSTEM DIVERGED FROM THE AUDITED BUILD`: the
+  run integrated a system other than the audited one. Tell the user; do not
+  resubmit or rebuild on your own.
 - `grompp` stops on any warning: read it. A net charge means the system is
   not neutral.
 - A topology MDAnalysis cannot read: `polyzymd analysis-topology --overwrite RUN_DIR`.

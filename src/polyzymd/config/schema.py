@@ -378,7 +378,7 @@ class ProteinSolute(_Solute):
         if self.charges.method != "library":
             raise ValueError(
                 "a protein takes the library charges of its force field; use "
-                "charges: {method: library} or leave charges out"
+                "charges: {method: library}"
             )
         return self
 
