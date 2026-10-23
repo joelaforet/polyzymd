@@ -56,13 +56,19 @@ def test_an_accepted_failure_passes_and_is_recorded_with_its_reason(monkeypatch)
     assert [a.check for a in accepted.accepted] == ["parameters.bonded"]
     assert accepted.accepted[0].reason.startswith("custom protein")
     assert {f.status for f in accepted.findings} == {"WARN", "ACCEPTED"}
+    bonded = next(f for f in accepted.findings if f.check == "parameters.bonded")
+    assert (bonded.accepted_from, bonded.reason) == (
+        "FAIL",
+        "custom protein force field, see methods",
+    )
+    assert bonded.to_dict()["accepted_from"] == "FAIL"
 
 
 def test_an_exception_for_another_component_does_not_accept(monkeypatch) -> None:
     findings = [("parameters.bonded", "protein", "FAIL", "Sage terms on the protein")]
     report = _audit_with(findings, [_Exception("parameters.bonded", "substrate", "x")], monkeypatch)
     assert not report.passed
-    assert any("found nothing to accept" in f.detail for f in report.findings)
+    assert any(f.check == "modeling_exceptions.unused" for f in report.findings)
 
 
 def test_a_stale_exception_is_reported(monkeypatch) -> None:
@@ -70,7 +76,9 @@ def test_a_stale_exception_is_reported(monkeypatch) -> None:
         [], [_Exception("geometry.buried_water", None, "crystal waters")], monkeypatch
     )
     assert report.passed
-    assert [f.status for f in report.findings] == ["WARN"]
+    assert [(f.check, f.status) for f in report.findings] == [
+        ("modeling_exceptions.unused", "WARN")
+    ]
 
 
 def test_an_unknown_check_in_the_config_names_the_closest() -> None:
@@ -90,3 +98,35 @@ def test_an_audit_that_cannot_run_is_a_failure_not_a_pass() -> None:
     report = _audit(object(), ["a component"], None)
     assert not report.passed
     assert "could not run" in report.findings[0].detail
+
+
+def test_an_exception_that_could_never_match_is_refused_by_the_config() -> None:
+    """A component a check never reports on is a config error, not a silent no-op."""
+    import yaml
+    from pydantic import ValidationError
+
+    from polyzymd.config.schema import SimulationConfig
+
+    quickstart = Path(__file__).resolve().parents[2] / "examples" / "quickstart" / "config.yaml"
+    data = yaml.safe_load(quickstart.read_text())
+    data["solutes"][0]["pdb_path"] = str(quickstart.parent / "trpcage.pdb")
+    data["modeling_exceptions"] = [
+        {"check": "composition.polymer_sequences", "component": "trpcage", "reason": "x"}
+    ]
+    with pytest.raises(ValidationError, match="cannot report on 'trpcage'"):
+        SimulationConfig.model_validate(data)
+    data["modeling_exceptions"] = [
+        {"check": "parameters.bonded", "component": "trpcage", "reason": "custom FF, see methods"}
+    ]
+    assert SimulationConfig.model_validate(data).modeling_exceptions[0].component == "trpcage"
+
+
+def test_an_unreadable_system_is_an_audit_failure() -> None:
+    from polyzymd.simulation.artifact_integrity import _audit
+
+    def unreadable():
+        raise ValueError("system.xml is truncated")
+
+    report = _audit(unreadable, ["a component"], None)
+    assert not report.passed
+    assert "truncated" in report.findings[0].detail
