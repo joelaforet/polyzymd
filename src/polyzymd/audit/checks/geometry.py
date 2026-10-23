@@ -113,7 +113,6 @@ def _overlap(
         "FAIL",
         "a solvent heavy atom clashing with a solute heavy atom (closer than half the Packmol "
         "tolerance the build used)",
-        "legacy CALB/RML builds with water inside the protein",
     )
 )
 def water_overlap(context: AuditContext) -> list[Finding]:
@@ -151,7 +150,6 @@ def polymer_overlap(context: AuditContext) -> list[Finding]:
         "WARN",
         "polymer chains clashing with each other (usually resolved by minimization; a sign of a "
         "forced Packmol result)",
-        "LipA July builds",
     )
 )
 def interchain_overlap(context: AuditContext) -> list[Finding]:
@@ -201,7 +199,6 @@ def interchain_overlap(context: AuditContext) -> list[Finding]:
         "system",
         "WARN",
         "water buried inside the protein (may be deliberate, as a crystal water)",
-        "legacy CALB/RML builds",
         component_types=("protein",),
     )
 )
@@ -305,7 +302,6 @@ def _image_distance(points: np.ndarray, box: np.ndarray, cutoff: float) -> Optio
         "system",
         "FAIL",
         "a fixed component closer to its own periodic image than the box padding guarantees",
-        "old brick boxes",
     )
 )
 def periodic_image(context: AuditContext) -> list[Finding]:
