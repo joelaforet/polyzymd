@@ -81,11 +81,10 @@ class CoSolvent:
     residue_name: str = "COS"
     molecule: Molecule | None = field(default=None, repr=False)
     count: int | None = None
-    #: How charges are assigned when the molecule is not in the bundled library.
-    charge_method: str = "nagl"
-    #: Whether the config set charge_method; when it did not, the build asks
-    #: the user to check the default.
-    charge_method_given: bool = False
+    #: ``preset`` (the shipped charges), ``nagl``, ``am1bcc`` or ``espaloma``.
+    #: None keeps the shipped charges of a bundled molecule and charges any
+    #: other with NAGL, and asks the user to check that default.
+    charge_method: str | None = None
 
     def __post_init__(self) -> None:
         """Validate co-solvent specification.
@@ -99,9 +98,7 @@ class CoSolvent:
             self.residue_name = self.residue_name[:3].upper()
 
         # Validate that exactly one composition method is used
-        given = [
-            v for v in (self.mole_fraction, self.concentration, self.count) if v is not None
-        ]
+        given = [v for v in (self.mole_fraction, self.concentration, self.count) if v is not None]
         if len(given) != 1:
             raise ValueError(
                 f"CoSolvent '{self.name}': give exactly one of mole_fraction, concentration "
@@ -427,12 +424,10 @@ class SolventBuilder:
                     charge_method=cosolvent.charge_method,
                     nagl_model=composition.nagl_model,
                 )
-                if not cosolvent.charge_method_given and not is_bundled_solvent(cosolvent.name):
+                if cosolvent.charge_method is None and not is_bundled_solvent(cosolvent.name):
                     LOGGER.warning(
-                        f"Co-solvent {cosolvent.name}: partial charges are from "
-                        f"{cosolvent.charge_method.upper()} (the default). Check that they suit "
-                        "this molecule; set charge_method: am1bcc in its co_solvents entry to "
-                        "use AM1-BCC, which needs AmberTools."
+                        f"Co-solvent {cosolvent.name}: partial charges are from NAGL (the "
+                        "default). Check that they suit this molecule, or pass charge_method."
                     )
             counter_ions.append((na_per_copy, cl_per_copy))
 
@@ -654,14 +649,13 @@ class SolventBuilder:
                 density=cs.density,
                 residue_name=cs.residue_name or cs.name[:3].upper(),
                 count=cs.count,
-                charge_method=cs.charge_method.value,
-                charge_method_given="charge_method" in cs.model_fields_set,
+                charge_method=cs.charges.method,
             )
             for cs in config.co_solvents
         ]
 
         composition = SolventComposition(
-            water_model=config.primary.model.value,
+            water_model=config.water.model.value,
             co_solvents=co_solvents,
             nacl_concentration=config.ions.nacl_concentration,
             neutralize=config.ions.neutralize,

@@ -203,3 +203,53 @@ def check_layout(components: Sequence[ComponentRecord], n_atoms: int) -> None:
         duplicates = sorted({v for v in values if values.count(v) > 1})
         if duplicates:
             raise ValueError(f"two components share the {attribute} {duplicates[0]!r}")
+
+
+def atom_segids(components: Sequence[ComponentRecord], n_atoms: int) -> list[str]:
+    """Return the segment ID of every atom of the system, in atom order."""
+    segids = [""] * n_atoms
+    for component in components:
+        for i in component.atom_indices():
+            segids[i] = component.segid
+    return segids
+
+
+def write_pdb_segids(path: Path | str, segids: Sequence[str]) -> None:
+    """Write each atom's segment ID into columns 73-76 of a PDB file, in place.
+
+    MDAnalysis reads these columns as ``segid`` and PyMOL as ``segi``. The
+    ATOM and HETATM records must be in system atom order, as OpenMM writes them.
+
+    Raises:
+        ValueError: If the file holds a different number of atoms.
+    """
+    path = Path(path)
+    lines = path.read_text().splitlines(keepends=True)
+    atom = 0
+    for k, line in enumerate(lines):
+        if line.startswith(("ATOM  ", "HETATM")):
+            if atom >= len(segids):
+                raise ValueError(f"{path} holds more than the {len(segids)} atoms given")
+            body = line.rstrip("\r\n").ljust(80)
+            lines[k] = body[:72] + segids[atom].ljust(4) + body[76:].rstrip() + "\n"
+            atom += 1
+    if atom != len(segids):
+        raise ValueError(f"{path} holds {atom} atoms, not {len(segids)}")
+    path.write_text("".join(lines))
+
+
+def write_index(path: Path | str, components: Sequence[ComponentRecord]) -> Path:
+    """Write a GROMACS index file with one group per component, named by the component.
+
+    GROMACS atom numbers count from 1. Each group is also written under its
+    segment ID when that differs from the name, so either handle selects it.
+    """
+    path = Path(path)
+    blocks = []
+    for component in components:
+        numbers = [str(i + 1) for i in component.atom_indices()]
+        rows = [" ".join(numbers[k : k + 15]) for k in range(0, len(numbers), 15)]
+        for group in dict.fromkeys((component.name, component.segid)):
+            blocks.append(f"[ {group} ]\n" + "\n".join(rows) + "\n")
+    path.write_text("\n".join(blocks))
+    return path

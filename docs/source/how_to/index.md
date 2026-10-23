@@ -43,6 +43,7 @@ Choose an analysis, run it on a study, and measure your own quantity.
 ```{toctree}
 :maxdepth: 1
 
+rewrite_config_rc5
 polymers
 dynamic_polymers
 restraints

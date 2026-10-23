@@ -142,7 +142,12 @@ def test_gromacs_file_prefix_of_the_shipped_configs() -> None:
     polymer = root / "src" / "polyzymd" / "templates" / "examples" / "enzyme_polymer.yaml"
     sds = yaml.safe_load(quickstart.read_text())
     sds["solvent"]["co_solvents"] = [
-        {"name": "sds", "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]", "count": 8}
+        {
+            "name": "sds",
+            "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]",
+            "count": 8,
+            "charges": {"method": "nagl"},
+        }
     ]
 
     assert system_prefix(SimulationConfig.from_yaml(quickstart)) == "trpcage"

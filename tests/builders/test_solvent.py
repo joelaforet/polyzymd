@@ -5,6 +5,9 @@ import pytest
 from polyzymd.builders.solvent import AVOGADRO_CONSTANT, SolventBuilder
 from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
+#: The small-molecule force field SolventConfig now requires.
+SAGE = ["openff-2.0.0.offxml"]
+
 
 def test_concentration_count_uses_liters_and_avogadro() -> None:
     """Concentration counts should use volume in liters and Avogadro's constant."""
@@ -56,10 +59,11 @@ def test_config_translation_uses_mole_fraction(monkeypatch) -> None:
     monkeypatch.setattr(SolventBuilder, "solvate", fake_solvate)
 
     config = SolventConfig(
+        force_field=SAGE,
         co_solvents=[
             CoSolventSpec(name="dmso", mole_fraction=0.10),
             CoSolventSpec(name="urea", concentration=2.0),
-        ]
+        ],
     )
     topology = object()
 
@@ -127,7 +131,7 @@ def test_config_translation_forwards_packmol_seed(monkeypatch) -> None:
         return topology
 
     monkeypatch.setattr(SolventBuilder, "solvate", fake_solvate)
-    SolventBuilder().solvate_from_config(object(), SolventConfig(), seed=4)
+    SolventBuilder().solvate_from_config(object(), SolventConfig(force_field=SAGE), seed=4)
     assert captured["kwargs"]["seed"] == 4
 
 
@@ -140,7 +144,7 @@ def test_solvate_default_seed_is_none(monkeypatch) -> None:
         return topology
 
     monkeypatch.setattr(SolventBuilder, "solvate", fake_solvate)
-    SolventBuilder().solvate_from_config(object(), SolventConfig())
+    SolventBuilder().solvate_from_config(object(), SolventConfig(force_field=SAGE))
     assert captured["kwargs"]["seed"] is None
 
 
@@ -248,7 +252,7 @@ def test_default_box_fits_an_elongated_solute_in_the_brick() -> None:
     import numpy as np
 
     solute = _elongated_solute()
-    config = SolventConfig()
+    config = SolventConfig(force_field=SAGE)
     box = SolventBuilder().compute_box_vectors_from_config(_FakeTopology(solute), config)
 
     coords = solute.conformers[0].m_as("angstrom") / 10.0
@@ -281,7 +285,7 @@ def test_compute_box_vectors_from_config_uses_config_padding() -> None:
     import numpy as np
 
     topology = _FakeTopology(_solute_molecule())
-    config = SolventConfig()
+    config = SolventConfig(force_field=SAGE)
     computed = SolventBuilder().compute_box_vectors_from_config(
         topology, config, extra_padding_nm=2.0
     )

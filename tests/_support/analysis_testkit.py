@@ -50,7 +50,15 @@ def write_simulation_config(directory: Path, *, scratch: Path, name: str = "toy"
     data = {
         "name": name,
         "engine": "openmm",
-        "enzyme": {"name": "TestEnzyme", "pdb_path": "test.pdb"},
+        "solutes": [
+            {
+                "type": "protein",
+                "name": "TestEnzyme",
+                "pdb_path": "test.pdb",
+                "force_field": ["ff14sb_off_impropers_0.0.4.offxml"],
+            }
+        ],
+        "solvent": {"force_field": ["openff-2.3.0.offxml"]},
         "thermodynamics": {"temperature": 300.0},
         "simulation_phases": {
             "equilibration_stages": [

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 if TYPE_CHECKING:
     from openff.toolkit import Molecule
 
-    from polyzymd.config.schema import MonomerSpec, PolymerConfig, ReactionConfig
+    from polyzymd.config.schema import MonomerSpec, PolymerSolute, ReactionConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -299,7 +299,7 @@ class PolymerBuilder:
         return molecules_for_packing, list(self._sequence_counts.values())
 
     def build_from_config(
-        self, config: "PolymerConfig", seed: Optional[int] = None
+        self, config: "PolymerSolute", seed: Optional[int] = None
     ) -> Tuple[List[Molecule], List[int]]:
         """Build polymers from a configuration object.
 
@@ -307,7 +307,7 @@ class PolymerBuilder:
         state accordingly, then calls build() to generate the polymers.
 
         Args:
-            config: PolymerConfig with polymer settings.
+            config: PolymerSolute with polymer settings.
             seed: Random seed for reproducibility.
 
         Returns:

@@ -82,7 +82,7 @@ def get_solvent_molecule(
     smiles: Optional[str] = None,
     residue_name: Optional[str] = None,
     cache: bool = True,
-    charge_method: str = "nagl",
+    charge_method: Optional[str] = None,
     nagl_model: Optional[str] = None,
 ) -> Molecule:
     """Get a solvent molecule with pre-computed partial charges.
@@ -104,9 +104,13 @@ def get_solvent_molecule(
         residue_name: 3-letter residue name for topology. If not provided,
                      uses first 3 characters of name (uppercase).
         cache: If True, cache newly generated molecules to disk.
-        charge_method: How a molecule generated from SMILES is charged:
-            ``nagl`` (default), ``am1bcc`` or ``espaloma``. Library and water
-            molecules keep their shipped charges.
+        charge_method: ``preset`` returns the bundled library molecule with its
+            shipped charges, and raises if there is none for this name and
+            SMILES. ``nagl``, ``am1bcc`` or ``espaloma`` generate the molecule
+            and charge it with that method, even when a library molecule
+            exists. None (the default) keeps the shipped charges of a library
+            molecule and charges any other with NAGL. Water keeps its
+            literature charges either way.
         nagl_model: NAGL model for ``charge_method`` nagl; the default model
             when None. It is part of the cache key.
 
@@ -144,13 +148,20 @@ def get_solvent_molecule(
 
     # The bundled library molecule, unless a different SMILES is given
     library_path = _SOLVENTS_DIR / f"{name_key}.sdf"
-    if library_path.exists():
+    if library_path.exists() and charge_method in (None, "preset"):
         if name_key not in _loaded_molecules:
             LOGGER.info(f"Loading {name_key} from library: {library_path}")
             _loaded_molecules[name_key] = _load_molecule_from_sdf(library_path)
         library = _loaded_molecules[name_key]
         if smiles is None or Chem.CanonSmiles(smiles) == Chem.CanonSmiles(library.to_smiles()):
             return library
+    if charge_method == "preset":
+        raise ValueError(
+            f"Solvent '{name}': charges preset reads the charges PolyzyMD ships, and it ships "
+            "none for this molecule (or its SMILES differs from the shipped one); use nagl, "
+            "am1bcc or espaloma"
+        )
+    charge_method = charge_method or "nagl"
 
     if smiles is None:
         # Try to get from cosolvent library

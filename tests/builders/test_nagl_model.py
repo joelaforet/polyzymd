@@ -110,14 +110,6 @@ def test_system_builder_takes_the_model_from_the_config() -> None:
     assert SystemBuilder.from_config(config)._nagl_model == OLD
 
 
-def test_an_unnamed_model_keeps_the_build_hash() -> None:
-    """A config without nagl_model dumps as before; one that names a model records it."""
-    from polyzymd.config.schema import ForceFieldConfig
-
-    assert "nagl_model" not in ForceFieldConfig().model_dump(mode="json")
-    assert ForceFieldConfig(nagl_model=OLD).model_dump(mode="json")["nagl_model"] == OLD
-
-
 def test_the_build_records_the_model_and_its_file() -> None:
     """The provenance names the model, the SHA-256 of its file and the package version."""
     import hashlib
@@ -168,16 +160,18 @@ def test_charged_molecules_carry_the_model_name() -> None:
     assert molecule.properties["nagl_model"] == RELEASED
 
 
-def _minimal_buildable(tmp_path, **force_field):
-    """A buildable config with a one-atom enzyme and the given force_field entries."""
+def _minimal_buildable(tmp_path, nagl_model):
+    """A buildable config with a one-atom enzyme and a co-solvent charged by ``nagl_model``."""
     import sys
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "config"))
     from test_validation import _buildable
 
-    from polyzymd.config.schema import ForceFieldConfig
-
-    config = _buildable(tmp_path)
-    config.force_field = ForceFieldConfig(**force_field)
-    return config
+    cosolvent = {
+        "name": "x",
+        "smiles": "CCO",
+        "count": 1,
+        "charges": {"method": "nagl", "model": nagl_model},
+    }
+    return _buildable(tmp_path, solvent={"co_solvents": [cosolvent]})

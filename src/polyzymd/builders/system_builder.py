@@ -41,14 +41,16 @@ def _cosolvent_charges(cosolvent: Any, nagl_model: Optional[str]) -> "ChargeSour
     from polyzymd.data.solvent_molecules import _SOLVENTS_DIR, is_bundled_solvent
 
     library = _SOLVENTS_DIR / f"{cosolvent.name.lower().strip()}.sdf"
-    if is_bundled_solvent(cosolvent.name) and library.exists() and cosolvent.molecule is not None:
+    method = getattr(cosolvent, "charge_method", None)
+    bundled = is_bundled_solvent(cosolvent.name) and library.exists()
+    if method in (None, "preset") and bundled and cosolvent.molecule is not None:
         from openff.toolkit import Molecule
 
         # The solvent loader uses the bundled charges whenever the molecule is the
         # library's, whether or not the config spelled out its SMILES.
         if Molecule.from_file(str(library)).is_isomorphic_with(cosolvent.molecule):
             return ChargeSource("preset", source_file=str(library))
-    method = getattr(cosolvent, "charge_method", "nagl") or "nagl"
+    method = method if method not in (None, "preset") else "nagl"
     model = (nagl_model or _default_nagl_model()) if method == "nagl" else None
     return ChargeSource(method, model=model)
 
@@ -101,6 +103,8 @@ class SystemBuilder:
         self._substrate_molecule: Optional[Molecule] = None
         self._substrate_charge_method: Optional[str] = None
         self._substrate_conformer_index: Optional[int] = None
+        #: (name, segid) of each solute type, from the config's solutes.
+        self._solute_handles: Dict[str, Tuple[str, str]] = {}
         self._polymer_molecules: List[Molecule] = []
         self._polymer_counts: List[int] = []
         self._combined_topology: Optional[Topology] = None
@@ -955,6 +959,10 @@ class SystemBuilder:
 
         path = Path(path)
         topology.to_file(str(path), keep_ids=True)
+        if topology is self._solvated_topology:
+            from polyzymd.core.components import atom_segids, write_pdb_segids
+
+            write_pdb_segids(path, atom_segids(self.components(), topology.n_atoms))
         LOGGER.info(f"Saved topology to {path}")
 
     def build_from_config(
@@ -987,6 +995,9 @@ class SystemBuilder:
         """
         config.require_buildable()
         self._working_dir = Path(working_dir) if working_dir else None
+        self._solute_handles = {
+            solute.type: (solute.name, solute.segid) for solute in getattr(config, "solutes", [])
+        }
         from polyzymd.utils.charging import DEFAULT_NAGL_MODEL, nagl_model_provenance
 
         self._build_provenance = {"packmol_seed": polymer_seed}
@@ -1282,6 +1293,11 @@ class SystemBuilder:
 
         if self._solvated_topology is None:
             raise RuntimeError("No solvated topology. Call solvate() first.")
+
+        def handle(type_: str) -> Tuple[str, str]:
+            # The config names its solutes; a builder driven from Python uses the type.
+            return self._solute_handles.get(type_, (type_, DEFAULT_SEGIDS[type_]))
+
         sizes = [molecule.n_atoms for molecule in self._solvated_topology.molecules]
         records: List[ComponentRecord] = []
         cursor = 0  # index of the next molecule
@@ -1301,9 +1317,9 @@ class SystemBuilder:
             atoms = take(self._n_enzyme_molecules)
             records.append(
                 ComponentRecord(
-                    name="protein",
+                    name=handle("protein")[0],
                     type="protein",
-                    segid=DEFAULT_SEGIDS["protein"],
+                    segid=handle("protein")[1],
                     placement="fixed",
                     molecules=atoms,
                     domains=[
@@ -1319,9 +1335,9 @@ class SystemBuilder:
             method = self._substrate_charge_method or "nagl"
             records.append(
                 ComponentRecord(
-                    name="substrate",
+                    name=handle("small_molecule")[0],
                     type="small_molecule",
-                    segid=DEFAULT_SEGIDS["small_molecule"],
+                    segid=handle("small_molecule")[1],
                     placement="fixed",
                     molecules=atoms,
                     domains=[Domain("substrate", tuple(atoms), (self._sm_ff,), charges(method))],
@@ -1356,9 +1372,9 @@ class SystemBuilder:
                 sources[sequence] = {"chains": count, "sdf": file_record(sdf)}
             records.append(
                 ComponentRecord(
-                    name="polymer",
+                    name=handle("polymer")[0],
                     type="polymer",
-                    segid=DEFAULT_SEGIDS["polymer"],
+                    segid=handle("polymer")[1],
                     placement="packed",
                     molecules=molecules,
                     domains=domains,

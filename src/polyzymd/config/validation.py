@@ -48,7 +48,7 @@ def _check_am1bcc(warnings: list[str], config: Any) -> None:
     solvent = getattr(config, "solvent", None)
     polymers = getattr(config, "polymers", None)
     methods = [getattr(substrate, "charge_method", None)]
-    methods += [cs.charge_method for cs in getattr(solvent, "co_solvents", None) or []]
+    methods += [cs.charges.method for cs in getattr(solvent, "co_solvents", None) or []]
     if polymers is not None and getattr(polymers, "enabled", False):
         methods.append(getattr(polymers, "charger", None))
     if "am1bcc" in {getattr(m, "value", m) for m in methods} and not charging.am1bcc_available():
@@ -166,7 +166,7 @@ def require_inputs(config: Any) -> None:
     from polyzymd.data.solvent_molecules import is_bundled_solvent, split_counter_ions
 
     for cosolvent in config.solvent.co_solvents:
-        if is_bundled_solvent(cosolvent.name):
+        if cosolvent.charges.method == "preset" and is_bundled_solvent(cosolvent.name):
             continue
         what = f"co-solvent {cosolvent.name!r}"
         smiles, _, _ = split_counter_ions(cosolvent.smiles, cosolvent.name)
@@ -182,7 +182,7 @@ def require_inputs(config: Any) -> None:
                 f"{what} is the ion {smiles}; the build adds only Na+ and Cl- ions.\n"
                 "fix: remove this co-solvent and use solvent.ions.nacl_concentration."
             )
-        _require_chargeable(molecule, cosolvent.charge_method, what)
+        _require_chargeable(molecule, cosolvent.charges.method, what)
 
     polymers = config.polymers
     if polymers is not None and polymers.enabled and polymers.generation_mode.value == "dynamic":
@@ -237,8 +237,9 @@ def require_inputs(config: Any) -> None:
 
         installed = ", ".join(sorted(path.name for path in list_available_nagl_models()))
         raise ValueError(
-            f"force_field.nagl_model {nagl_model!r} is not an installed NAGL model.\n"
-            f"fix: name one of {installed}, or give the path of a model file."
+            f"charges model {nagl_model!r} is not an installed NAGL model.\n"
+            f"fix: in each charges: {{method: nagl, model: ...}}, name one of {installed}, "
+            "or give the path of a model file."
         )
 
 
@@ -252,15 +253,16 @@ def _require_chargeable(molecule: Any, method: Any, what: str) -> None:
             raise ValueError(
                 f"{what} contains {', '.join(others)}, which the NAGL charge model does not "
                 f"cover (it covers {', '.join(sorted(NAGL_ELEMENTS))}).\n"
-                "fix: set charge_method: am1bcc (needs AmberTools), or leave the molecule out."
+                "fix: set charges: {method: am1bcc} (needs AmberTools), or leave the molecule "
+                "out."
             )
     elif method == "am1bcc":
         from polyzymd.utils import charging
 
         if not charging.am1bcc_available():
             raise ValueError(
-                f"{what}: charge_method am1bcc needs AmberTools or OpenEye, and neither is "
-                "installed in this environment.\nfix: use charge_method: nagl."
+                f"{what}: charges method am1bcc needs AmberTools or OpenEye, and neither is "
+                "installed in this environment.\nfix: use charges: {method: nagl}."
             )
     elif method == "espaloma":
         import importlib.util
@@ -268,5 +270,5 @@ def _require_chargeable(molecule: Any, method: Any, what: str) -> None:
         if importlib.util.find_spec("espaloma_charge") is None:
             raise ValueError(
                 f"{what}: charge_method espaloma needs the espaloma-charge package, which is not "
-                "installed in this environment.\nfix: use charge_method: nagl."
+                "installed in this environment.\nfix: use charges: {method: nagl}."
             )
