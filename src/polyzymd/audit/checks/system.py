@@ -44,7 +44,6 @@ def _charges(spec: Any) -> tuple[str, Optional[str]]:
         "system",
         "FAIL",
         "a component, its segment ID, force field or charge source that differs from the config",
-        "parameter checks compare with the builder's records; this ties the records to the config",
     )
 )
 def declared(context: AuditContext) -> list[Finding]:
@@ -210,7 +209,6 @@ def _mass(context: AuditContext, atoms: Any) -> float:
         "system",
         "INFO",
         "the polymer weight fraction of polymer plus solvent the build reached",
-        "20 wt% decision for the Paper 1 rerun",
         component_types=("polymer",),
     )
 )
@@ -318,7 +316,6 @@ def _ion_census(context: AuditContext) -> tuple[int, int, float, float, float]:
         "system",
         "FAIL",
         "an ionic strength more than one ion away from the configured target",
-        "nacl_concentration meaning change; buffer matched by ionic strength (Paper 1 rerun)",
     )
 )
 def ionic_strength(context: AuditContext) -> list[Finding]:
@@ -358,7 +355,6 @@ def ionic_strength(context: AuditContext) -> list[Finding]:
         "system",
         "FAIL",
         "NaCl pairs more than one pair away from the configured concentration",
-        "nacl_concentration meaning change",
     )
 )
 def salt(context: AuditContext) -> list[Finding]:
