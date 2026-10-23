@@ -9,7 +9,7 @@ import pytest
 from polyzymd.config.schema import SimulationConfig
 from polyzymd.config.validation import collect_reference_warnings, require_inputs
 
-SAGE = ["openff-2.0.0.offxml"]
+SAGE = ["openff-2.3.0.offxml"]
 
 #: NAGL charges with the model the config must name.
 NAGL = {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"}
