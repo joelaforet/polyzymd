@@ -24,6 +24,7 @@ polyzymd.data.solvent_molecules : Module providing pre-parameterized solvents
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
@@ -153,6 +154,8 @@ class SolventComposition:
         co_solvents: List of co-solvent specifications.
         nacl_concentration: NaCl salt concentration in mol/L, before neutralizing ions.
         neutralize: Whether to neutralize system charge.
+        ionic_strength: Ionic strength of the box in mol/L, counter-ions
+            included; replaces nacl_concentration when given.
     """
 
     water_model: WaterModelType = "tip3p"
@@ -160,6 +163,7 @@ class SolventComposition:
     nacl_concentration: float = 0.0  # NaCl salt concentration, mol/L
     neutralize: bool = True
     nagl_model: Optional[str] = None  # NAGL model for co-solvents charged with nagl
+    ionic_strength: Optional[float] = None  # mol/L, counter-ions included
 
     def __post_init__(self) -> None:
         """Validate co-solvent mole fractions."""
@@ -168,6 +172,11 @@ class SolventComposition:
         )
         if total_cosolvent >= 1.0:
             raise ValueError(f"Total co-solvent mole fraction must be < 1.0, got {total_cosolvent}")
+        if self.ionic_strength is not None and (self.nacl_concentration or not self.neutralize):
+            raise ValueError(
+                "ionic_strength sets the ions of a neutral box: give it without "
+                "nacl_concentration and with neutralize=True"
+            )
 
     @property
     def water_mole_fraction(self) -> float:
@@ -450,6 +459,29 @@ class SolventBuilder:
         # leave unbalanced, on top of the salt pairs.
         solute_int = self._charge_to_integer(sum(mol.total_charge for mol in topology.molecules))
 
+        # Solvent water-equivalents, the volume the ionic strength refers to,
+        # as for the NaCl pairs above.
+        water_equivalents = (solvent_mass / water_mass).m_as("dimensionless")
+        target_ions = (
+            2.0
+            * composition.ionic_strength
+            * water_equivalents
+            / molarity_pure_water.m_as("mole / liter")
+            if composition.ionic_strength is not None
+            else 0.0
+        )
+
+        def fixed_ionic_weight(copies: list[int], counter_na: int, counter_cl: int) -> int:
+            """Sum of n z^2 over the charged co-solvents and their counter-ions."""
+            return (
+                sum(
+                    self._charge_to_integer(cosolvent.molecule.total_charge) ** 2 * n
+                    for cosolvent, n in zip(composition.co_solvents, copies)
+                )
+                + counter_na
+                + counter_cl
+            )
+
         def ion_counts(copies: list[int]) -> tuple[int, int, int, int, int]:
             cosolvent_int = sum(
                 self._charge_to_integer(cosolvent.molecule.total_charge) * n
@@ -457,11 +489,20 @@ class SolventBuilder:
             )
             counter_na = sum(na * n for (na, _), n in zip(counter_ions, copies))
             counter_cl = sum(cl * n for (_, cl), n in zip(counter_ions, copies))
-            na_count, cl_count = self._calculate_ion_counts(
-                nacl_to_add=nacl_to_add,
-                solute_charge=solute_int + cosolvent_int + counter_na - counter_cl,
-                neutralize=composition.neutralize,
-            )
+            if composition.ionic_strength is not None:
+                # Charged co-solvents and the counter-ions in their SMILES
+                # count toward the ionic strength, I = 1/2 sum c z^2; NaCl
+                # fills the rest and neutralizes everything.
+                na_count, cl_count = self._calculate_ionic_strength_counts(
+                    total_ions=target_ions - fixed_ionic_weight(copies, counter_na, counter_cl),
+                    solute_charge=solute_int + cosolvent_int + counter_na - counter_cl,
+                )
+            else:
+                na_count, cl_count = self._calculate_ion_counts(
+                    nacl_to_add=nacl_to_add,
+                    solute_charge=solute_int + cosolvent_int + counter_na - counter_cl,
+                    neutralize=composition.neutralize,
+                )
             return (
                 na_count + counter_na,
                 cl_count + counter_cl,
@@ -499,6 +540,22 @@ class SolventBuilder:
         na_to_add, cl_to_add, cosolvent_int, counter_na, counter_cl = ion_counts(copies)
 
         LOGGER.info(f"Adding {int(water_to_add)} water, {na_to_add} Na+, {cl_to_add} Cl-")
+        if composition.ionic_strength is not None:
+            cosolvent_weight = fixed_ionic_weight(copies, 0, 0)
+            reached = 0.5 * (na_to_add + cl_to_add + cosolvent_weight) / (water_equivalents / 55.5)
+            message = (
+                f"Ionic strength {reached:.4f} M from {na_to_add} Na+, {cl_to_add} Cl- and "
+                f"charged co-solvents (target {composition.ionic_strength} M, counter-ions "
+                "included)"
+            )
+            neutralizing = abs(solute_int + cosolvent_int + counter_na - counter_cl)
+            if neutralizing + fixed_ionic_weight(copies, counter_na, counter_cl) > target_ions:
+                LOGGER.warning(
+                    f"{message}: the counter-ions and charged co-solvents alone exceed the "
+                    "target ionic strength"
+                )
+            else:
+                LOGGER.info(message)
         if cosolvent_int or counter_na or counter_cl:
             LOGGER.info(
                 f"Co-solvents carry charge {cosolvent_int:+d} and {counter_na} Na+, "
@@ -609,6 +666,7 @@ class SolventBuilder:
             nacl_concentration=config.ions.nacl_concentration,
             neutralize=config.ions.neutralize,
             nagl_model=nagl_model,
+            ionic_strength=config.ions.ionic_strength,
         )
 
         return self.solvate(
@@ -742,6 +800,36 @@ class SolventBuilder:
 
         solute_charge_int = cls._charge_to_integer(solute_charge)
         return nacl_count + max(0, -solute_charge_int), nacl_count + max(0, solute_charge_int)
+
+    @staticmethod
+    def _calculate_ionic_strength_counts(total_ions: float, solute_charge: int) -> tuple[int, int]:
+        """Return Na+ and Cl- counts that neutralize the solute and give an ionic strength.
+
+        The counts split the charge Q to neutralize between the two ions, Na+ = (N - Q) / 2
+        and Cl- = (N + Q) / 2, so the counter-ions count toward the ionic strength
+        (Machado and Pantano, J. Chem. Theory Comput. 2020, 16, 1367). N, the
+        total number of monovalent ions, is the integer nearest ``total_ions``
+        whose parity matches Q; it is never below abs(Q), so the box is always
+        neutral.
+
+        Parameters
+        ----------
+        total_ions : float
+            Total Na+ plus Cl- for the target ionic strength, 2 x I x V x N_A.
+        solute_charge : int
+            Net charge of the solute in elementary charges.
+
+        Returns
+        -------
+        tuple[int, int]
+            Number of Na+ and Cl- ions to add.
+        """
+        charge = int(solute_charge)
+        lower = math.floor(total_ions)
+        candidates = [n for n in (lower - 1, lower, lower + 1, lower + 2) if (n - charge) % 2 == 0]
+        total = min(candidates, key=lambda n: (abs(n - total_ions), -n))
+        total = max(total, abs(charge))
+        return (total - charge) // 2, (total + charge) // 2
 
     @staticmethod
     def _charge_to_integer(charge: Any, tolerance: float = ION_CHARGE_TOLERANCE) -> int:

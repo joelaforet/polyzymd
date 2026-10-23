@@ -176,6 +176,7 @@ def require_inputs(config: Any) -> None:
                 f"{what}: RDKit cannot read the SMILES {cosolvent.smiles!r}.\n"
                 "fix: correct the SMILES."
             )
+
         if molecule.GetNumAtoms() == 1 and molecule.GetAtomWithIdx(0).GetFormalCharge():
             raise ValueError(
                 f"{what} is the ion {smiles}; the build adds only Na+ and Cl- ions.\n"
