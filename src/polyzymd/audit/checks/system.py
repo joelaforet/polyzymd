@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Optional
 
+import numpy as np
+
 from polyzymd.audit.findings import AuditContext, Finding
 from polyzymd.audit.registry import CheckSpec, register
 
@@ -100,6 +102,15 @@ def declared(context: AuditContext) -> list[Finding]:
                     f"co-solvent {cosolvent.name}: charges {domain.charges.method} "
                     f"{domain.charges.model or ''}, config says {_charges(cosolvent)}"
                 )
+            elif domain.charges.method == "preset":
+                from pathlib import Path
+
+                shipped = f"{cosolvent.name.lower().strip()}.sdf"
+                if Path(domain.charges.source_file or "").name != shipped:
+                    problems.append(
+                        f"co-solvent {cosolvent.name}: preset charges from "
+                        f"{domain.charges.source_file}, not the shipped {shipped}"
+                    )
     if problems:
         return [Finding("components.declared", "system", "FAIL", "; ".join(problems))]
     return [
@@ -258,22 +269,47 @@ def neutral(context: AuditContext) -> list[Finding]:
     return [Finding("ions.neutral", "system", "PASS", f"net charge {total:+.6f} e")]
 
 
-def _ion_census(context: AuditContext) -> tuple[int, int, float, float]:
-    """(Na+, Cl-, water-equivalents, sum of n z^2 over charged co-solvents)."""
+#: Daltons in one nm^3 of a 1 g/mL fluid.
+DALTON_PER_NM3_AT_1G_PER_ML = 602.214076
+
+
+def _water_equivalents(context: AuditContext) -> float:
+    """The solvent the salt and ionic strength refer to, as the builder sizes it.
+
+    The builder fills the box to its target density: (box volume x density -
+    solute mass) / water mass. Co-solvents given as a count or concentration
+    are added on top, so they are not part of it.
+    """
+    box = np.asarray(context.realized.box_nm, dtype=float)
+    volume = abs(float(np.linalg.det(box)))
+    density = 1.0 if context.config is None else context.config.solvent.box.target_density
+    solute = _mass(
+        context,
+        [
+            i
+            for c in context.components
+            if c.type not in ("solvent", "ions")
+            for i in c.atom_indices()
+        ],
+    )
+    return (volume * density * DALTON_PER_NM3_AT_1G_PER_ML - solute) / WATER_MASS
+
+
+def _ion_census(context: AuditContext) -> tuple[int, int, float, float, float]:
+    """(Na+, Cl-, water-equivalents, sum n z^2 of charged co-solvents, charge of all but ions)."""
     ions = _of_type(context, "ions")
     na = sum(len(d.atoms) for c in ions for d in c.domains if d.name == "Na+")
     cl = sum(len(d.atoms) for c in ions for d in c.domains if d.name == "Cl-")
-    solvent_atoms = [
-        i for c in context.components if c.type in ("solvent", "ions") for i in c.atom_indices()
-    ]
-    water_equivalents = _mass(context, solvent_atoms) / WATER_MASS
     weight = 0.0
     for component in _of_type(context, "solvent"):
         for domain in component.domains:
             if domain.name.startswith("co_solvent:") and domain.atoms:
                 z = round(_charge_of(context, domain.atoms[0]))
                 weight += z * z * len(domain.atoms)
-    return na, cl, water_equivalents, weight
+    others = _charge_of(
+        context, [i for c in context.components if c.type != "ions" for i in c.atom_indices()]
+    )
+    return na, cl, _water_equivalents(context), weight, others
 
 
 @register(
@@ -287,30 +323,24 @@ def _ion_census(context: AuditContext) -> tuple[int, int, float, float]:
 )
 def ionic_strength(context: AuditContext) -> list[Finding]:
     config = context.config
-    if config is None or config.solvent.ions.ionic_strength is None:
+    if config is None:
+        return _no_config("ions.ionic_strength")
+    if config.solvent.ions.ionic_strength is None:
         return []
     target = config.solvent.ions.ionic_strength
-    na, cl, water_eq, weight = _ion_census(context)
+    na, cl, water_eq, weight, others = _ion_census(context)
     litres = water_eq / WATER_MOLARITY
     reached = 0.5 * (na + cl + weight) / litres
     one_ion = 0.5 / litres
-    solute_charge = _charge_of(
-        context,
-        [
-            i
-            for c in context.components
-            if c.type not in ("solvent", "ions")
-            for i in c.atom_indices()
-        ],
-    )
-    floor = 0.5 * (abs(round(solute_charge)) + weight) / litres
+    # The least the build can reach: the ions that neutralize everything else.
+    floor = 0.5 * (abs(round(others)) + weight) / litres
     detail = (
         f"I = {reached:.4f} M from {na} Na+, {cl} Cl- in {water_eq:.0f} water-equivalents "
         f"(target {target} M, one ion = {one_ion:.4f} M)"
     )
     if abs(reached - target) <= one_ion + 1e-12:
         return [Finding("ions.ionic_strength", "system", "PASS", detail)]
-    if floor > target:
+    if floor > target and reached <= floor + one_ion + 1e-12:
         return [
             Finding(
                 "ions.ionic_strength",
@@ -333,15 +363,19 @@ def ionic_strength(context: AuditContext) -> list[Finding]:
 )
 def salt(context: AuditContext) -> list[Finding]:
     config = context.config
-    if config is None or config.solvent.ions.ionic_strength is not None:
+    if config is None:
+        return _no_config("ions.salt")
+    if config.solvent.ions.ionic_strength is not None:
         return []
     target = config.solvent.ions.nacl_concentration
-    na, cl, water_eq, _ = _ion_census(context)
+    na, cl, water_eq, _, others = _ion_census(context)
     expected = round(water_eq * target / WATER_MOLARITY)
-    pairs = min(na, cl)
+    # Salt pairs: the ions beyond those that neutralize everything else.
+    neutralizing = abs(round(others)) if config.solvent.ions.neutralize else 0
+    pairs = (na + cl - neutralizing) // 2
     detail = (
-        f"{pairs} NaCl pairs ({na} Na+, {cl} Cl-) for {target} M in {water_eq:.0f} "
-        f"water-equivalents; expected {expected}"
+        f"{pairs} NaCl pairs ({na} Na+, {cl} Cl-, {neutralizing} neutralizing) for {target} M "
+        f"in {water_eq:.0f} water-equivalents; expected {expected}"
     )
     status = "PASS" if abs(pairs - expected) <= 1 else "FAIL"
     return [Finding("ions.salt", "system", status, detail)]
@@ -352,10 +386,13 @@ def salt(context: AuditContext) -> list[Finding]:
         "constraints.hbonds",
         "system",
         "FAIL",
-        "a bond to hydrogen left flexible at a time step that needs it constrained",
+        "a bond to hydrogen left flexible at a time step that needs it constrained, or a step "
+        "above 2 fs without hydrogen mass repartitioning",
     )
 )
 def hbonds(context: AuditContext) -> list[Finding]:
+    from openmm import unit
+
     realized = context.realized
     elements = realized.elements
     index = realized.index
@@ -372,21 +409,32 @@ def hbonds(context: AuditContext) -> list[Finding]:
                 if elements[h] == "H" and elements[other] != "H":
                     constrained[h] += 1
     free = [i for i, e in enumerate(elements) if e == "H" and constrained[i] == 0]
-    step = realized.settings.get("timestep_fs")
-    if step is None and context.config is not None:
-        step = context.config.simulation_phases.production.time_step
+    steps = [realized.settings.get("timestep_fs")]
+    if context.config is not None:
+        phases = context.config.simulation_phases
+        steps.append(phases.production.time_step)
+        steps += [stage.time_step or 2.0 for stage in phases.equilibration_stages or []]
+    step = max((s for s in steps if s is not None), default=None)
+    masses = [
+        realized.system.getParticleMass(i).value_in_unit(unit.dalton)
+        for i, e in enumerate(elements)
+        if e == "H"
+    ]
+    lightest = min(masses, default=None)
     detail = (
         f"{len(flexible)} flexible bonds to hydrogen, {len(free)} hydrogens without a "
-        f"constraint; time step {step} fs"
+        f"constraint; longest time step {step} fs; lightest hydrogen {lightest} Da"
     )
     if (flexible or free) and (step is None or step > 1.0):
+        examples = [repr(x) for x in (flexible or free)[:3]]
+        return [Finding("constraints.hbonds", "system", "FAIL", detail, examples)]
+    if step is not None and step > 2.0 + 1e-9 and lightest is not None and lightest < 2.0:
         return [
             Finding(
                 "constraints.hbonds",
                 "system",
                 "FAIL",
-                detail,
-                [repr(x) for x in (flexible or free)[:3]],
+                detail + "; a step above 2 fs needs hydrogen mass repartitioning",
             )
         ]
     return [Finding("constraints.hbonds", "system", "PASS", detail)]
@@ -434,3 +482,25 @@ def nonbonded(context: AuditContext) -> list[Finding]:
     if wrong:
         return [Finding("nonbonded.settings", "system", "FAIL", "; ".join(wrong))]
     return [Finding("nonbonded.settings", "system", "PASS", detail)]
+
+
+@register(
+    CheckSpec(
+        "composition.density",
+        "system",
+        "INFO",
+        "the density the box reached, against the config's target",
+    )
+)
+def density(context: AuditContext) -> list[Finding]:
+    box = np.asarray(context.realized.box_nm, dtype=float)
+    volume = abs(float(np.linalg.det(box)))
+    total = _mass(context, range(context.realized.n_atoms))
+    reached = total / (volume * DALTON_PER_NM3_AT_1G_PER_ML)
+    detail = f"{reached:.4f} g/mL in {volume:.1f} nm^3"
+    if context.config is not None:
+        detail += (
+            f" (target {context.config.solvent.box.target_density} g/mL; co-solvents given "
+            "as a count or concentration are added on top of it)"
+        )
+    return [Finding("composition.density", "system", "INFO", detail)]

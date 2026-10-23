@@ -110,8 +110,13 @@ def parameters(context: AuditContext) -> list[Finding]:
 
 
 def _mdanalysis_selection(selection: str) -> str:
-    """Translate PolyzyMD's selection words to MDAnalysis's (pdbindex is the PDB serial)."""
-    text = re.sub(r"\bpdbindex\s+(\d+)", r"id \1", selection)
+    """Translate PolyzyMD's selection words to MDAnalysis's.
+
+    ``pdbindex N`` is the N-th atom of the built system (MDAnalysis ``bynum``),
+    as in the builder and the analyses; it is not the PDB serial, which skips a
+    number at every TER record.
+    """
+    text = re.sub(r"\bpdbindex\s+(\d+)", r"bynum \1", selection)
     text = re.sub(r"\bchain(?:id)?\s+(\S+)", r"chainID \1", text)
     return text
 
@@ -165,6 +170,10 @@ def atom_identity(context: AuditContext) -> list[Finding]:
             else:
                 a = chosen[0]
                 verified.append(f"{spec.component} {a.resname}{a.resid}:{a.name}")
+    if not verified and not problems:
+        problems.append(
+            "no restrained atom could be verified (see restraint.parameters for missing restraints)"
+        )
     if problems:
         return [Finding("restraint.atom_identity", "system", "FAIL", "; ".join(problems))]
     return [

@@ -170,8 +170,9 @@ def _parse_selection(
     The selection is an MDTraj selection with three MDAnalysis spellings
     translated first: ``resid N`` is the residue number of the built PDB
     (MDTraj ``resSeq N``), ``chain X`` or ``chainid X`` is the chain letter,
-    and ``pdbindex N`` is the PDB atom serial, counted from 1 (``index
-    N-1``). ``index N`` counts from 0, as OpenMM does. ``protein``, ``not``,
+    and ``pdbindex N`` is the N-th atom of the system, counted from 1 (``index
+    N-1``; MDAnalysis ``bynum N``), not the PDB serial, which skips a number at
+    every TER record. ``index N`` counts from 0, as OpenMM does. ``protein``, ``not``,
     ``element``, ranges (``resid 70 to 80``) and parentheses work as in MDTraj.
     The words ``and``, ``or``, ``not`` and ``to`` may be written in any case.
 
