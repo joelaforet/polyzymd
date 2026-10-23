@@ -32,6 +32,99 @@ class ArtifactIntegrityError(RuntimeError):
     """Raised when molecular artifacts cannot belong to the same build."""
 
 
+#: Where a build whose audit failed leaves its record, for inspection; nothing is committed.
+FAILED_RECORD = "build_provenance.failed.json"
+CHECKS_GUIDE = "https://polyzymd.readthedocs.io/en/latest/reference/physics_checks.html"
+
+
+class AuditFailedError(ArtifactIntegrityError):
+    """Raised when a build's physics audit fails: the system is not what the config asks for."""
+
+
+class AuditGateError(ArtifactIntegrityError):
+    """Raised when a run or submission has no passing physics audit for the files it would use."""
+
+
+def _audit_refusal(audit: dict[str, Any], where: Path) -> str:
+    failures = [
+        f"  FAIL {f['check']} ({f['component']}): {f['detail']}"
+        for f in audit.get("findings", [])
+        if f["status"] == "FAIL"
+    ]
+    return (
+        "The physics audit failed: the system is not what the config asks for.\n"
+        + "\n".join(failures)
+        + f"\nDetails: {where}\n"
+        "fix: correct the config or the inputs and build again; if a failure is a deliberate "
+        f"choice, accept it under modeling_exceptions with the reason ({CHECKS_GUIDE})."
+    )
+
+
+#: In a GROMACS run folder: ``sha256sum`` lines of the files a passing audit vouched
+#: for. The job script checks them before every ``grompp``.
+AUDITED_FILES = "audited_files.sha256"
+
+
+def require_audited_build(
+    working_dir: Path,
+    config: Any,
+    engine: str | None = None,
+    *,
+    config_path: Any = None,
+    replicate: int | None = None,
+) -> dict[str, Any]:
+    """Return the build record of ``working_dir`` if a run may use its files.
+
+    The record must exist, come from PolyzyMD 1.3.0rc5 or later (it carries a
+    physics audit), match ``engine`` and the current config, list files that
+    are unchanged on disk, and record an audit that passed. ``config_path`` and
+    ``replicate`` make the fix in the message a command that can be run as is.
+
+    Raises:
+        AuditGateError: Naming what is wrong and the command that fixes it.
+    """
+    working_dir = Path(working_dir)
+    path = build_record_path(working_dir)
+    command = (
+        f"polyzymd build -c {config_path or '<config.yaml>'} -r {replicate or '<replicate>'}"
+        + (" --format gromacs" if engine == "gromacs" else "")
+    )
+    rebuild = f"fix: build this replicate again: {command}"
+    if not path.is_file():
+        raise AuditGateError(f"{working_dir} has no build record ({MANIFEST_NAME}).\n{rebuild}")
+    try:
+        record = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AuditGateError(f"{path} cannot be read: {exc}\n{rebuild}") from exc
+    if int(record.get("schema_version", 1)) < 2 or record.get("audit") is None:
+        raise AuditGateError(
+            f"{path} records no physics audit (built before PolyzyMD 1.3.0rc5, or without "
+            f"one), so nothing shows the system is what the config asks for.\n{rebuild}"
+        )
+    if engine is not None and record.get("engine") != engine:
+        raise AuditGateError(
+            f"{path} records a {record.get('engine')} build, not {engine}.\n{rebuild}"
+        )
+    if record.get("config_hash") not in (config_hash(config), _absolute_path_config_hash(config)):
+        raise AuditGateError(
+            f"The config changed since {path} was written, so its audit no longer applies.\n"
+            + rebuild
+        )
+    for name, artifact in (record.get("artifacts") or {}).items():
+        # Paths are relative to the run folder; older records held absolute ones,
+        # read by file name so a moved run folder still validates.
+        recorded = Path(artifact.get("path", name))
+        file = working_dir / (recorded.name if recorded.is_absolute() else recorded)
+        if not file.is_file() or file_sha256(file, use_cache=False) != artifact.get("sha256"):
+            raise AuditGateError(
+                f"{file} is missing or changed since the build was audited ({path}).\n"
+                f"fix: restore the file from that build, or {rebuild[5:]}"
+            )
+    if not record["audit"].get("passed"):
+        raise AuditGateError(_audit_refusal(record["audit"], working_dir / PROVENANCE_MARKDOWN))
+    return record
+
+
 def build_record_path(working_dir: Path) -> Path:
     """The run folder's build record: ``build_provenance.json``, or the older
     ``build_manifest.json`` of a run built before 1.3.0rc5."""
@@ -241,20 +334,18 @@ def write_gromacs_build_manifest(
     artifacts = {
         path.relative_to(replicate_dir).as_posix(): path for path in candidates if path.is_file()
     }
-    report = None
-    if components:
-        from polyzymd.audit.realized import RealizedSystem
+    from polyzymd.audit.realized import RealizedSystem
 
-        prefix = system_prefix(config)
-        report = _audit(
-            lambda: RealizedSystem.from_gromacs(
-                gromacs_dir / f"{prefix}.top",
-                gromacs_dir / f"{prefix}.gro",
-                gromacs_dir / "prod.mdp",
-            ),
-            components,
-            config,
-        )
+    prefix = system_prefix(config)
+    report = _audit(
+        lambda: RealizedSystem.from_gromacs(
+            gromacs_dir / f"{prefix}.top",
+            gromacs_dir / f"{prefix}.gro",
+            gromacs_dir / "prod.mdp",
+        ),
+        components,
+        config,
+    )
     manifest = _manifest(
         config, particle_count, None, provenance, artifacts, "gromacs", components, report
     )
@@ -266,6 +357,22 @@ def write_gromacs_build_manifest(
         replicate_dir / MANIFEST_NAME,
         (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
     )
+    audited = gromacs_dir / AUDITED_FILES
+    if report is not None and not report.passed:
+        # The record stays, marked failed, so the run gate refuses these files,
+        # and no hash list exists for a job script to accept them by.
+        audited.unlink(missing_ok=True)
+        raise AuditFailedError(
+            _audit_refusal(report.to_dict(), replicate_dir / PROVENANCE_MARKDOWN)
+        )
+    if report is not None:
+        # sha256sum lines, paths relative to the GROMACS folder, for the job script.
+        lines = [
+            f"{artifact['sha256']}  {Path(name).relative_to(gromacs_dir.name)}"
+            for name, artifact in manifest["artifacts"].items()
+            if Path(name).parts[:1] == (gromacs_dir.name,)
+        ]
+        _atomic_write(audited, ("\n".join(sorted(lines)) + "\n").encode())
     return manifest
 
 
@@ -312,14 +419,15 @@ def publish_build_bundle(
         if write_analysis_topology(topology, system, positions, staging / ANALYSIS_TOPOLOGY_NAME):
             written.append(ANALYSIS_TOPOLOGY_NAME)
 
-        report = None
-        if components:
-            from polyzymd.audit.realized import RealizedSystem
+        from polyzymd.audit.realized import RealizedSystem
 
-            step = config.simulation_phases.production.time_step
-            report = _audit(
-                lambda: RealizedSystem.from_openmm(system_path, pdb_path, step), components, config
-            )
+        report = _audit(
+            lambda: RealizedSystem.from_openmm(
+                system_path, pdb_path, config.simulation_phases.production.time_step
+            ),
+            components,
+            config,
+        )
         manifest = _manifest(
             config,
             system.getNumParticles(),
@@ -332,6 +440,15 @@ def publish_build_bundle(
         )
         (staging / PROVENANCE_MARKDOWN).write_text(provenance_markdown(manifest, report))
         written.append(PROVENANCE_MARKDOWN)
+        if report is not None and not report.passed:
+            # Nothing is committed; the record is kept beside the run for inspection.
+            failed_md = working_dir / FAILED_RECORD.replace(".json", ".md")
+            _atomic_write(failed_md, provenance_markdown(manifest, report).encode())
+            _atomic_write(
+                working_dir / FAILED_RECORD,
+                (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
+            )
+            raise AuditFailedError(_audit_refusal(report.to_dict(), failed_md))
         previous = {
             name: (working_dir / name).read_bytes()
             for name in (
@@ -342,6 +459,8 @@ def publish_build_bundle(
             )
             if (working_dir / name).exists()
         }
+        for stale in (FAILED_RECORD, FAILED_RECORD.replace(".json", ".md")):
+            (working_dir / stale).unlink(missing_ok=True)
         try:
             # The manifest is the final commit marker for the new pair.
             for name in written:
@@ -366,8 +485,16 @@ def publish_build_bundle(
     return manifest
 
 
-def validate_build_bundle(working_dir: Path, config: Any) -> None:
-    """Validate a prebuilt bundle against its build record and current configuration."""
+def validate_build_bundle(
+    working_dir: Path, config: Any, require_audit: bool | None = None, **gate: Any
+) -> None:
+    """Validate a prebuilt bundle against its build record and current configuration.
+
+    A replicate that has not started also needs a passing physics audit
+    (:func:`require_audited_build`; ``require_audit`` overrides). A started one
+    continues from its own files, which must still match the record. ``gate``
+    passes ``config_path`` and ``replicate`` on for the fix in the message.
+    """
     manifest_path = build_record_path(working_dir)
     paths = {name: working_dir / name for name in _BUILD_ARTIFACTS}
     missing = [str(path) for path in paths.values() if not path.is_file()]
@@ -428,6 +555,8 @@ def validate_build_bundle(working_dir: Path, config: Any) -> None:
         topology_path=paths["solvated_system.pdb"],
         system_path=paths["system.xml"],
     )
+    if require_audit if require_audit is not None else not run_started(working_dir):
+        require_audited_build(working_dir, config, "openmm", **gate)
     if int(manifest["particle_count"]) != system.getNumParticles():
         raise ArtifactIntegrityError(
             f"Manifest particle count mismatch for {manifest_path}: "
@@ -462,12 +591,12 @@ def validate_openmm_identity(
         )
 
 
-def assert_rebuild_allowed(working_dir: Path) -> None:
-    """Refuse replacement once an OpenMM or GROMACS run has written output.
+def run_started(working_dir: Path) -> bool:
+    """Whether an OpenMM or GROMACS run has written output in ``working_dir``."""
+    return bool(_run_outputs(Path(working_dir)))
 
-    GROMACS run outputs live in ``working_dir/gromacs``; the ``.mdp`` files
-    there are build outputs.
-    """
+
+def _run_outputs(working_dir: Path) -> list[Path]:
     markers = [*working_dir.glob("minimization*")]
     markers.extend(working_dir.glob("equilibration_*"))
     markers.extend(working_dir.glob("production*"))
@@ -475,7 +604,16 @@ def assert_rebuild_allowed(working_dir: Path) -> None:
         markers.extend(
             path for path in (working_dir / "gromacs").glob(pattern) if path.suffix != ".mdp"
         )
-    active = sorted(markers)
+    return sorted(markers)
+
+
+def assert_rebuild_allowed(working_dir: Path) -> None:
+    """Refuse replacement once an OpenMM or GROMACS run has written output.
+
+    GROMACS run outputs live in ``working_dir/gromacs``; the ``.mdp`` files
+    there are build outputs.
+    """
+    active = _run_outputs(Path(working_dir))
     if active:
         raise ArtifactIntegrityError(
             f"Refusing to rebuild started campaign {working_dir}; found {active[0]}. "

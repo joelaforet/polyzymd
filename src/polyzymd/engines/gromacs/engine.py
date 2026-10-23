@@ -131,6 +131,8 @@ class GromacsEngine(SimulationEngine):
 
         pixi_env = str(request.extra.get("pixi_env", "build"))
         self.check_build(request)
+        # Every submission path (submit, recover, --generate-only) comes through here.
+        self._require_audited_build(request, self._config)
         from polyzymd.analyses.shared.gromacs import system_prefix
 
         prefix = system_prefix(self._config)
@@ -370,6 +372,29 @@ class GromacsEngine(SimulationEngine):
             "stderr": result.stderr.strip(),
             "returncode": result.returncode,
         }
+
+    @staticmethod
+    def _require_audited_build(request: EngineSubmitRequest, config: Any = None) -> None:
+        """Refuse to submit a replicate that has not started unless a passing audit
+        vouches for its exported files. A started one continues from its own files;
+        its job script still checks them against the audited hashes before grompp."""
+        gromacs_dir = Path(request.working_dir)
+        started = (gromacs_dir / "em.gro").exists() or any(gromacs_dir.glob("*.cpt"))
+        if started:
+            return
+        from polyzymd.simulation.artifact_integrity import require_audited_build
+
+        if config is None:
+            from polyzymd.config.loader import load_config
+
+            config = load_config(request.config_path)
+        require_audited_build(
+            gromacs_dir.parent,
+            config,
+            "gromacs",
+            config_path=request.config_path,
+            replicate=request.replicate,
+        )
 
     #: Production trajectories a GROMACS run leaves: the raw ``mdrun`` output and the
     #: post-processed whole-molecule and centred copies that analyses read.

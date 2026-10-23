@@ -12,6 +12,14 @@ from polyzymd.engines.gromacs.engine import GromacsEngine
 from polyzymd.workflow.slurm import SlurmConfig
 
 
+@pytest.fixture(autouse=True)
+def _audited_builds(monkeypatch):
+    """These tests are about scripts; the audit gate is tested in tests/audit/test_gates.py."""
+    from polyzymd.engines.gromacs.engine import GromacsEngine
+
+    monkeypatch.setattr(GromacsEngine, "_require_audited_build", staticmethod(lambda *a, **k: None))
+
+
 def _make_config(
     *,
     ntmpi: int = 1,
@@ -333,6 +341,8 @@ class TestEngineSubmitModuleLoad:
         engine = GromacsEngine(config=config, gmx_binary="gmx")
         script_path = Path("/tmp/run_rep1.sh")
         engine.prepare_submission = MagicMock(return_value=script_path)
+        # The audit gate is tested in tests/audit/test_gates.py.
+        engine._require_audited_build = MagicMock()
 
         mock_run_sbatch.return_value = MagicMock(
             returncode=0,

@@ -35,6 +35,7 @@ from polyzymd.cli.env_warnings import (
     warn_if_user_site_install,
     warn_if_wrong_pixi_env,
 )
+from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
 # time.  setup_colored_logging() replaces this handler when the CLI runs.
@@ -880,6 +881,11 @@ def build(
         report_config_error(e, config)
         sys.exit(1)
 
+    except ArtifactIntegrityError as e:
+        # A failed physics audit, or a build that no audit vouches for.
+        colored_echo(str(e), err=True, level=logging.ERROR)
+        sys.exit(1)
+
     except FileNotFoundError as e:
         colored_echo(f"File not found: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
@@ -1143,6 +1149,11 @@ def run(
         report_config_error(e, config)
         sys.exit(1)
 
+    except ArtifactIntegrityError as e:
+        # A failed physics audit, or a build that no audit vouches for.
+        colored_echo(str(e), err=True, level=logging.ERROR)
+        sys.exit(1)
+
     except FileNotFoundError as e:
         colored_echo(f"File not found: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
@@ -1198,6 +1209,18 @@ def _run_gromacs_impl(
     prefix = system_prefix(sim_config)
     exported = (f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp")
     if all((gromacs_dir / name).is_file() for name in exported):
+        from polyzymd.simulation.artifact_integrity import require_audited_build, run_started
+
+        # Only files a passing audit vouches for, unchanged since, may start a run;
+        # a started run continues from its own files.
+        if not run_started(working_dir):
+            require_audited_build(
+                working_dir,
+                sim_config,
+                "gromacs",
+                config_path=config_path or None,
+                replicate=replicate,
+            )
         colored_echo(f"Reusing the GROMACS files in {gromacs_dir}", phase="export")
         eq_mdp_names = sorted(path.name for path in gromacs_dir.glob("eq_*.mdp"))
     else:
@@ -1361,10 +1384,18 @@ def _run_openmm_impl(
 
         # Reuse the build of an earlier `polyzymd build` when it matches this config.
         try:
-            validate_build_bundle(working_dir, sim_config)
+            validate_build_bundle(
+                working_dir, sim_config, config_path=config_path, replicate=replicate
+            )
             reuse_build = True
-        except ArtifactIntegrityError:
+        except ArtifactIntegrityError as reason:
             reuse_build = False
+            if (working_dir / "system.xml").exists():
+                # Say why the existing build is not used; never rebuild a started run.
+                colored_echo(f"Not reusing the build in {working_dir}: {reason}", phase="simulation")
+                from polyzymd.simulation.artifact_integrity import assert_rebuild_allowed
+
+                assert_rebuild_allowed(working_dir)
         if reuse_build:
             colored_echo(f"Reusing the build in {working_dir}", phase="simulation")
         else:
