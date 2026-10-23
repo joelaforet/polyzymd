@@ -17,7 +17,12 @@ from typing import Any, Iterator, Sequence
 from polyzymd.analyses.shared.file_hashes import file_sha256
 from polyzymd.simulation.analysis_topology import ANALYSIS_TOPOLOGY_NAME, write_analysis_topology
 
-MANIFEST_NAME = "build_manifest.json"
+#: The build record: provenance, components, physics audit and artifact hashes.
+MANIFEST_NAME = "build_provenance.json"
+#: The same record for people (Markdown).
+PROVENANCE_MARKDOWN = "build_provenance.md"
+#: Name of the record before 1.3.0rc5, still read for existing runs.
+LEGACY_MANIFEST_NAME = "build_manifest.json"
 _BUILD_ARTIFACTS = ("solvated_system.pdb", "system.xml")
 # Written when ParmEd can convert the system; its absence is not an error.
 _OPTIONAL_ARTIFACTS = (ANALYSIS_TOPOLOGY_NAME,)
@@ -25,6 +30,14 @@ _OPTIONAL_ARTIFACTS = (ANALYSIS_TOPOLOGY_NAME,)
 
 class ArtifactIntegrityError(RuntimeError):
     """Raised when molecular artifacts cannot belong to the same build."""
+
+
+def build_record_path(working_dir: Path) -> Path:
+    """The run folder's build record: ``build_provenance.json``, or the older
+    ``build_manifest.json`` of a run built before 1.3.0rc5."""
+    current = Path(working_dir) / MANIFEST_NAME
+    legacy = Path(working_dir) / LEGACY_MANIFEST_NAME
+    return legacy if legacy.is_file() and not current.is_file() else current
 
 
 def _digest(payload: Any) -> str:
@@ -80,12 +93,20 @@ def _manifest(
     openmm_version: str | None,
     provenance: dict[str, Any] | None,
     artifacts: dict[str, Path],
+    engine: str = "openmm",
+    components: Sequence[Any] | None = None,
+    audit: Any = None,
 ) -> dict[str, Any]:
-    """Return a build manifest; ``artifacts`` maps each recorded path to the file to hash."""
+    """Return the build record; ``artifacts`` maps each recorded path to the file to hash.
+
+    ``components`` (their records) and ``audit`` (the physics audit of the files
+    the engine will run) are recorded when given.
+    """
     from polyzymd.utils.version import build_versions, get_polyzymd_version
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "engine": engine,
         "build_uuid": str(uuid.uuid4()),
         "config_hash": config_hash(config),
         "particle_count": int(particle_count),
@@ -97,7 +118,96 @@ def _manifest(
             name: {"path": name, "sha256": file_sha256(path, use_cache=False)}
             for name, path in artifacts.items()
         },
+        "components": [c.to_dict() for c in components or []],
+        "audit": audit.to_dict() if audit is not None else None,
+        "cite": methods_to_cite(config),
     }
+
+
+def methods_to_cite(config: Any) -> list[str]:
+    """Return the references of the methods this build used that its config chose.
+
+    The force fields and charge models are named in the component records;
+    this lists the other methods, such as how ``ionic_strength`` set the ions.
+    """
+    from polyzymd.builders.solvent import MACHADO_PANTANO
+
+    ions = getattr(getattr(config, "solvent", None), "ions", None)
+    return [MACHADO_PANTANO] if getattr(ions, "ionic_strength", None) is not None else []
+
+
+def _audit(realize: Any, components: Sequence[Any] | None, config: Any) -> Any:
+    """The physics audit of the system ``realize()`` reads, or None without components.
+
+    Reading the system is part of the audit: if it cannot be read, or any check
+    cannot run, the audit is one FAIL saying so, never a pass.
+    """
+    if not components:
+        return None
+    from polyzymd.audit.findings import Finding
+    from polyzymd.audit.report import AuditReport, audit
+
+    try:
+        realized = realize() if callable(realize) else realize
+        return audit(realized, components, config)
+    except Exception as error:  # an audit that cannot run must not pass silently
+        return AuditReport(
+            [
+                Finding(
+                    "audit",
+                    "system",
+                    "FAIL",
+                    f"the physics audit could not run: {type(error).__name__}: {error}",
+                )
+            ]
+        )
+
+
+def provenance_markdown(record: dict[str, Any], audit: Any = None) -> str:
+    """The build record for people: versions, components and the physics audit."""
+    lines = [
+        "# Build provenance",
+        "",
+        f"- engine: {record.get('engine')}",
+        f"- PolyzyMD {record.get('polyzymd_version')}; OpenMM {record.get('openmm_version')}",
+        f"- config hash `{record.get('config_hash')}`; {record.get('particle_count')} atoms",
+        f"- build {record.get('build_uuid')}",
+        "",
+        "## Components",
+        "",
+        "| Component | Type | Segment | Molecules | Force field | Charges |",
+        "|---|---|---|---|---|---|",
+    ]
+    for c in record.get("components") or []:
+        fields = sorted({", ".join(d["force_field"]) for d in c["domains"]})
+        charges = sorted(
+            {
+                f"{d['charges']['method']}"
+                + (f" ({d['charges']['model']})" if d["charges"].get("model") else "")
+                for d in c["domains"]
+            }
+        )
+        lines.append(
+            f"| {c['name']} | {c['type']} | {c['segid']} | {c.get('n_molecules', len(c['molecules']))} | "
+            f"{'; '.join(fields)} | {'; '.join(charges)} |"
+        )
+    if audit is not None:
+        lines += ["", audit.to_markdown()]
+    elif record.get("audit") is None:
+        lines += ["", "No physics audit was recorded for this build."]
+    lines += [
+        "",
+        "## Methods to cite",
+        "",
+        "Cite the force fields and charge models of the components above, and:",
+        "",
+    ] + ([f"- {reference}" for reference in record.get("cite") or []] or ["- nothing else"])
+    seeds = record.get("provenance") or {}
+    if seeds:
+        lines += ["", "## Inputs and seeds", ""] + [
+            f"- {k}: `{v}`" for k, v in sorted(seeds.items())
+        ]
+    return "\n".join(lines) + "\n"
 
 
 def write_gromacs_build_manifest(
@@ -106,8 +216,13 @@ def write_gromacs_build_manifest(
     config: Any,
     particle_count: int,
     provenance: dict[str, Any] | None = None,
+    components: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
-    """Write ``build_manifest.json`` for a GROMACS build into the replicate folder.
+    """Write ``build_provenance.json`` (and ``.md``) for a GROMACS build into the replicate folder.
+
+    With ``components``, the record carries the physics audit of the exported
+    ``.top``/``.gro`` read under the production ``prod.mdp``, the files GROMACS
+    will run.
 
     It has the keys of an OpenMM build's manifest, with ``openmm_version``
     null and the OpenFF versions that parameterized the system. The artifacts are ``solvated_system.pdb``, the exported
@@ -126,7 +241,27 @@ def write_gromacs_build_manifest(
     artifacts = {
         path.relative_to(replicate_dir).as_posix(): path for path in candidates if path.is_file()
     }
-    manifest = _manifest(config, particle_count, None, provenance, artifacts)
+    report = None
+    if components:
+        from polyzymd.audit.realized import RealizedSystem
+
+        prefix = system_prefix(config)
+        report = _audit(
+            lambda: RealizedSystem.from_gromacs(
+                gromacs_dir / f"{prefix}.top",
+                gromacs_dir / f"{prefix}.gro",
+                gromacs_dir / "prod.mdp",
+            ),
+            components,
+            config,
+        )
+    manifest = _manifest(
+        config, particle_count, None, provenance, artifacts, "gromacs", components, report
+    )
+    # The Markdown first, the JSON last: the JSON is the record readers trust.
+    _atomic_write(
+        replicate_dir / PROVENANCE_MARKDOWN, provenance_markdown(manifest, report).encode()
+    )
     _atomic_write(
         replicate_dir / MANIFEST_NAME,
         (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
@@ -142,8 +277,14 @@ def publish_build_bundle(
     config: Any,
     provenance: dict[str, Any] | None = None,
     segids: Sequence[str] | None = None,
+    components: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
-    """Atomically publish a complete PDB/System bundle, committing manifest last.
+    """Atomically publish a complete PDB/System bundle, committing its record last.
+
+    With ``components``, the staged ``system.xml`` and PDB are audited
+    (:mod:`polyzymd.audit`) before the bundle is committed, and the record
+    (``build_provenance.json``, with ``build_provenance.md`` for people) carries
+    the components and the audit.
 
     ``segids`` (optional) is each atom's component segment ID, written into
     columns 73-76 of the PDB.
@@ -171,16 +312,34 @@ def publish_build_bundle(
         if write_analysis_topology(topology, system, positions, staging / ANALYSIS_TOPOLOGY_NAME):
             written.append(ANALYSIS_TOPOLOGY_NAME)
 
+        report = None
+        if components:
+            from polyzymd.audit.realized import RealizedSystem
+
+            step = config.simulation_phases.production.time_step
+            report = _audit(
+                lambda: RealizedSystem.from_openmm(system_path, pdb_path, step), components, config
+            )
         manifest = _manifest(
             config,
             system.getNumParticles(),
             version.full_version,
             provenance,
             {name: staging / name for name in written},
+            "openmm",
+            components,
+            report,
         )
+        (staging / PROVENANCE_MARKDOWN).write_text(provenance_markdown(manifest, report))
+        written.append(PROVENANCE_MARKDOWN)
         previous = {
             name: (working_dir / name).read_bytes()
-            for name in (*_BUILD_ARTIFACTS, *_OPTIONAL_ARTIFACTS, MANIFEST_NAME)
+            for name in (
+                *_BUILD_ARTIFACTS,
+                *_OPTIONAL_ARTIFACTS,
+                PROVENANCE_MARKDOWN,
+                MANIFEST_NAME,
+            )
             if (working_dir / name).exists()
         }
         try:
@@ -192,7 +351,12 @@ def publish_build_bundle(
                 (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
             )
         except Exception:
-            for name in (*_BUILD_ARTIFACTS, *_OPTIONAL_ARTIFACTS, MANIFEST_NAME):
+            for name in (
+                *_BUILD_ARTIFACTS,
+                *_OPTIONAL_ARTIFACTS,
+                PROVENANCE_MARKDOWN,
+                MANIFEST_NAME,
+            ):
                 path = working_dir / name
                 if name in previous:
                     _atomic_write(path, previous[name])
@@ -203,8 +367,8 @@ def publish_build_bundle(
 
 
 def validate_build_bundle(working_dir: Path, config: Any) -> None:
-    """Validate a prebuilt bundle against its manifest and current configuration."""
-    manifest_path = working_dir / MANIFEST_NAME
+    """Validate a prebuilt bundle against its build record and current configuration."""
+    manifest_path = build_record_path(working_dir)
     paths = {name: working_dir / name for name in _BUILD_ARTIFACTS}
     missing = [str(path) for path in paths.values() if not path.is_file()]
     if missing:
@@ -213,7 +377,7 @@ def validate_build_bundle(working_dir: Path, config: Any) -> None:
         )
     if not manifest_path.is_file():
         raise ArtifactIntegrityError(
-            f"Build manifest is missing: {manifest_path}. Rebuild with "
+            f"Build record is missing: {manifest_path}. Rebuild with "
             "'polyzymd build -c <config> -r <replicate>', then run the same command again."
         )
     try:
@@ -222,7 +386,7 @@ def validate_build_bundle(working_dir: Path, config: Any) -> None:
         expected_config = manifest["config_hash"]
         int(manifest["particle_count"])
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        raise ArtifactIntegrityError(f"Invalid build manifest {manifest_path}: {exc}") from exc
+        raise ArtifactIntegrityError(f"Invalid build record {manifest_path}: {exc}") from exc
     # Builds written before the portable hash recorded the absolute-path hash.
     if expected_config not in (config_hash(config), _absolute_path_config_hash(config)):
         raise ArtifactIntegrityError(

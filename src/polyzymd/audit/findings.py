@@ -8,7 +8,8 @@ from typing import Any, Literal, Optional, Sequence
 from polyzymd.audit import registry
 from polyzymd.audit.realized import RealizedSystem
 
-Status = Literal["PASS", "FAIL", "WARN", "INFO"]
+#: ACCEPTED is a FAIL or WARN the config accepts in ``modeling_exceptions``.
+Status = Literal["PASS", "FAIL", "WARN", "INFO", "ACCEPTED"]
 
 
 @dataclass
@@ -29,15 +30,23 @@ class Finding:
     status: Status
     detail: str
     examples: list[str] = field(default_factory=list)
+    #: The status a modeling exception accepted (FAIL or WARN), when status is ACCEPTED.
+    accepted_from: Optional[str] = None
+    #: The reason the config gives for accepting it.
+    reason: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "check": self.check,
             "component": self.component,
             "status": self.status,
             "detail": self.detail,
             "examples": list(self.examples),
         }
+        if self.accepted_from is not None:
+            data["accepted_from"] = self.accepted_from
+            data["reason"] = self.reason
+        return data
 
 
 @dataclass
