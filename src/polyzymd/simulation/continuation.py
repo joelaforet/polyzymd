@@ -1207,6 +1207,16 @@ class ContinuationManager:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved initial system to {system_xml_path}")
 
+        from polyzymd.audit.runtime import record_system_check
+
+        record_system_check(
+            self._system,
+            self._working_dir,
+            output_dir,
+            f"production_{self._segment_index}",
+            self._segment_index,
+        )
+
         # Count the steps from the step actually loaded, not from the
         # estimate the caller sized the segment with.
         total_steps = round(duration_ns * 1e6 / timestep_fs)

@@ -54,7 +54,7 @@ def _contend_for_lock(path: str, queue: Queue) -> None:
         queue.put("blocked")
 
 
-def test_manifest_rejects_hash_and_config_drift(tmp_path):
+def test_manifest_rejects_hash_and_config_drift(tmp_path, passing_audit):
     topology, system, positions = _tiny_openmm_bundle()
     publish_build_bundle(tmp_path, topology, system, positions, _Config())
     validate_build_bundle(tmp_path, _Config())
@@ -68,7 +68,7 @@ def test_manifest_rejects_hash_and_config_drift(tmp_path):
         validate_build_bundle(tmp_path, _Config("changed"))
 
 
-def test_failed_publication_restores_previous_bundle(tmp_path, monkeypatch):
+def test_failed_publication_restores_previous_bundle(tmp_path, monkeypatch, passing_audit):
     import polyzymd.simulation.artifact_integrity as integrity
 
     topology, system, positions = _tiny_openmm_bundle()
@@ -233,7 +233,9 @@ def test_config_hash_is_the_same_for_copies_in_different_folders(tmp_path):
     assert config_hash(first) != config_hash(second)
 
 
-def test_build_validates_with_a_copied_config_and_with_the_absolute_path_hash(tmp_path):
+def test_build_validates_with_a_copied_config_and_with_the_absolute_path_hash(
+    tmp_path, passing_audit
+):
     first = _copied_quickstart_config(tmp_path / "a")
     second = _copied_quickstart_config(tmp_path / "b")
     run = tmp_path / "run"
@@ -250,7 +252,7 @@ def test_build_validates_with_a_copied_config_and_with_the_absolute_path_hash(tm
         validate_build_bundle(run, second)
 
 
-def test_a_moved_build_validates(tmp_path):
+def test_a_moved_build_validates(tmp_path, passing_audit):
     """Artifacts are recorded relative to the run folder, so a moved run folder still validates."""
     import shutil
 
@@ -273,7 +275,9 @@ def test_a_moved_build_validates(tmp_path):
         validate_build_bundle(moved, _Config())
 
 
-def test_validation_reads_an_artifact_replaced_with_the_same_size_and_time(tmp_path, monkeypatch):
+def test_validation_reads_an_artifact_replaced_with_the_same_size_and_time(
+    tmp_path, monkeypatch, passing_audit
+):
     import os
 
     from polyzymd.analyses.shared.file_hashes import cache_dir

@@ -842,7 +842,7 @@ class TestRunBuildManifest:
     @patch("polyzymd.simulation.runner.SimulationRunner")
     @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
     def test_run_build_manifest_records_packmol_seed(
-        self, from_config, _runner, tmp_path: Path
+        self, from_config, _runner, tmp_path: Path, passing_audit
     ) -> None:
         import json
         from unittest.mock import MagicMock
@@ -920,9 +920,13 @@ class TestRunReusesBuild:
     @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
     @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
     def test_gromacs_run_reuses_exported_files(
-        self, _prefix, from_config, gromacs_runner, tmp_path: Path, capsys
+        self, _prefix, from_config, gromacs_runner, tmp_path: Path, capsys, monkeypatch
     ) -> None:
         from polyzymd.cli.main import _run_gromacs_impl
+
+        monkeypatch.setattr(
+            "polyzymd.simulation.artifact_integrity.require_audited_build", lambda *a, **k: {}
+        )
 
         gromacs_dir = tmp_path / "run_1" / "gromacs"
         gromacs_dir.mkdir(parents=True)
@@ -939,6 +943,25 @@ class TestRunReusesBuild:
             gmx_command="gmx",
         )
         assert f"Reusing the GROMACS files in {gromacs_dir}" in capsys.readouterr().out
+
+    @patch("polyzymd.exporters.gromacs.GromacsRunner")
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
+    def test_gromacs_run_refuses_exported_files_no_audit_vouches_for(
+        self, _prefix, from_config, gromacs_runner, tmp_path: Path
+    ) -> None:
+        """Exported files without a passing build record are not run."""
+        from polyzymd.cli.main import _run_gromacs_impl
+        from polyzymd.simulation.artifact_integrity import AuditGateError
+
+        gromacs_dir = tmp_path / "run_1" / "gromacs"
+        gromacs_dir.mkdir(parents=True)
+        for name in ("sys.top", "sys.gro", "em.mdp", "eq_00_nvt.mdp", "prod.mdp"):
+            (gromacs_dir / name).write_text("")
+
+        with pytest.raises(AuditGateError, match="has no build record"):
+            _run_gromacs_impl(self._config(tmp_path), replicate=1, gmx_path="gmx")
+        gromacs_runner.assert_not_called()
 
     @patch("polyzymd.exporters.gromacs.GromacsRunner")
     @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
@@ -962,8 +985,11 @@ class TestRunReusesBuild:
     @patch("polyzymd.exporters.gromacs.GromacsRunner")
     @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
     def test_gromacs_run_records_the_polyzymd_version(
-        self, _prefix, gromacs_runner, tmp_path: Path
+        self, _prefix, gromacs_runner, tmp_path: Path, monkeypatch
     ) -> None:
+        monkeypatch.setattr(
+            "polyzymd.simulation.artifact_integrity.require_audited_build", lambda *a, **k: {}
+        )
         from polyzymd import __version__
         from polyzymd.cli.main import _run_gromacs_impl
         from polyzymd.simulation.progress import load_progress

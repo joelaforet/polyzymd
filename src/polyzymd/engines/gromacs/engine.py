@@ -355,6 +355,7 @@ class GromacsEngine(SimulationEngine):
         Any
             Submission metadata with script path and optional SLURM job id.
         """
+        self._require_audited_build(request)
         script_path = self.prepare_submission(request)
 
         from polyzymd.workflow.slurm_submit import run_sbatch
@@ -370,6 +371,19 @@ class GromacsEngine(SimulationEngine):
             "stderr": result.stderr.strip(),
             "returncode": result.returncode,
         }
+
+    @staticmethod
+    def _require_audited_build(request: EngineSubmitRequest) -> None:
+        """Refuse to submit a replicate that has not started unless a passing audit
+        vouches for its exported files (a started one continues from its own files)."""
+        gromacs_dir = Path(request.working_dir)
+        started = (gromacs_dir / "em.gro").exists() or any(gromacs_dir.glob("*.cpt"))
+        if started:
+            return
+        from polyzymd.config.loader import load_config
+        from polyzymd.simulation.artifact_integrity import require_audited_build
+
+        require_audited_build(gromacs_dir.parent, load_config(request.config_path), "gromacs")
 
     #: Production trajectories a GROMACS run leaves: the raw ``mdrun`` output and the
     #: post-processed whole-molecule and centred copies that analyses read.
