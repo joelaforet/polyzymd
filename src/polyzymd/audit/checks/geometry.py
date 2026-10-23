@@ -19,7 +19,8 @@ from polyzymd.audit.findings import AuditContext, Finding
 from polyzymd.audit.registry import CheckSpec, register
 
 #: Protein heavy atoms within BURIAL_RADIUS_NM of a water oxygen at or above which
-#: the water is reported as buried.
+#: the water is reported as buried. In correctly built Paper 1 systems (CALB,
+#: LipA, RML; 45,000-92,000 atoms) the most buried water had 45-50.
 BURIED_NEIGHBOURS = 75
 BURIAL_RADIUS_NM = 0.8
 #: Heavy-atom distance at which a polymer chain is in contact with the protein.
