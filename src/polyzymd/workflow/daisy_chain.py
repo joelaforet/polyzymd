@@ -777,8 +777,10 @@ def _check_build(
         With the ``polyzymd build`` command to run.
     """
     from polyzymd.simulation.artifact_integrity import validate_build_bundle
+    from polyzymd.simulation.own_protocol import require_polyzymd_run
     from polyzymd.simulation.progress import PROGRESS_FILENAME, load_progress
 
+    require_polyzymd_run(working_dir, "submit")
     progress_file = working_dir / PROGRESS_FILENAME
     started = progress_file.exists() or any(
         any(working_dir.glob(pattern))
