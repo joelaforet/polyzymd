@@ -567,7 +567,7 @@ class TestSubmitNeedsABuild:
         validated = []
         monkeypatch.setattr(
             "polyzymd.simulation.artifact_integrity.validate_build_bundle",
-            lambda working_dir, config: validated.append(working_dir),
+            lambda working_dir, config, **gate: validated.append(working_dir),
         )
         config = self._config_file(tmp_path)
 

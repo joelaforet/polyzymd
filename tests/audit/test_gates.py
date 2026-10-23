@@ -169,6 +169,22 @@ def _system(charge: float):
     return system
 
 
+def _vouch(folder: Path, passed: bool = True) -> None:
+    """A build record whose audit vouches (or not) for folder/system.xml."""
+    from polyzymd.analyses.shared.file_hashes import file_sha256
+
+    sha = file_sha256(folder / "system.xml", use_cache=False)
+    (folder / MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "artifacts": {"system.xml": {"path": "system.xml", "sha256": sha}},
+                "audit": {"passed": passed, "findings": []},
+            }
+        )
+    )
+
+
 def test_a_run_whose_system_differs_from_the_build_is_recorded_and_shown(tmp_path) -> None:
     """The LipA case: production ran with charges other than the audited build's."""
     from polyzymd.audit.runtime import compare_with_build, record_system_check
@@ -180,6 +196,7 @@ def test_a_run_whose_system_differs_from_the_build_is_recorded_and_shown(tmp_pat
 
     build = tmp_path / "system.xml"
     build.write_text(openmm.XmlSerializer.serialize(_system(0.5)))
+    _vouch(tmp_path)
     same = _system(0.5)
     same.addForce(openmm.MonteCarloBarostat(1.0, 300.0))  # a run control, as production adds
     assert compare_with_build(same, build)["matches_build"]
@@ -235,3 +252,47 @@ def test_gromacs_submission_needs_an_audited_build_until_the_run_starts(tmp_path
         GromacsEngine._require_audited_build(request)
     (gromacs_dir / "em.gro").write_text("")  # started: continues from its own files
     GromacsEngine._require_audited_build(request)
+
+
+def test_the_runtime_check_compares_restraints_and_needs_a_vouching_record(tmp_path) -> None:
+    from polyzymd.audit.runtime import compare_with_build
+
+    def restrained(k):
+        system = _system(0.5)
+        force = openmm.CustomBondForce("0.5 * k * (r - r0)^2")
+        force.addPerBondParameter("r0")
+        force.addPerBondParameter("k")
+        force.addBond(0, 1, [0.3, k])
+        force.setName("polyzymd_restraint:tether")
+        system.addForce(force)
+        return system
+
+    build = tmp_path / "system.xml"
+    build.write_text(openmm.XmlSerializer.serialize(restrained(1000.0)))
+    _vouch(tmp_path)
+    assert compare_with_build(restrained(1000.0), build)["matches_build"]
+    changed = compare_with_build(restrained(2000.0), build)
+    assert not changed["matches_build"] and "polyzymd_restraint:tether" in changed["detail"]
+    _vouch(tmp_path, passed=False)
+    unvouched = compare_with_build(restrained(1000.0), build)
+    assert (unvouched["compared"], unvouched["matches_build"]) == (False, False)
+    assert "no passing physics audit" in unvouched["detail"]
+
+
+def test_a_started_replicate_is_not_held_to_the_audit_it_predates(tmp_path) -> None:
+    from polyzymd.simulation.artifact_integrity import run_started
+
+    assert not run_started(tmp_path)
+    (tmp_path / "production_0").mkdir()
+    assert run_started(tmp_path)
+
+
+def test_the_gromacs_job_refuses_files_no_audit_vouched_for() -> None:
+    """The job script checks audited_files.sha256 before any grompp."""
+    template = (
+        Path(__file__).resolve().parents[2]
+        / "src/polyzymd/engines/gromacs/templates/slurm_self_resubmitting.sh.jinja"
+    ).read_text()
+    check = template.index("sha256sum --check --quiet audited_files.sha256")
+    assert check < template.index("$GMX grompp")
+    assert "no passing physics audit vouches for these files" in template

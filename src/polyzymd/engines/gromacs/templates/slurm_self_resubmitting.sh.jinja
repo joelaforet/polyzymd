@@ -195,6 +195,17 @@ trap 'handle_term' TERM
 mkdir -p "$WORKING_DIR"
 cd "$WORKING_DIR"
 
+# Run only files a passing physics audit vouched for, unchanged since: the
+# build writes their hashes only when its audit passes.
+if [ ! -f audited_files.sha256 ]; then
+    echo "FATAL: $WORKING_DIR has no audited_files.sha256: no passing physics audit vouches for these files. Build again with polyzymd build --format gromacs."
+    exit 1
+fi
+if ! sha256sum --check --quiet audited_files.sha256; then
+    echo "FATAL: files in $WORKING_DIR changed since the build was audited (above). Restore them or build again."
+    exit 1
+fi
+
 echo "=================================================="
 echo "PolyzyMD GROMACS self-resubmitting job"
 echo "{{ FULL_CREDIT_LINE }}"

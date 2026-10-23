@@ -803,7 +803,7 @@ def _check_build(
             )
         return
     try:
-        validate_build_bundle(working_dir, sim_config)
+        validate_build_bundle(working_dir, sim_config, config_path=config_path, replicate=replicate)
     except (OSError, RuntimeError, ValueError) as exc:
         raise FileNotFoundError(
             f"Replicate {replicate} has no usable build in {working_dir}: {exc}\n"
