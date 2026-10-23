@@ -46,17 +46,26 @@ class AuditContext:
 
     realized: RealizedSystem
     components: Sequence[Any]
+    #: The SimulationConfig the system was built from; system checks compare with it.
+    config: Any = None
     #: Work several checks share (such as the reference comparisons), by key.
     cache: dict[str, Any] = field(default_factory=dict)
 
 
 def run_checks(
-    realized: RealizedSystem, components: Sequence[Any], ids: Optional[Sequence[str]] = None
+    realized: RealizedSystem,
+    components: Sequence[Any],
+    ids: Optional[Sequence[str]] = None,
+    config: Any = None,
 ) -> list[Finding]:
-    """Run every registered check (or those in ``ids``) and return their findings."""
+    """Run every registered check (or those in ``ids``) and return their findings.
+
+    ``config`` is the SimulationConfig of the build; checks that compare the
+    system with the config report INFO "not checked" without it.
+    """
     import polyzymd.audit.checks  # noqa: F401  # registers the checks
 
-    context = AuditContext(realized, components)
+    context = AuditContext(realized, components, config)
     findings: list[Finding] = []
     for spec in registry.catalog():
         if ids is not None and spec.id not in ids:
