@@ -12,6 +12,14 @@ from polyzymd.engines.gromacs.engine import GromacsEngine
 from polyzymd.workflow.slurm import SlurmConfig
 
 
+@pytest.fixture(autouse=True)
+def _audited_builds(monkeypatch):
+    """These tests are about scripts; the audit gate is tested in tests/audit/test_gates.py."""
+    from polyzymd.engines.gromacs.engine import GromacsEngine
+
+    monkeypatch.setattr(GromacsEngine, "_require_audited_build", staticmethod(lambda *a, **k: None))
+
+
 def _make_config(
     *,
     ntmpi: int = 1,
