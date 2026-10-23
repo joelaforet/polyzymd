@@ -363,8 +363,10 @@ def test_solvate_without_box_centres_and_derives_the_box(monkeypatch) -> None:
     )
 
 
-def _packmol_counts(monkeypatch, tmp_path, composition, runs: int = 1) -> list[dict]:
-    """Solvate methane `runs` times with Packmol replaced; return what it was asked each time."""
+def _packmol_counts(
+    monkeypatch, tmp_path, composition, runs: int = 1, solute_smiles: str = "C"
+) -> list[dict]:
+    """Solvate a solute (methane) `runs` times with Packmol replaced; return what it was asked."""
     from openff.toolkit import Molecule, Topology
 
     import polyzymd.utils.packmol as packmol_utils
@@ -379,14 +381,14 @@ def _packmol_counts(monkeypatch, tmp_path, composition, runs: int = 1) -> list[d
     monkeypatch.setattr(packmol_utils, "solvate_with_packmol", fake_solvate_with_packmol)
     monkeypatch.setattr(solvent_molecules, "_USER_CACHE_DIR", tmp_path)
     monkeypatch.setattr(solvent_molecules, "_loaded_molecules", {})
-    solute = Molecule.from_smiles("C")
+    solute = Molecule.from_smiles(solute_smiles)
     solute.generate_conformers(n_conformers=1)
     results = []
     for _ in range(runs):
         SolventBuilder().solvate(Topology.from_molecules([solute]), composition, padding=1.5)
         names = ["water", "na", "cl", "cosolvent"]
         counts = dict(zip(names, calls[-1]["number_of_copies"]))
-        counts["molecule"] = calls[-1]["molecules"][3]
+        counts["molecule"] = (calls[-1]["molecules"][3:] or [None])[0]
         results.append(counts)
     return results
 
@@ -468,3 +470,119 @@ class TestCoSolventCharge:
         assert counts["na"] == counts["cosolvent"] and counts["cl"] == 0
         achieved = counts["cosolvent"] / (counts["cosolvent"] + counts["water"])
         assert achieved == pytest.approx(0.1, abs=0.002)
+
+
+@pytest.mark.parametrize(
+    ("target", "solute_charge", "expected"),
+    [
+        (20.0, 0, (10, 10)),
+        (20.0, -9, (15, 6)),  # 21 ions: the parity of the charge forces an odd total
+        (20.0, 4, (8, 12)),
+        (3.0, -9, (9, 0)),  # the counter-ions alone exceed the target
+    ],
+)
+def test_ionic_strength_counts_split_the_charge(target, solute_charge, expected) -> None:
+    """Na+ and Cl- split the solute charge and together come nearest the target total."""
+    na_count, cl_count = SolventBuilder._calculate_ionic_strength_counts(
+        total_ions=target, solute_charge=solute_charge
+    )
+
+    assert (na_count, cl_count) == expected
+    assert solute_charge + na_count - cl_count == 0
+
+
+CITRATE = "OC(CC(=O)[O-])(CC(=O)[O-])C(=O)[O-]"
+
+
+def _ionic_strength(counts: dict) -> float:
+    """Ionic strength (M) of monovalent ions, on the water count as the solvent volume."""
+    return 0.5 * (counts["na"] + counts["cl"]) / (counts["water"] / 55.5)
+
+
+class TestIonicStrength:
+    @pytest.mark.parametrize("solute_smiles", ["C", "CC(=O)[O-]", "C[NH3+]", CITRATE])
+    def test_counter_ions_count_toward_the_target(
+        self, monkeypatch, tmp_path, solute_smiles
+    ) -> None:
+        """The box is neutral and its ions, counter-ions included, give the target strength."""
+        from polyzymd.builders.solvent import SolventComposition
+
+        composition = SolventComposition(ionic_strength=0.13)
+        counts = _packmol_counts(monkeypatch, tmp_path, composition, solute_smiles=solute_smiles)[0]
+        charge = {"C": 0, "CC(=O)[O-]": -1, "C[NH3+]": 1, CITRATE: -3}[solute_smiles]
+        # The solvent water-equivalents the counts were taken on: the packed
+        # water plus the mass of the ions, in waters.
+        water_equivalents = (
+            counts["water"] + (22.98977 * counts["na"] + 35.453 * counts["cl"]) / 18.015
+        )
+
+        assert charge + counts["na"] - counts["cl"] == 0
+        assert (counts["na"], counts["cl"]) == SolventBuilder._calculate_ionic_strength_counts(
+            total_ions=2 * 0.13 * water_equivalents / 55.5, solute_charge=charge
+        )
+        assert _ionic_strength(counts) == pytest.approx(0.13, abs=0.6 / (counts["water"] / 55.5))
+
+    def test_the_build_names_the_method_to_cite(self, monkeypatch, tmp_path, caplog) -> None:
+        """Whoever builds with ionic_strength is told to cite Machado and Pantano."""
+        import logging
+
+        from polyzymd.builders.solvent import SolventComposition
+
+        with caplog.at_level(logging.INFO, logger="polyzymd.builders.solvent"):
+            _packmol_counts(
+                monkeypatch, tmp_path, SolventComposition(ionic_strength=0.13), solute_smiles="C"
+            )
+        assert "doi:10.1021/acs.jctc.9b00953" in caplog.text
+
+    @pytest.mark.parametrize(
+        "smiles", ["CCCCCCCCCCCCOS(=O)(=O)[O-]", "CCCCCCCCCCCCOS(=O)(=O)[O-].[Na+]"]
+    )
+    def test_a_charged_surfactant_counts_toward_the_target(
+        self, monkeypatch, tmp_path, smiles
+    ) -> None:
+        """Dodecyl sulfate and its Na+ count toward the ionic strength; NaCl fills the rest."""
+        from polyzymd.builders.solvent import CoSolvent, SolventComposition
+
+        cosolvent = CoSolvent(name="sds", smiles=smiles, count=5)
+        composition = SolventComposition(co_solvents=[cosolvent], ionic_strength=0.2)
+        counts = _packmol_counts(monkeypatch, tmp_path, composition)[0]
+        # Methane solute is neutral: the 5 sulfates are balanced by Na+.
+        assert counts["na"] - counts["cl"] == 5
+        ion_mass = 22.98977 * counts["na"] + 35.453 * counts["cl"]
+        surfactant_mass = 5 * sum(atom.mass.m for atom in counts["molecule"].atoms)
+        water_equivalents = counts["water"] + (ion_mass + surfactant_mass) / 18.015
+        target = 2 * 0.2 * water_equivalents / 55.5
+        # SMILES counter-ions are part of counts["na"]; the surfactant adds 5 x 1^2.
+        extra_na, extra_cl = SolventBuilder._calculate_ionic_strength_counts(
+            total_ions=target - 5 - (5 if "[Na+]" in smiles else 0),
+            solute_charge=-5 + (5 if "[Na+]" in smiles else 0),
+        )
+        assert counts["na"] == extra_na + (5 if "[Na+]" in smiles else 0)
+        assert counts["cl"] == extra_cl
+
+    def test_counter_ions_above_the_target_are_a_warning(
+        self, monkeypatch, tmp_path, caplog
+    ) -> None:
+        """When neutralizing alone exceeds the target, the build says what strength it reached."""
+        import logging
+
+        from polyzymd.builders.solvent import SolventComposition
+
+        composition = SolventComposition(ionic_strength=1e-6)
+        with caplog.at_level(logging.WARNING):
+            counts = _packmol_counts(
+                monkeypatch, tmp_path, composition, solute_smiles="CC(=O)[O-]"
+            )[0]
+        assert (counts["na"], counts["cl"]) == (1, 0)
+        assert any("ionic strength" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{"nacl_concentration": 0.1}, {"neutralize": False}], ids=["salt", "no-neutralize"]
+)
+def test_composition_refuses_ionic_strength_beside_other_salt_settings(kwargs) -> None:
+    """The Python API enforces the same rules as the config."""
+    from polyzymd.builders.solvent import SolventComposition
+
+    with pytest.raises(ValueError, match="ionic_strength"):
+        SolventComposition(ionic_strength=0.13, **kwargs)

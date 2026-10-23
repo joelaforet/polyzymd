@@ -557,11 +557,19 @@ def build(
             )
             colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
             _echo_box_plan(sim_config, phase="build")
-            colored_echo(
-                f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M, "
-                f"neutralize: {sim_config.solvent.ions.neutralize}",
-                phase="build",
-            )
+            ions = sim_config.solvent.ions
+            if ions.ionic_strength is not None:
+                colored_echo(
+                    f"    Ionic strength: {ions.ionic_strength} M, counter-ions included "
+                    "(Na+ and Cl- split the solute charge)",
+                    phase="build",
+                )
+            else:
+                colored_echo(
+                    f"    NaCl concentration: {ions.nacl_concentration} M, "
+                    f"neutralize: {ions.neutralize}",
+                    phase="build",
+                )
             for cs in sim_config.solvent.co_solvents:
                 if cs.count is not None:
                     amount = f"{cs.count} molecules"
