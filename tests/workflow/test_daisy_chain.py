@@ -22,13 +22,13 @@ def _simulation_config_data(tmp_path: Path) -> dict:
                 "type": "small_molecule",
                 "name": "Sub-A",
                 "sdf_path": "substrate.sdf",
-                "force_field": ["openff-2.0.0.offxml"],
+                "force_field": ["openff-2.3.0.offxml"],
                 "charges": {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"},
             },
         ],
         "thermodynamics": {"temperature": 310.0},
         "solvent": {
-            "force_field": ["openff-2.0.0.offxml"],
+            "force_field": ["openff-2.3.0.offxml"],
             "water": {"model": "tip3p"},
             "co_solvents": [
                 {"name": "dmso", "mole_fraction": 0.3, "charges": {"method": "preset"}}
