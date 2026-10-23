@@ -61,7 +61,7 @@ solvent:
 #   resname XXX  - Residue name (e.g., RBY, SER, LIG)
 #   name XXX     - Atom name (e.g., OG, CA, C1)
 #   index N      - Atom index (0-indexed, OpenMM internal)
-#   pdbindex N   - PDB atom serial (1-indexed, matches PyMOL display)
+#   pdbindex N   - N-th atom of the built system, from 1 (PyMOL `index`, not `ID`)
 #   and/or       - Combine selections
 #
 # Example: To select the atom shown as serial 2740 in PyMOL:

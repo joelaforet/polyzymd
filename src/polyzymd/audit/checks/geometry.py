@@ -18,8 +18,8 @@ import numpy as np
 from polyzymd.audit.findings import AuditContext, Finding
 from polyzymd.audit.registry import CheckSpec, register
 
-#: Protein heavy atoms within BURIAL_RADIUS_NM of a water oxygen above which the
-#: water is reported as buried (calibrated on Paper 1 rerun builds; see docs).
+#: Protein heavy atoms within BURIAL_RADIUS_NM of a water oxygen at or above which
+#: the water is reported as buried.
 BURIED_NEIGHBOURS = 75
 BURIAL_RADIUS_NM = 0.8
 #: Heavy-atom distance at which a polymer chain is in contact with the protein.
@@ -237,13 +237,15 @@ def buried_water(context: AuditContext) -> list[Finding]:
 
 
 def _whole(context: AuditContext, atoms: list[int]) -> np.ndarray:
-    """Positions (nm) of ``atoms`` with every bond made short across the box (molecules made whole)."""
+    """Positions (nm) of ``atoms``, each molecule made whole and placed in the periodic
+    image nearest the first molecule, so a ligand beside the protein is measured there."""
     positions = np.asarray(context.realized.positions_nm, dtype=float)
     box = np.asarray(context.realized.box_nm, dtype=float)
     inverse = np.linalg.inv(box)
     index = context.realized.index
     members = set(atoms)
-    out = {}
+    out: dict[int, np.ndarray] = {}
+    placed: set[int] = set()
     for start in atoms:
         if start in out:
             continue
@@ -257,6 +259,15 @@ def _whole(context: AuditContext, atoms: list[int]) -> np.ndarray:
                     s = d @ inverse
                     out[j] = out[i] + (s - np.round(s)) @ box
                     queue.append(j)
+        if start != atoms[0]:
+            piece = [i for i in out if i not in placed]
+            centre = np.mean([out[i] for i in piece], axis=0)
+            anchor = np.mean([out[i] for i in placed], axis=0)
+            s = (centre - anchor) @ inverse
+            shift = -np.round(s) @ box
+            for i in piece:
+                out[i] = out[i] + shift
+        placed.update(out)
     return np.array([out[i] for i in atoms])
 
 
@@ -302,7 +313,11 @@ def periodic_image(context: AuditContext) -> list[Finding]:
     fixed = [int(i) for i in _heavy(context, _atoms(context, "protein", "small_molecule"))]
     if not fixed:
         return []
-    padding = 1.2 if context.config is None else context.config.solvent.box.padding
+    config = context.config
+    padding = 1.2 if config is None else config.solvent.box.padding
+    if config is not None and config.polymers is not None:
+        # The cell reserves room for the chains as well (polymers.packing.padding).
+        padding += config.polymers.packing.padding
     guaranteed = 2.0 * padding
     box = np.asarray(context.realized.box_nm, dtype=float)
     nearest = _image_distance(_whole(context, fixed), box, guaranteed)
