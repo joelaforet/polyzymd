@@ -258,6 +258,10 @@ def _is_list(annotation: Any) -> bool:
     return any(getattr(arg, "__origin__", None) is list for arg in get_args(annotation))
 
 
+#: The ``type`` values of ``solutes:`` entries, which pydantic adds to error locations.
+_SOLUTE_TYPES = ("protein", "small_molecule", "polymer")
+
+
 @lru_cache(maxsize=1)
 def _schema_fields() -> dict[tuple[str, ...], bool]:
     """Map the path of every field of :class:`SimulationConfig` to whether it is in a list."""
@@ -353,10 +357,14 @@ def _unknown_key_messages(loc: tuple[Any, ...], value: Any) -> list[str]:
     parent = tuple(part for part in loc[:-1] if isinstance(part, str))
 
     def mean(path: tuple[str, ...]) -> str:
-        # A field at the same level keeps the list indices of the location.
+        # A field at the same level keeps the list indices of the location;
+        # elsewhere a list section reads as name[] (solutes[].pdb_path).
         if path[:-1] == parent:
             return ".".join(str(part) for part in (*loc[:-1], path[-1]))
-        return ".".join(path)
+        return ".".join(
+            part + ("[]" if k < len(path) - 1 and _is_list(_annotation_at(path[: k + 1])) else "")
+            for k, part in enumerate(path)
+        )
 
     if isinstance(value, dict) and value:
         # A misspelled section (enzym:) whose keys belong to the section it names.
@@ -390,6 +398,16 @@ def _is_suggested(section: str, lines: list[tuple[str, str]]) -> bool:
     return any(text.endswith(f"; did you mean {section}?") for _, text in lines)
 
 
+def _without_union_tags(loc: tuple[Any, ...]) -> tuple[Any, ...]:
+    """Drop the tag pydantic adds after a list index of a tagged union (``solutes.0.protein``)."""
+    out: list[Any] = []
+    for part in loc:
+        if isinstance(part, str) and out and isinstance(out[-1], int) and part in _SOLUTE_TYPES:
+            continue
+        out.append(part)
+    return tuple(out)
+
+
 def config_error_lines(error: ValidationError, path: Union[str, Path]) -> list[tuple[str, str]]:
     """Explain a config ``ValidationError`` as ``error:`` and ``fix:`` lines.
 
@@ -415,7 +433,7 @@ def config_error_lines(error: ValidationError, path: Union[str, Path]) -> list[t
     missing_sections: set[str] = set()
     ours = error.title == SimulationConfig.__name__
     for item in error.errors():
-        loc = tuple(item["loc"])
+        loc = _without_union_tags(tuple(item["loc"]))
         where = ".".join(str(part) for part in loc) or "config"
         keys = tuple(part for part in loc if isinstance(part, str))
         kind = item["type"]
@@ -432,7 +450,7 @@ def config_error_lines(error: ValidationError, path: Union[str, Path]) -> list[t
             got = _YAML_TYPE_NAMES.get(type(item.get("input")), type(item.get("input")).__name__)
             lines.append(("error", f"{where}: expected {shape}, not {got}"))
         else:
-            message, _, fix = item["msg"].partition("\nfix: ")
+            message, _, fix = item["msg"].removeprefix("Value error, ").partition("\nfix: ")
             lines.append(("error", f"{where}: {message}"))
             if fix and fix not in fixes:
                 fixes.append(fix)

@@ -12,7 +12,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional
 
 if TYPE_CHECKING:
     from openmm import CustomBondForce, HarmonicBondForce, System
@@ -111,33 +111,57 @@ class AtomSelection:
     :func:`_parse_selection`.
 
     Attributes:
-        selection: Selection string, such as ``"protein and resid 77 and name OG"``
+        selection: Selection string, such as ``"resid 77 and name OG"``
         description: Human-readable description of what this selects
+        component: Name of the component (solute) the atom belongs to. The
+            selection is matched only among that component's atoms, so
+            ``resid 77`` cannot pick up a polymer or water residue 77.
 
     Example:
-        >>> sel = AtomSelection("resid 77 and name OG", "Catalytic serine oxygen")
-        >>> indices = sel.resolve(topology)
+        >>> sel = AtomSelection("resid 77 and name OG", "Catalytic serine oxygen", "LipA")
+        >>> indices = sel.resolve(topology, {"LipA": range(0, 2900)})
     """
 
     selection: str
     description: Optional[str] = None
+    component: Optional[str] = None
 
-    def resolve(self, topology: OpenMMTopology) -> List[int]:
+    def resolve(
+        self, topology: OpenMMTopology, components: Optional[Mapping[str, Iterable[int]]] = None
+    ) -> List[int]:
         """Resolve the selection to atom indices.
 
         Args:
             topology: OpenMM Topology object
+            components: Atom indices of each component, by name. Required when
+                the selection names a component.
 
         Returns:
             List of atom indices matching the selection
 
         Raises:
-            ValueError: If selection syntax is invalid or no atoms match
+            ValueError: If selection syntax is invalid, the component is
+                unknown, or no atoms of the component match
         """
-        return _parse_selection(self.selection, topology)
+        indices = _parse_selection(self.selection, topology, allow_empty=True)
+        if self.component is not None:
+            if components is None or self.component not in components:
+                known = ", ".join(components) if components else "none"
+                raise ValueError(
+                    f"Selection {self.selection!r} names component {self.component!r}, which "
+                    f"the system does not have (components: {known})"
+                )
+            scope = set(components[self.component])
+            indices = [i for i in indices if i in scope]
+        if not indices:
+            where = f" in component {self.component!r}" if self.component else ""
+            raise ValueError(f"No atoms match selection: '{self.selection}'{where}")
+        return indices
 
 
-def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
+def _parse_selection(
+    selection: str, topology: OpenMMTopology, allow_empty: bool = False
+) -> List[int]:
     """Return the sorted 0-based indices of the atoms ``selection`` picks in ``topology``.
 
     The selection is an MDTraj selection with three MDAnalysis spellings
@@ -195,7 +219,7 @@ def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
                     f"Cannot parse selection {selection!r}: index, resid, residue, "
                     f"pdbindex and chainid take numbers, not {', '.join(map(repr, words))}"
                 )
-    if len(indices) == 0:
+    if len(indices) == 0 and not allow_empty:
         raise ValueError(f"No atoms match selection: '{selection}'")
     return sorted(int(i) for i in indices)
 
@@ -234,12 +258,19 @@ class RestraintDefinition:
     )
     enabled: bool = True
 
-    def apply(self, topology: OpenMMTopology, system: System) -> Optional[int]:
+    def apply(
+        self,
+        topology: OpenMMTopology,
+        system: System,
+        components: Optional[Mapping[str, Iterable[int]]] = None,
+    ) -> Optional[int]:
         """Apply this restraint to an OpenMM system.
 
         Args:
             topology: OpenMM Topology for resolving atom selections
             system: OpenMM System to add the force to
+            components: Atom indices of each component, by name, for
+                selections that name a component
 
         Returns:
             Index of the added force, or None if restraint is disabled
@@ -249,8 +280,8 @@ class RestraintDefinition:
             return None
 
         # Resolve atom selections
-        atom1_indices = self.atom1.resolve(topology)
-        atom2_indices = self.atom2.resolve(topology)
+        atom1_indices = self.atom1.resolve(topology, components)
+        atom2_indices = self.atom2.resolve(topology, components)
 
         if len(atom1_indices) != 1 or len(atom2_indices) != 1:
             raise ValueError(
@@ -368,10 +399,14 @@ class RestraintFactory:
         atom2_config = config.get("atom2", {})
 
         atom1 = AtomSelection(
-            selection=atom1_config.get("selection", ""), description=atom1_config.get("description")
+            selection=atom1_config.get("selection", ""),
+            description=atom1_config.get("description"),
+            component=atom1_config.get("component"),
         )
         atom2 = AtomSelection(
-            selection=atom2_config.get("selection", ""), description=atom2_config.get("description")
+            selection=atom2_config.get("selection", ""),
+            description=atom2_config.get("description"),
+            component=atom2_config.get("component"),
         )
 
         # Parse distance (default unit: angstrom)
@@ -394,7 +429,10 @@ class RestraintFactory:
 
 
 def apply_restraints(
-    restraints: List[RestraintDefinition], topology: OpenMMTopology, system: System
+    restraints: List[RestraintDefinition],
+    topology: OpenMMTopology,
+    system: System,
+    components: Optional[Mapping[str, Iterable[int]]] = None,
 ) -> List[int]:
     """Apply multiple restraints to a system.
 
@@ -402,13 +440,14 @@ def apply_restraints(
         restraints: List of restraint definitions
         topology: OpenMM Topology for resolving selections
         system: OpenMM System to modify
+        components: Atom indices of each component, by name
 
     Returns:
         List of force indices for the added restraints
     """
     force_indices = []
     for restraint in restraints:
-        idx = restraint.apply(topology, system)
+        idx = restraint.apply(topology, system, components)
         if idx is not None:
             force_indices.append(idx)
     return force_indices

@@ -85,7 +85,7 @@ def test_conditions_with_runs_named_apart_can_share_one_folder(tmp_path: Path) -
         folder = tmp_path / "runs" / enzyme
         config = write_simulation_config(folder, scratch=tmp_path / "scratch")
         data = yaml.safe_load(config.read_text())
-        data["enzyme"]["name"] = enzyme
+        data["solutes"][0]["name"] = enzyme
         config.write_text(yaml.safe_dump(data, sort_keys=False))
         (folder / "test.pdb").write_text("REMARK input\nEND\n")
         for replicate in (1, 2):

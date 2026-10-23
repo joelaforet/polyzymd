@@ -10,11 +10,25 @@ def _simulation_config_data(tmp_path: Path) -> dict:
     return {
         "name": "test_simulation",
         "engine": "openmm",
-        "enzyme": {"name": "LipA", "pdb_path": "enzyme.pdb"},
-        "substrate": {"name": "Sub-A", "sdf_path": "substrate.sdf"},
+        "solutes": [
+            {
+                "type": "protein",
+                "name": "LipA",
+                "pdb_path": "enzyme.pdb",
+                "force_field": ["ff14sb_off_impropers_0.0.4.offxml"],
+            },
+            {
+                "type": "small_molecule",
+                "name": "Sub-A",
+                "sdf_path": "substrate.sdf",
+                "force_field": ["openff-2.0.0.offxml"],
+                "charges": {"method": "nagl"},
+            },
+        ],
         "thermodynamics": {"temperature": 310.0},
         "solvent": {
-            "primary": {"type": "water", "model": "tip3p"},
+            "force_field": ["openff-2.0.0.offxml"],
+            "water": {"model": "tip3p"},
             "co_solvents": [{"name": "dmso", "mole_fraction": 0.3}],
         },
         "simulation_phases": {
@@ -107,7 +121,7 @@ class TestJobNameGeneration:
         from polyzymd.workflow.daisy_chain import create_job_name
 
         data = _simulation_config_data(tmp_path)
-        data["enzyme"]["name"] = "LipA/(variant)"
+        data["solutes"][0]["name"] = "LipA(variant)"  # a solute name refuses "/"
         data["output"]["naming_template"] = "{enzyme} / run {replicate}"
         sim_config = SimulationConfig(**data)
 

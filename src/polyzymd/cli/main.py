@@ -553,7 +553,7 @@ def build(
                         phase="build",
                     )
             colored_echo(
-                f"  Chain D+ (Solvent): {sim_config.solvent.primary.model.name}", phase="build"
+                f"  Chain D+ (Solvent): {sim_config.solvent.water.model.name}", phase="build"
             )
             colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
             _echo_box_plan(sim_config, phase="build")
@@ -579,7 +579,7 @@ def build(
                     amount = f"{cs.mole_fraction * 100:g} mol%"
                 colored_echo(
                     f"    Co-solvent {cs.name} ({cs.residue_name}): {amount}, "
-                    f"SMILES {cs.smiles}, charges {cs.charge_method.value}",
+                    f"SMILES {cs.smiles}, charges {cs.charges.method}",
                     phase="build",
                 )
             colored_echo(phase="build")
@@ -589,7 +589,7 @@ def build(
             colored_echo(
                 f"  Small molecule FF: {sim_config.force_field.small_molecule}", phase="build"
             )
-            colored_echo(f"  Water model: {sim_config.solvent.primary.model.name}", phase="build")
+            colored_echo(f"  Water model: {sim_config.solvent.water.model.name}", phase="build")
             colored_echo(phase="build")
 
             colored_echo("Thermodynamics:", phase="build")
@@ -737,6 +737,9 @@ def build(
                     component_info=builder.get_component_info(),
                     replicate=rep,
                 )
+                from polyzymd.core.components import write_index
+
+                write_index(export_dir / "components.ndx", builder.components())
                 from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
 
                 write_gromacs_build_manifest(
@@ -787,6 +790,7 @@ def build(
                         f"Applying {len(sim_config.restraints)} restraint(s)...", phase="build"
                     )
                     restraint_defs = []
+                    components = {c.name: c.atom_indices() for c in builder.components()}
                     for r in sim_config.restraints:
                         if not r.enabled:
                             colored_echo(f"  - {r.name}: DISABLED (skipping)", phase="build")
@@ -797,8 +801,8 @@ def build(
 
                         # Validate the selection resolves to exactly one atom each
                         try:
-                            indices1 = restraint_def.atom1.resolve(omm_topology)
-                            indices2 = restraint_def.atom2.resolve(omm_topology)
+                            indices1 = restraint_def.atom1.resolve(omm_topology, components)
+                            indices2 = restraint_def.atom2.resolve(omm_topology, components)
 
                             if len(indices1) != 1:
                                 colored_echo(
@@ -835,12 +839,13 @@ def build(
 
                     # Apply all validated restraints to the system
                     if restraint_defs:
-                        apply_restraints(restraint_defs, omm_topology, omm_system)
+                        apply_restraints(restraint_defs, omm_topology, omm_system, components)
                         colored_echo(
                             f"Successfully applied {len(restraint_defs)} restraint(s)",
                             phase="build",
                         )
 
+                from polyzymd.core.components import atom_segids
                 from polyzymd.simulation.artifact_integrity import publish_build_bundle
 
                 publish_build_bundle(
@@ -850,6 +855,7 @@ def build(
                     omm_positions,
                     sim_config,
                     provenance=builder.build_provenance,
+                    segids=atom_segids(builder.components(), omm_system.getNumParticles()),
                 )
 
                 colored_echo("System built successfully!", phase="build")
@@ -1225,6 +1231,9 @@ def _run_gromacs_impl(
             output_dir=gromacs_dir,
             gmx_command=gmx_path,
         )
+        from polyzymd.core.components import write_index
+
+        write_index(gromacs_dir / "components.ndx", builder.components())
         from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
 
         write_gromacs_build_manifest(
@@ -2498,9 +2507,11 @@ def _run_initial_segment(
                 restraint_def = RestraintFactory.from_config(r.model_dump())
                 restraint_defs.append(restraint_def)
             if restraint_defs:
-                apply_restraints(restraint_defs, omm_topology, omm_system)
+                components = {c.name: c.atom_indices() for c in builder.components()}
+                apply_restraints(restraint_defs, omm_topology, omm_system, components)
                 colored_echo(f"Applied {len(restraint_defs)} restraint(s)", phase="build")
 
+        from polyzymd.core.components import atom_segids
         from polyzymd.simulation.artifact_integrity import publish_build_bundle
 
         publish_build_bundle(
@@ -2510,6 +2521,7 @@ def _run_initial_segment(
             omm_positions,
             sim_config,
             provenance=builder.build_provenance,
+            segids=atom_segids(builder.components(), omm_system.getNumParticles()),
         )
     else:
         from openmm import XmlSerializer

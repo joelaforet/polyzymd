@@ -8,37 +8,35 @@
 name: "LipA_ResorufinButyrate_control"
 engine: "openmm"
 description: "LipA enzyme with docked Resorufin-Butyrate substrate - no polymers"
+solutes:
 
-# ============================================================================
-# Enzyme Configuration
-# ============================================================================
-enzyme:
-  name: "LipA"
-  pdb_path: "structures/LipA_prepared.pdb"
-  description: "Bacillus subtilis Lipase A"
+  # ============================================================================
+  # Enzyme Configuration
+  # ============================================================================
+  - type: protein
+    name: "LipA"
+    pdb_path: "structures/LipA_prepared.pdb"
+    description: "Bacillus subtilis Lipase A"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
 
-# ============================================================================
-# Substrate Configuration (Docked Ligand)
-# ============================================================================
-substrate:
-  name: "Resorufin-Butyrate"
-  sdf_path: "structures/resorufin_butyrate_docked.sdf"
-  conformer_index: 0  # Use best-scoring conformer
-  charge_method: "nagl"  # Options: nagl, espaloma, am1bcc
-  residue_name: "RBY"
-
-# ============================================================================
-# Polymer Configuration (Disabled for enzyme-only)
-# ============================================================================
-polymers: null  # No polymers in this simulation
+  # ============================================================================
+  # Substrate Configuration (Docked Ligand)
+  # ============================================================================
+  - type: small_molecule
+    name: "Resorufin-Butyrate"
+    sdf_path: "structures/resorufin_butyrate_docked.sdf"
+    conformer_index: 0  # Use best-scoring conformer
+    residue_name: "RBY"
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
 
 # ============================================================================
 # Solvent Configuration
 # ============================================================================
 solvent:
-  primary:
-    type: "water"
-    model: "tip3p"  # The only supported water model
+  force_field: ["openff-2.3.0.offxml"]
+  water:
+    model: "tip3p"
   
   co_solvents: []  # No co-solvents
   
@@ -72,10 +70,12 @@ restraints:
   - type: "flat_bottom"
     name: "substrate_active_site"
     atom1:
+      component: "LipA"
       selection: "resid 77 and name OG"  # Ser77 nucleophile
       description: "Catalytic serine"
     atom2:
-      selection: "resname RBY and name C1"  # Substrate carbonyl carbon
+      component: "Resorufin-Butyrate"
+      selection: "name C1"  # Substrate carbonyl carbon
       description: "Substrate reactive carbon"
     distance: 3.3  # Angstroms threshold
     force_constant: 10000.0  # kJ/mol/nm^2
@@ -148,11 +148,3 @@ output:
   
   # Naming template for run directories
   naming_template: "{enzyme}_{substrate}_{temperature}K_run{replicate}"
-
-# ============================================================================
-# Force Field Selection
-# ============================================================================
-force_field:
-  protein: "ff14sb_off_impropers_0.0.4.offxml"
-  small_molecule: "openff-2.0.0.offxml"
-  nagl_model: "openff-gnn-am1bcc-1.0.0.pt"   # NAGL charge model for charge_method: nagl

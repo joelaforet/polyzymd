@@ -242,13 +242,14 @@ def test_configs_of_existing_runs_load_with_values_new_builds_refuse(tmp_path: P
     path = write_simulation_config(tmp_path / "water", scratch=tmp_path / "s")
     data = yaml.safe_load(path.read_text())
     data["engine"] = "gromacs"
-    data["solvent"] = {"primary": {"model": "spce"}, "ions": {"kcl_concentration": 0.15}}
+    data["solvent"]["water"] = {"model": "spce"}
+    data["solvent"]["ions"] = {"kcl_concentration": 0.15}
     data["restraints"] = [
         {
             "type": "flat_bottom",
             "name": "site",
-            "atom1": {"selection": "resid 1 and name CA"},
-            "atom2": {"selection": "resid 2 and name CA"},
+            "atom1": {"component": "TestEnzyme", "selection": "resid 1 and name CA"},
+            "atom2": {"component": "TestEnzyme", "selection": "resid 2 and name CA"},
             "distance": 3.5,
         }
     ]
@@ -256,7 +257,7 @@ def test_configs_of_existing_runs_load_with_values_new_builds_refuse(tmp_path: P
 
     config = load_config(path)
 
-    assert config.solvent.primary.model.value == "spce"
+    assert config.solvent.water.model.value == "spce"
     assert config.solvent.ions.kcl_concentration == 0.15
 
 
@@ -359,15 +360,15 @@ def _error_lines(tmp_path: Path, edit) -> list[tuple[str, str]]:
 
 def test_an_unknown_key_names_the_closest_field_in_any_section(tmp_path: Path) -> None:
     def edit(data):
-        data["pdb"] = data["enzyme"].pop("pdb_path")
+        data["pdb"] = data["solutes"][0].pop("pdb_path")
         data["system"] = {"pdb": "x.pdb", "water": "tip3p"}
         data["thermodynamics"]["temprature"] = 300.0
 
     lines = _error_lines(tmp_path, edit)
 
-    assert ("error", "pdb: unknown key; did you mean enzyme.pdb_path?") in lines
-    assert ("error", "system.pdb: unknown key; did you mean enzyme.pdb_path?") in lines
-    assert ("error", "system.water: unknown key") in lines
+    assert ("error", "pdb: unknown key; did you mean solutes[].pdb_path?") in lines
+    assert ("error", "system.pdb: unknown key; did you mean solutes[].pdb_path?") in lines
+    assert ("error", "system.water: unknown key; did you mean solvent.water?") in lines
     assert (
         "error",
         "thermodynamics.temprature: unknown key; did you mean thermodynamics.temperature?",
@@ -416,9 +417,9 @@ def test_a_value_of_the_wrong_type_names_the_expected_shape(tmp_path: Path) -> N
 def test_a_misspelled_section_names_the_section(tmp_path: Path) -> None:
     from polyzymd.config.loader import TEMPLATE_FIX
 
-    lines = _error_lines(tmp_path, lambda data: data.update(enzym=data.pop("enzyme")))
+    lines = _error_lines(tmp_path, lambda data: data.update(solute=data.pop("solutes")))
 
-    assert ("error", "enzym: unknown key; did you mean enzyme?") in lines
+    assert ("error", "solute: unknown key; did you mean solutes?") in lines
     assert ("fix", TEMPLATE_FIX) not in lines
 
 
