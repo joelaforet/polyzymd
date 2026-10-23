@@ -238,24 +238,33 @@ class ChargeSpec(_ConfigModel):
 
     - ``library``: the force field's library charges (ff14SB for proteins).
     - ``preset``: the charges stored in the component's SDF files.
-    - ``nagl``: OpenFF NAGL; ``model`` names the network file, by default
-      ``openff-gnn-am1bcc-1.0.0.pt``.
+    - ``nagl``: OpenFF NAGL; ``model`` names the network file (required).
     - ``am1bcc`` (needs AmberTools) and ``espaloma``: computed for each molecule.
+
+    PolyzyMD assumes no charge model: the config names one for every component,
+    so the choice is on record with the system it made.
     """
 
     method: Literal["library", "preset", "nagl", "am1bcc", "espaloma"] = Field(
         ..., description="library, preset, nagl, am1bcc or espaloma"
     )
     model: str | None = Field(
-        None, description=f"NAGL model file, for method nagl only (default {DEFAULT_NAGL_MODEL})"
+        None,
+        description=(
+            "NAGL model file, required for method nagl (for example "
+            f"{DEFAULT_NAGL_MODEL}, the model Sage 2.3.0 names)"
+        ),
     )
 
     @model_validator(mode="after")
     def _model_only_for_nagl(self) -> Self:
-        """Fill in the default NAGL model, and refuse a model for any other method."""
+        """Require a NAGL model with nagl, and refuse one for any other method."""
         if self.method == "nagl":
             if self.model is None:
-                object.__setattr__(self, "model", DEFAULT_NAGL_MODEL)
+                raise ValueError(
+                    "method nagl needs model: the NAGL network file, for example "
+                    f"model: {DEFAULT_NAGL_MODEL} (the model Sage 2.3.0 names)"
+                )
         elif self.model is not None:
             raise ValueError(
                 f"model names a NAGL model, but method {self.method} does not use one; "
@@ -344,8 +353,7 @@ class ProteinSolute(_Solute):
         ),
     )
     charges: ChargeSpec = Field(
-        default_factory=lambda: ChargeSpec(method="library"),
-        description="library: the protein force field's library charges",
+        ..., description="library: the protein force field's library charges"
     )
 
     @field_validator("custom_substructures_path")
@@ -799,10 +807,10 @@ class CoSolventSpec(_ConfigModel):
     count: int | None = Field(None, ge=1, description="Number of molecules in the box")
 
     charges: ChargeSpec = Field(
-        None,  # type: ignore[assignment]  # preset for bundled molecules, filled below
+        None,  # type: ignore[assignment]  # required; refused below with a fix that names preset
         description=(
-            "preset (default for molecules PolyzyMD ships charges for, such as dmso) or "
-            "nagl, am1bcc, espaloma; required for any other molecule"
+            "preset (the charges PolyzyMD ships for molecules such as dmso), or nagl "
+            "(with model), am1bcc or espaloma"
         ),
     )
 
@@ -829,8 +837,8 @@ class CoSolventSpec(_ConfigModel):
             raise ValueError(
                 "co-solvent 'charge_method' is now 'charges'. Releases up to 1.3.0rc4 gave a "
                 "co-solvent PolyzyMD ships charges for (such as dmso) those shipped charges "
-                "whatever charge_method said; to keep them, delete the key (or write charges: "
-                "{method: preset}). Any other co-solvent: charges: {method: nagl} (or am1bcc, "
+                "whatever charge_method said; to keep them, write charges: {method: preset}. "
+                "Any other co-solvent: charges: {method: nagl, model: ...} (or am1bcc, "
                 f"espaloma). See {REWRITE_GUIDE}"
             )
         return data
@@ -855,12 +863,15 @@ class CoSolventSpec(_ConfigModel):
         from polyzymd.data.solvent_molecules import is_bundled_solvent
 
         if self.charges is None:
-            if not is_bundled_solvent(self.name):
-                raise ValueError(
-                    f"Co-solvent '{self.name}' has no charges shipped with PolyzyMD; give "
-                    "charges: {method: nagl} (or am1bcc, espaloma)"
-                )
-            object.__setattr__(self, "charges", ChargeSpec(method="preset"))
+            shipped = (
+                "charges: {method: preset} (the charges PolyzyMD ships with it) or "
+                if is_bundled_solvent(self.name)
+                else ""
+            )
+            raise ValueError(
+                f"Co-solvent '{self.name}' needs charges, for example {shipped}"
+                "charges: {method: nagl, model: ...} (or am1bcc, espaloma)"
+            )
         if self.charges.method == "library":
             raise ValueError(
                 f"Co-solvent '{self.name}': charges method library is for proteins; use "
@@ -927,7 +938,7 @@ class WaterConfig(_ConfigModel):
         model: Water model; only TIP3P is built.
     """
 
-    model: WaterModel = Field(WaterModel.TIP3P, description="Water model")
+    model: WaterModel = Field(..., description="Water model (tip3p is the one built)")
 
 
 class IonConfig(_ConfigModel):
@@ -1020,7 +1031,7 @@ class SolventConfig(_ConfigModel):
     force_field: list[str] = Field(
         ..., min_length=1, description="Force field files for water, ions and co-solvents"
     )
-    water: WaterConfig = Field(default_factory=WaterConfig, description="Water model")
+    water: WaterConfig = Field(..., description="Water model")
     co_solvents: list[CoSolventSpec] = Field(default_factory=list, description="Co-solvents")
     ions: IonConfig = Field(default_factory=IonConfig, description="Ion settings")
     box: BoxConfig = Field(default_factory=BoxConfig, description="Box settings")

@@ -146,7 +146,7 @@ def test_gromacs_file_prefix_of_the_shipped_configs() -> None:
             "name": "sds",
             "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]",
             "count": 8,
-            "charges": {"method": "nagl"},
+            "charges": {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"},
         }
     ]
 

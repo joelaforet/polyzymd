@@ -11,6 +11,12 @@ from polyzymd.config.validation import collect_reference_warnings, require_input
 
 SAGE = ["openff-2.0.0.offxml"]
 
+#: NAGL charges with the model the config must name.
+NAGL = {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"}
+
+#: The solvent section's required keys: the small-molecule force field and the water model.
+SOLVENT = {"force_field": SAGE, "water": {"model": "tip3p"}}
+
 
 def _protein(pdb_path: Path, **keys: object) -> dict[str, object]:
     """A protein solutes entry."""
@@ -19,6 +25,7 @@ def _protein(pdb_path: Path, **keys: object) -> dict[str, object]:
         "name": "Enz",
         "pdb_path": pdb_path,
         "force_field": ["ff14sb_off_impropers_0.0.4.offxml"],
+        "charges": {"method": "library"},
         **keys,
     }
 
@@ -35,7 +42,7 @@ def _minimal_config_data(tmp_path: Path) -> dict[str, object]:
         "name": "reference_validation",
         "engine": "openmm",
         "solutes": [_protein(tmp_path / "missing.pdb")],
-        "solvent": {"force_field": SAGE},
+        "solvent": dict(SOLVENT),
         "thermodynamics": {"temperature": 300.0},
         "simulation_phases": {
             "equilibration_stages": [
@@ -76,7 +83,7 @@ def test_collect_reference_warnings_accepts_existing_pdb_and_sdf(tmp_path: Path)
     data = _minimal_config_data(tmp_path)
     data["solutes"] = [
         _protein(pdb_path),
-        _solute("small_molecule", name="Lig", sdf_path=sdf_path, charges={"method": "nagl"}),
+        _solute("small_molecule", name="Lig", sdf_path=sdf_path, charges=NAGL),
     ]
     config = SimulationConfig(**data)
 
@@ -145,7 +152,7 @@ def test_collect_reference_warnings_reports_missing_reaction_templates(tmp_path:
         {
             "type": "polymer",
             "force_field": SAGE,
-            "charges": {"method": "nagl"},
+            "charges": NAGL,
             "generation_mode": "dynamic",
             "type_prefix": "PEG",
             "monomers": [{"label": "A", "probability": 1.0, "smiles": "C=C"}],
@@ -178,7 +185,7 @@ def test_am1bcc_without_ambertools_is_reported_before_the_build(
     monkeypatch.setattr(charging, "am1bcc_available", lambda: False)
     data = _minimal_config_data(tmp_path)
     data["solvent"] = {
-        "force_field": SAGE,
+        **SOLVENT,
         "co_solvents": [
             {"name": "etac", "smiles": "CCOC(C)=O", "count": 5, "charges": {"method": "am1bcc"}}
         ],
@@ -207,7 +214,7 @@ def _buildable(tmp_path: Path, **sections) -> SimulationConfig:
         if type_ in sections:
             data["solutes"].append(_solute(type_, **sections.pop(type_)))
     if "solvent" in sections:
-        sections["solvent"] = {"force_field": SAGE, **sections["solvent"]}
+        sections["solvent"] = {**SOLVENT, **sections["solvent"]}
     data.update(sections)
     return SimulationConfig(**data)
 
@@ -231,7 +238,7 @@ def test_a_substrate_conformer_the_sdf_lacks_is_refused(tmp_path: Path) -> None:
         "name": "lig",
         "sdf_path": tmp_path / "lig.sdf",
         "conformer_index": 1,
-        "charges": {"method": "nagl"},
+        "charges": NAGL,
     }
     with pytest.raises(ValueError, match="holds 1 conformer"):
         require_inputs(_buildable(tmp_path, small_molecule=substrate))
@@ -251,9 +258,7 @@ def test_a_substrate_conformer_the_sdf_lacks_is_refused(tmp_path: Path) -> None:
 def test_cosolvents_the_build_cannot_make_are_refused(tmp_path: Path, smiles, message) -> None:
     """Unreadable SMILES, ions other than NaCl and elements NAGL cannot charge are refused."""
     solvent = {
-        "co_solvents": [
-            {"name": "x", "smiles": smiles, "concentration": 0.1, "charges": {"method": "nagl"}}
-        ]
+        "co_solvents": [{"name": "x", "smiles": smiles, "concentration": 0.1, "charges": NAGL}]
     }
     with pytest.raises(ValueError, match=message):
         require_inputs(_buildable(tmp_path, solvent=solvent))
@@ -272,7 +277,7 @@ def test_a_monomer_without_a_polymerisable_group_is_refused(tmp_path: Path) -> N
             "termination": "default",
         },
         "monomers": [{"label": "A", "probability": 1.0, "smiles": "CC(=C)C(=O)OCCO"}],
-        "charges": {"method": "nagl"},
+        "charges": NAGL,
     }
     require_inputs(_buildable(tmp_path, polymer=polymers))
     polymers["monomers"] = [{"label": "A", "probability": 1.0, "smiles": "CCO"}]
@@ -290,9 +295,7 @@ def test_a_force_field_that_is_not_installed_is_refused(tmp_path: Path) -> None:
 def test_a_charged_cosolvent_with_ionic_strength_is_accepted(tmp_path: Path, smiles) -> None:
     """Charged co-solvents count toward ionic_strength, so validate accepts them."""
     solvent = {
-        "co_solvents": [
-            {"name": "x", "smiles": smiles, "concentration": 0.1, "charges": {"method": "nagl"}}
-        ],
+        "co_solvents": [{"name": "x", "smiles": smiles, "concentration": 0.1, "charges": NAGL}],
         "ions": {"ionic_strength": 0.13},
     }
     require_inputs(_buildable(tmp_path, solvent=solvent))

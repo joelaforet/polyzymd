@@ -16,13 +16,14 @@ Later 1.3 releases only add keys; an rc5 config keeps working.
 | `polymers: {enabled: false}` or `polymers: null` | leave the polymer entry out |
 | `force_field.protein` | `force_field:` on the protein entry, as a list |
 | `force_field.small_molecule` | `force_field:` on `solvent:` and on every other solute (the same file) |
-| `force_field.nagl_model` | `model:` in each `charges: {method: nagl}` |
-| `substrate.charge_method: nagl` | `charges: {method: nagl}` |
-| `polymers.charger` (dynamic polymers) | `charges: {method: nagl}` (or `am1bcc`, `espaloma`) |
+| `force_field.nagl_model` (or nothing: the default was `openff-gnn-am1bcc-1.0.0.pt`) | `model:` in each `charges: {method: nagl}` |
+| `substrate.charge_method: nagl` | `charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}` |
+| `polymers.charger` (dynamic polymers) | `charges: {method: nagl, model: ...}` (or `am1bcc`, `espaloma`) |
 | cached polymers (charges in the SDFs) | `charges: {method: preset}` |
-| `co_solvents[].charge_method` on a co-solvent PolyzyMD ships charges for (dmso, urea, ...) | delete it: those always got their shipped charges, which is `charges: {method: preset}`, the default |
-| `co_solvents[].charge_method` on any other co-solvent | `co_solvents[].charges: {method: nagl}` (or `am1bcc`, `espaloma`) |
-| `solvent.primary: {type: water, model: tip3p}` | `solvent.water: {model: tip3p}` |
+| `co_solvents[].charge_method`, or nothing, on a co-solvent PolyzyMD ships charges for (dmso, urea, ...) | `charges: {method: preset}`: those always got their shipped charges |
+| `co_solvents[].charge_method` on any other co-solvent | `co_solvents[].charges: {method: nagl, model: ...}` (or `am1bcc`, `espaloma`) |
+| `solvent.primary: {type: water, model: tip3p}`, or nothing (the default was tip3p) | `solvent.water: {model: tip3p}` |
+| the protein's charges (always ff14SB's own) | `charges: {method: library}` on the protein entry |
 | `restraints[].atom1: {selection: "protein and resid 105 and name OG"}` | `atom1: {component: <protein name>, selection: "resid 105 and name OG"}` |
 
 A config that did not name a force field was built with
@@ -72,6 +73,7 @@ solutes:
     name: "LipA"
     pdb_path: "structures/LipA_prepared.pdb"
     force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
   - type: small_molecule
     name: "Resorufin-Butyrate"
     sdf_path: "structures/resorufin_butyrate_docked.sdf"
@@ -111,11 +113,16 @@ restraints:
   default, `SOL` for water and co-solvents and `ION` for ions. Select a
   component with `segid PROT` in MDAnalysis or `segi PROT` in PyMOL. GROMACS
   builds also write `components.ndx` with one group per component.
-- **`charges`** names where partial charges come from: `library` (the
-  protein force field's own), `preset` (the charges stored in the SDF files),
-  `nagl` (with `model`, by default `openff-gnn-am1bcc-1.0.0.pt`), `am1bcc`
-  or `espaloma`. Co-solvents PolyzyMD ships charges for, such as DMSO, use
-  them unless you name another method.
+- **`charges`** (required on every solute and co-solvent) names where partial
+  charges come from: `library` (the protein force field's own), `preset` (the
+  charges stored in the SDF files, or shipped with PolyzyMD for co-solvents
+  such as DMSO), `nagl` (with a required `model`, such as
+  `openff-gnn-am1bcc-1.0.0.pt`, the model Sage 2.3.0 names), `am1bcc` or
+  `espaloma`.
+- **`force_field`** (required on every solute and on `solvent`) and
+  **`solvent.water.model`** (required): PolyzyMD assumes no force field,
+  charge model or water model. Each is your choice, on record in the config
+  that built the system.
 
 ## Limits of this release
 

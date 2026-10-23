@@ -23,6 +23,7 @@ solutes:
     pdb_path: "structures/enzyme.pdb"
     description: "Test enzyme for dynamic polymer generation"
     force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
 
   # ============================================================================
   # Substrate Configuration (Optional - comment out to skip)

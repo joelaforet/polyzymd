@@ -96,7 +96,11 @@ def test_the_config_hash_knows_the_cosolvents(tmp_path) -> None:
         (folder / "c" / "test.pdb").write_text("END\n")
         data = yaml.safe_load(path.read_text())
         if solvent:
-            data["solvent"] = {"force_field": data["solvent"]["force_field"], **solvent}
+            data["solvent"] = {
+                "force_field": data["solvent"]["force_field"],
+                "water": data["solvent"]["water"],
+                **solvent,
+            }
         path.write_text(yaml.safe_dump(data))
         return SimulationConfig.from_yaml(path)
 
@@ -104,7 +108,7 @@ def test_the_config_hash_knows_the_cosolvents(tmp_path) -> None:
         "name": "sds",
         "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]",
         "count": 8,
-        "charges": {"method": "nagl"},
+        "charges": {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"},
     }
     assert compute_config_hash(config(tmp_path / "w")) != compute_config_hash(
         config(tmp_path / "s", co_solvents=[sds])

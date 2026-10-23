@@ -1489,9 +1489,10 @@ def test_gromacs_export_refuses_distance_restraints_it_would_drop(tmp_path):
                 "name": "E",
                 "pdb_path": "e.pdb",
                 "force_field": ["ff14sb_off_impropers_0.0.4.offxml"],
+                "charges": {"method": "library"},
             }
         ],
-        solvent={"force_field": ["openff-2.0.0.offxml"]},
+        solvent={"force_field": ["openff-2.0.0.offxml"], "water": {"model": "tip3p"}},
         thermodynamics={"temperature": 300.0},
         simulation_phases={
             "equilibration_stages": [
