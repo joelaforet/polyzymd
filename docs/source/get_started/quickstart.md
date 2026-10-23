@@ -154,7 +154,8 @@ The {term}`replicate folder` `trpcage_300K_run1/` now holds the simulation:
 
 ```text
 runs/trpcage/water/trpcage_300K_run1/
-├── build_manifest.json
+├── build_provenance.json        # the build record: versions, seeds, hashes, physics audit
+├── build_provenance.md          # the same record, for people
 ├── progress.json                # the stages and segments that have run
 ├── solvated_system.pdb          # the built system, for viewers
 ├── system.prmtop                # the topology that the analyses read

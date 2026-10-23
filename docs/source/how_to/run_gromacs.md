@@ -392,8 +392,8 @@ This prints the script path and the SLURM settings, and writes nothing.
 ## Output files
 
 A GROMACS run writes its files to `<replicate folder>/gromacs/`. `<prefix>` is
-the enzyme name, followed by `_<polymers.type_prefix>` when the system has
-polymers. `<stage>` is the name of an equilibration stage. A local run of the
+the protein name, followed by `_<type_prefix>` of the polymer solute when
+the system has polymers. `<stage>` is the name of an equilibration stage. A local run of the
 quickstart writes these files:
 
 ```text
@@ -409,6 +409,7 @@ gromacs/
 ├── mdout.mdp                 # Parameters as grompp read them
 │
 ├── run_<prefix>_gromacs.sh   # Generated shell script
+├── audited_files.sha256      # Hashes of the audited files, checked before grompp
 │
 ├── em.tpr, em.gro, em.edr    # Energy minimization outputs
 ├── eq_01.tpr, eq_01.gro, eq_01.cpt, eq_01.xtc
@@ -426,9 +427,15 @@ gromacs/
 ```
 
 Each `mdrun` stage also writes a `.log` file, and a `.trr` file when the stage
-writes full-precision coordinates. `solvated_system.pdb` and
-`build_manifest.json` (PACKMOL seeds, box and the SHA-256 of each input file)
-are in the replicate folder, beside `gromacs/`.
+writes full-precision coordinates. `solvated_system.pdb`,
+`build_provenance.json` (PACKMOL seeds, box, the SHA-256 of each input file
+and the physics audit) and `build_provenance.md` are in the replicate folder,
+beside `gromacs/`.
+
+The build writes `audited_files.sha256` only when the physics audit passes.
+Every SLURM job of `polyzymd submit` checks it with `sha256sum --check`
+before it runs `grompp`, and stops if a file is missing or changed. For the checks, see
+{doc}`../reference/physics_checks`.
 
 Position restraints are appended as `#ifdef POSRES_*` blocks inside the
 molecule `.itp` files. MDP files use `-DPOSRES_PROTEIN`, `-DPOSRES_POLYMER`,

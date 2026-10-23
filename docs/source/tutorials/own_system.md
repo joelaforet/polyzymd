@@ -89,8 +89,8 @@ explain its keys. Change these fields:
 |---|---|
 | `name` | A short name of the simulation, such as `water` |
 | `description` | One sentence about the system |
-| `enzyme.name` | The name of the protein. It is part of the run folder names |
-| `enzyme.pdb_path` | The PDB file, relative to the config: `structures/trpcage.pdb` |
+| `name` of the protein under `solutes:` | The name of the protein. It is part of the run folder names |
+| `pdb_path` of the protein | The PDB file, relative to the config: `structures/trpcage.pdb` |
 | `thermodynamics.temperature` | The temperature in K. Also change the temperatures of the equilibration stages |
 | `simulation_phases.production.duration` | The production length in ns. The template has 100 ns |
 | `output.scratch_directory` | On a cluster, your scratch storage. Leave it `null` to write the runs into `runs/` |
@@ -100,8 +100,8 @@ The template is set up for OpenMM. To run GROMACS, change `engine` to
 `gromacs`. GROMACS does not read the `openmm:` block, so you can leave it, and
 it writes `.xtc` trajectories.
 
-The optional sections, such as `substrate:`, `polymers:` and `restraints:`,
-are commented out. Remove the leading `# ` of a section to use it. For every
+The optional entries, such as the `small_molecule` and `polymer` solutes and
+`restraints:`, are commented out. Remove the leading `# ` of an entry to use it. For every
 key, see {doc}`../reference/configuration`.
 
 ## Step 4: Check the config
@@ -113,13 +113,13 @@ not exist:
 polyzymd validate -c trpcage/conditions/water/config.yaml
 ```
 
-If `enzyme.pdb_path` still names the template file, `validate` stops with
+If the `pdb_path` of the protein still names the template file, `validate` stops with
 an error:
 
 ```
 Validating configuration: trpcage/conditions/water/config.yaml
-error: enzyme PDB /home/me/my_paper/trpcage/conditions/water/structures/protein_X.pdb does not exist.
-fix: correct enzyme.pdb_path.
+error: protein PDB /home/me/my_paper/trpcage/conditions/water/structures/protein_X.pdb does not exist.
+fix: correct solutes.0.pdb_path.
 ```
 
 Fix each error and warning, and run `validate` again until it prints none.
