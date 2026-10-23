@@ -58,6 +58,17 @@ def _shown(path: object) -> str:
     return os.path.normpath(str(path))
 
 
+def _refuse_own_protocol(working_dir: Path, action: str) -> None:
+    """Exit with the refusal when the replicate was run with the user's own protocol."""
+    from polyzymd.simulation.own_protocol import OwnProtocolError, require_polyzymd_run
+
+    try:
+        require_polyzymd_run(working_dir, action)
+    except OwnProtocolError as error:
+        colored_echo(str(error), err=True, level=logging.ERROR)
+        sys.exit(1)
+
+
 def _echo_audit(working_dir: Path, phase: str) -> None:
     """Print the build's physics audit result, each warning or accepted finding,
     and where the readable build record is."""
@@ -1234,6 +1245,7 @@ def _run_gromacs_impl(
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
 
     working_dir = sim_config.get_working_directory(replicate)
+    _refuse_own_protocol(working_dir, "run")
     # Determine output directory for GROMACS files
     gromacs_dir = working_dir / "gromacs"
 
@@ -1395,6 +1407,7 @@ def _run_openmm_impl(
 
     production = sim_config.simulation_phases.production
     working_dir = sim_config.get_working_directory(replicate)
+    _refuse_own_protocol(working_dir, "run")
     total_steps = int(production.duration * 1e6 / production.time_step)
     report_interval = calculate_report_interval(total_steps, production.samples)
 
@@ -2253,6 +2266,8 @@ def _run_segment_locked(
     )
     from polyzymd.simulation.signals import raise_if_interrupted
 
+    # Never scan, clean up or continue a replicate the user ran themselves.
+    _refuse_own_protocol(working_dir, "run")
     sim_config.require_engine_barostats("openmm")
 
     # Calculate total steps and samples from config
@@ -3842,6 +3857,7 @@ def recover(
         working_dir = Path(scratch_dir)
     else:
         working_dir = engine_impl.get_engine_working_directory(sim_config, replicate)
+    _refuse_own_protocol(working_dir, "recover")
 
     if not working_dir.exists():
         colored_echo(
