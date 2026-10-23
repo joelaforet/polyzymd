@@ -1160,6 +1160,9 @@ def run(
 
         resolved_gmx_path = gmx_path or "gmx"
 
+        # Refuse before any replicate runs, so a range never stops half done.
+        for rep in replicate_list:
+            _refuse_own_protocol(sim_config.get_working_directory(rep), "run")
         succeeded = 0
         for rep in replicate_list:
             colored_echo(
@@ -3425,9 +3428,19 @@ def _status_table(config: str) -> None:
     running_count = 0
     stopped_reps: list[int] = []
     corrupt_count = 0
+    own_count = 0
+    from polyzymd.simulation.own_protocol import protocol_dir
 
     for rep_num, rep_path in sorted(rep_map.items()):
         label = f"run{rep_num}"
+        if rep_path is not None and protocol_dir(rep_path) is not None:
+            # Run outside PolyzyMD: no progress to show, nothing to recover.
+            own_count += 1
+            click.echo(
+                f"  {label:<{label_width}}  run with its own protocol (protocol/): "
+                "analyze it; PolyzyMD does not run it"
+            )
+            continue
         corrupt = None
         if rep_path is not None:
             engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
@@ -3495,8 +3508,13 @@ def _status_table(config: str) -> None:
 
     click.echo()
     total_reps = len(rep_map)
-    if completed_count == total_reps:
-        click.echo(click.style(f"  All {total_reps} replicates completed!", fg="green"))
+    if own_count:
+        click.echo(f"  {own_count}/{total_reps} run with their own protocol")
+    if completed_count + own_count == total_reps:
+        if not own_count:
+            click.echo(click.style(f"  All {total_reps} replicates completed!", fg="green"))
+        elif completed_count:
+            click.echo(click.style(f"  All {completed_count} PolyzyMD runs completed!", fg="green"))
     else:
         if need_attention > 0:
             click.echo(

@@ -122,3 +122,88 @@ def test_the_missing_trajectory_message_names_the_files_analysis_reads() -> None
 
     assert "gromacs/prod_centered.xtc" in _expected_trajectories("gromacs")
     assert "production_0/production_0_trajectory.dcd" in _expected_trajectories("openmm")
+
+
+QUICKSTART = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+
+
+@pytest.fixture
+def campaign(tmp_path):
+    """The quickstart config with replicate 2 run with its own protocol (a DCD and protocol/)."""
+    import shutil
+
+    shutil.copy(QUICKSTART / "config.yaml", tmp_path / "config.yaml")
+    shutil.copy(QUICKSTART / "trpcage.pdb", tmp_path / "trpcage.pdb")
+    own = tmp_path / "trpcage_300K_run2"
+    (own / "production_0").mkdir(parents=True)
+    (own / "production_0" / "production_0_trajectory.dcd").write_bytes(b"user data")
+    (own / "protocol").mkdir()
+    (own / "protocol" / "run_metad.py").write_text("# the user's script\n")
+    return tmp_path
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["run", "-r", "1-2"], ["run-segment", "-r", "2"], ["recover", "-r", "2"]],
+    ids=["run a range", "run-segment", "recover"],
+)
+def test_the_cli_never_runs_or_touches_an_own_protocol_replicate(campaign, args) -> None:
+    from click.testing import CliRunner
+
+    from polyzymd.cli.main import cli
+
+    command = [args[0], "-c", str(campaign / "config.yaml"), *args[1:]]
+    result = CliRunner().invoke(cli, command)
+    assert result.exit_code != 0
+    assert "was run with your own protocol" in result.output
+    assert "--- Replicate 1" not in result.output  # a range is refused before replicate 1 runs
+    dcd = campaign / "trpcage_300K_run2" / "production_0" / "production_0_trajectory.dcd"
+    assert dcd.read_bytes() == b"user data"
+
+
+def test_the_status_table_shows_an_own_protocol_replicate_without_asking_to_recover_it(
+    campaign,
+) -> None:
+    from click.testing import CliRunner
+
+    from polyzymd.cli.main import cli
+
+    result = CliRunner().invoke(cli, ["status", "-c", str(campaign / "config.yaml"), "--no-slurm"])
+    assert "run2" in result.output and "run with its own protocol" in result.output
+    assert "need attention" not in result.output
+
+
+def test_a_rebuild_refuses_an_own_protocol_replicate(campaign) -> None:
+    from polyzymd.simulation.artifact_integrity import (
+        ArtifactIntegrityError,
+        assert_rebuild_allowed,
+    )
+
+    with pytest.raises(ArtifactIntegrityError, match="your own protocol"):
+        assert_rebuild_allowed(campaign / "trpcage_300K_run2")
+
+
+def _own_protocol_block(template: str) -> str:
+    text = (
+        Path(__file__).resolve().parents[2] / "src/polyzymd/engines/gromacs/templates" / template
+    ).read_text()
+    start = text.index("# A replicate run with the user's own protocol")
+    return text[start : text.index("\nfi\n", start) + len("\nfi\n")]
+
+
+@pytest.mark.parametrize("declared", [True, False])
+def test_a_queued_gromacs_job_stops_before_touching_an_own_protocol_run(tmp_path, declared) -> None:
+    import subprocess
+
+    block = _own_protocol_block("slurm_self_resubmitting.sh.jinja")
+    assert block == _own_protocol_block("run_gromacs.sh.jinja")
+    gromacs = tmp_path / "gromacs"
+    gromacs.mkdir()
+    if declared:
+        (gromacs / "protocol").mkdir()
+        (gromacs / "protocol" / "md.mdp").write_text("dt = 0.002\n")
+    result = subprocess.run(
+        ["bash", "-c", block + "echo RAN\n"], cwd=gromacs, capture_output=True, text=True
+    )
+    assert result.returncode == 0
+    assert ("RAN" in result.stdout) is not declared

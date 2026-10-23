@@ -613,6 +613,14 @@ def assert_rebuild_allowed(working_dir: Path) -> None:
     GROMACS run outputs live in ``working_dir/gromacs``; the ``.mdp`` files
     there are build outputs.
     """
+    from polyzymd.simulation.own_protocol import protocol_dir
+
+    own = protocol_dir(working_dir)
+    if own is not None:
+        raise ArtifactIntegrityError(
+            f"Refusing to rebuild {working_dir}: it is being run with your own protocol "
+            f"({own}), which uses this build. Use a new output directory."
+        )
     active = _run_outputs(Path(working_dir))
     if active:
         raise ArtifactIntegrityError(
