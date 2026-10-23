@@ -15,11 +15,14 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional
 
 if TYPE_CHECKING:
-    from openmm import CustomBondForce, HarmonicBondForce, System
+    from openmm import CustomBondForce, System
     from openmm.app import Topology as OpenMMTopology
     from openmm.unit import Quantity
 
 logger = logging.getLogger(__name__)
+
+#: Name prefix of every restraint force PolyzyMD adds (``polyzymd_restraint:<name>``).
+RESTRAINT_FORCE_PREFIX = "polyzymd_restraint:"
 
 
 def _distance_in_angstroms(value: float) -> Quantity:
@@ -304,6 +307,9 @@ class RestraintDefinition:
         else:
             raise ValueError(f"Unknown restraint type: {self.restraint_type}")
 
+        # The name lets the physics audit find this restraint and compare it with
+        # the config; nothing else in a PolyzyMD system uses the prefix.
+        force.setName(f"{RESTRAINT_FORCE_PREFIX}{self.name}")
         force_idx = system.addForce(force)
 
         logger.info(
@@ -320,29 +326,14 @@ class RestraintDefinition:
         U(r) = 0 if r < r0
                0.5 * k * (r - r0)^2 if r >= r0
         """
-        from openmm import CustomBondForce
+        return self._bond_force("step(r - r0) * 0.5 * k * (r - r0)^2", atom1_idx, atom2_idx)
 
-        expression = "step(r - r0) * 0.5 * k * (r - r0)^2"
-        force = CustomBondForce(expression)
-        force.addGlobalParameter("k", self.force_constant)
-        force.addGlobalParameter("r0", self.distance)
-        force.addBond(atom1_idx, atom2_idx, [])
-        return force
-
-    def _create_harmonic_force(self, atom1_idx: int, atom2_idx: int) -> HarmonicBondForce:
-        """Create a harmonic bond force.
+    def _create_harmonic_force(self, atom1_idx: int, atom2_idx: int) -> CustomBondForce:
+        """Create a harmonic restraint.
 
         U(r) = 0.5 * k * (r - r0)^2
         """
-        from openmm import HarmonicBondForce
-
-        force = HarmonicBondForce()
-        # Convert distance to nanometers for OpenMM
-        r0_nm = _quantity_in_nanometers(self.distance)
-        # Convert force constant to kJ/mol/nm^2
-        k_value = _force_constant_value_in_openmm_units(self.force_constant)
-        force.addBond(atom1_idx, atom2_idx, r0_nm, k_value)
-        return force
+        return self._bond_force("0.5 * k * (r - r0)^2", atom1_idx, atom2_idx)
 
     def _create_upper_wall_force(self, atom1_idx: int, atom2_idx: int) -> CustomBondForce:
         """Create an upper wall potential (prevent distance exceeding r0).
@@ -360,13 +351,28 @@ class RestraintDefinition:
         U(r) = 0.5 * k * (r0 - r)^2 if r < r0
                0 if r >= r0
         """
+        return self._bond_force("step(r0 - r) * 0.5 * k * (r0 - r)^2", atom1_idx, atom2_idx)
+
+    def _bond_force(self, expression: str, atom1_idx: int, atom2_idx: int) -> CustomBondForce:
+        """A CustomBondForce with ``r0`` and ``k`` as parameters of its one bond.
+
+        Per-bond parameters, not global ones: OpenMM shares global parameters
+        between all forces of a Context, so two restraints with different
+        distances could not coexist.
+        """
         from openmm import CustomBondForce
 
-        expression = "step(r0 - r) * 0.5 * k * (r0 - r)^2"
         force = CustomBondForce(expression)
-        force.addGlobalParameter("k", self.force_constant)
-        force.addGlobalParameter("r0", self.distance)
-        force.addBond(atom1_idx, atom2_idx, [])
+        force.addPerBondParameter("r0")
+        force.addPerBondParameter("k")
+        force.addBond(
+            atom1_idx,
+            atom2_idx,
+            [
+                _quantity_in_nanometers(self.distance),
+                _force_constant_value_in_openmm_units(self.force_constant),
+            ],
+        )
         return force
 
 
