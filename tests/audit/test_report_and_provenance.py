@@ -130,3 +130,21 @@ def test_an_unreadable_system_is_an_audit_failure() -> None:
     report = _audit(unreadable, ["a component"], None)
     assert not report.passed
     assert "truncated" in report.findings[0].detail
+
+
+def test_the_build_record_lists_the_methods_to_cite() -> None:
+    """A build whose ions were set by ionic_strength names Machado and Pantano to cite."""
+    from types import SimpleNamespace
+
+    from polyzymd.simulation.artifact_integrity import methods_to_cite, provenance_markdown
+
+    def config(strength):
+        return SimpleNamespace(
+            solvent=SimpleNamespace(ions=SimpleNamespace(ionic_strength=strength))
+        )
+
+    assert methods_to_cite(config(None)) == []
+    cited = methods_to_cite(config(0.13))
+    assert len(cited) == 1 and "doi:10.1021/acs.jctc.9b00953" in cited[0]
+    text = provenance_markdown({"components": [], "cite": cited})
+    assert "## Methods to cite" in text and "Machado" in text
