@@ -15,11 +15,14 @@ _RESERVED = (
     | ION_RESIDUE_NAMES
 )
 
+#: A library co-solvent's charges: the ones PolyzyMD ships with it.
+_PRESET = {"method": "preset"}
+
 
 @pytest.mark.parametrize("key", sorted(COSOLVENT_LIBRARY))
 def test_library_cosolvent_residue_names_are_not_protein_nucleic_water_or_ion(key: str) -> None:
     """A library co-solvent's residue name is not one a protein, nucleic, water or ion selection matches."""
-    residue_name = CoSolventSpec(name=key, count=1).residue_name
+    residue_name = CoSolventSpec(name=key, count=1, charges=_PRESET).residue_name
     assert residue_name == COSOLVENT_LIBRARY[key].residue_name
     assert residue_name not in _RESERVED
 
@@ -37,7 +40,7 @@ def test_glycerol_is_not_selected_as_protein() -> None:
     from polyzymd.data.solvent_molecules import get_solvent_molecule
 
     glycerol = get_solvent_molecule("glycerol")
-    residue_name = CoSolventSpec(name="glycerol", mole_fraction=0.1).residue_name
+    residue_name = CoSolventSpec(name="glycerol", mole_fraction=0.1, charges=_PRESET).residue_name
     universe = mda.Universe.empty(glycerol.n_atoms, n_residues=1, trajectory=False)
     universe.add_TopologyAttr("resname", [residue_name])
     universe.add_TopologyAttr("name", [atom.name or atom.symbol for atom in glycerol.atoms])

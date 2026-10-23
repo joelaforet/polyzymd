@@ -18,6 +18,7 @@ solutes:
     pdb_path: "structures/LipA_prepared.pdb"
     description: "Bacillus subtilis Lipase A"
     force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
 
   # ============================================================================
   # Substrate Configuration (Docked Ligand)
