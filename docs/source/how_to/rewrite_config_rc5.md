@@ -20,7 +20,8 @@ Later 1.3 releases only add keys; an rc5 config keeps working.
 | `substrate.charge_method: nagl` | `charges: {method: nagl}` |
 | `polymers.charger` (dynamic polymers) | `charges: {method: nagl}` (or `am1bcc`, `espaloma`) |
 | cached polymers (charges in the SDFs) | `charges: {method: preset}` |
-| `co_solvents[].charge_method` | `co_solvents[].charges` |
+| `co_solvents[].charge_method` on a co-solvent PolyzyMD ships charges for (dmso, urea, ...) | delete it: those always got their shipped charges, which is `charges: {method: preset}`, the default |
+| `co_solvents[].charge_method` on any other co-solvent | `co_solvents[].charges: {method: nagl}` (or `am1bcc`, `espaloma`) |
 | `solvent.primary: {type: water, model: tip3p}` | `solvent.water: {model: tip3p}` |
 | `restraints[].atom1: {selection: "protein and resid 105 and name OG"}` | `atom1: {component: <protein name>, selection: "resid 105 and name OG"}` |
 
