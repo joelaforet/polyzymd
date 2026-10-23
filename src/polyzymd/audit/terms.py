@@ -29,6 +29,13 @@ RUN_CONTROL_FORCES = frozenset(
     }
 )
 
+#: Appended to each refusal of something the audit cannot read yet, so a user
+#: whose system needs it asks for it rather than works around the check.
+ASK_FOR_SUPPORT = (
+    "If your system needs it, open an issue at "
+    "https://github.com/joelaforet/polyzymd/issues so it can be supported."
+)
+
 #: Forces PolyzyMD's restraints are made of. They are set aside, not compared as
 #: force-field terms; the restraint checks account for each one.
 RESTRAINT_FORCES = frozenset(
@@ -123,7 +130,7 @@ class SystemIndex:
                 "the system has forces the audit cannot read: "
                 + ", ".join(unreadable)
                 + ". PolyzyMD builds with one combined NonbondedForce and harmonic or "
-                "periodic valence forces."
+                "periodic valence forces. " + ASK_FOR_SUPPORT
             )
         if nonbonded is None:
             raise ValueError("the system has no NonbondedForce")
