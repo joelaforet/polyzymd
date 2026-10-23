@@ -442,9 +442,10 @@ class TestBuildFromConfigSharesOneBox:
                     "name": "TestEnzyme",
                     "pdb_path": "test.pdb",
                     "force_field": ["ff14sb_off_impropers_0.0.4.offxml"],
+                    "charges": {"method": "library"},
                 }
             ],
-            "solvent": {"force_field": ["openff-2.0.0.offxml"]},
+            "solvent": {"force_field": ["openff-2.0.0.offxml"], "water": {"model": "tip3p"}},
             "thermodynamics": {"temperature": 300.0},
             "simulation_phases": {
                 "equilibration_stages": [
@@ -547,7 +548,11 @@ def test_build_from_config_refuses_what_it_cannot_build(solvent, message):
     from polyzymd.config.schema import SimulationConfig
 
     data = TestBuildFromConfigSharesOneBox._config(with_polymers=False).model_dump()
-    data["solvent"] = {"force_field": ["openff-2.0.0.offxml"], **solvent}
+    data["solvent"] = {
+        "force_field": ["openff-2.0.0.offxml"],
+        "water": {"model": "tip3p"},
+        **solvent,
+    }
     config = SimulationConfig(**data)
 
     with pytest.raises(ValueError, match=message):

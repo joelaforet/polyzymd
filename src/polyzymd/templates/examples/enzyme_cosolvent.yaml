@@ -18,6 +18,7 @@ solutes:
     pdb_path: "structures/LipA_prepared.pdb"
     description: "Bacillus subtilis Lipase A"
     force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
 
   # ============================================================================
   # Substrate Configuration
@@ -44,6 +45,7 @@ solvent:
       smiles: "CS(=O)C"  # DMSO SMILES
       mole_fraction: 0.10  # 10 mol% DMSO
       residue_name: "DMS"
+      charges: {method: preset}  # the charges PolyzyMD ships for DMSO
   
   ions:
     neutralize: true

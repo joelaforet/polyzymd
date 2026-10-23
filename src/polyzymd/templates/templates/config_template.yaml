@@ -27,9 +27,10 @@
 # OPTIONAL SECTIONS:
 #   - restraints (distance restraints)
 #
-# You choose the physics: every solute names its force field and charges, and
-# PolyzyMD applies exactly those and checks that it did. Whether they suit
-# your system is your call.
+# You choose the physics: PolyzyMD assumes no force field, charge model or
+# water model. Every solute and the solvent name theirs, PolyzyMD applies
+# exactly those and checks that it did, and the config keeps the choice on
+# record. Whether they suit your system is your call.
 #
 # ============================================================================
 
@@ -55,7 +56,7 @@ description: "Description of your simulation system"
 #   charges     where its partial charges come from:
 #                 library  the force field's own charges (proteins)
 #                 preset   the charges stored in its SDF files
-#                 nagl     OpenFF NAGL; model defaults to
+#                 nagl     OpenFF NAGL; model names the network, such as
 #                          openff-gnn-am1bcc-1.0.0.pt (the model Sage 2.3.0 names)
 #                 am1bcc   AM1-BCC (needs AmberTools; slower)
 #                 espaloma Espaloma
@@ -136,25 +137,27 @@ solvent:
   # Built-in co-solvents (auto-populated smiles & density):
   #   dmso, dmf, acetonitrile, urea, ethanol, methanol, glycerol,
   #   isopropanol, acetone, thf, dioxane, ethylene_glycol
-  # Those PolyzyMD ships charges for use them (charges: {method: preset});
-  # any other co-solvent must name its charges.
+  # Every co-solvent names its charges: {method: preset} for the charges
+  # PolyzyMD ships with the built-in ones, or nagl (with model), am1bcc, espaloma.
 
   # Example: 10 mol% DMSO (replaces water in neutral solvent mixture)
   # co_solvents:
   #   - name: "dmso"
   #     mole_fraction: 0.10              # Mole fraction
+  #     charges: {method: preset}
 
   # Example: 2 M urea (additive, doesn't reduce water)
   # co_solvents:
   #   - name: "urea"
   #     concentration: 2.0                # Molar
+  #     charges: {method: preset}
 
   # Example: Custom co-solvent (not in library)
   # co_solvents:
   #   - name: "my_solvent"
   #     smiles: "CCOC(=O)C"               # SMILES required for custom
   #     mole_fraction: 0.05              # Mole fraction
-  #     charges: {method: nagl}
+  #     charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
 
   ions:
     neutralize: true                    # Add counter-ions to neutralize

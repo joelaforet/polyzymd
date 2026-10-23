@@ -13,6 +13,8 @@ from tests._support.analysis_testkit import write_simulation_config
 
 PROTEIN_FF = "ff14sb_off_impropers_0.0.4.offxml"
 SAGE = "openff-2.3.0.offxml"
+PRESET = {"method": "preset"}
+NAGL = {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"}
 #: The keys every cached polymer solute shares in these tests.
 CACHED_POLYMER = {
     "type": "polymer",
@@ -38,9 +40,10 @@ def minimal_config_data(tmp_path):
                 "name": "TestEnzyme",
                 "pdb_path": str(tmp_path / "test.pdb"),
                 "force_field": [PROTEIN_FF],
+                "charges": {"method": "library"},
             }
         ],
-        "solvent": {"force_field": [SAGE]},
+        "solvent": {"force_field": [SAGE], "water": {"model": "tip3p"}},
         "thermodynamics": {"temperature": 300.0},
         "simulation_phases": {
             "equilibration_stages": [
@@ -118,9 +121,16 @@ class TestConfigValidation:
         from polyzymd.config.schema import ProteinSolute
 
         with pytest.raises(ValidationError):
-            ProteinSolute(type="protein", pdb_path="test.pdb")
+            ProteinSolute(type="protein", pdb_path="test.pdb", charges={"method": "library"})
+        with pytest.raises(ValidationError, match="charges"):
+            ProteinSolute(type="protein", pdb_path="test.pdb", force_field=[PROTEIN_FF])
 
-        config = ProteinSolute(type="protein", pdb_path="test.pdb", force_field=[PROTEIN_FF])
+        config = ProteinSolute(
+            type="protein",
+            pdb_path="test.pdb",
+            force_field=[PROTEIN_FF],
+            charges={"method": "library"},
+        )
         assert config.name == "protein"
         assert config.pdb_path == Path("test.pdb")
 
@@ -171,7 +181,7 @@ class TestConfigValidation:
             PolymerSolute(
                 type="polymer",
                 force_field=[SAGE],
-                charges={"method": "nagl"},
+                charges=NAGL,
                 type_prefix="TEST",
                 generation_mode="dynamic",
                 monomers=[
@@ -237,7 +247,9 @@ class TestCoSolventCompositionValidation:
         from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
         config = SolventConfig(
-            force_field=[SAGE], co_solvents=[CoSolventSpec(name="urea", concentration=2.0)]
+            force_field=[SAGE],
+            water={"model": "tip3p"},
+            co_solvents=[CoSolventSpec(name="urea", concentration=2.0, charges=PRESET)],
         )
         assert len(config.co_solvents) == 1
 
@@ -247,9 +259,10 @@ class TestCoSolventCompositionValidation:
 
         config = SolventConfig(
             force_field=[SAGE],
+            water={"model": "tip3p"},
             co_solvents=[
-                CoSolventSpec(name="dmso", mole_fraction=0.3),
-                CoSolventSpec(name="urea", concentration=2.0),
+                CoSolventSpec(name="dmso", mole_fraction=0.3, charges=PRESET),
+                CoSolventSpec(name="urea", concentration=2.0, charges=PRESET),
             ],
         )
         assert len(config.co_solvents) == 2
@@ -263,9 +276,10 @@ class TestCoSolventCompositionValidation:
         with pytest.raises(ValidationError, match="mole fraction must be < 1.0"):
             SolventConfig(
                 force_field=[SAGE],
+                water={"model": "tip3p"},
                 co_solvents=[
-                    CoSolventSpec(name="dmso", mole_fraction=0.6),
-                    CoSolventSpec(name="ethanol", mole_fraction=0.5),
+                    CoSolventSpec(name="dmso", mole_fraction=0.6, charges=PRESET),
+                    CoSolventSpec(name="ethanol", mole_fraction=0.5, charges=PRESET),
                 ],
             )
 
@@ -275,9 +289,10 @@ class TestCoSolventCompositionValidation:
 
         config = SolventConfig(
             force_field=[SAGE],
+            water={"model": "tip3p"},
             co_solvents=[
-                CoSolventSpec(name="dmso", mole_fraction=0.3),
-                CoSolventSpec(name="ethanol", mole_fraction=0.2),
+                CoSolventSpec(name="dmso", mole_fraction=0.3, charges=PRESET),
+                CoSolventSpec(name="ethanol", mole_fraction=0.2, charges=PRESET),
             ],
         )
         assert len(config.co_solvents) == 2
@@ -294,7 +309,7 @@ class TestCoSolventCompositionValidation:
         with pytest.raises(
             ValidationError, match="give exactly one of mole_fraction, concentration"
         ):
-            CoSolventSpec(name="dmso", mole_fraction=0.1, concentration=1.0)
+            CoSolventSpec(name="dmso", mole_fraction=0.1, concentration=1.0, charges=PRESET)
 
 
 class TestRunDirectoryNaming:
@@ -360,15 +375,15 @@ class TestRunDirectoryNaming:
             "force_field": [SAGE],
             "water": {"model": "tip3p"},
             "co_solvents": [
-                {"name": "urea", "concentration": 2.5},
+                {"name": "urea", "concentration": 2.5, "charges": PRESET},
                 {
                     "name": "tert butanol",
                     "smiles": "CC(C)(C)O",
                     "density": 0.78,
                     "mole_fraction": 0.125,
-                    "charges": {"method": "nagl"},
+                    "charges": NAGL,
                 },
-                {"name": "dmso", "mole_fraction": 0.30},
+                {"name": "dmso", "mole_fraction": 0.30, "charges": PRESET},
             ],
         }
         minimal_config_data["output"] = {
@@ -387,7 +402,7 @@ class TestRunDirectoryNaming:
         minimal_config_data["solvent"] = {
             "force_field": [SAGE],
             "water": {"model": "tip3p"},
-            "co_solvents": [{"name": "dmso", "mole_fraction": 0.99}],
+            "co_solvents": [{"name": "dmso", "mole_fraction": 0.99, "charges": PRESET}],
         }
         minimal_config_data["output"] = {"naming_template": "{cosolvent_composition}"}
 
@@ -1103,7 +1118,7 @@ def _config_with_solvent(tmp_path: Path, **solvent) -> SimulationConfig:
     (tmp_path / "c" / "test.pdb").write_text("END\n")
     data = yaml.safe_load(path.read_text())
     if solvent:
-        data["solvent"] = {"force_field": [SAGE], **solvent}
+        data["solvent"] = {"force_field": [SAGE], "water": {"model": "tip3p"}, **solvent}
     path.write_text(yaml.safe_dump(data))
     return SimulationConfig.from_yaml(path)
 
@@ -1111,7 +1126,7 @@ def _config_with_solvent(tmp_path: Path, **solvent) -> SimulationConfig:
 class TestCoSolventAmount:
     def test_a_count_is_a_third_way_to_give_the_amount(self, tmp_path: Path) -> None:
         """A co-solvent takes a number of molecules, or a concentration, but not both."""
-        sds = {"name": "sds", "smiles": SDS, "count": 8, "charges": {"method": "nagl"}}
+        sds = {"name": "sds", "smiles": SDS, "count": 8, "charges": NAGL}
         config = _config_with_solvent(tmp_path, co_solvents=[sds])
         assert config.solvent.co_solvents[0].count == 8
         with pytest.raises(ValidationError, match="exactly one"):
@@ -1119,11 +1134,11 @@ class TestCoSolventAmount:
 
     def test_custom_cosolvents_name_their_charges(self, tmp_path: Path) -> None:
         """A molecule PolyzyMD ships no charges for must say how it is charged."""
-        with pytest.raises(ValidationError, match="no charges shipped"):
+        with pytest.raises(ValidationError, match="needs charges"):
             _config_with_solvent(tmp_path, co_solvents=[{"name": "sds", "smiles": SDS, "count": 8}])
         config = _config_with_solvent(
             tmp_path,
-            co_solvents=[{"name": "sds", "smiles": SDS, "count": 8, "charges": {"method": "nagl"}}],
+            co_solvents=[{"name": "sds", "smiles": SDS, "count": 8, "charges": NAGL}],
         )
         assert config.solvent.co_solvents[0].charges.method == "nagl"
 
@@ -1142,7 +1157,9 @@ def test_checkpoint_interval_has_a_default_and_unknown_keys_are_refused(tmp_path
     assert SimulationConfig.from_yaml(path).simulation_phases.production.checkpoint_interval == 60.0
     data["solvent"] = {
         "force_field": [SAGE],
-        "co_solvents": [{"name": "x", "smiles": "CO", "concentration": 1.0, "bananas": 3}],
+        "co_solvents": [
+            {"name": "x", "smiles": "CO", "concentration": 1.0, "bananas": 3, "charges": NAGL}
+        ],
     }
     path.write_text(yaml.safe_dump(data))
     with pytest.raises(ValidationError, match="bananas"):
@@ -1222,8 +1239,12 @@ def test_default_cosolvent_residue_name_avoids_protein_nucleic_water_and_ion_nam
     minimal_config_data, name: str
 ) -> None:
     """A config without residue_name loads, and its derived name is not one a selection takes."""
-    entry = {"name": name, "smiles": "CCO", "count": 1, "charges": {"method": "nagl"}}
-    minimal_config_data["solvent"] = {"force_field": [SAGE], "co_solvents": [entry]}
+    entry = {"name": name, "smiles": "CCO", "count": 1, "charges": NAGL}
+    minimal_config_data["solvent"] = {
+        "force_field": [SAGE],
+        "water": {"model": "tip3p"},
+        "co_solvents": [entry],
+    }
     config = SimulationConfig(**minimal_config_data)
     config.require_buildable()
 
@@ -1241,7 +1262,10 @@ def test_explicit_clashing_cosolvent_residue_name_loads_but_is_not_built(
     """A config that names a co-solvent GLY loads for analysis; validate and build refuse it."""
     minimal_config_data["solvent"] = {
         "force_field": [SAGE],
-        "co_solvents": [{"name": "glycerol", "mole_fraction": 0.1, "residue_name": "GLY"}],
+        "water": {"model": "tip3p"},
+        "co_solvents": [
+            {"name": "glycerol", "mole_fraction": 0.1, "residue_name": "GLY", "charges": PRESET}
+        ],
     }
     config = SimulationConfig(**minimal_config_data)
     with pytest.raises(ValueError, match="residue_name"):
@@ -1324,11 +1348,19 @@ def test_gromacs_refuses_position_restraints_its_export_would_merge(
 @pytest.mark.parametrize("key", ["kcl_concentration", "mgcl2_concentration"])
 def test_salts_the_build_does_not_add_load_but_are_not_built(minimal_config_data, key):
     """Configs of existing runs with KCl or MgCl2 load; a new build refuses them."""
-    minimal_config_data["solvent"] = {"force_field": [SAGE], "ions": {key: 0.15}}
+    minimal_config_data["solvent"] = {
+        "force_field": [SAGE],
+        "water": {"model": "tip3p"},
+        "ions": {key: 0.15},
+    }
     config = SimulationConfig(**minimal_config_data)
     with pytest.raises(ValueError, match="use nacl_concentration"):
         config.require_buildable()
-    minimal_config_data["solvent"] = {"force_field": [SAGE], "ions": {key: 0.0}}
+    minimal_config_data["solvent"] = {
+        "force_field": [SAGE],
+        "water": {"model": "tip3p"},
+        "ions": {key: 0.0},
+    }
     SimulationConfig(**minimal_config_data).require_buildable()
 
 

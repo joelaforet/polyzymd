@@ -13,6 +13,8 @@ from polyzymd.config.schema import REWRITE_GUIDE, SimulationConfig
 
 QUICKSTART = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
 SAGE = ["openff-2.3.0.offxml"]
+PRESET = {"method": "preset"}
+NAGL = {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"}
 
 
 @pytest.fixture
@@ -30,7 +32,7 @@ def _ligand(data: dict, **extra) -> dict:
         "type": "small_molecule",
         "sdf_path": data["_ligand"],
         "force_field": SAGE,
-        "charges": {"method": "nagl"},
+        "charges": NAGL,
     }
     return {**entry, **extra}
 
@@ -126,7 +128,7 @@ def test_this_release_builds_one_solute_per_type_around_a_protein(data) -> None:
 
 
 def test_a_protein_takes_library_charges(data) -> None:
-    data["solutes"][0]["charges"] = {"method": "nagl"}
+    data["solutes"][0]["charges"] = NAGL
     with pytest.raises(ValidationError, match="library charges"):
         load(data)
 
@@ -141,7 +143,7 @@ def test_nagl_names_its_model_and_other_methods_take_none(data) -> None:
 
 def test_polymer_charges_follow_how_the_chains_are_made(data) -> None:
     """Cached chains carry their SDF charges; dynamic chains are charged as they are built."""
-    data["solutes"].append(_polymer(charges={"method": "nagl"}))
+    data["solutes"].append(_polymer(charges=NAGL))
     with pytest.raises(ValidationError, match="method: preset"):
         load(data)
     data["solutes"][-1] = _polymer(
@@ -169,11 +171,16 @@ def test_one_nagl_model_charges_every_component(data) -> None:
 
 
 def test_co_solvent_charges_say_what_is_built(data) -> None:
-    """Shipped charges by default for a bundled molecule; any other must name its method."""
+    """Every co-solvent names its charges; preset needs a molecule PolyzyMD ships charges for."""
     data["solvent"]["co_solvents"] = [{"name": "dmso", "concentration": 0.2}]
+    with pytest.raises(
+        ValidationError, match=r"needs charges, for example charges: \{method: preset\}"
+    ):
+        load(data)
+    data["solvent"]["co_solvents"][0]["charges"] = PRESET
     assert load(data).solvent.co_solvents[0].charges.method == "preset"
     data["solvent"]["co_solvents"] = [{"name": "x", "smiles": "CCO", "count": 1}]
-    with pytest.raises(ValidationError, match="no charges shipped"):
+    with pytest.raises(ValidationError, match="needs charges"):
         load(data)
     data["solvent"]["co_solvents"][0]["charges"] = {"method": "preset"}
     with pytest.raises(ValidationError, match="ships none"):
@@ -219,7 +226,9 @@ def test_a_solute_cannot_take_a_built_in_name_or_hold_spaces(data, name) -> None
 def test_the_old_co_solvent_key_says_bundled_molecules_kept_their_charges(data) -> None:
     """Rewriting charge_method: nagl as charges nagl on dmso would change its charges."""
     data["solvent"]["co_solvents"] = [{"name": "dmso", "count": 1, "charge_method": "nagl"}]
-    with pytest.raises(ValidationError, match="shipped charges .* delete the key"):
+    with pytest.raises(
+        ValidationError, match=r"shipped charges .* write charges: \{method: preset\}"
+    ):
         load(data)
 
 
@@ -227,11 +236,11 @@ def test_a_new_charge_method_on_a_bundled_co_solvent_is_a_new_analysis_identity(
     """Shipped charges keep the identity runs built before rc5 had; NAGL on dmso does not."""
     from polyzymd.analyses.identity import compute_config_hash
 
-    data["solvent"]["co_solvents"] = [{"name": "dmso", "count": 10}]
+    data["solvent"]["co_solvents"] = [{"name": "dmso", "count": 10, "charges": PRESET}]
     shipped = compute_config_hash(load(data))
     data["solvent"]["co_solvents"][0]["charges"] = {"method": "preset"}
     assert compute_config_hash(load(data)) == shipped
-    data["solvent"]["co_solvents"][0]["charges"] = {"method": "nagl"}
+    data["solvent"]["co_solvents"][0]["charges"] = NAGL
     assert compute_config_hash(load(data)) != shipped
 
 
@@ -241,6 +250,6 @@ def test_preset_charges_need_the_shipped_molecule() -> None:
     from polyzymd.config.schema import CoSolventSpec
     from polyzymd.config.validation import _require_shipped_molecule
 
-    _require_shipped_molecule(CoSolventSpec(name="dmso", count=1))
+    _require_shipped_molecule(CoSolventSpec(name="dmso", count=1, charges=PRESET))
     with pytest.raises(ValueError, match="not the dmso PolyzyMD ships"):
-        _require_shipped_molecule(CoSolventSpec(name="dmso", smiles="CCO", count=1))
+        _require_shipped_molecule(CoSolventSpec(name="dmso", smiles="CCO", count=1, charges=PRESET))

@@ -12,6 +12,7 @@ solutes:
     name: "trpcage"
     pdb_path: "trpcage.pdb"
     force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
 
 # Water, co-solvents and ions. Sage carries the TIP3P water and ion parameters.
 solvent:
