@@ -7,7 +7,6 @@ wrong and checks that the right check, on the right component, fails.
 
 from __future__ import annotations
 
-import shutil
 import sys
 from pathlib import Path
 
@@ -78,8 +77,7 @@ def test_a_correct_build_passes_every_parameter_check(built, correct) -> None:
 
 def test_the_gromacs_files_pass_the_same_checks(built) -> None:
     """A GROMACS build is checked on its .top, .gro and production .mdp."""
-    if shutil.which("gmx") is None and not Path.home().joinpath(".pixi/bin/gmx").exists():
-        pytest.skip("GROMACS is not installed")
+    # Exporting and reading GROMACS files needs no GROMACS binary, so this runs in CI.
     from polyzymd.exporters.gromacs import GromacsExporter
 
     builder, config, folder = built
