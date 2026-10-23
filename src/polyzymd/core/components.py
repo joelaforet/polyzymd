@@ -78,12 +78,20 @@ class AtomRange:
 
 @dataclass(frozen=True)
 class Domain:
-    """Atoms that share one valence source and one charge source."""
+    """Atoms that share one valence source and one charge source.
+
+    ``reference`` says how to make the domain's molecule from its inputs alone,
+    so the audit can rebuild it independently of the build: ``{"pdb": path,
+    "custom_substructures": path or None}`` (all its molecules at once, in
+    order), ``{"sdf": path, "conformer_index": i}`` or ``{"smiles": text}`` (one
+    molecule, of which every atom range of the domain is a copy).
+    """
 
     name: str
     atoms: tuple[AtomRange, ...]
     force_field: tuple[str, ...]
     charges: ChargeSource
+    reference: Optional[dict[str, Any]] = None
 
     def atom_indices(self) -> list[int]:
         return [i for r in self.atoms for i in r]

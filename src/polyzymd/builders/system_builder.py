@@ -55,6 +55,19 @@ def _cosolvent_charges(cosolvent: Any, nagl_model: Optional[str]) -> "ChargeSour
     return ChargeSource(method, model=model)
 
 
+def _optional_str(value: Any) -> Optional[str]:
+    return None if value is None else str(value)
+
+
+def _cosolvent_smiles(cosolvent: Any) -> str:
+    """The SMILES of the co-solvent molecule the build packed, without counter-ions."""
+    from polyzymd.data.solvent_molecules import split_counter_ions
+
+    if cosolvent.smiles:
+        return split_counter_ions(cosolvent.smiles, cosolvent.name)[0]
+    return cosolvent.molecule.to_smiles()
+
+
 class SystemBuilder:
     """Orchestrator for building complete simulation systems.
 
@@ -1324,7 +1337,16 @@ class SystemBuilder:
                     molecules=atoms,
                     domains=[
                         Domain(
-                            "protein", tuple(atoms), (self._protein_ff,), ChargeSource("library")
+                            "protein",
+                            tuple(atoms),
+                            (self._protein_ff,),
+                            ChargeSource("library"),
+                            reference={
+                                "pdb": str(self._enzyme_builder.pdb_path),
+                                "custom_substructures": _optional_str(
+                                    getattr(self._enzyme_builder, "custom_substructures_path", None)
+                                ),
+                            },
                         )
                     ],
                     provenance={"pdb": file_record(self._enzyme_builder.pdb_path)},
@@ -1340,7 +1362,18 @@ class SystemBuilder:
                     segid=handle("small_molecule")[1],
                     placement="fixed",
                     molecules=atoms,
-                    domains=[Domain("substrate", tuple(atoms), (self._sm_ff,), charges(method))],
+                    domains=[
+                        Domain(
+                            "substrate",
+                            tuple(atoms),
+                            (self._sm_ff,),
+                            charges(method),
+                            reference={
+                                "sdf": str(self._substrate_builder.sdf_path),
+                                "conformer_index": self._substrate_conformer_index or 0,
+                            },
+                        )
+                    ],
                     provenance={
                         "sdf": file_record(self._substrate_builder.sdf_path),
                         "conformer_index": self._substrate_conformer_index,
@@ -1367,6 +1400,7 @@ class SystemBuilder:
                         tuple(atoms),
                         (self._sm_ff,),
                         charges(source.get("charge_method", "preset"), str(sdf) if sdf else None),
+                        reference={"sdf": str(sdf)} if sdf else None,
                     )
                 )
                 sources[sequence] = {"chains": count, "sdf": file_record(sdf)}
@@ -1390,7 +1424,11 @@ class SystemBuilder:
             solvent_molecules = list(water)
             domains = [
                 Domain(
-                    "water", tuple(water), (self._sm_ff,), ChargeSource("water_model", water_model)
+                    "water",
+                    tuple(water),
+                    (self._sm_ff,),
+                    ChargeSource("water_model", water_model),
+                    reference={"smiles": "O"},
                 )
             ]
             for (name, count), cosolvent in zip(
@@ -1398,12 +1436,18 @@ class SystemBuilder:
             ):
                 atoms = take(count)
                 solvent_molecules += atoms
+                source = _cosolvent_charges(cosolvent, self._nagl_model)
                 domains.append(
                     Domain(
                         f"co_solvent:{name}",
                         tuple(atoms),
                         (self._sm_ff,),
-                        _cosolvent_charges(cosolvent, self._nagl_model),
+                        source,
+                        reference=(
+                            {"sdf": source.source_file}
+                            if source.method == "preset"
+                            else {"smiles": _cosolvent_smiles(cosolvent)}
+                        ),
                     )
                 )
             records.append(
@@ -1430,7 +1474,15 @@ class SystemBuilder:
                         placement="packed",
                         molecules=na + cl,
                         domains=[
-                            Domain("ions", tuple(na + cl), (self._sm_ff,), ChargeSource("library"))
+                            Domain(
+                                ion,
+                                tuple(atoms),
+                                (self._sm_ff,),
+                                ChargeSource("library"),
+                                reference={"smiles": smiles},
+                            )
+                            for ion, atoms, smiles in (("Na+", na, "[Na+]"), ("Cl-", cl, "[Cl-]"))
+                            if atoms
                         ],
                         provenance={"Na+": counts.na, "Cl-": counts.cl},
                     )
