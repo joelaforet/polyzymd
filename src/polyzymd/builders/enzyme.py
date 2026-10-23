@@ -104,6 +104,9 @@ class EnzymeBuilder:
 
         self._topology = topology
         self._pdb_path = pdb_path
+        self.custom_substructures_path = (
+            Path(custom_substructures_path) if custom_substructures_path else None
+        )
 
         return topology
 
