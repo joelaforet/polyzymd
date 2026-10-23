@@ -188,7 +188,6 @@ def _minimization_problems(path: Path, config: Any, components) -> list[str]:
         "GROMACS run parameters (.mdp) other than the config's: integrator, thermostat, time "
         "step, length, temperature or annealing, pressure coupling, bond constraints, velocity "
         "generation or position-restraint switches",
-        "testers on GROMACS",
     )
 )
 def realized(context: AuditContext) -> list[Finding]:
