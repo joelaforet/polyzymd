@@ -205,8 +205,12 @@ def test_a_run_whose_system_differs_from_the_build_is_recorded_and_shown(tmp_pat
 
     phase = tmp_path / "production_0"
     phase.mkdir()
-    written = record_system_check(_system(0.4), tmp_path, phase, "production_0", 0)
-    assert json.loads((phase / "production_0_system_check.json").read_text()) == written
+    from polyzymd.audit.runtime import SystemDivergedError
+
+    with pytest.raises(SystemDivergedError, match="stopped before its first step"):
+        record_system_check(_system(0.4), tmp_path, phase, "production_0", 0)
+    written = json.loads((phase / "production_0_system_check.json").read_text())
+    assert written["compared"] and not written["matches_build"]
 
     class _Segment:
         index = 0
@@ -382,3 +386,14 @@ def test_a_build_prints_its_audit_in_a_fixed_order_with_its_record(tmp_path, cap
     assert "Physics audit: PASSED (25 pass, 1 warn, 2 info)" in text
     assert "WARN geometry.buried_water (protein): 3 buried waters" in text
     assert "build_provenance.md" in text
+
+
+def test_a_run_with_no_audited_build_to_compare_with_goes_on(tmp_path) -> None:
+    """A chain started before rc.5 has no vouching record: recorded, not stopped."""
+    from polyzymd.audit.runtime import record_system_check
+
+    (tmp_path / "system.xml").write_text(openmm.XmlSerializer.serialize(_system(0.5)))
+    phase = tmp_path / "production_0"
+    phase.mkdir()
+    record = record_system_check(_system(0.4), tmp_path, phase, "production_0", 0)
+    assert (record["compared"], record["matches_build"]) == (False, False)
