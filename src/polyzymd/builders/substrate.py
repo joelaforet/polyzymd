@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, List, Literal, Optional, Union
 if TYPE_CHECKING:
     from openff.toolkit import Molecule
 
-    from polyzymd.config.schema import ChargeMethod, SubstrateConfig
+    from polyzymd.config.schema import ChargeMethod, SmallMoleculeSolute
 
 LOGGER = logging.getLogger(__name__)
 
@@ -142,12 +142,12 @@ class SubstrateBuilder:
         return charged_mol
 
     def build_from_config(
-        self, config: "SubstrateConfig", nagl_model: Optional[str] = None
+        self, config: "SmallMoleculeSolute", nagl_model: Optional[str] = None
     ) -> Molecule:
         """Load substrate from a configuration object.
 
         Args:
-            config: SubstrateConfig with SDF path and options.
+            config: SmallMoleculeSolute with SDF path and options.
             nagl_model: NAGL model for charge_method nagl; the default when None.
 
         Returns:

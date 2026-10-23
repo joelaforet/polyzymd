@@ -1155,8 +1155,7 @@ class TestEnergyMinimizationHelpers:
         assert 'GMX="/opt/gromacs/bin/gmx"' in script_content
         assert 'PREFIX="system"' in script_content
         assert (
-            "$GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro "
-            "-p ${PREFIX}.top -o em.tpr"
+            "$GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro " "-p ${PREFIX}.top -o em.tpr"
         ) in script_content
         assert "$GMX mdrun -deffnm em -v" in script_content
         assert "$GMX grompp -f eq_01_nvt.mdp -c em.gro -r em.gro" in script_content
@@ -1484,7 +1483,15 @@ def test_gromacs_export_refuses_distance_restraints_it_would_drop(tmp_path):
     config = SimulationConfig(
         name="t",
         engine="openmm",
-        enzyme={"name": "E", "pdb_path": "e.pdb"},
+        solutes=[
+            {
+                "type": "protein",
+                "name": "E",
+                "pdb_path": "e.pdb",
+                "force_field": ["ff14sb_off_impropers_0.0.4.offxml"],
+            }
+        ],
+        solvent={"force_field": ["openff-2.0.0.offxml"]},
         thermodynamics={"temperature": 300.0},
         simulation_phases={
             "equilibration_stages": [
@@ -1496,8 +1503,8 @@ def test_gromacs_export_refuses_distance_restraints_it_would_drop(tmp_path):
             {
                 "type": "flat_bottom",
                 "name": "site",
-                "atom1": {"selection": "resid 1 and name CA"},
-                "atom2": {"selection": "resid 2 and name CA"},
+                "atom1": {"component": "E", "selection": "resid 1 and name CA"},
+                "atom2": {"component": "E", "selection": "resid 2 and name CA"},
                 "distance": 3.5,
             }
         ],

@@ -287,6 +287,19 @@ def build_pdb_file(topology_file: str | Path) -> Path | None:
     return None
 
 
+def _apply_segments(universe: Any, segids: list[str]) -> None:
+    """Put each residue in the segment of its atoms (one segment per component)."""
+    # Atoms are in residue order, so each residue's first atom is where its index starts.
+    first_atom = np.searchsorted(universe.atoms.resindices, np.arange(len(universe.residues)))
+    of_residue = np.asarray(segids, dtype=object)[first_atom]
+    segments = {}
+    for segid in dict.fromkeys(of_residue):
+        existing = [seg for seg in universe.segments if seg.segid == segid]
+        segments[segid] = existing[0] if existing else universe.add_Segment(segid=segid)
+    for segid, segment in segments.items():
+        universe.residues[of_residue == segid].segments = segment
+
+
 def apply_build_chain_ids(universe: Any, pdb_file: str | Path | None) -> dict[str, Any]:
     """Give a universe the chain IDs PolyzyMD assigned when it built the system.
 
@@ -298,8 +311,12 @@ def apply_build_chain_ids(universe: Any, pdb_file: str | Path | None) -> dict[st
     names differ between the two files). Otherwise, or when ``pdb_file``
     cannot be read, the universe is left unchanged.
 
-    Only the residue name and chain ID columns of the ``ATOM`` and ``HETATM``
-    records of the first model are read. Serial numbers and ``CONECT``
+    The component segment IDs PolyzyMD writes into columns 73-76 (``PROT``,
+    ``LIG``, ``POLY``, ``SOL``, ``ION`` or the config's own) are applied the
+    same way, as MDAnalysis segments, so ``segid PROT`` selects the protein.
+
+    Only the residue name, chain ID and segment ID columns of the ``ATOM`` and
+    ``HETATM`` records of the first model are read. Serial numbers and ``CONECT``
     records are not, so a PDB from OpenMM above 99,999 atoms, with hex
     serials, is read like any other.
 
@@ -315,12 +332,14 @@ def apply_build_chain_ids(universe: Any, pdb_file: str | Path | None) -> dict[st
     else:
         resnames: list[str] = []
         chains: list[str] = []
+        segids: list[str] = []
         try:
             with open(pdb_file) as handle:
                 for line in handle:
                     if line.startswith(("ATOM  ", "HETATM")):
                         resnames.append(line[17:21].strip())
                         chains.append(line[21:22].strip())
+                        segids.append(line[72:76].strip())
                     elif line.startswith("ENDMDL") or line[:6].strip() == "END":
                         break
         except (OSError, UnicodeDecodeError) as error:
@@ -340,7 +359,9 @@ def apply_build_chain_ids(universe: Any, pdb_file: str | Path | None) -> dict[st
                 universe.atoms.chainIDs = chain_ids
             else:
                 universe.add_TopologyAttr("chainIDs", chain_ids)
-            metadata = {"applied": True, "source": str(pdb_file)}
+            if all(segids):
+                _apply_segments(universe, segids)
+            metadata = {"applied": True, "source": str(pdb_file), "segids": all(segids)}
         else:
             metadata = {"applied": False, "source": str(pdb_file), "reason": reason}
     universe._polyzymd_chain_ids = metadata

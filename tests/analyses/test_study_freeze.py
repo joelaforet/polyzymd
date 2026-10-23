@@ -260,7 +260,7 @@ class TestFreeze:
         assert "frames_analysed" not in replicate and replicate["production_frames"] == 10
         assert all(len(f["sha256"]) == 64 for f in replicate["files"])
         assert not any(f["path"].startswith("/") for f in replicate["files"])
-        assert manifest["conditions"]["Polymer"]["resolved_config"]["enzyme"][
+        assert manifest["conditions"]["Polymer"]["resolved_config"]["solutes"][0][
             "pdb_path"
         ].startswith("conditions/")
         assert "study.yaml" in manifest["files"]
@@ -314,8 +314,8 @@ class TestFreeze:
             {
                 "type": "flat_bottom",
                 "name": "ligand_in_pocket",
-                "atom1": {"selection": "index 0"},
-                "atom2": {"selection": "index 1"},
+                "atom1": {"component": "TestEnzyme", "selection": "index 0"},
+                "atom2": {"component": "TestEnzyme", "selection": "index 1"},
                 "distance": 4.0,
                 "force_constant": 5000.0,
             }
@@ -856,7 +856,8 @@ def test_an_absolute_input_path_inside_the_study_is_deposited_relative(
     """A reproducer's copy of the deposit finds the input and its results are not stale."""
     config = study / "conditions" / "polymer" / "config.yaml"
     data = yaml.safe_load(config.read_text())
-    data["enzyme"]["pdb_path"] = str((config.parent / data["enzyme"]["pdb_path"]).resolve())
+    protein = data["solutes"][0]
+    protein["pdb_path"] = str((config.parent / protein["pdb_path"]).resolve())
     config.write_text(yaml.safe_dump(data, sort_keys=False))
     _git(study, "commit", "-qam", "Absolute path")
     deposit = freeze(study).deposit
@@ -864,7 +865,7 @@ def test_an_absolute_input_path_inside_the_study_is_deposited_relative(
     shutil.copytree(deposit / "study", elsewhere)
     shutil.rmtree(study)
     deposited = yaml.safe_load((elsewhere / "conditions" / "polymer" / "config.yaml").read_text())
-    assert not Path(deposited["enzyme"]["pdb_path"]).is_absolute()
+    assert not Path(deposited["solutes"][0]["pdb_path"]).is_absolute()
     assert stale_runs(load_study_file(elsewhere)) == {}
 
 
@@ -872,7 +873,7 @@ def test_an_input_outside_the_study_is_named_in_a_warning(study: Path, tmp_path:
     """Freeze warns that an input outside the study is not deposited, naming no machine path."""
     config = study / "conditions" / "polymer" / "config.yaml"
     data = yaml.safe_load(config.read_text())
-    data["enzyme"]["pdb_path"] = str(tmp_path / "runs" / "polymer" / "test.pdb")
+    data["solutes"][0]["pdb_path"] = str(tmp_path / "runs" / "polymer" / "test.pdb")
     config.write_text(yaml.safe_dump(data, sort_keys=False))
     _git(study, "commit", "-qam", "Outside path")
     warnings = freeze(study).warnings

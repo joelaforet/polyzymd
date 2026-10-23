@@ -436,7 +436,15 @@ class TestBuildFromConfigSharesOneBox:
         data = {
             "name": "test",
             "engine": "openmm",
-            "enzyme": {"name": "TestEnzyme", "pdb_path": "test.pdb"},
+            "solutes": [
+                {
+                    "type": "protein",
+                    "name": "TestEnzyme",
+                    "pdb_path": "test.pdb",
+                    "force_field": ["ff14sb_off_impropers_0.0.4.offxml"],
+                }
+            ],
+            "solvent": {"force_field": ["openff-2.0.0.offxml"]},
             "thermodynamics": {"temperature": 300.0},
             "simulation_phases": {
                 "equilibration_stages": [
@@ -451,14 +459,18 @@ class TestBuildFromConfigSharesOneBox:
             },
         }
         if with_polymers:
-            data["polymers"] = {
-                "enabled": True,
-                "type_prefix": "SBMA-EGMA",
-                "length": 5,
-                "count": 3,
-                "sdf_directory": "/tmp/test",
-                "monomers": [{"label": "A", "probability": 1.0, "name": "SBMA"}],
-            }
+            data["solutes"].append(
+                {
+                    "type": "polymer",
+                    "type_prefix": "SBMA-EGMA",
+                    "length": 5,
+                    "count": 3,
+                    "sdf_directory": "/tmp/test",
+                    "monomers": [{"label": "A", "probability": 1.0, "name": "SBMA"}],
+                    "force_field": ["openff-2.0.0.offxml"],
+                    "charges": {"method": "preset"},
+                }
+            )
         return SimulationConfig(**data)
 
     @staticmethod
@@ -526,7 +538,7 @@ class TestBuildFromConfigSharesOneBox:
 @pytest.mark.parametrize(
     ("solvent", "message"),
     [
-        ({"primary": {"model": "spce"}}, "use model: tip3p for new systems"),
+        ({"water": {"model": "spce"}}, "use model: tip3p for new systems"),
         ({"ions": {"kcl_concentration": 0.15}}, "use nacl_concentration"),
     ],
 )
@@ -535,7 +547,7 @@ def test_build_from_config_refuses_what_it_cannot_build(solvent, message):
     from polyzymd.config.schema import SimulationConfig
 
     data = TestBuildFromConfigSharesOneBox._config(with_polymers=False).model_dump()
-    data["solvent"] = solvent
+    data["solvent"] = {"force_field": ["openff-2.0.0.offxml"], **solvent}
     config = SimulationConfig(**data)
 
     with pytest.raises(ValueError, match=message):
