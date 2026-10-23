@@ -69,9 +69,9 @@ def _echo_audit(working_dir: Path, phase: str) -> None:
     if not record.is_file():
         return
     audit = json.loads(record.read_text()).get("audit") or {}
-    counts = ", ".join(
-        f"{n} {status.lower()}" for status, n in audit.get("counts", {}).items() if n
-    )
+    numbers = audit.get("counts", {})
+    order = ("PASS", "WARN", "ACCEPTED", "INFO", "FAIL")
+    counts = ", ".join(f"{numbers[s]} {s.lower()}" for s in order if numbers.get(s))
     result = "PASSED" if audit.get("passed") else "FAILED"
     colored_echo(f"Physics audit: {result} ({counts})", phase=phase)
     for finding in audit.get("findings", []):
@@ -894,6 +894,10 @@ def build(
                 colored_echo("Files saved:", phase="build")
                 colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
                 colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
+                colored_echo(
+                    "  - build_provenance.json, build_provenance.md (build record and audit)",
+                    phase="build",
+                )
                 colored_echo(
                     "Use 'polyzymd submit' to submit for HPC execution,",
                     phase="build",
