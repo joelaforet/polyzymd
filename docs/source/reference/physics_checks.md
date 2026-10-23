@@ -5,7 +5,7 @@ will run (OpenMM `system.xml`, or GROMACS `.top`/`.gro` with the production `.md
 and records the result in `build_provenance.json` and `build_provenance.md`.
 A check whose default is FAIL stops the build; WARN and INFO are recorded only.
 
-To keep a deliberate departure, accept the failing check in the config with a
+To keep a deliberate departure, accept the failing (or warning) check in the config with a
 reason. The build record then lists the accepted finding, its reason and the
 atoms it covered:
 
@@ -41,6 +41,7 @@ This page is generated from PolyzyMD's check registry
 | `ions.neutral` | the system | FAIL | a net charge left on a system the config asked to neutralize |  |
 | `ions.salt` | the system | FAIL | NaCl pairs more than one pair away from the configured concentration | nacl_concentration meaning change |
 | `masses` | each component | FAIL | atom masses that differ from the force field's (unintended hydrogen mass repartitioning) |  |
+| `modeling_exceptions.unused` | the system | WARN | a modeling_exceptions entry that accepted nothing (stale in a published config) |  |
 | `nonbonded.settings` | the system | FAIL | a cutoff, switching distance, PME or dispersion correction other than the force field's |  |
 | `parameters.bonded` | each component | FAIL | bonds, angles, torsions or impropers not from the component's declared force field | 1.3 force-field order bug: Sage terms on ff14SB proteins (Paper 1) |
 | `parameters.constraints` | each component | FAIL | constraints missing, extra, or at lengths other than the declared force field's | 1.3 force-field order bug: Sage terms on ff14SB proteins (Paper 1) (Sage bond-to-hydrogen lengths on the protein) |

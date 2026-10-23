@@ -123,14 +123,19 @@ def _manifest(
     }
 
 
-def _audit(realized: Any, components: Sequence[Any] | None, config: Any) -> Any:
-    """The physics audit of ``realized``, or None when the build gave no components."""
+def _audit(realize: Any, components: Sequence[Any] | None, config: Any) -> Any:
+    """The physics audit of the system ``realize()`` reads, or None without components.
+
+    Reading the system is part of the audit: if it cannot be read, or any check
+    cannot run, the audit is one FAIL saying so, never a pass.
+    """
     if not components:
         return None
     from polyzymd.audit.findings import Finding
     from polyzymd.audit.report import AuditReport, audit
 
     try:
+        realized = realize() if callable(realize) else realize
         return audit(realized, components, config)
     except Exception as error:  # an audit that cannot run must not pass silently
         return AuditReport(
@@ -221,19 +226,25 @@ def write_gromacs_build_manifest(
         from polyzymd.audit.realized import RealizedSystem
 
         prefix = system_prefix(config)
-        realized = RealizedSystem.from_gromacs(
-            gromacs_dir / f"{prefix}.top", gromacs_dir / f"{prefix}.gro", gromacs_dir / "prod.mdp"
+        report = _audit(
+            lambda: RealizedSystem.from_gromacs(
+                gromacs_dir / f"{prefix}.top",
+                gromacs_dir / f"{prefix}.gro",
+                gromacs_dir / "prod.mdp",
+            ),
+            components,
+            config,
         )
-        report = _audit(realized, components, config)
     manifest = _manifest(
         config, particle_count, None, provenance, artifacts, "gromacs", components, report
+    )
+    # The Markdown first, the JSON last: the JSON is the record readers trust.
+    _atomic_write(
+        replicate_dir / PROVENANCE_MARKDOWN, provenance_markdown(manifest, report).encode()
     )
     _atomic_write(
         replicate_dir / MANIFEST_NAME,
         (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
-    )
-    _atomic_write(
-        replicate_dir / PROVENANCE_MARKDOWN, provenance_markdown(manifest, report).encode()
     )
     return manifest
 
@@ -287,7 +298,7 @@ def publish_build_bundle(
 
             step = config.simulation_phases.production.time_step
             report = _audit(
-                RealizedSystem.from_openmm(system_path, pdb_path, step), components, config
+                lambda: RealizedSystem.from_openmm(system_path, pdb_path, step), components, config
             )
         manifest = _manifest(
             config,
@@ -346,7 +357,7 @@ def validate_build_bundle(working_dir: Path, config: Any) -> None:
         )
     if not manifest_path.is_file():
         raise ArtifactIntegrityError(
-            f"Build manifest is missing: {manifest_path}. Rebuild with "
+            f"Build record is missing: {manifest_path}. Rebuild with "
             "'polyzymd build -c <config> -r <replicate>', then run the same command again."
         )
     try:
@@ -355,7 +366,7 @@ def validate_build_bundle(working_dir: Path, config: Any) -> None:
         expected_config = manifest["config_hash"]
         int(manifest["particle_count"])
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        raise ArtifactIntegrityError(f"Invalid build manifest {manifest_path}: {exc}") from exc
+        raise ArtifactIntegrityError(f"Invalid build record {manifest_path}: {exc}") from exc
     # Builds written before the portable hash recorded the absolute-path hash.
     if expected_config not in (config_hash(config), _absolute_path_config_hash(config)):
         raise ArtifactIntegrityError(
