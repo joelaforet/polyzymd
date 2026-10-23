@@ -170,8 +170,8 @@ Files written next to the record:
 
 | File | Written when | Meaning |
 |------|--------------|---------|
-| `build_provenance.failed.json`, `build_provenance.failed.md` | The audit of an OpenMM build fails | The full record of the failed build, to read. No `system.xml` is committed, so nothing can run from it |
-| `audited_files.sha256` | A GROMACS build passes its audit | `sha256sum` lines for every file GROMACS reads. Each GROMACS job runs `sha256sum --check` on it before `grompp` and stops if a file changed |
+| `build_provenance.failed.json`, `build_provenance.failed.md` | The audit of an OpenMM build fails | The full record of the failed build, to read. No `system.xml` is committed, so nothing can run from it. A failed GROMACS build keeps `build_provenance.json` with `audit.passed: false` and writes no `audited_files.sha256` |
+| `gromacs/audited_files.sha256` | A GROMACS build passes its audit | `sha256sum` lines for every file GROMACS reads. The local and SLURM GROMACS job scripts run `sha256sum --check` on it before `grompp` and stop if a file changed. A run that started before 1.3.0rc5 has none and continues from its own files |
 | `production_N/production_N_system_check.json` | Each OpenMM production segment starts | `compared` (whether a passing build record vouched for `system.xml`), `matches_build`, and the terms that differ. A segment whose System differs from the audited build is logged as an error and shown by `polyzymd status` as `SYSTEM DIVERGED FROM THE AUDITED BUILD`. The run goes on |
 
 When loading multi-segment trajectories, the analysis loader verifies that the
@@ -197,8 +197,8 @@ how per-replicate directories are named.
 
 | Placeholder | Source | Example Value |
 |---|---|---|
-| `{enzyme}` | `enzyme.name` | `LipA` |
-| `{substrate}` | `substrate.name` (hyphens removed), or `apo` if null | `ResorufinButyrate` |
+| `{enzyme}` | `name` of the protein solute | `LipA` |
+| `{substrate}` | `name` of the small-molecule solute (hyphens removed), or `apo` without one | `ResorufinButyrate` |
 | `{polymer_type}` | Derived from polymer config, or `none` if disabled | `SBMA-EGPMA_A70_B30` |
 | `{temperature}` | `thermodynamics.temperature` (integer) | `300` |
 | `{replicate}` | Replicate number (1-indexed) | `1` |
@@ -345,10 +345,10 @@ directory and referenced from `config.yaml`.
 
 | File | Format | Config Field | Requirements |
 |---|---|---|---|
-| Protein structure | PDB (`.pdb`) | `enzyme.pdb_path` | Standard residue names, protonated at simulation pH, no missing heavy atoms in regions of interest |
-| Substrate | SDF (`.sdf`) | `substrate.sdf_path` | 3D coordinates with docked pose, explicit hydrogens preferred. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
-| Polymer (if pre-built) | SDF (`.sdf`) | `polymers.sdf_directory` | One SDF per chain, or use dynamic generation from SMILES |
-| Reaction templates | RXN or `"default"` | `polymers.reactions.*` | The string `"default"` loads bundled ATRP templates; a file path loads a custom template |
+| Protein structure | PDB (`.pdb`) | `pdb_path` of the protein solute | Standard residue names, protonated at simulation pH, no missing heavy atoms in regions of interest |
+| Substrate | SDF (`.sdf`) | `sdf_path` of the small-molecule solute | 3D coordinates with docked pose, explicit hydrogens preferred. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
+| Polymer (if pre-built) | SDF (`.sdf`) | `sdf_directory` of the polymer solute | One SDF per chain, or use dynamic generation from SMILES |
+| Reaction templates | RXN or `"default"` | `reactions.*` of the polymer solute | The string `"default"` loads bundled ATRP templates; a file path loads a custom template |
 
 ```{note}
 The sentinel value `"default"` for reaction templates is **not** a file path.
@@ -407,7 +407,7 @@ topology and trajectory files of each replicate.
 
 ```{warning}
 **Path resolution is config-relative, not CWD-relative.**
-Relative paths in `config.yaml` (e.g., `enzyme.pdb_path: "structures/enzyme.pdb"`)
+Relative paths in `config.yaml` (e.g., `pdb_path: "structures/enzyme.pdb"` of the protein solute)
 are resolved relative to the directory containing `config.yaml`, not your
 shell's current working directory. Relative `-c` paths of `polyzymd analyze`
 are resolved from the current directory.

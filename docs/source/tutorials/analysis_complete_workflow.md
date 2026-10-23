@@ -59,32 +59,35 @@ name: trpcage_sbma
 description: Trp-cage with two SBMA 3-mers in water with NaCl
 ```
 
-Add this section at the end of the file:
+Add this entry to the `solutes:` list, after the protein entry:
 
 ```yaml
-polymers:
-  enabled: true
-  generation_mode: dynamic
-  type_prefix: SBMA
-  reactions:
-    initiation: default
-    polymerization: default
-    termination: default
-  monomers:
-    - label: A
-      probability: 1.0
-      name: SBMA
-      residue_name: SBM
-      smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
-  length: 3
-  count: 2
-  packing:
-    padding: 0.5
+  - type: polymer
+    generation_mode: dynamic
+    type_prefix: SBMA
+    reactions:
+      initiation: default
+      polymerization: default
+      termination: default
+    monomers:
+      - label: A
+        probability: 1.0
+        name: SBMA
+        residue_name: SBM
+        smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
+    length: 3
+    count: 2
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+    packing:
+      padding: 0.5
 ```
 
-The section asks for two chains of three SBMA monomers. `dynamic` builds each
+The entry asks for two chains of three SBMA monomers. `dynamic` builds each
 chain from the SMILES of the monomer, with the ATRP reaction templates that
 ship with PolyzyMD. `residue_name: SBM` names the monomers in the topology.
+`force_field` is the same file as `solvent.force_field`. `charges` charges
+each new chain with {term}`NAGL` and the model you name.
 `packing.padding: 0.5` places the chains within 0.5 nm of the protein
 surface, so they touch the protein within the few picoseconds of this
 tutorial. A real study uses the default, 2.0 nm, and a long simulation. For

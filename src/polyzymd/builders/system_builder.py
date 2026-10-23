@@ -1011,10 +1011,13 @@ class SystemBuilder:
         self._solute_handles = {
             solute.type: (solute.name, solute.segid) for solute in getattr(config, "solutes", [])
         }
-        from polyzymd.utils.charging import DEFAULT_NAGL_MODEL, nagl_model_provenance
+        from polyzymd.utils.charging import nagl_model_provenance
 
         self._build_provenance = {"packmol_seed": polymer_seed}
-        self._build_provenance.update(nagl_model_provenance(self._nagl_model or DEFAULT_NAGL_MODEL))
+        # Record a NAGL model only when a component is charged with one.
+        nagl_model = getattr(config, "nagl_model", None)
+        if nagl_model is not None:
+            self._build_provenance.update(nagl_model_provenance(nagl_model))
         if config.polymers and config.polymers.enabled:
             self._build_provenance["polymer_seed"] = polymer_seed
         if polymer_seed is None:
