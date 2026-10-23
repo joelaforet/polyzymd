@@ -160,15 +160,19 @@ class RealizedSystem:
                 f"{ASK_FOR_SUPPORT}"
             )
 
+        # The production run's preprocessor defines (define = -DPOSRES -DFLEXIBLE ...)
+        # choose blocks of the topology, so they are read as grompp would.
+        defines = mdp_defines(parse_mdp(mdp).get("define", ""))
         gro_file = app.GromacsGroFile(str(gro))
         topology_file = app.GromacsTopFile(
-            str(top), periodicBoxVectors=gro_file.getPeriodicBoxVectors()
+            str(top), periodicBoxVectors=gro_file.getPeriodicBoxVectors(), defines=defines
         )
         kwargs: dict[str, Any] = {
             "nonbondedMethod": app.PME,
             "nonbondedCutoff": rcoulomb * unit.nanometer,
             "constraints": constraint_map[constraints_key],
-            "rigidWater": True,
+            # GROMACS keeps water rigid (SETTLE) unless the run defines FLEXIBLE.
+            "rigidWater": "FLEXIBLE" not in defines,
             "ewaldErrorTolerance": float(options.get("ewald-rtol", 1e-5)),
         }
         if modifier == "potential-switch":
@@ -199,6 +203,16 @@ class RealizedSystem:
         dt_ps = options.get("dt")
         realized.settings["timestep_fs"] = float(dt_ps) * 1000 if dt_ps else None
         return realized
+
+
+def mdp_defines(text: str) -> dict[str, str]:
+    """Return the preprocessor defines of an ``.mdp`` ``define`` line (``-DPOSRES -DX=1``)."""
+    defines = {}
+    for token in text.split():
+        if token.startswith("-D") and len(token) > 2:
+            name, _, value = token[2:].partition("=")
+            defines[name] = value or "1"
+    return defines
 
 
 def parse_mdp(path: Path) -> dict[str, str]:
