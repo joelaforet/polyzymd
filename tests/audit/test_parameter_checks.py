@@ -71,6 +71,8 @@ def test_a_correct_build_passes_every_parameter_check(built, correct) -> None:
     assert {(f.component, f.check) for f in findings} == {
         (name, check) for name in names for check in PARAMETER_CHECKS
     }
+    coverage = run_checks(correct[0], builder.components(), ["parameters.coverage"])
+    assert [(f.component, f.status) for f in coverage] == [("system", "PASS")]
     assert all(f.status == "PASS" for f in findings), [f for f in findings if f.status != "PASS"]
 
 
@@ -120,12 +122,13 @@ def test_ff14sb_loaded_last_fails_a_small_molecule(built) -> None:
     wrong = builder._create_interchange_single_call(reversed_ff, get_solvent_molecule("tip3p"))
     realized = _realize(folder, wrong.to_openmm(combine_nonbonded_forces=True), "ff14sb_last")
     failed = _failed(run_checks(realized, builder.components(), PARAMETER_CHECKS))
-    names = {c.type: c.name for c in builder.components()}
-    assert any(
-        component in (names["small_molecule"], names["polymer"], "solvent")
-        for component, check in failed
-        if check.startswith("parameters.")
-    ), failed
+    substrate = next(c.name for c in builder.components() if c.type == "small_molecule")
+    # The protein is right (ff14SB is its force field); the substrate's amide is not.
+    assert failed == {
+        (substrate, "parameters.bonded"),
+        (substrate, "parameters.nonbonded"),
+        (substrate, "parameters.constraints"),
+    }
 
 
 def _broken(built, name, edit) -> list:
@@ -222,3 +225,63 @@ def test_parameters_a_change_in_openff_would_move_are_pinned(correct, built) -> 
 #: The C-H constraint lengths (aromatic and aliphatic) Sage 2.3.0 gives the substrate,
 #: as OpenFF Interchange realized them when this test was written.
 SAGE_CH_CONSTRAINTS_NM = {0.108664, 0.109245}
+
+
+def test_one_wrong_copy_among_thousands_of_waters_fails_the_solvent(built) -> None:
+    """Copies are compared once per distinct set of terms, so one odd water is still seen."""
+
+    def edit(system, builder):
+        solvent = next(c for c in builder.components() if c.type == "solvent")
+        water = next(d for d in solvent.domains if d.name == "water")
+        oxygen = water.atoms[500].start
+        force = _nonbonded(system)
+        q, sigma, epsilon = force.getParticleParameters(oxygen)
+        force.setParticleParameters(oxygen, q * 0.9, sigma, epsilon)
+
+    status = _status(_broken(built, "one_water", edit))
+    assert status[("solvent", "charges.source")] == "FAIL"
+    assert status[("solvent", "parameters.bonded")] == "PASS"
+
+
+def test_one_wrong_polymer_chain_fails_the_polymer(built) -> None:
+    """A bond of one chain made 10 % stiffer fails the polymer, whatever its copies hold."""
+
+    def edit(system, builder):
+        polymer = next(c for c in builder.components() if c.type == "polymer")
+        chain = set(polymer.molecules[-1])
+        force = next(f for f in system.getForces() if isinstance(f, openmm.HarmonicBondForce))
+        for k in range(force.getNumBonds()):
+            a, b, r0, kb = force.getBondParameters(k)
+            if a in chain and b in chain:
+                force.setBondParameters(k, a, b, r0, kb * 1.1)
+                return
+
+    status = _status(_broken(built, "one_chain", edit))
+    polymer = next(c.name for c in built[0].components() if c.type == "polymer")
+    assert status[(polymer, "parameters.bonded")] == "FAIL"
+
+
+def test_a_bond_between_two_components_fails_coverage(built) -> None:
+    """A term no component declares (here a protein-substrate bond) fails parameters.coverage."""
+
+    def edit(system, builder):
+        protein = _atoms_of(builder, "protein")
+        substrate = _atoms_of(builder, "small_molecule")
+        force = next(f for f in system.getForces() if isinstance(f, openmm.HarmonicBondForce))
+        force.addBond(protein[0], substrate[0], 0.15, 1000.0)
+
+    builder, _, folder = built
+    system = _openmm_system(builder)
+    edit(system, builder)
+    findings = run_checks(
+        _realize(folder, system, "cross_bond"), builder.components(), ["parameters.coverage"]
+    )
+    assert [(f.component, f.status) for f in findings] == [("system", "FAIL")]
+    assert "not single molecules" in findings[0].detail
+
+
+def test_gromacs_defines_are_read_from_the_mdp() -> None:
+    from polyzymd.audit.realized import mdp_defines
+
+    assert mdp_defines("-DPOSRES -DFLEXIBLE -DX=2") == {"POSRES": "1", "FLEXIBLE": "1", "X": "2"}
+    assert mdp_defines("") == {}

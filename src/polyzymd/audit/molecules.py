@@ -73,6 +73,24 @@ def map_molecule(
     return next(matcher.isomorphisms_iter(), None)
 
 
+def molecule_maps(molecule: Any, sub_graph: nx.Graph, limit: int = 64) -> list[dict[int, int]]:
+    """Return up to ``limit`` element-preserving maps of ``sub_graph`` onto ``molecule``.
+
+    A graph without bond orders has symmetries the chemistry does not (the two
+    oxygens of a carboxylate, say), so a caller picks among these the map whose
+    terms agree best, instead of trusting the first.
+    """
+    matcher = nx.algorithms.isomorphism.GraphMatcher(
+        sub_graph, molecule_graph(molecule), node_match=lambda a, b: a["element"] == b["element"]
+    )
+    maps = []
+    for mapping in matcher.isomorphisms_iter():
+        maps.append(mapping)
+        if len(maps) >= limit:
+            break
+    return maps
+
+
 def reference_system(
     force_field_files: Sequence[str],
     topology: Any,
