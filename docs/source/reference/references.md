@@ -11,6 +11,18 @@ For contributors: when you add a method, add its reference here and in the
 
 To cite PolyzyMD itself, see `CITATION.cff` in the repository root.
 
+## Building the system
+
+PolyzyMD uses these methods only when the config asks for them; cite each
+one that your build used. The build log names it when it is used.
+
+- Machado, M. R. and Pantano, S. (2020). Split the charge difference in two!
+  A rule of thumb for adding proper amounts of ions in MD simulations.
+  *Journal of Chemical Theory and Computation*, 16(3), 1367-1372.
+  doi:10.1021/acs.jctc.9b00953. Used by `solvent.ions.ionic_strength`: the
+  neutralizing charge is split between Na+ and Cl-, so the counter-ions count
+  toward the ionic strength.
+
 ## Libraries we build on
 
 PolyzyMD does not reimplement trajectory input and output, neighbour searching,
