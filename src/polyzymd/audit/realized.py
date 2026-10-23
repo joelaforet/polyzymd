@@ -23,7 +23,7 @@ from typing import Any, Literal, Optional
 
 import numpy as np
 
-from polyzymd.audit.terms import SystemIndex
+from polyzymd.audit.terms import ASK_FOR_SUPPORT, SystemIndex
 
 Engine = Literal["openmm", "gromacs"]
 
@@ -129,30 +129,35 @@ class RealizedSystem:
             "h-angles": app.HAngles,
         }
         if constraints_key not in constraint_map:
-            raise ValueError(f"{mdp}: constraints = {constraints_key} is not understood")
+            raise ValueError(
+                f"{mdp}: constraints = {constraints_key} is not understood. {ASK_FOR_SUPPORT}"
+            )
         rvdw = float(options.get("rvdw", 1.0))
         rcoulomb = float(options.get("rcoulomb", 1.0))
         if abs(rvdw - rcoulomb) > 1e-9:
-            raise ValueError(f"{mdp}: rvdw ({rvdw}) and rcoulomb ({rcoulomb}) differ")
+            raise ValueError(
+                f"{mdp}: rvdw ({rvdw}) and rcoulomb ({rcoulomb}) differ. {ASK_FOR_SUPPORT}"
+            )
         # GROMACS's default coulombtype is a plain cutoff; OpenMM has no exact match.
         coulombtype = options.get("coulombtype", "cut-off")
         if coulombtype != "pme":
             raise ValueError(
                 f"{mdp}: coulombtype = {coulombtype} has no exact OpenMM equivalent; "
-                "the audit reads PME only"
+                f"the audit reads PME only. {ASK_FOR_SUPPORT}"
             )
         vdwtype = options.get("vdwtype", "cut-off").replace("cutoff", "cut-off")
         modifier = options.get("vdw-modifier", "potential-shift")
         if vdwtype != "cut-off" or modifier not in ("potential-switch", "none"):
             raise ValueError(
                 f"{mdp}: vdwtype = {vdwtype} with vdw-modifier = {modifier} has no exact "
-                "OpenMM equivalent; use vdw-modifier = Potential-switch or None"
+                f"OpenMM equivalent; use vdw-modifier = Potential-switch or None. {ASK_FOR_SUPPORT}"
             )
         dispcorr = options.get("dispcorr", "no")
         if dispcorr not in ("no", "enerpres"):
             raise ValueError(
                 f"{mdp}: DispCorr = {dispcorr} has no exact OpenMM equivalent "
-                "(OpenMM corrects energy and pressure together); use EnerPres or no"
+                "(OpenMM corrects energy and pressure together); use EnerPres or no. "
+                f"{ASK_FOR_SUPPORT}"
             )
 
         # The production run's preprocessor defines (define = -DPOSRES -DFLEXIBLE ...)
