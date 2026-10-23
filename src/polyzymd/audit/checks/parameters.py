@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from polyzymd.audit.findings import AuditContext, Finding
-from polyzymd.audit.references import DomainComparison, compare_component
+from polyzymd.audit.references import CONSTRAINTS_FROM, DomainComparison, compare_component
 from polyzymd.audit.registry import CheckSpec, register
 
 #: The kinds of term each check reads.
@@ -22,10 +22,20 @@ _KINDS = {
 }
 
 
+def _constraints_from(components: Any) -> str:
+    """The small-molecule force field whose Constraints section the build lends to the protein."""
+    for component in components:
+        for domain in component.domains:
+            if domain.charges.method == "water_model" and domain.force_field:
+                return domain.force_field[0]
+    return CONSTRAINTS_FROM
+
+
 def _comparisons(context: AuditContext) -> dict[str, list[DomainComparison]]:
     if "references" not in context.cache:
+        source = _constraints_from(context.components)
         context.cache["references"] = {
-            component.name: compare_component(context.realized, component)
+            component.name: compare_component(context.realized, component, source)
             for component in context.components
         }
     return context.cache["references"]
@@ -123,6 +133,69 @@ for _spec in (
     ),
 ):
     _register(_spec)
+
+
+@register(
+    CheckSpec(
+        "parameters.coverage",
+        "system",
+        "FAIL",
+        "atoms no component owns, molecules other than the components declare, or terms "
+        "(bonds, constraints, exceptions) joining two molecules",
+        "every term must have exactly one declared source",
+    )
+)
+def coverage(context: AuditContext) -> list[Finding]:
+    """Every atom is in one component, every declared molecule is one molecule of the system,
+    and no term joins two molecules (a term that does has no declared source)."""
+    from collections import Counter
+
+    index = context.realized.index
+    n_atoms = context.realized.n_atoms
+    problems: list[str] = []
+    owned = Counter(i for c in context.components for i in c.atom_indices())
+    unowned = [i for i in range(n_atoms) if owned[i] == 0]
+    shared = sorted(i for i, n in owned.items() if n > 1)
+    if unowned:
+        problems.append(f"{len(unowned)} atoms belong to no component (first: atom {unowned[0]})")
+    if shared:
+        problems.append(f"{len(shared)} atoms belong to two components (first: atom {shared[0]})")
+    size = Counter(index.molecule_of)
+    for component in context.components:
+        wrong = [
+            r
+            for r in component.molecules
+            if len({index.molecule_of[i] for i in r}) != 1
+            or size[index.molecule_of[r.start]] != len(r)
+        ]
+        if wrong:
+            problems.append(
+                f"{component.name}: {len(wrong)} of its {len(component.molecules)} molecules are "
+                f"not single molecules of the system (first at atom {wrong[0].start}): a bond or "
+                "constraint joins or splits them"
+            )
+    spanning = [
+        (kind, atoms)
+        for terms in index.terms.values()
+        for kind, entries in terms.items()
+        for atoms, _ in entries
+        if len({index.molecule_of[a] for a in atoms}) > 1
+    ]
+    if spanning:
+        problems.append(
+            f"{len(spanning)} terms join two molecules (first: {spanning[0][0]} {spanning[0][1]})"
+        )
+    if problems:
+        return [Finding("parameters.coverage", "system", "FAIL", "; ".join(problems))]
+    return [
+        Finding(
+            "parameters.coverage",
+            "system",
+            "PASS",
+            f"{n_atoms} atoms in {len(context.components)} components; every term is inside one "
+            "declared molecule",
+        )
+    ]
 
 
 def comparisons(context: AuditContext) -> Any:
