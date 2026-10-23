@@ -133,7 +133,7 @@ def test_an_unreadable_system_is_an_audit_failure() -> None:
 
 
 def test_the_build_record_lists_the_methods_to_cite() -> None:
-    """A build whose ions were set by ionic_strength names Machado and Pantano to cite."""
+    """Packmol when it packed the build; Machado and Pantano when ionic_strength set the ions."""
     from types import SimpleNamespace
 
     from polyzymd.simulation.artifact_integrity import methods_to_cite, provenance_markdown
@@ -144,7 +144,13 @@ def test_the_build_record_lists_the_methods_to_cite() -> None:
         )
 
     assert methods_to_cite(config(None)) == []
-    cited = methods_to_cite(config(0.13))
-    assert len(cited) == 1 and "doi:10.1021/acs.jctc.9b00953" in cited[0]
+    packed = {"packmol_seed": 1, "solvent_packmol_seed": 1}
+    cited = methods_to_cite(config(None), packed)
+    assert len(cited) == 1 and "doi:10.1002/jcc.21224" in cited[0]
+    # packmol_seed alone is recorded before anything is packed; it is not evidence.
+    assert methods_to_cite(config(None), {"packmol_seed": 1}) == []
+    cited = methods_to_cite(config(0.13), {"polymer_packmol_seed": 2})
+    assert [c.split(" ")[0] for c in cited] == ["Martínez,", "Machado,"]
+    assert "doi:10.1021/acs.jctc.9b00953" in cited[1]
     text = provenance_markdown({"components": [], "cite": cited})
-    assert "## Methods to cite" in text and "Machado" in text
+    assert "## Methods to cite" in text and "PACKMOL" in text and "Machado" in text

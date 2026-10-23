@@ -29,6 +29,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Packmol places the solvent, co-solvents and polymer chains of every build;
+#: cite it in the methods of a system PolyzyMD built.
+PACKMOL = (
+    "Martínez, L., Andrade, R., Birgin, E. G. and Martínez, J. M. (2009). PACKMOL: a "
+    "package for building initial configurations for molecular dynamics simulations. "
+    "J. Comput. Chem. 30(13), 2157-2164. doi:10.1002/jcc.21224"
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -602,6 +610,7 @@ def run_packmol(
 
     input_path.write_text(input_text)
 
+    logger.info("Packing with Packmol: cite %s", PACKMOL)
     logger.debug("Running Packmol in %s", working_directory)
     logger.debug("Input file:\n%s", input_text)
 
