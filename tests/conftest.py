@@ -61,3 +61,16 @@ def git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
         "GIT_COMMITTER_EMAIL": "test@example.com",
     }.items():
         monkeypatch.setenv(key, value)
+
+
+@pytest.fixture()
+def passing_audit(monkeypatch):
+    """Record a passing physics audit for bundles a test publishes.
+
+    Tests of bundle mechanics (hashes, moves, rollback) publish tiny or fake
+    systems no audit can read; real builds always audit (tests/audit).
+    """
+    from polyzymd.audit.report import AuditReport
+    from polyzymd.simulation import artifact_integrity
+
+    monkeypatch.setattr(artifact_integrity, "_audit", lambda *args, **kwargs: AuditReport([]))

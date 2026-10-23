@@ -82,7 +82,9 @@ def test_rebuild_refuses_mismatched_files(tmp_path: Path, water_box) -> None:
         rebuild_analysis_topology(tmp_path)
 
 
-def test_build_bundle_publishes_and_validates_the_prmtop(tmp_path: Path, water_box) -> None:
+def test_build_bundle_publishes_and_validates_the_prmtop(
+    tmp_path: Path, water_box, passing_audit
+) -> None:
     """The bundle publisher writes system.prmtop and records it in the manifest."""
     from polyzymd.simulation.artifact_integrity import (
         ArtifactIntegrityError,
