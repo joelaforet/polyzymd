@@ -1051,3 +1051,11 @@ def test_a_missing_packmol_is_named(monkeypatch) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: None)
     with pytest.raises(OSError, match="Packmol is not on PATH"):
         packmol._require_packmol()
+
+
+def test_packing_order_puts_the_largest_count_first_and_keeps_ties() -> None:
+    """Chains appear in the packed system in this order, so components() relies on it."""
+    from polyzymd.utils.packmol import packing_order
+
+    assert packing_order([1, 3, 2]) == [1, 2, 0]
+    assert packing_order([2, 2, 5]) == [2, 0, 1]

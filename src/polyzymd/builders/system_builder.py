@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from openff.toolkit import ForceField, Molecule, Topology
 
     from polyzymd.config.schema import SimulationConfig
+    from polyzymd.core.components import ChargeSource, ComponentRecord
 
 from polyzymd.builders.enzyme import EnzymeBuilder
 from polyzymd.builders.polymer import PolymerBuilder
@@ -26,6 +27,30 @@ from polyzymd.builders.substrate import SubstrateBuilder
 LOGGER = logging.getLogger(__name__)
 
 _ORIGINAL_RESIDUE_TOKEN_KEY = "_polyzymd_original_residue_token"
+
+
+def _default_nagl_model() -> str:
+    from polyzymd.utils.charging import DEFAULT_NAGL_MODEL
+
+    return DEFAULT_NAGL_MODEL
+
+
+def _cosolvent_charges(cosolvent: Any, nagl_model: Optional[str]) -> "ChargeSource":
+    """Return where a co-solvent's charges come from: its bundled SDF, or its charge method."""
+    from polyzymd.core.components import ChargeSource
+    from polyzymd.data.solvent_molecules import _SOLVENTS_DIR, is_bundled_solvent
+
+    library = _SOLVENTS_DIR / f"{cosolvent.name.lower().strip()}.sdf"
+    if is_bundled_solvent(cosolvent.name) and library.exists() and cosolvent.molecule is not None:
+        from openff.toolkit import Molecule
+
+        # The solvent loader uses the bundled charges whenever the molecule is the
+        # library's, whether or not the config spelled out its SMILES.
+        if Molecule.from_file(str(library)).is_isomorphic_with(cosolvent.molecule):
+            return ChargeSource("preset", source_file=str(library))
+    method = getattr(cosolvent, "charge_method", "nagl") or "nagl"
+    model = (nagl_model or _default_nagl_model()) if method == "nagl" else None
+    return ChargeSource(method, model=model)
 
 
 class SystemBuilder:
@@ -74,6 +99,8 @@ class SystemBuilder:
         # State
         self._enzyme_topology: Optional[Topology] = None
         self._substrate_molecule: Optional[Molecule] = None
+        self._substrate_charge_method: Optional[str] = None
+        self._substrate_conformer_index: Optional[int] = None
         self._polymer_molecules: List[Molecule] = []
         self._polymer_counts: List[int] = []
         self._combined_topology: Optional[Topology] = None
@@ -176,6 +203,8 @@ class SystemBuilder:
             residue_name=residue_name,
             nagl_model=self._nagl_model,
         )
+        self._substrate_charge_method = charge_method
+        self._substrate_conformer_index = conformer_index
         self._n_substrate_molecules = 1
         return self._substrate_molecule
 
@@ -981,6 +1010,8 @@ class SystemBuilder:
             LOGGER.info(f"Building substrate: {config.substrate.name}")
             self._substrate_builder.build_from_config(config.substrate, nagl_model=self._nagl_model)
             self._substrate_molecule = self._substrate_builder.molecule
+            self._substrate_charge_method = config.substrate.charge_method.value
+            self._substrate_conformer_index = config.substrate.conformer_index
             self._n_substrate_molecules = 1
 
         # 3. Combine enzyme + substrate
@@ -1227,3 +1258,170 @@ class SystemBuilder:
             polymer_chain_id="C",
             solvent_start_chain_id="D",
         )
+
+    def components(self) -> List["ComponentRecord"]:
+        """Return the components of the solvated system, in atom order.
+
+        Each record names the atoms the component owns, where their parameters
+        and charges come from (as the build was asked to make them), and the
+        inputs it was made from. The physics audit checks the built system
+        against these records.
+
+        Raises:
+            RuntimeError: If the system has not been solvated.
+        """
+        from polyzymd.core.components import (
+            DEFAULT_SEGIDS,
+            ChargeSource,
+            ComponentRecord,
+            Domain,
+            check_layout,
+            file_record,
+            molecule_ranges,
+        )
+
+        if self._solvated_topology is None:
+            raise RuntimeError("No solvated topology. Call solvate() first.")
+        sizes = [molecule.n_atoms for molecule in self._solvated_topology.molecules]
+        records: List[ComponentRecord] = []
+        cursor = 0  # index of the next molecule
+
+        def take(n_molecules: int):
+            nonlocal cursor
+            start = sum(sizes[:cursor])
+            ranges = molecule_ranges(sizes[cursor : cursor + n_molecules], start)
+            cursor += n_molecules
+            return ranges
+
+        def charges(method: Optional[str], source_file=None) -> ChargeSource:
+            model = (self._nagl_model or _default_nagl_model()) if method == "nagl" else None
+            return ChargeSource(method=method, model=model, source_file=source_file)
+
+        if self._n_enzyme_molecules:
+            atoms = take(self._n_enzyme_molecules)
+            records.append(
+                ComponentRecord(
+                    name="protein",
+                    type="protein",
+                    segid=DEFAULT_SEGIDS["protein"],
+                    placement="fixed",
+                    molecules=atoms,
+                    domains=[
+                        Domain(
+                            "protein", tuple(atoms), (self._protein_ff,), ChargeSource("library")
+                        )
+                    ],
+                    provenance={"pdb": file_record(self._enzyme_builder.pdb_path)},
+                )
+            )
+        if self._n_substrate_molecules:
+            atoms = take(self._n_substrate_molecules)
+            method = self._substrate_charge_method or "nagl"
+            records.append(
+                ComponentRecord(
+                    name="substrate",
+                    type="small_molecule",
+                    segid=DEFAULT_SEGIDS["small_molecule"],
+                    placement="fixed",
+                    molecules=atoms,
+                    domains=[Domain("substrate", tuple(atoms), (self._sm_ff,), charges(method))],
+                    provenance={
+                        "sdf": file_record(self._substrate_builder.sdf_path),
+                        "conformer_index": self._substrate_conformer_index,
+                    },
+                )
+            )
+        if self._n_polymer_chains:
+            molecules, domains, sources = [], [], {}
+            from polyzymd.utils.packmol import packing_order
+
+            sequences = list(self._polymer_builder.sequence_counts) if self._polymer_builder else []
+            for index in packing_order(self._polymer_counts):
+                count = self._polymer_counts[index]
+                atoms = take(count)
+                molecules += atoms
+                sequence = sequences[index] if index < len(sequences) else f"type{index}"
+                source = (
+                    self._polymer_builder.molecule_source(sequence) if self._polymer_builder else {}
+                )
+                sdf = source.get("sdf_path")
+                domains.append(
+                    Domain(
+                        f"polymer:{sequence}",
+                        tuple(atoms),
+                        (self._sm_ff,),
+                        charges(source.get("charge_method", "preset"), str(sdf) if sdf else None),
+                    )
+                )
+                sources[sequence] = {"chains": count, "sdf": file_record(sdf)}
+            records.append(
+                ComponentRecord(
+                    name="polymer",
+                    type="polymer",
+                    segid=DEFAULT_SEGIDS["polymer"],
+                    placement="packed",
+                    molecules=molecules,
+                    domains=domains,
+                    provenance={"sequences": sources},
+                )
+            )
+        counts = self._solvent_builder._solvation_counts
+        composition = self._solvent_builder._composition
+        if counts is not None:
+            water_model = composition.water_model if composition else "tip3p"
+            water = take(counts.water)
+            na, cl = take(counts.na), take(counts.cl)
+            solvent_molecules = list(water)
+            domains = [
+                Domain(
+                    "water", tuple(water), (self._sm_ff,), ChargeSource("water_model", water_model)
+                )
+            ]
+            for (name, count), cosolvent in zip(
+                counts.co_solvents, composition.co_solvents if composition else []
+            ):
+                atoms = take(count)
+                solvent_molecules += atoms
+                domains.append(
+                    Domain(
+                        f"co_solvent:{name}",
+                        tuple(atoms),
+                        (self._sm_ff,),
+                        _cosolvent_charges(cosolvent, self._nagl_model),
+                    )
+                )
+            records.append(
+                ComponentRecord(
+                    name="solvent",
+                    type="solvent",
+                    segid=DEFAULT_SEGIDS["solvent"],
+                    placement="packed",
+                    molecules=solvent_molecules,
+                    domains=domains,
+                    provenance={
+                        "water_model": water_model,
+                        "waters": counts.water,
+                        "co_solvents": dict(counts.co_solvents),
+                    },
+                )
+            )
+            if na or cl:
+                records.append(
+                    ComponentRecord(
+                        name="ions",
+                        type="ions",
+                        segid=DEFAULT_SEGIDS["ions"],
+                        placement="packed",
+                        molecules=na + cl,
+                        domains=[
+                            Domain("ions", tuple(na + cl), (self._sm_ff,), ChargeSource("library"))
+                        ],
+                        provenance={"Na+": counts.na, "Cl-": counts.cl},
+                    )
+                )
+        if cursor != len(sizes):
+            raise RuntimeError(
+                f"{len(sizes) - cursor} molecules of the solvated system belong to no component"
+            )
+        check_layout(records, sum(sizes))
+        return records
