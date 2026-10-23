@@ -182,6 +182,9 @@ class SegmentRecord(BaseModel):
     openmm_version: str | None = None
     pixi_environment: str | None = None
     openmm_platform: dict[str, Any] | None = None
+    #: The segment's System compared with the audited build
+    #: (polyzymd.audit.runtime.record_system_check); None for older records.
+    system_check: dict[str, Any] | None = None
     trajectory_sha256: str | None = None
     trajectory_bytes: int | None = None
     report_interval: int | None = None
@@ -508,6 +511,18 @@ def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path
 
     progress.last_updated = _now_iso()
     target = _progress_path(working_dir)
+    # The run-time system check is written beside each segment when it starts,
+    # before or after its record exists; attach it to the record here.
+    for seg in progress.segments:
+        if seg.system_check is None:
+            check = working_dir / f"production_{seg.index}" / (
+                f"production_{seg.index}_system_check.json"
+            )
+            if check.is_file():
+                try:
+                    seg.system_check = json.loads(check.read_text())
+                except (OSError, json.JSONDecodeError):
+                    pass
 
     # A fixed temporary file name is shared state: two writers (the
     # simulation loop's periodic update and a concurrent CLI command) could
@@ -544,6 +559,9 @@ def _update_or_append_segment(
             # built fresh, so its default started_at is the end time; keep
             # the start recorded when the segment was marked RUNNING.
             record.started_at = existing.started_at
+            # Likewise the run-time system check, recorded once the segment starts.
+            if record.system_check is None:
+                record.system_check = existing.system_check
             progress.segments[i] = record
             return
     progress.segments.append(record)
