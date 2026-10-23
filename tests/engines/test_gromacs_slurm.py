@@ -1914,6 +1914,15 @@ def test_job_resubmits_until_the_last_checkpoint_reaches_nsteps(
     run.mkdir(parents=True)
     for name in ("em.gro", "eq_01.gro", "eq_01.cpt", "state.cpt"):
         (run / name).write_text("x")
+    # The build's passing audit vouches for these files (checked before grompp).
+    import hashlib
+
+    (run / "audited_files.sha256").write_text(
+        "".join(
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
+            for path in sorted(run.iterdir())
+        )
+    )
     (run / "prod.log").write_text(log)
     script = tmp_path / "job.sh"
     script.write_text(
