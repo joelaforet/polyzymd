@@ -51,15 +51,19 @@ class SystemBuilder:
         self,
         protein_forcefield: str = "ff14sb_off_impropers_0.0.4.offxml",
         small_molecule_forcefield: str = "openff-2.0.0.offxml",
+        nagl_model: Optional[str] = None,
     ) -> None:
         """Initialize the SystemBuilder.
 
         Args:
             protein_forcefield: Force field for proteins.
             small_molecule_forcefield: Force field for small molecules.
+            nagl_model: NAGL model for every molecule charged with nagl; the
+                default model when None.
         """
         self._protein_ff = protein_forcefield
         self._sm_ff = small_molecule_forcefield
+        self._nagl_model = nagl_model
 
         # Sub-builders
         self._enzyme_builder = EnzymeBuilder()
@@ -107,6 +111,7 @@ class SystemBuilder:
         builder = cls(
             protein_forcefield=config.force_field.protein,
             small_molecule_forcefield=config.force_field.small_molecule,
+            nagl_model=config.force_field.nagl_model,
         )
         builder._config = config
         return builder
@@ -169,6 +174,7 @@ class SystemBuilder:
             conformer_index=conformer_index,
             charge_method=charge_method,
             residue_name=residue_name,
+            nagl_model=self._nagl_model,
         )
         self._n_substrate_molecules = 1
         return self._substrate_molecule
@@ -232,6 +238,7 @@ class SystemBuilder:
             reactions=reactions,
             charger_type=charger_type,
             max_retries=max_retries,
+            nagl_model=self._nagl_model,
         )
 
         molecules, counts = self._polymer_builder.build(count=count, seed=seed)
@@ -405,6 +412,12 @@ class SystemBuilder:
 
         LOGGER.info("Solvating system")
 
+        if self._nagl_model is not None:
+            import dataclasses
+
+            composition = dataclasses.replace(
+                composition or SolventComposition(), nagl_model=self._nagl_model
+            )
         self._solvated_topology = self._solvent_builder.solvate(
             topology=self._combined_topology,
             composition=composition,
@@ -945,7 +958,10 @@ class SystemBuilder:
         """
         config.require_buildable()
         self._working_dir = Path(working_dir) if working_dir else None
+        from polyzymd.utils.charging import DEFAULT_NAGL_MODEL, nagl_model_provenance
+
         self._build_provenance = {"packmol_seed": polymer_seed}
+        self._build_provenance.update(nagl_model_provenance(self._nagl_model or DEFAULT_NAGL_MODEL))
         if config.polymers and config.polymers.enabled:
             self._build_provenance["polymer_seed"] = polymer_seed
         if polymer_seed is None:
@@ -963,7 +979,7 @@ class SystemBuilder:
         # 2. Build substrate (if configured)
         if config.substrate:
             LOGGER.info(f"Building substrate: {config.substrate.name}")
-            self._substrate_builder.build_from_config(config.substrate)
+            self._substrate_builder.build_from_config(config.substrate, nagl_model=self._nagl_model)
             self._substrate_molecule = self._substrate_builder.molecule
             self._n_substrate_molecules = 1
 
@@ -1070,6 +1086,7 @@ class SystemBuilder:
             config.solvent,
             seed=polymer_seed,
             box_vectors=box_vectors,
+            nagl_model=self._nagl_model,
         )
         self._solvated_topology = self._solvent_builder.solvated_topology
         self._build_provenance["solvent_packmol_seed"] = self._solvent_builder.packmol_seed

@@ -126,6 +126,7 @@ class PolymerBuilder:
         reactions: Optional["ReactionConfig"] = None,
         charger_type: str = "nagl",
         max_retries: int = 10,
+        nagl_model: Optional[str] = None,
     ) -> None:
         """Initialize the PolymerBuilder.
 
@@ -169,6 +170,7 @@ class PolymerBuilder:
         self._reactions = reactions
         self._charger_type = charger_type.lower()
         self._max_retries = max_retries
+        self._nagl_model = nagl_model
 
         # Validate dynamic mode requirements
         if self._generation_mode == "dynamic":
@@ -621,6 +623,7 @@ class PolymerBuilder:
             max_retries=self._max_retries,
             charger_type=self._charger_type,
             type_prefix=self._type_prefix,
+            nagl_model=self._nagl_model,
         )
 
         LOGGER.info("Dynamic polymer generation pipeline initialized")

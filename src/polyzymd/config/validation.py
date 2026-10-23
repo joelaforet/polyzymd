@@ -229,6 +229,18 @@ def require_inputs(config: Any) -> None:
                 ".offxml file."
             )
 
+    from polyzymd.utils.charging import installed_nagl_model
+
+    nagl_model = config.force_field.nagl_model
+    if installed_nagl_model(nagl_model) is None:
+        from openff.nagl_models import list_available_nagl_models
+
+        installed = ", ".join(sorted(path.name for path in list_available_nagl_models()))
+        raise ValueError(
+            f"force_field.nagl_model {nagl_model!r} is not an installed NAGL model.\n"
+            f"fix: name one of {installed}, or give the path of a model file."
+        )
+
 
 def _require_chargeable(molecule: Any, method: Any, what: str) -> None:
     """Raise ``ValueError`` when ``method`` cannot assign charges to an RDKit molecule."""

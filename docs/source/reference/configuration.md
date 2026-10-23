@@ -515,7 +515,7 @@ PolyzyMD solves this by computing charges **once** and reusing them:
 # Lookup order for get_solvent_molecule("dmso")
 1. Check in-memory cache (fastest)
 2. Check bundled library: src/polyzymd/data/solvents/dmso.sdf (used when no SMILES or the library SMILES is given)
-3. Check user cache: ~/.polyzymd/solvent_cache/<name>.<charge method>.<SMILES hash>.sdf
+3. Check user cache: ~/.polyzymd/solvent_cache/<name>.<charge method>.<hash of SMILES, method and NAGL model>.sdf
 4. Generate from SMILES, charge with charge_method (default nagl), save to user cache
 ```
 
@@ -550,7 +550,7 @@ When you use a custom co-solvent (not in the library), PolyzyMD:
    build writes a warning that asks you to check that NAGL charges suit the
    molecule.
 3. Caches the charged molecule in `~/.polyzymd/solvent_cache/`, one file per
-   SMILES and charge method, and reuses it. A changed SMILES gives a new
+   SMILES, charge method and NAGL model, and reuses it. A changed SMILES gives a new
    molecule, even under the same `name`.
 
 A charged molecule can carry Na+ or Cl- counter-ions in its SMILES
@@ -796,7 +796,18 @@ The removed `volume_fraction` field is not part of naming-template resolution.
 force_field:
   protein: "ff14sb_off_impropers_0.0.4.offxml"  # Protein force field
   small_molecule: "openff-2.0.0.offxml"          # Ligand/polymer force field
+  nagl_model: "openff-gnn-am1bcc-1.0.0.pt"       # NAGL charge model (charge_method: nagl)
 ```
+
+`nagl_model` names the NAGL model that charges every molecule with
+`charge_method: nagl`: the substrate, co-solvents generated from SMILES and
+dynamically generated polymers. The default, `openff-gnn-am1bcc-1.0.0.pt`, is the
+first production release of OpenFF's AM1-BCC graph model (openff-nagl-models
+2025.09.0) and the model OpenFF Sage 2.3.0 names in its own `NAGLCharges`
+section. PolyzyMD 1.3 release candidates used `openff-gnn-am1bcc-0.1.0-rc.3.pt`;
+name it here to rebuild a system exactly as they did. Co-solvent charges are
+cached per model, so changing it never reuses charges from another model.
+Pre-built polymer SDFs and bundled co-solvents keep the charges stored in them.
 
 ### Available Force Fields
 
