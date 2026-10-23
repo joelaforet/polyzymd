@@ -445,7 +445,7 @@ class TestBuildFromConfigSharesOneBox:
                     "charges": {"method": "library"},
                 }
             ],
-            "solvent": {"force_field": ["openff-2.0.0.offxml"], "water": {"model": "tip3p"}},
+            "solvent": {"force_field": ["openff-2.3.0.offxml"], "water": {"model": "tip3p"}},
             "thermodynamics": {"temperature": 300.0},
             "simulation_phases": {
                 "equilibration_stages": [
@@ -468,7 +468,7 @@ class TestBuildFromConfigSharesOneBox:
                     "count": 3,
                     "sdf_directory": "/tmp/test",
                     "monomers": [{"label": "A", "probability": 1.0, "name": "SBMA"}],
-                    "force_field": ["openff-2.0.0.offxml"],
+                    "force_field": ["openff-2.3.0.offxml"],
                     "charges": {"method": "preset"},
                 }
             )
@@ -549,7 +549,7 @@ def test_build_from_config_refuses_what_it_cannot_build(solvent, message):
 
     data = TestBuildFromConfigSharesOneBox._config(with_polymers=False).model_dump()
     data["solvent"] = {
-        "force_field": ["openff-2.0.0.offxml"],
+        "force_field": ["openff-2.3.0.offxml"],
         "water": {"model": "tip3p"},
         **solvent,
     }
