@@ -9,7 +9,7 @@ name: Engine parity and physics audit
 on:
   pull_request:
   push:
-    branches: [main, dev, "feature/**"]
+    branches: [main, dev, "feature/**", "feat/**"]
   workflow_dispatch:
 
 defaults:
