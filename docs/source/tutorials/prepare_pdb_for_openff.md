@@ -182,8 +182,14 @@ The build takes about 30 seconds. It ends with:
 
 ```
 System built successfully!
+Physics audit: PASSED (25 pass, 2 info)
+Build record: /home/me/ubq_prep/ubiquitin_300K_run1/build_provenance.md
 Output directory: /home/me/ubq_prep/ubiquitin_300K_run1
 ```
+
+`build_provenance.md` lists the components with their force fields and
+charges, and the result of every physics check (see
+{doc}`../explanation/physics_audit`).
 
 The build can also print a warning that a few atoms lie between 1 and 2 Å of
 a periodic image. Energy minimization removes these contacts before the

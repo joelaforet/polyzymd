@@ -1,7 +1,7 @@
 # Add polymers to a simulation
 
-Add random co-polymer chains around the protein with the `polymers:` section
-of `config.yaml`. The builder draws a monomer sequence for each chain, places
+Add random co-polymer chains around the protein with a `type: polymer` entry
+in the `solutes:` list of `config.yaml`. The builder draws a monomer sequence for each chain, places
 the chains around the protein with {term}`PACKMOL`, and then adds water and
 ions.
 
@@ -25,25 +25,30 @@ PolyzyMD gets the polymer structures in one of two ways. The
 | `cached` (default) | A pre-built SDF file for each sequence, in `sdf_directory` | This page |
 | `dynamic` | Built from monomer SMILES with ATRP reaction templates | {doc}`dynamic_polymers` |
 
-## Write the `polymers:` section
+## Write the polymer entry
 
 This example adds two 5-mer chains of SBMA and EGPMA from pre-built SDF files:
 
 ```yaml
-polymers:
-  enabled: true
-  type_prefix: "SBMA-EGPMA"
-  monomers:
-    - label: "A"
-      probability: 0.98
-      name: "SBMA"    # sulfobetaine methacrylate
-    - label: "B"
-      probability: 0.02
-      name: "EGPMA"   # ethylene glycol phenyl ether methacrylate
-  length: 5           # monomers per chain
-  count: 2            # number of chains
-  sdf_directory: "polymer_sdfs/SBMA-EGPMA"
+solutes:
+  # ... the protein entry ...
+  - type: polymer
+    type_prefix: "SBMA-EGPMA"
+    monomers:
+      - label: "A"
+        probability: 0.98
+        name: "SBMA"    # sulfobetaine methacrylate
+      - label: "B"
+        probability: 0.02
+        name: "EGPMA"   # ethylene glycol phenyl ether methacrylate
+    length: 5           # monomers per chain
+    count: 2            # number of chains
+    sdf_directory: "polymer_sdfs/SBMA-EGPMA"
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: preset}   # the charges stored in the SDF files
 ```
+
+The entry is one item of `solutes:`; all its keys are indented under the `-`.
 
 The keys have these meanings:
 
@@ -56,6 +61,8 @@ The keys have these meanings:
 | `length` | The number of monomers in each chain. |
 | `count` | The number of chains in the box. |
 | `sdf_directory` | The folder with the pre-built SDF files. `cached` mode requires it. |
+| `force_field` | The force field file, as a list. It is the same file as `solvent.force_field`. |
+| `charges` | `{method: preset}` in `cached` mode: the builder uses the charges in the SDF files. |
 
 A relative `sdf_directory` is relative to the folder that holds `config.yaml`.
 
@@ -89,35 +96,29 @@ The replicate number seeds the sequence draw, so each replicate gets its own
 set of chains. To give every replicate the same chains, set a fixed seed:
 
 ```yaml
-polymers:
-  random_seed: 42
+solutes:
+  - type: polymer
+    # ... the other polymer keys ...
+    random_seed: 42
 ```
 
 The replicate number still seeds the PACKMOL placement.
 
 ## Build a system without polymers
 
-For a control without polymer, say so in the config:
-
-```yaml
-polymers:
-  enabled: false
-```
-
-`polymers: null`, or leaving out the `polymers:` section, does the same. A
-disabled section needs no other keys; a warning names any it does not read.
+For a control without polymer, leave the polymer entry out of `solutes:`.
 
 ## How the builder places the chains
 
 The builder does these steps:
 
 1. It computes the periodic cell from the protein and substrate. The edge is
-   their diameter plus 2 x (`polymers.packing.padding` +
+   their diameter plus 2 x (`packing.padding` of the polymer solute +
    `solvent.box.padding`).
 2. It centers the bounding box of the protein and substrate in the rectangular
    brick of that cell. It holds them fixed.
 3. It packs the chains inside the brick and inside a sphere around the solute.
-   PACKMOL keeps each polymer atom at least `polymers.packing.tolerance`
+   PACKMOL keeps each polymer atom at least `packing.tolerance`
    (default 2.0 Å) from the solute and from other chains.
 4. It fills the remaining space of the brick with water. It does not move the
    system between packing and solvation.
@@ -130,14 +131,18 @@ ions.
 
 ### Packing settings
 
+These keys go under `packing:` in the polymer entry:
+
 ```yaml
-polymers:
-  packing:
-    padding: 2.0            # nm of room for the chains (default 2.0)
-    tolerance: 2.0          # Å, smallest distance between molecules (default 2.0)
-    confine_to_sphere: true # keep the chains in a sphere around the solute (default)
-    movebadrandom: false    # PACKMOL movebadrandom keyword (default false)
-    nloop: 200              # PACKMOL loops per molecule type (default 200)
+solutes:
+  - type: polymer
+    # ... the other polymer keys ...
+    packing:
+      padding: 2.0            # nm of room for the chains (default 2.0)
+      tolerance: 2.0          # Å, smallest distance between molecules (default 2.0)
+      confine_to_sphere: true # keep the chains in a sphere around the solute (default)
+      movebadrandom: false    # PACKMOL movebadrandom keyword (default false)
+      nloop: 200              # PACKMOL loops per molecule type (default 200)
 ```
 
 The sphere has a radius of half the solute bounding-box diagonal plus
@@ -204,11 +209,13 @@ two 5-mers, before you build a large one.
 Give the chains more room, or let PACKMOL work longer:
 
 ```yaml
-polymers:
-  packing:
-    padding: 2.5          # more room for the chains
-    movebadrandom: true   # helps when there are many different chain sequences
-    nloop: 400            # raise when PACKMOL stops at the loop limit
+solutes:
+  - type: polymer
+    # ... the other polymer keys ...
+    packing:
+      padding: 2.5          # more room for the chains
+      movebadrandom: true   # helps when there are many different chain sequences
+      nloop: 400            # raise when PACKMOL stops at the loop limit
 solvent:
   box:
     padding: 2.0          # a larger box
@@ -224,8 +231,10 @@ An exit code of 173 is not a failure. The build continues. A
 1. Check that each SDF file has correct bond orders, formal charges and
    explicit hydrogens.
 2. Check that each SDF file has partial charges. The builder uses them.
-3. Build the chains in `dynamic` mode with `charger: nagl`, so that
-   {term}`NAGL` assigns the charges. See {doc}`dynamic_polymers`.
+3. Build the chains in `dynamic` mode with
+   `charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}`, so that
+   {term}`NAGL` assigns the charges. NAGL needs no extra program. See
+   {doc}`dynamic_polymers`.
 
 The `am1bcc` charge method ({term}`AM1-BCC`) needs AmberTools, which the
 PolyzyMD environments do not include. Use it only in an environment where you
@@ -243,4 +252,4 @@ installed AmberTools.
 
 - {doc}`dynamic_polymers`: build the chains from monomer SMILES.
 - {doc}`equilibration`: hold the protein while the polymer relaxes.
-- {doc}`../reference/configuration`: every key of the `polymers:` section.
+- {doc}`../reference/configuration`: every key of the polymer solute.

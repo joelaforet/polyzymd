@@ -27,9 +27,12 @@ the `type: protein` entry of `solutes:`.
 **The scientific choices are the user's.** Every solute names its
 `force_field` files and its `charges` (with the NAGL `model` file for
 `method: nagl`), and `solvent` names its `force_field` and `water.model`.
-PolyzyMD fills in none of them. Take them from the user, from their earlier
-configs or from the example, and say in your reply which ones the config
-uses. Never change one to make a build pass.
+PolyzyMD fills in none of them. Take them from the user or from a config of
+theirs that names them, and say in your reply which ones the config uses. A
+1.3.0rc4 config that names no force field or NAGL model was built with
+`openff-2.0.0.offxml` and `openff-gnn-am1bcc-0.1.0-rc.3.pt`: keep those to
+reproduce it, or ask the user before moving to newer ones. Never change one
+to make a build pass.
 
 A config with `enzyme:`, `substrate:`, `polymers:` or `force_field:` is from
 1.3.0rc4 or earlier and is refused: rewrite it with
@@ -125,7 +128,8 @@ force fields and charges, and any WARN line.
 
 If the audit fails, the build stops and names each failing check
 (`FAIL <check> (<component>): <detail>`); the full record is in
-`build_provenance.failed.md`. Most failures mean the config does not say
+`build_provenance.failed.md` (GROMACS: `build_provenance.md`, marked
+failed). Most failures mean the config does not say
 what the user meant: fix the config, not the check. A `modeling_exceptions`
 entry accepts a failure on purpose, and its `reason` is published with the
 config. Add one only when the user has told you the departure is deliberate,
