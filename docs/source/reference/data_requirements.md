@@ -141,6 +141,7 @@ what, and did the built system pass the physics audit. It replaced
 | `components` | One record per component (each solute, `solvent`, `ions`): `name`, `type`, `segid`, `placement` (`fixed` or `packed`), `n_atoms`, `n_molecules`, the atom ranges of each molecule, and its `domains`. A domain is a set of atoms with one `force_field` list and one `charges` source (`method`, `model`, `source_file`), and the inputs it can be rebuilt from (`reference`). `provenance` holds each input file's path and SHA-256 |
 | `provenance` | Seeds and the box: see below |
 | `audit` | The physics audit: `passed`, `counts` per status, every `finding` (`check`, `component`, `status`, `detail`, and `examples` of the first terms that differ) and `accepted_exceptions` |
+| `cite` | References of the methods this build used beyond its force fields and charge models, such as Machado and Pantano when `ionic_strength` set the ions. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
 
 `provenance` keys:
 
