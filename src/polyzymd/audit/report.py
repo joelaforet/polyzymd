@@ -1,7 +1,9 @@
 """The audit of one build: every check's finding, with the config's accepted exceptions applied.
 
-A failing check is accepted only by a ``modeling_exceptions`` entry that names
-it (and, if the entry names one, its component). An accepted finding keeps its
+A failing (FAIL) or warning (WARN) finding is accepted only by a
+``modeling_exceptions`` entry that names its check and, if the entry names
+one, its component; an entry without a component covers every component the
+check runs on. An accepted finding keeps its
 detail and gains the reason and the atoms it covered, so the record shows both
 what PolyzyMD would have refused and why the user chose it. An exception that
 matches no failing finding is reported, so stale exceptions do not linger in a
@@ -18,6 +20,8 @@ from polyzymd.audit.realized import RealizedSystem
 
 #: Statuses that stop a build unless accepted.
 BLOCKING = ("FAIL",)
+#: The finding that reports a modeling exception which accepted nothing.
+UNUSED_EXCEPTION = "modeling_exceptions.unused"
 
 
 @dataclass
@@ -87,6 +91,8 @@ class AuditReport:
         order = {"FAIL": 0, "ACCEPTED": 1, "WARN": 2, "PASS": 3, "INFO": 4}
         for f in sorted(self.findings, key=lambda f: (order[f.status], f.check, f.component)):
             detail = f.detail.replace("|", "\\|")
+            if f.accepted_from:
+                detail += f" (accepted {f.accepted_from}: {f.reason})".replace("|", "\\|")
             lines.append(f"| {f.status} | `{f.check}` | {f.component} | {detail} |")
         if self.accepted:
             lines += ["", "### Accepted exceptions", ""]
@@ -126,15 +132,16 @@ def audit(
                     atoms_of.get(finding.component, [[0, realized.n_atoms]]),
                 )
             )
+            finding.accepted_from = finding.status
+            finding.reason = exception.reason
             finding.status = "ACCEPTED"
-            finding.detail = f"{finding.detail} [accepted: {exception.reason}]"
             break
     for k, exception in enumerate(exceptions):
         if not used[k]:
             where = f" on {exception.component}" if exception.component else ""
             findings.append(
                 Finding(
-                    exception.check,
+                    UNUSED_EXCEPTION,
                     exception.component or "system",
                     "WARN",
                     f"modeling_exceptions accepts {exception.check}{where}, but that check found "
