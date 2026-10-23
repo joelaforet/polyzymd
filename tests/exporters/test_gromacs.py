@@ -1579,3 +1579,28 @@ def test_a_barostat_frequency_gromacs_does_not_use_is_named_once(
     generator.generate_production()
     generator.generate_production()
     assert sum("barostat_frequency 50" in text for text in messages) == 1
+
+
+def test_the_protein_restraint_groups_restrain_different_atoms(tmp_path):
+    """protein_heavy, protein_backbone and protein_calpha share the POSRES_PROTEIN switch,
+    but each writes its own atoms into the protein's restraint block."""
+    from polyzymd.exporters.gromacs import PositionRestraintGenerator
+
+    atoms = ["N", "H", "CA", "HA", "CB", "HB1", "C", "O", "OXT"]
+    itp = tmp_path / "protein.itp"
+    itp.write_text(
+        "[ moleculetype ]\nMOL0 3\n[ atoms ]\n"
+        + "".join(
+            f"{k:>5} t {1:>5} ALA {name:>4} {k:>5} 0.0 {1.008 if name.startswith('H') else 12.011}\n"
+            for k, name in enumerate(atoms, start=1)
+        )
+    )
+
+    def selected(group):
+        indices = PositionRestraintGenerator._get_local_atom_indices_from_itp(itp, group)
+        return [atoms[i - 1] for i in indices]
+
+    assert selected("protein_heavy") == ["N", "CA", "CB", "C", "O", "OXT"]
+    assert selected("protein_backbone") == ["N", "CA", "C", "O", "OXT"]
+    assert selected("protein_calpha") == ["CA"]
+    assert PositionRestraintGenerator.GROUP_MAPPING["protein_backbone"][1] == "POSRES_PROTEIN"
