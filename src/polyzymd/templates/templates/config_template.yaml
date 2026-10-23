@@ -192,7 +192,8 @@ solvent:
 #   resid N        : Residue number in the built topology (protein renumbered from 1)
 #   resname XXX    : Residue name (e.g., LIG, SER)
 #   name XXX       : Atom name (e.g., CA, OG, C1)
-#   pdbindex N     : PDB atom serial number (1-indexed, matches PyMOL)
+#   pdbindex N     : the N-th atom of the built system, from 1 (PyMOL `index`,
+#                    not its `ID`: PDB serials skip a number at every TER)
 #   index N        : Internal atom index (0-indexed)
 #   and/or         : Combine selections
 #
