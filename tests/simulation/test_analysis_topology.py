@@ -99,7 +99,7 @@ def test_build_bundle_publishes_and_validates_the_prmtop(tmp_path: Path, water_b
 
     assert ANALYSIS_TOPOLOGY_NAME in manifest["artifacts"]
     assert (tmp_path / ANALYSIS_TOPOLOGY_NAME).is_file()
-    on_disk = json.loads((tmp_path / "build_manifest.json").read_text())
+    on_disk = json.loads((tmp_path / "build_provenance.json").read_text())
     assert on_disk["artifacts"][ANALYSIS_TOPOLOGY_NAME]["sha256"]
     validate_build_bundle(tmp_path, _Config())
 
