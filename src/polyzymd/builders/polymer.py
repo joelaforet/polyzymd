@@ -217,6 +217,32 @@ class PolymerBuilder:
         """Get counts of each unique sequence."""
         return self._sequence_counts
 
+    def molecule_source(self, sequence: str) -> Dict[str, object]:
+        """Return where the molecule of ``sequence`` came from, for the build's provenance.
+
+        Returns a dict with ``sdf_path`` (the file holding the molecule and its
+        charges, or None) and ``charge_method``: ``preset`` when the charges were
+        read from that file, otherwise the charger that computed them (dynamic
+        generation), with ``nagl_model`` for NAGL.
+        """
+        candidates = []
+        if self._sdf_directory:
+            candidates.append(self._get_sdf_path(sequence, self._sdf_directory))
+        candidates.append(self._get_sdf_path(sequence, self._cache_directory))
+        sdf_path = next((path for path in candidates if path.exists()), None)
+        # Mirrors _get_or_create_molecule: in dynamic mode a user SDF that does not
+        # look like a cache entry is loaded as given, charges included.
+        user_sdf = self._sdf_directory and sdf_path == candidates[0]
+        if user_sdf and not self._is_dynamic_cache_like_sdf(sdf_path, sequence):
+            return {"sdf_path": sdf_path, "charge_method": "preset", "nagl_model": None}
+        if self._generation_mode == "dynamic":
+            return {
+                "sdf_path": sdf_path,
+                "charge_method": self._charger_type,
+                "nagl_model": self._nagl_model if self._charger_type == "nagl" else None,
+            }
+        return {"sdf_path": sdf_path, "charge_method": "preset", "nagl_model": None}
+
     def build(self, count: int, seed: Optional[int] = None) -> Tuple[List[Molecule], List[str]]:
         """Generate random polymer sequences and load/create corresponding molecules.
 
