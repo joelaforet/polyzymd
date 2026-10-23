@@ -62,7 +62,7 @@ table below. The most useful selectors are:
 | `resid` | residue number | `resid 76` |
 | `resname` | residue name | `resname LIG` |
 | `name` | atom name | `name OG` |
-| `pdbindex` | Position in the built system, counted from 1: the PDB ATOM serial PolyzyMD writes. Analyses read it the same way. | `pdbindex 2740` |
+| `pdbindex` | Position in the built system, counted from 1 (MDAnalysis `bynum`, PyMOL `index`). It is not the PDB ATOM serial: the built PDB has a TER record after every chain and molecule, and each TER takes a serial, so serials run ahead of positions after the first chain. Analyses read `pdbindex` the same way. | `pdbindex 2740` |
 | `index` | OpenMM atom index, 0-indexed | `index 2739` |
 | `chain` | chain identifier | `chain A` |
 
@@ -102,8 +102,10 @@ you can inspect `solvated_system.pdb`:
 pixi run -e build polyzymd build -c config.yaml
 ```
 
-Then open the solvated structure in PyMOL and inspect the atom serial shown in
-the built system, not only in the original ligand or protein input file.
+Then open the solvated structure in PyMOL and read the atom's `index` (for example
+`iterate sele, print(index)`), not its `ID`: `ID` is the PDB serial, which skips a
+number at every TER record, so after the first chain it is larger than `pdbindex`.
+Use the built system, not the original ligand or protein input file.
 
 That built PDB is the best source for `pdbindex` values because it reflects the
 final atom ordering used by the simulation.

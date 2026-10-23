@@ -1064,7 +1064,8 @@ class AtomSelectionConfig(_ConfigModel):
 
     The selection is an MDTraj selection in which ``resid``, ``chain`` and
     ``pdbindex`` keep their MDAnalysis meaning (PDB residue number, chain
-    letter, PDB atom serial). It is matched only among the atoms of
+    letter, position in the built system counted from 1, ``bynum``; not the
+    PDB serial, which skips a number at every TER). It is matched only among the atoms of
     ``component``, so ``resid 106`` cannot pick up a polymer residue 106.
 
     Attributes:

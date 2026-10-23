@@ -29,6 +29,7 @@ SYSTEM_CHECKS = [
     "composition.counts",
     "composition.polymer_sequences",
     "composition.polymer_mass_fraction",
+    "composition.density",
     "ions.neutral",
     "ions.ionic_strength",
     "ions.salt",
@@ -236,8 +237,8 @@ def test_a_chain_touching_the_protein_and_its_image_fails_bridging() -> None:
     """A hand-made box: a straight chain reaching from the protein to the protein's image."""
     from openmm import app
 
-    from polyzymd.audit.findings import AuditContext
     from polyzymd.audit.checks.geometry import image_bridging
+    from polyzymd.audit.findings import AuditContext
     from polyzymd.core.components import AtomRange, ChargeSource, ComponentRecord, Domain
 
     n_chain = 7
@@ -275,3 +276,65 @@ def test_a_chain_touching_the_protein_and_its_image_fails_bridging() -> None:
     ]
     findings = image_bridging(AuditContext(realized, components))
     assert [f.status for f in findings] == ["FAIL"]
+
+
+def test_the_salted_build_has_the_salt_it_asked_for(built) -> None:
+    """The fixture asks for 0.15 M NaCl with DMSO given as a concentration (added on top)."""
+    findings = _run(built, name="salt")
+    assert findings[("ions.salt", "system")].status == "PASS"
+    assert "expected" in findings[("ions.salt", "system")].detail
+    assert findings[("composition.density", "system")].status == "INFO"
+
+
+def test_the_periodic_image_check_counts_the_polymer_padding(built) -> None:
+    detail = _run(built, name="padding")[("geometry.periodic_image", "system")].detail
+    padding = built[1].solvent.box.padding + built[1].polymers.packing.padding
+    assert f"padding {padding:g} nm" in detail
+
+
+def test_pdbindex_is_the_position_in_the_system_not_the_pdb_serial(built) -> None:
+    """The built PDB has a TER after every chain, so serials run ahead of positions."""
+    builder, config, folder, system = built
+    force = next(f for f in system.getForces() if f.getName() == "polyzymd_restraint:tether")
+    substrate_atom = force.getBondParameters(0)[1]
+    serial = None
+    with open(folder / "build" / "solvated_system.pdb") as stream:
+        records = [line for line in stream if line.startswith(("ATOM  ", "HETATM"))]
+    serial = int(records[substrate_atom][6:11])
+    assert serial != substrate_atom + 1  # a TER came before it
+
+    def with_atom2(selection):
+        copy = config.model_copy(deep=True)
+        object.__setattr__(copy.restraints[0].atom2, "selection", selection)
+        return _run(built, config=copy)[("restraint.atom_identity", "system")]
+
+    assert with_atom2(f"pdbindex {substrate_atom + 1}").status == "PASS"
+    assert with_atom2(f"pdbindex {serial}").status == "FAIL"
+
+
+@pytest.fixture(scope="module")
+def concentrated(tmp_path_factory):
+    """1 M DMSO by concentration and an ionic-strength target: the box is denser than its
+    target and the salt refers to the water-equivalents the builder sized."""
+    from polyzymd.builders.system_builder import SystemBuilder
+    from polyzymd.config.loader import load_config
+
+    folder = tmp_path_factory.mktemp("concentrated")
+    path = write_inputs(folder)
+    data = yaml.safe_load(path.read_text())
+    data["solvent"]["co_solvents"][0]["concentration"] = 1.0
+    data["solvent"]["ions"] = {"neutralize": True, "ionic_strength": 0.13}
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    config = load_config(path)
+    builder = SystemBuilder.from_config(config)
+    builder.build_from_config(config, working_dir=folder / "build", polymer_seed=2)
+    _, system, _ = builder.get_openmm_components()
+    return builder, config, folder, system
+
+
+def test_ionic_strength_passes_with_a_concentrated_co_solvent(concentrated) -> None:
+    findings = _run(concentrated, name="ionic")
+    assert findings[("ions.ionic_strength", "system")].status == "PASS", findings[
+        ("ions.ionic_strength", "system")
+    ].detail
+    assert ("ions.salt", "system") not in findings
