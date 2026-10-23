@@ -46,8 +46,9 @@ def test_a_force_the_index_cannot_read_is_refused() -> None:
     custom = openmm.CustomNonbondedForce("4*epsilon*((sigma/r)^12-(sigma/r)^6)")
     for _ in range(2):
         custom.addParticle([])
-    with pytest.raises(ValueError, match="CustomNonbondedForce"):
+    with pytest.raises(ValueError, match="CustomNonbondedForce") as refused:
         SystemIndex.from_system(_system(2, custom))
+    assert "polyzymd/issues" in str(refused.value)  # tells the user how to ask for it
     with pytest.raises(ValueError, match="NonbondedForce"):
         SystemIndex.from_system(_system(2, openmm.NonbondedForce()))
 
@@ -72,8 +73,9 @@ def test_gromacs_settings_openmm_cannot_reproduce_are_refused(tmp_path, mdp, rea
     """GROMACS defaults count: an unset vdw-modifier is potential-shift, an unset rvdw is 1.0."""
     path = tmp_path / "prod.mdp"
     path.write_text(mdp)
-    with pytest.raises(ValueError, match=reason):
+    with pytest.raises(ValueError, match=reason) as refused:
         RealizedSystem.from_gromacs(tmp_path / "x.top", tmp_path / "x.gro", path)
+    assert "polyzymd/issues" in str(refused.value)
 
 
 def _realized(atoms, constraints) -> RealizedSystem:
