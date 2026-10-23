@@ -8,7 +8,8 @@ from typing import Any, Literal, Optional, Sequence
 from polyzymd.audit import registry
 from polyzymd.audit.realized import RealizedSystem
 
-Status = Literal["PASS", "FAIL", "WARN", "INFO"]
+#: ACCEPTED is a FAIL or WARN the config accepts in ``modeling_exceptions``.
+Status = Literal["PASS", "FAIL", "WARN", "INFO", "ACCEPTED"]
 
 
 @dataclass

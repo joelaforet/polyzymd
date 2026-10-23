@@ -748,6 +748,7 @@ def build(
                     sim_config,
                     interchange.topology.n_atoms,
                     builder.build_provenance,
+                    components=builder.components(),
                 )
 
                 colored_echo(f"{export_format.upper()} export successful!", phase="export")
@@ -856,6 +857,7 @@ def build(
                     sim_config,
                     provenance=builder.build_provenance,
                     segids=atom_segids(builder.components(), omm_system.getNumParticles()),
+                    components=builder.components(),
                 )
 
                 colored_echo("System built successfully!", phase="build")
@@ -1242,6 +1244,7 @@ def _run_gromacs_impl(
             sim_config,
             interchange.topology.n_atoms,
             builder.build_provenance,
+            components=builder.components(),
         )
 
         colored_echo(f"\nGROMACS files exported to: {gromacs_dir}", phase="export")
@@ -2522,6 +2525,7 @@ def _run_initial_segment(
             sim_config,
             provenance=builder.build_provenance,
             segids=atom_segids(builder.components(), omm_system.getNumParticles()),
+            components=builder.components(),
         )
     else:
         from openmm import XmlSerializer

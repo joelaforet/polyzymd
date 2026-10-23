@@ -45,6 +45,7 @@ n_eff.
 
 cli_reference
 configuration
+physics_checks
 gromacs_openmm
 ```
 

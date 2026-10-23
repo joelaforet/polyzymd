@@ -69,7 +69,7 @@ def build_versions() -> dict[str, str | None]:
     """Return the versions of the OpenFF packages that parameterize a system, for either engine.
 
     ``openff_toolkit_version`` and ``openff_interchange_version``
-    (:func:`package_version`), as ``build_manifest.json`` records them.
+    (:func:`package_version`), as ``build_provenance.json`` records them.
     """
     return {
         "openff_toolkit_version": package_version("openff.toolkit"),
