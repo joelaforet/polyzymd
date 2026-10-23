@@ -89,14 +89,14 @@ def test_failed_publication_restores_previous_bundle(tmp_path, monkeypatch):
     with pytest.raises(OSError, match="injected"):
         publish_build_bundle(tmp_path, topology, system, positions, _Config("replacement"))
 
-    assert json.loads((tmp_path / "build_manifest.json").read_text()) == original
+    assert json.loads((tmp_path / "build_provenance.json").read_text()) == original
     validate_build_bundle(tmp_path, _Config())
 
 
 def test_bundle_without_manifest_is_refused_with_rebuild_advice(tmp_path):
     topology, system, positions = _tiny_openmm_bundle()
     publish_build_bundle(tmp_path, topology, system, positions, _Config())
-    (tmp_path / "build_manifest.json").unlink()
+    (tmp_path / "build_provenance.json").unlink()
     with pytest.raises(ArtifactIntegrityError, match="Build manifest is missing") as excinfo:
         validate_build_bundle(tmp_path, _Config())
     message = str(excinfo.value)
@@ -295,7 +295,7 @@ def test_validation_reads_an_artifact_replaced_with_the_same_size_and_time(tmp_p
 
 
 def test_gromacs_build_manifest_records_the_exported_inputs(tmp_path):
-    """A GROMACS build writes build_manifest.json beside the replicate, as an OpenMM build does."""
+    """A GROMACS build writes build_provenance.json beside the replicate, as an OpenMM build does."""
     from polyzymd.analyses.shared.file_hashes import file_sha256
     from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
 
@@ -380,3 +380,13 @@ def test_rebuild_is_refused_once_an_openmm_run_has_started(tmp_path):
 
     with pytest.raises(ArtifactIntegrityError, match="equilibration_0"):
         assert_rebuild_allowed(tmp_path)
+
+
+def test_a_run_built_before_rc5_is_read_through_its_old_record(tmp_path) -> None:
+    """Existing runs keep build_manifest.json; new builds write build_provenance.json."""
+    from polyzymd.simulation.artifact_integrity import build_record_path
+
+    (tmp_path / "build_manifest.json").write_text("{}")
+    assert build_record_path(tmp_path).name == "build_manifest.json"
+    (tmp_path / "build_provenance.json").write_text("{}")
+    assert build_record_path(tmp_path).name == "build_provenance.json"
