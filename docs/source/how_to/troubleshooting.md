@@ -57,7 +57,7 @@ of each section, see {doc}`../reference/configuration`.
 ### `this config uses the layout of PolyzyMD 1.3.0rc4 and earlier`
 
 ```
-error: config: this config uses the layout of PolyzyMD 1.3.0rc4 and earlier (enzyme -> a solutes entry with type: protein). Rewrite it from the template (polyzymd init) or see https://polyzymd.readthedocs.io/en/latest/how_to/rewrite_config_rc5.html
+error: config: this config uses the layout of PolyzyMD 1.3.0rc4 and earlier (enzyme -> a solutes entry with type: protein). Rewrite it from the template (polyzymd study add-condition LABEL --new writes one) or see https://polyzymd.readthedocs.io/en/latest/how_to/rewrite_config_rc5.html
 ```
 
 The config has an `enzyme:`, `substrate:`, `polymers:` or top-level
@@ -118,13 +118,14 @@ co_solvents:
   - residue_name: "DMS"
 ```
 
-Correct (one item with three keys):
+Correct (one item with four keys):
 
 ```yaml
 co_solvents:
   - name: "dmso"
     mole_fraction: 0.1
     residue_name: "DMS"
+    charges: {method: preset}
 ```
 
 The same rule applies to every list, such as `co_solvents`, `monomers` and

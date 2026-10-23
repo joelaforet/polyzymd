@@ -172,6 +172,7 @@ urea:
   co_solvents:
     - name: "urea"
       concentration: 2.0                # molar
+      charges: {method: preset}         # the charges PolyzyMD ships for urea
 ```
 
 Check the copy with `validate` and `build --dry-run`, as in step 4. The

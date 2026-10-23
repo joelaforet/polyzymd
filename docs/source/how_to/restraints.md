@@ -35,15 +35,22 @@ restraints:
   - type: "flat_bottom"
     name: "substrate_active_site"
     atom1:
-      selection: "protein and resid 76 and name OG"
+      component: "LipA"
+      selection: "resid 76 and name OG"
       description: "Catalytic serine oxygen"
     atom2:
-      selection: "resname LIG and name C1"
+      component: "Resorufin-Butyrate"
+      selection: "name C1"
       description: "Substrate carbonyl carbon"
     distance: 3.5
     force_constant: 10000.0
     enabled: true
 ```
+
+Each atom names the solute it belongs to in `component`: the `name` of a
+solute entry (a solute without a `name` is named after its type, such as
+`protein`). The selection is matched only among that component's atoms, so
+`resid 76` cannot pick a polymer residue 76.
 
 The units differ between the two keys:
 
@@ -80,8 +87,8 @@ Combine them with `and`, `or`, `not` and parentheses. Write a range as
   `No atoms match selection: '<selection>'`.
 
 ```{warning}
-Always make protein selections chain-aware enough to avoid accidental matches.
-`protein and resid 76 and name OG` is safer than `resid 76 and name OG`.
+Set `component` to the solute that holds the atom. A selection inside the wrong
+component matches no atom, or another atom with the same residue number and name.
 ```
 
 ```{important}
@@ -131,9 +138,11 @@ restraints:
   - type: "flat_bottom"
     name: "substrate_catalytic"
     atom1:
-      selection: "protein and resid 76 and name OG"
+      component: "LipA"
+      selection: "resid 76 and name OG"
     atom2:
-      selection: "resname LIG and name C1"
+      component: "Resorufin-Butyrate"
+      selection: "name C1"
     distance: 3.5
     force_constant: 10000.0
     enabled: true
@@ -171,9 +180,11 @@ restraints:
   - type: "harmonic"
     name: "domain_distance"
     atom1:
-      selection: "protein and resid 50 and name CA"
+      component: "LipA"
+      selection: "resid 50 and name CA"
     atom2:
-      selection: "protein and resid 150 and name CA"
+      component: "LipA"
+      selection: "resid 150 and name CA"
     distance: 25.0
     force_constant: 100.0
     enabled: true
@@ -186,9 +197,11 @@ restraints:
   - type: "flat_bottom"
     name: "optional_restraint"
     atom1:
-      selection: "protein and resid 76 and name OG"
+      component: "LipA"
+      selection: "resid 76 and name OG"
     atom2:
-      selection: "resname LIG and name C1"
+      component: "Resorufin-Butyrate"
+      selection: "name C1"
     distance: 4.0
     force_constant: 5000.0
     enabled: false

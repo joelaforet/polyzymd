@@ -1,0 +1,89 @@
+# An rc.5 config that sets as many keys as it can to values other than their
+# defaults, so the freeze test sees each one read back unchanged.
+name: "every_option"
+engine: "openmm"
+description: "Every rc.5 option set"
+solutes:
+  - type: protein
+    name: "LipA"
+    segid: "ENZ"
+    pdb_path: "structures/enzyme.pdb"
+    description: "a protein"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+  - type: small_molecule
+    name: "RBY"
+    segid: "SUB"
+    sdf_path: "structures/substrate.sdf"
+    conformer_index: 1
+    residue_name: "RBY"
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+  - type: polymer
+    name: "brush"
+    segid: "PLY"
+    generation_mode: "dynamic"
+    type_prefix: "SBMA-EGPMA"
+    reactions: {initiation: "default", polymerization: "default", termination: "default"}
+    monomers:
+      - {label: "A", probability: 0.7, name: "SBMA", smiles: "C=C(C)C(=O)OCC", residue_name: "SBM"}
+      - {label: "B", probability: 0.3, name: "EGPMA", smiles: "C=C(C)C(=O)OCCO", residue_name: "EGM"}
+    length: 6
+    count: 3
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+    max_retries: 4
+    cache_directory: "cache"
+    random_seed: 7
+    packing: {padding: 1.5, tolerance: 2.5, confine_to_sphere: false, nloop: 50, movebadrandom: true}
+solvent:
+  force_field: ["openff-2.3.0.offxml"]
+  water: {model: "tip3p"}
+  co_solvents:
+    - {name: "dmso", mole_fraction: 0.05, charges: {method: preset}}
+    - {name: "acetamide", smiles: "CC(N)=O", count: 4, residue_name: "ACM", density: 1.16, charges: {method: am1bcc}}
+  ions: {neutralize: true, ionic_strength: 0.13}
+  box: {padding: 1.5, shape: "cube", target_density: 0.99, tolerance: 2.5}
+restraints:
+  - type: "harmonic"
+    name: "tether"
+    atom1: {component: "LipA", selection: "resid 77 and name OG", description: "serine"}
+    atom2: {component: "RBY", selection: "name C1"}
+    distance: 3.5
+    force_constant: 5000.0
+modeling_exceptions:
+  - {check: "geometry.buried_water", component: "LipA", reason: "crystal waters kept"}
+thermodynamics: {temperature: 310.0, pressure: 1.2}
+simulation_phases:
+  minimization: {freeze_solute: false, max_iterations: 500, tolerance: 5.0}
+  equilibration_stages:
+    - name: "warm"
+      samples: 3
+      ensemble: "NVT"
+      temperature_start: 290.0
+      temperature_end: 310.0
+      temperature_increment: 5.0
+      temperature_interval_steps: 100
+      time_step: 1.0
+      thermostat_timescale: 0.5
+      position_restraints: [{group: "protein_heavy", force_constant: 800.0}]
+    - name: "press"
+      duration: 0.01
+      samples: 5
+      ensemble: "NPT"
+      temperature: 310.0
+      barostat: "MC"
+      barostat_frequency: 50
+  production:
+    ensemble: "NPT"
+    duration: 0.02
+    samples: 10
+    time_step: 4.0
+    thermostat: "Langevin"
+    thermostat_timescale: 2.0
+    barostat: "MC"
+    barostat_frequency: 10
+openmm: {platform: "CUDA", device_index: "1", precision: "double"}
+output:
+  projects_directory: "runs"
+  naming_template: "{enzyme}_{substrate}_{temperature}K_run{replicate}"
