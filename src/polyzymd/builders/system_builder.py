@@ -1203,7 +1203,7 @@ class SystemBuilder:
 
         ``box_vectors_nm`` and ``brick_nm`` let a user confirm that replicates
         of one condition really do share a box (and therefore the same water
-        and ion counts) by diffing their ``build_manifest.json`` files.
+        and ion counts) by diffing their ``build_provenance.json`` files.
         """
         import numpy as np
 
@@ -1219,7 +1219,7 @@ class SystemBuilder:
     def build_provenance(self) -> Dict[str, Any]:
         """Seeds and settings that determine the build's starting coordinates.
 
-        Populated by :meth:`build_from_config`; recorded in ``build_manifest.json``
+        Populated by :meth:`build_from_config`; recorded in ``build_provenance.json``
         by :func:`polyzymd.simulation.artifact_integrity.publish_build_bundle`.
         """
         return dict(self._build_provenance)

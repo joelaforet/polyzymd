@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.simulation.artifact_integrity import build_record_path
 
 DEPOSIT = "deposit"
 MANIFEST = "manifest.json"
@@ -543,7 +544,7 @@ def _engine_inputs(provenance: Any, config: Any = None) -> list[Path]:
             system = openmm_system_file(trajectory.path)
             if system is not None:
                 files.append(system)
-    build = Path(provenance.working_directory) / "build_manifest.json"
+    build = build_record_path(Path(provenance.working_directory))
     if build.is_file():
         files.append(build)
     unique, seen = [], set()
@@ -826,9 +827,9 @@ def _hashes_recorded(condition: Any, replicate: int, provenance: Any) -> bool:
 
 
 def _missing_build_files(working_dir: Path) -> list[str]:
-    """Return the files ``build_manifest.json`` lists that are not in the run directory."""
+    """Return the files the build record (``build_provenance.json``) lists that are not in the run directory."""
     try:
-        manifest = json.loads((working_dir / "build_manifest.json").read_text())
+        manifest = json.loads(build_record_path(working_dir).read_text())
     except (OSError, ValueError):
         return []
     return sorted(
@@ -839,7 +840,7 @@ def _missing_build_files(working_dir: Path) -> list[str]:
 def simulated_with(working_dir: Path) -> dict[str, Any]:
     """Return the software versions that built and ran a replicate, as the run recorded them.
 
-    ``build`` comes from the replicate's ``build_manifest.json``, and
+    ``build`` comes from the replicate's build record (``build_provenance.json``, or ``build_manifest.json`` before 1.3.0rc5), and
     ``segments`` lists each distinct (PolyzyMD, OpenMM, pixi environment,
     OpenMM platform and properties) combination that ``progress.json``
     records for its production segments,
@@ -853,7 +854,7 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
     from polyzymd.simulation.progress import load_progress
 
     found: dict[str, Any] = {}
-    build = working_dir / "build_manifest.json"
+    build = build_record_path(working_dir)
     try:
         manifest = json.loads(build.read_text())
         found["build"] = {
@@ -1113,7 +1114,7 @@ def _replicates(
         if unknown:
             warnings.append(
                 f"{label}: replicates {', '.join(unknown)} record no OpenMM version (no "
-                "build_manifest.json, and progress.json predates version recording); state the "
+                "build_provenance.json, and progress.json predates version recording); state the "
                 "engine version in the methods"
             )
         no_gromacs = [
@@ -1129,7 +1130,7 @@ def _replicates(
         for index, replicate_record in replicates.items():
             for name in replicate_record.get("missing_build_files", []):
                 warnings.append(
-                    f"{label} replicate {index}: build_manifest.json lists {name}, which is "
+                    f"{label} replicate {index}: the build record lists {name}, which is "
                     "missing from the run directory"
                 )
     return conditions, rows
