@@ -29,7 +29,6 @@ class CheckSpec:
         severity: ``FAIL`` stops the build unless the config accepts it; ``WARN``
             and ``INFO`` are recorded only.
         catches: The modelling mistake the check catches, in one sentence.
-        origin: The real failure that motivated the check, if any.
         component_types: Component types the check applies to; None means all.
     """
 
@@ -37,7 +36,6 @@ class CheckSpec:
     scope: Scope
     severity: Severity
     catches: str
-    origin: str = ""
     component_types: Optional[tuple[str, ...]] = None
 
     def applies_to(self, component_type: str) -> bool:
@@ -123,14 +121,13 @@ def catalog_markdown() -> str:
         "This page is generated from PolyzyMD's check registry",
         "(`polyzymd.audit.registry.catalog_markdown`).",
         "",
-        "| Check | Runs on | Default | Catches | Origin |",
-        "|---|---|---|---|---|",
+        "| Check | Runs on | Default | Catches |",
+        "|---|---|---|---|",
     ]
     for spec in catalog():
         scope = "each component" if spec.scope == "component" else "the system"
         if spec.component_types:
             scope += f" ({', '.join(spec.component_types)})"
         catches = spec.catches.replace("|", "\\|")
-        origin = spec.origin.replace("|", "\\|")
-        lines.append(f"| `{spec.id}` | {scope} | {spec.severity} | {catches} | {origin} |")
+        lines.append(f"| `{spec.id}` | {scope} | {spec.severity} | {catches} |")
     return "\n".join(lines) + "\n"

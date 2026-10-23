@@ -94,36 +94,30 @@ def _register(spec: CheckSpec) -> None:
         return _findings(_spec.id, _spec.severity, context)
 
 
-_ORIGIN = "1.3 force-field order bug: Sage terms on ff14SB proteins (Paper 1)"
-
 for _spec in (
     CheckSpec(
         "parameters.bonded",
         "component",
         "FAIL",
         "bonds, angles, torsions or impropers not from the component's declared force field",
-        _ORIGIN,
     ),
     CheckSpec(
         "parameters.nonbonded",
         "component",
         "FAIL",
         "Lennard-Jones or 1-4 terms not from the component's declared force field",
-        _ORIGIN,
     ),
     CheckSpec(
         "parameters.constraints",
         "component",
         "FAIL",
         "constraints missing, extra, or at lengths other than the declared force field's",
-        _ORIGIN + " (Sage bond-to-hydrogen lengths on the protein)",
     ),
     CheckSpec(
         "charges.source",
         "component",
         "FAIL",
         "partial charges that differ from the declared source (library, NAGL model, preset file)",
-        "LipA production runs that recomputed charges",
     ),
     CheckSpec(
         "masses",
@@ -142,7 +136,6 @@ for _spec in (
         "FAIL",
         "atoms no component owns, molecules other than the components declare, or terms "
         "(bonds, constraints, exceptions) joining two molecules",
-        "every term must have exactly one declared source",
     )
 )
 def coverage(context: AuditContext) -> list[Finding]:
