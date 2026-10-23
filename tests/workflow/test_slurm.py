@@ -1329,3 +1329,27 @@ def test_an_openmm_job_without_its_environment_does_not_run(monkeypatch, tmp_pat
     assert result.returncode == 1, result.stdout + result.stderr
     assert "polyzymd ran" not in result.stdout
     assert log == ""
+
+
+def test_preempted_jobs_go_back_to_the_queue(monkeypatch):
+    """Both engines let SLURM requeue a job it preempts.
+
+    Blanca preempts with PreemptMode=REQUEUE and no grace time, so the job's
+    SIGTERM handler gets no chance to submit a successor; with --no-requeue the
+    chain stopped. A requeued job resumes from the replicate's restart state.
+    """
+    from polyzymd.engines.gromacs.slurm import GromacsSlurmScriptGenerator
+
+    manifest = lambda: "/projects/user/polyzymd/pixi.toml"  # noqa: E731
+    monkeypatch.setattr(slurm_module, "_discover_manifest_path", manifest)
+    monkeypatch.setattr("polyzymd.engines.gromacs.slurm._discover_manifest_path", manifest)
+    cfg = SlurmConfig.from_preset("blanca-shirts")
+    openmm = _make_generator(cfg).generate_job_script("/c.yaml", 1, "/run_1").splitlines()
+    gromacs = (
+        GromacsSlurmScriptGenerator(cfg)
+        .generate_job_script("/c.yaml", 1, "/run_1", "LipA", ["eq_01_nvt.mdp"])
+        .splitlines()
+    )
+    for script in (openmm, gromacs):
+        assert "#SBATCH --requeue" in script
+        assert "#SBATCH --no-requeue" not in script

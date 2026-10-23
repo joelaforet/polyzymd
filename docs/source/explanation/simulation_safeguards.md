@@ -235,6 +235,16 @@ while work remains. A GROMACS job resumes one production run with `-cpi` and
 `-maxh`, and centres the trajectory when production is finished.
 ```
 
+**A preempted job goes back to the queue.** A scheduler may preempt a job
+with no warning at all: Blanca's preemptable QoS gives no grace time, so the
+job's `SIGTERM` handler cannot submit a successor before the job is killed.
+The job script therefore allows SLURM to requeue it (`#SBATCH --requeue`).
+The requeued job starts again under the same job ID and continues from the
+replicate's newest restart state, saved every minute, so a preemption costs at
+most the steps since that save. The replicate lock is a POSIX record lock,
+which the killed process releases, so the requeued job is not mistaken for a
+second chain.
+
 **A chain must not run out of nodes.** A job pinned to a CUDA environment can
 land on a node whose driver is too old. The job then submits itself again and
 excludes that node. The list of excluded nodes passes to every following

@@ -297,8 +297,12 @@ This maps directly to `#SBATCH --constraint` in the generated script.
 (gromacs-preemption-resilience)=
 ### Preemption
 
-GROMACS SLURM scripts trap `SIGTERM`, the signal that SLURM sends before it
-preempts a job. When the trap fires:
+A preempted job goes back to the queue: the script sets `#SBATCH --requeue`,
+and SLURM restarts it under the same job ID, resuming from the last `.cpt`
+checkpoint. This is what keeps a chain alive on queues that preempt without
+warning, such as Blanca's preemptable QoS.
+
+When the scheduler does send `SIGTERM` first, the script also traps it:
 
 1. The script forwards `SIGTERM` to `gmx mdrun`.
 2. GROMACS writes a `.cpt` checkpoint file.

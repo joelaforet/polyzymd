@@ -46,8 +46,10 @@ yourself, use these values:
 | `--qos` | `normal` | The same as the partition, or `preemptable` |
 
 The simulation presets `blanca-shirts` and `blanca-chbe-rdi` use the
-`preemptable` QoS. The owner's jobs can then stop a job. The job script
-writes a checkpoint and submits a successor.
+`preemptable` QoS. The owner's jobs can then stop a job at any moment, with no
+grace time. SLURM then puts the job back in the queue (the job script allows
+requeueing), and the requeued job continues from the replicate's newest
+restart state.
 
 For example, on Blanca:
 
