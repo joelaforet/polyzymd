@@ -121,14 +121,13 @@ def catalog_markdown() -> str:
         "This page is generated from PolyzyMD's check registry",
         "(`polyzymd.audit.registry.catalog_markdown`).",
         "",
-        "| Check | Runs on | Default | Catches | Origin |",
-        "|---|---|---|---|---|",
+        "| Check | Runs on | Default | Catches |",
+        "|---|---|---|---|",
     ]
     for spec in catalog():
         scope = "each component" if spec.scope == "component" else "the system"
         if spec.component_types:
             scope += f" ({', '.join(spec.component_types)})"
         catches = spec.catches.replace("|", "\\|")
-        origin = spec.origin.replace("|", "\\|")
-        lines.append(f"| `{spec.id}` | {scope} | {spec.severity} | {catches} | {origin} |")
+        lines.append(f"| `{spec.id}` | {scope} | {spec.severity} | {catches} |")
     return "\n".join(lines) + "\n"
