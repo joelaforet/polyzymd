@@ -106,7 +106,7 @@ def catalog_markdown() -> str:
         "and records the result in `build_provenance.json` and `build_provenance.md`.",
         "A check whose default is FAIL stops the build; WARN and INFO are recorded only.",
         "",
-        "To keep a deliberate departure, accept the failing check in the config with a",
+        "To keep a deliberate departure, accept the failing (or warning) check in the config with a",
         "reason. The build record then lists the accepted finding, its reason and the",
         "atoms it covered:",
         "",

@@ -2193,12 +2193,25 @@ class SimulationConfig(_ConfigModel):
                         f"restraint {restraint.name!r} names component {atom.component!r}, "
                         f"which is not a solute; solutes are {', '.join(names)}"
                     )
-        allowed = set(names) | {"solvent", "ions", "system"}
+        from polyzymd.audit import registry
+
+        type_of = {solute.name: solute.type for solute in self.solutes}
+        type_of.update({"solvent": "solvent", "ions": "ions"})
         for exception in self.modeling_exceptions:
-            if exception.component is not None and exception.component not in allowed:
+            component = exception.component
+            if component is None:
+                continue
+            spec = registry.get(exception.check)
+            # A check reports on the components of the types it applies to; a
+            # system check may also report on "system".
+            allowed = {n for n, t in type_of.items() if spec.applies_to(t)}
+            if spec.scope == "system":
+                allowed.add("system")
+            if component not in allowed:
                 raise ValueError(
-                    f"modeling_exceptions: {exception.check} names component "
-                    f"{exception.component!r}; components are {', '.join(sorted(allowed))}"
+                    f"modeling_exceptions: {exception.check} cannot report on {component!r}; "
+                    f"it reports on {', '.join(sorted(allowed)) or 'no component of this config'}. "
+                    "Name one of those, or leave component out to cover all of them."
                 )
         return self
 
