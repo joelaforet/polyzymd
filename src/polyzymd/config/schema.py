@@ -264,6 +264,9 @@ class ChargeSpec(_ConfigModel):
         return self
 
 
+#: Names of the components PolyzyMD adds itself (and their segment IDs), so no solute takes them.
+_BUILT_IN_COMPONENT_NAMES = frozenset({"solvent", "ions", "SOL", "ION"})
+
 #: Charge methods that compute charges from a molecule's graph.
 COMPUTED_CHARGES = ("nagl", "am1bcc", "espaloma")
 
@@ -298,8 +301,19 @@ class _Solute(_ConfigModel):
         type_: str = self.type  # type: ignore[attr-defined]  # each subclass defines it
         if self.name is None:
             object.__setattr__(self, "name", type_)
-        if not self.name.strip() or "/" in self.name or "\\" in self.name:
-            raise ValueError(f"name {self.name!r} must be non-empty, without '/' or '\\'")
+        if (
+            not self.name.strip()
+            or any(c in self.name for c in "/\\")
+            or self.name.split() != [self.name]
+        ):
+            raise ValueError(
+                f"name {self.name!r} must be non-empty, without '/', '\\' or spaces (it names "
+                "run folders and GROMACS index groups)"
+            )
+        if self.name in _BUILT_IN_COMPONENT_NAMES:
+            raise ValueError(
+                f"name {self.name!r} is taken by a component PolyzyMD adds itself; choose another"
+            )
         if self.segid is None:
             object.__setattr__(self, "segid", DEFAULT_SEGIDS[type_])
         validate_segid(self.segid)
@@ -620,7 +634,7 @@ class PolymerSolute(_Solute):
         PolymerGenerationMode.CACHED,
         description="Polymer generation mode: 'cached' (pre-built SDFs) or 'dynamic' (generate from SMILES)",
     )
-    type_prefix: str = Field(..., description="Polymer type prefix for filenames")
+    type_prefix: str = Field(..., min_length=1, description="Polymer type prefix for filenames")
     monomers: list[MonomerSpec] = Field(..., min_length=1, description="Monomer specifications")
     length: int = Field(..., ge=1, description="Monomers per chain")
     count: int = Field(..., ge=1, description="Number of polymer chains")
@@ -813,8 +827,11 @@ class CoSolventSpec(_ConfigModel):
             )
         if isinstance(data, dict) and "charge_method" in data:
             raise ValueError(
-                "co-solvent 'charge_method' is now 'charges': {method: nagl} (or am1bcc, "
-                f"espaloma, preset). See {REWRITE_GUIDE}"
+                "co-solvent 'charge_method' is now 'charges'. Releases up to 1.3.0rc4 gave a "
+                "co-solvent PolyzyMD ships charges for (such as dmso) those shipped charges "
+                "whatever charge_method said; to keep them, delete the key (or write charges: "
+                "{method: preset}). Any other co-solvent: charges: {method: nagl} (or am1bcc, "
+                f"espaloma). See {REWRITE_GUIDE}"
             )
         return data
 
@@ -1040,8 +1057,8 @@ class AtomSelectionConfig(_ConfigModel):
     ``component``, so ``resid 106`` cannot pick up a polymer residue 106.
 
     Attributes:
-        component: Name of the solute the atom belongs to (``protein`` by default
-            for a protein solute).
+        component: Name of the solute the atom belongs to (a solute's name
+            defaults to its type, so ``protein`` when the protein has no name).
         selection: Selection string (e.g., "resid 77 and name OG")
         description: Optional human-readable description
     """
