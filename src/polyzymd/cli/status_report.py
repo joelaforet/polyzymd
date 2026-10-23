@@ -772,7 +772,9 @@ def _diverged_segments(progress: Any) -> list[str]:
     """Segments whose run-time System differs from the audited build."""
     segments = getattr(progress, "segments", None) or []
     return [
-        f"segment {seg.index}: {seg.system_check.get('detail', '')}"
+        f"segment {seg.index}"
+        + ("" if seg.system_check.get("compared", True) else " (not compared)")
+        + f": {seg.system_check.get('detail', '')}"
         for seg in segments
         if seg.system_check and not seg.system_check.get("matches_build", True)
     ]
