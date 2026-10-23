@@ -7,88 +7,120 @@ This document describes all configuration options for PolyzyMD YAML files.
 A complete configuration file has these sections:
 
 ```yaml
-name: "simulation_name"   # Required
-engine: "openmm"          # Required: openmm or gromacs
+name: "simulation_name"     # Required
+engine: "openmm"            # Required: openmm or gromacs
 description: "optional description"
 
-enzyme: { ... }           # Required
-substrate: { ... }        # Optional (null for apo)
-polymers: { ... }         # Optional (null to disable)
-solvent: { ... }          # Optional (default: TIP3P water, neutralizing ions)
-restraints: [ ... ]       # Optional
-thermodynamics: { ... }   # Required
-simulation_phases: { ... } # Required
-output: { ... }           # Optional (has defaults)
-force_field: { ... }      # Optional (has defaults)
-openmm: { ... }           # Optional (has defaults; read when engine is openmm)
-gromacs: { ... }          # Optional (has defaults; read when engine is gromacs)
+solutes: [ ... ]            # Required: what you add to the box (protein, ligand, polymers)
+solvent: { ... }            # Required: force field, water model, co-solvents, ions, box
+restraints: [ ... ]         # Optional
+modeling_exceptions: [ ... ] # Optional: deliberate departures from a physics check
+thermodynamics: { ... }     # Required
+simulation_phases: { ... }  # Required
+output: { ... }             # Optional (has defaults)
+openmm: { ... }             # Optional (has defaults; read when engine is openmm)
+gromacs: { ... }            # Optional (has defaults; read when engine is gromacs)
 ```
+
+PolyzyMD assumes no force field, charge model or water model. Every solute
+and the solvent name their own, so each choice is on record in the config
+that built the system. The physics audit then checks that the built system
+carries exactly these choices; see {doc}`physics_checks` and
+{doc}`../explanation/physics_audit`.
+
+A config written for 1.3.0rc4 or earlier (`enzyme:`, `substrate:`,
+`polymers:`, `force_field:`) stops with an error that lists where each section
+went. See {doc}`../how_to/rewrite_config_rc5`.
 
 ---
 
-## Enzyme Configuration
+## Solutes
+
+`solutes:` lists everything you add to the box. Each entry is one component.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `type` | string | Yes | - | `protein`, `small_molecule` or `polymer`. It selects which keys the entry takes and how its physics is checked. It is never guessed from the other keys |
+| `name` | string | No | the type | The handle that restraints, `modeling_exceptions`, the build record and analysis use. No spaces, `/` or `\`; not `solvent`, `ions`, `SOL` or `ION`. Names must be unique |
+| `segid` | string | No | `PROT`, `LIG`, `POLY` | Segment ID of the component's atoms in the built PDB (columns 73-76), in analysis and in the GROMACS `components.ndx`. 1-4 characters, not `SOL` or `ION` |
+| `force_field` | list of paths | Yes | - | The `.offxml` files that parameterize this component |
+| `charges` | object | Yes | - | Where its partial charges come from; see below |
+
+This release builds one solute of each type, and a protein is required. Every
+solute but the protein uses the same force field file as `solvent`.
+`validate` says so when a config goes beyond these limits; it never builds
+something else.
+
+### Charges
 
 ```yaml
-enzyme:
-  name: "LipA"                           # Identifier (required)
-  pdb_path: "structures/enzyme.pdb"      # Path to PDB file (required)
-  description: "Bacillus subtilis Lipase A"  # Optional description
+charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+```
+
+| `method` | Meaning | Takes |
+|----------|---------|-------|
+| `library` | The force field's library charges (ff14SB's for a protein) | protein |
+| `preset` | The charges stored in the component's SDF files, or shipped with PolyzyMD for a co-solvent such as DMSO | cached polymers, bundled co-solvents |
+| `nagl` | OpenFF NAGL. `model` names the network file and is required | small molecules, dynamic polymers, co-solvents |
+| `am1bcc` | AM1-BCC, computed for each molecule. Needs AmberTools | same as `nagl` |
+| `espaloma` | Espaloma charges, computed for each molecule | same as `nagl` |
+
+`model` is only for `nagl`. `openff-gnn-am1bcc-1.0.0.pt` is the model OpenFF
+Sage 2.3.0 names in its own `NAGLCharges` section; PolyzyMD 1.3 release
+candidates before rc.5 used `openff-gnn-am1bcc-0.1.0-rc.3.pt`. Every component
+charged with `nagl` must name the same model in this release. Co-solvent
+charges are cached per model, so a change never reuses charges from another
+model.
+
+`nagl` and OpenFF charging need no extra program. `am1bcc` depends on
+AmberTools, which is not in every pixi environment (in particular macOS NumPy 2
+environments). `validate` refuses `nagl` for elements other than H, C, N, O,
+F, P, S, Cl, Br and I, and a method whose software is not installed.
+
+### Protein (`type: protein`)
+
+```yaml
+solutes:
+  - type: protein
+    name: "LipA"                                  # optional; the run folder name uses it
+    pdb_path: "structures/enzyme.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+    description: "Bacillus subtilis Lipase A"     # optional
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Short identifier for the enzyme. It names the run folder, so it must not be empty or hold `/` |
-| `pdb_path` | path | Yes | Path to prepared PDB file. `validate` refuses a missing file or one without ATOM/HETATM records |
+| `pdb_path` | path | Yes | Prepared, protonated PDB file. `validate` refuses a missing file or one without ATOM/HETATM records |
+| `charges` | object | Yes | `{method: library}`: a protein takes its force field's library charges |
 | `custom_substructures_path` | path | No | JSON file of residue templates for residues that OpenFF does not know, such as an N-terminal cystine. See {doc}`openff_pdb_ingestion` |
 | `description` | string | No | Human-readable description |
 
----
+### Small molecule (`type: small_molecule`)
 
-## Substrate Configuration
+A ligand placed as given, such as a docked substrate. Leave the entry out for
+an apo simulation.
 
 ```yaml
-substrate:
-  name: "Resorufin-Butyrate"             # Identifier (required)
-  sdf_path: "structures/substrate.sdf"   # Path to SDF file (required)
-  conformer_index: 0                     # Which conformer to use (default: 0)
-  charge_method: "nagl"                  # Charge assignment method
-  residue_name: "LIG"                    # 3-letter residue name
+  - type: small_molecule
+    name: "Resorufin-Butyrate"
+    sdf_path: "structures/substrate.sdf"
+    conformer_index: 0                            # which conformer to place
+    residue_name: "LIG"
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
 ```
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | string | Yes | - | Substrate identifier |
-| `sdf_path` | path | Yes | - | Path to SDF with docked conformers. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
-| `conformer_index` | int | No | 0 | Index of conformer to use (0-indexed). `validate` refuses an index the SDF does not hold |
-| `charge_method` | string | No | "nagl" | Options: `nagl`, `espaloma`, `am1bcc`. `validate` refuses `nagl` for elements other than H, C, N, O, F, P, S, Cl, Br, I, and a method whose software is not installed |
-| `residue_name` | string | No | "LIG" | 3-letter code for topology |
-
-### Charge Methods
-
-| Method | Description | Speed |
-|--------|-------------|-------|
-| `nagl` | Graph neural network charges | Fast |
-| `espaloma` | Machine learning charges | Medium |
-| `am1bcc` | Semi-empirical QM charges | Slow |
-
-```{note}
-`nagl`/OpenFF charging is the recommended default for routine PolyzyMD v1.3
-workflows. `am1bcc` depends on AmberTools availability, which is
-platform- and environment-specific and is not available in all default pixi
-environments, especially macOS NumPy 2 environments. If you need AM1-BCC, use
-pre-charged molecules or request/construct a dedicated AmberTools environment
-for your platform.
-```
-
-### No Substrate (Apo Simulation)
-
-```yaml
-substrate: null
-```
+| `sdf_path` | path | Yes | - | SDF with the docked, protonated conformers. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
+| `conformer_index` | int | No | 0 | Index of the conformer to place (0-indexed). `validate` refuses an index the SDF does not hold |
+| `residue_name` | string | No | "LIG" | 3-letter code for the topology |
+| `charges` | object | Yes | - | `nagl` (with `model`), `am1bcc` or `espaloma` |
 
 ---
 
-## Polymer Configuration
+## Polymers (`type: polymer`)
 
 PolyzyMD supports two modes for polymer generation: **cached** (load from pre-built SDF files) and **dynamic** (generate on-the-fly from SMILES).
 
@@ -99,9 +131,8 @@ For a complete guide on dynamic polymer generation, see {doc}`../how_to/dynamic_
 ### Basic Configuration (Cached Mode)
 
 ```yaml
-polymers:
-  enabled: true                          # Enable/disable polymers
-  type_prefix: "SBMA-EGPMA"              # Polymer type identifier
+  - type: polymer
+    type_prefix: "SBMA-EGPMA"              # Polymer type identifier
   
   monomers:                              # Monomer definitions
     - label: "A"                         # Single character label
@@ -116,16 +147,19 @@ polymers:
   
   sdf_directory: "polymer_sdfs/SBMA-EGPMA" # Pre-built polymer SDFs (required in cached mode)
   cache_directory: ".polymer_cache"      # Cache for generated polymers
+  force_field: ["openff-2.3.0.offxml"]
+  charges: {method: preset}              # the charges stored in the SDFs
 ```
+
+The entry is one item of `solutes:`; its keys are indented under the `-`.
 
 ### Dynamic Generation Configuration
 
 To generate polymers on-the-fly from monomer SMILES (without pre-built SDF files):
 
 ```yaml
-polymers:
-  enabled: true
-  generation_mode: "dynamic"             # Enable dynamic generation
+  - type: polymer
+    generation_mode: "dynamic"             # Enable dynamic generation
   type_prefix: "SBMA-EGPMA"
   
   # ATRP reaction templates (use bundled defaults or custom paths)
@@ -148,7 +182,8 @@ polymers:
   
   length: 5
   count: 2
-  charger: "nagl"                        # Charge method: nagl, espaloma, am1bcc
+  force_field: ["openff-2.3.0.offxml"]
+  charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}   # or am1bcc, espaloma
   max_retries: 10                        # Retries for ring-piercing detection
   cache_directory: ".polymer_cache"
 ```
@@ -157,7 +192,6 @@ polymers:
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `enabled` | bool | No | true | Enable polymer addition |
 | `generation_mode` | string | No | "cached" | `cached` or `dynamic` |
 | `type_prefix` | string | Yes | - | Identifier for polymer type |
 | `monomers` | list | Yes | - | Monomer specifications |
@@ -166,12 +200,13 @@ polymers:
 | `sdf_directory` | path | In cached mode | null | Directory with pre-built polymer SDFs |
 | `cache_directory` | path | No | ".polymer_cache" | Cache directory |
 | `reactions` | object | No | all "default" | ATRP reaction templates (dynamic mode) |
-| `charger` | string | No | "nagl" | Charge method for dynamic generation |
+| `force_field` | list | Yes | - | Force field files; the same file as `solvent.force_field` |
+| `charges` | object | Yes | - | `preset` in cached mode (the charges in the SDFs); `nagl` (with `model`), `am1bcc` or `espaloma` in dynamic mode |
 | `max_retries` | int | No | 10 | Max attempts for ring-piercing avoidance |
 | `random_seed` | int | No | null | Seed for polymer sequence draws (default: the replicate number) |
 | `packing` | object | No | see below | PACKMOL placement settings |
 
-### Packing Options (`polymers.packing`)
+### Packing Options (`packing`)
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -183,7 +218,7 @@ polymers:
 
 PACKMOL is seeded with the replicate number for both polymer packing and
 solvation, so replicates start from independent coordinates. The seeds are
-recorded under `provenance` in `build_manifest.json`.
+recorded under `provenance` in `build_provenance.json`.
 
 #### Where the polymers are packed
 
@@ -191,7 +226,7 @@ The periodic cell is computed **before** anything is packed, from the protein
 and substrate alone:
 
 ```
-edge = solute diameter + 2 * (polymers.packing.padding + solvent.box.padding)
+edge = solute diameter + 2 * (packing.padding + solvent.box.padding)
 box vectors = edge * shape_matrix
 ```
 
@@ -200,9 +235,9 @@ Chains are then packed inside the rectangular *brick* of that cell (shrunk by
 solvent fills the same brick afterwards. Because the cell depends only on the
 enzyme and substrate, every replicate of a condition gets the same box volume,
 the same water count and the same ion counts. The cell, the brick and the
-sphere radius are recorded under `provenance` in `build_manifest.json`
+sphere radius are recorded under `provenance` in `build_provenance.json`
 (`box_vectors_nm`, `brick_nm`, `polymer_sphere_radius_nm`), so replicates can
-be compared by diffing their manifests.
+be compared by diffing their build records.
 
 ```{note}
 A rhombic-dodecahedron brick is one edge long along `x` and `y`, but only
@@ -223,36 +258,17 @@ each brick face.
 | `smiles` | string | Dynamic only | Raw monomer SMILES (with C=C double bond) |
 | `residue_name` | string | No | 3-letter residue code for topology |
 
-### Charge Methods for Dynamic Generation
+### Charges
 
-| Method | Description | Speed | Accuracy |
-|--------|-------------|-------|----------|
-| `nagl` | Graph neural network charges | Fast | Good |
-| `espaloma` | Machine learning charges | Medium | Good |
-| `am1bcc` | Semi-empirical QM charges | Slow | Best |
-
-```{note}
-`nagl`/OpenFF charging is the recommended default for dynamic polymer generation.
-`am1bcc` depends on AmberTools availability, which is platform- and
-environment-specific and is not available in all default pixi environments,
-especially macOS NumPy 2 environments. If you need AM1-BCC, use pre-charged
-molecules or request/construct a dedicated AmberTools environment for your
-platform.
-```
+Cached chains carry their charges in the SDF files: write
+`charges: {method: preset}`. Dynamically generated chains are charged when
+they are made: write `nagl` (with `model`), `am1bcc` or `espaloma`. `validate`
+refuses any other combination, so the config never names a charge source the
+build did not use. See [Charges](#charges).
 
 ### No Polymers
 
-```yaml
-polymers:
-  enabled: false
-```
-
-`polymers: null`, or leaving out the `polymers:` section, does the same. A
-disabled section needs no other keys; a warning names any it does not read. A
-disabled section that still has every required polymer key is kept as
-written, so the configs of existing runs keep their hash. Do not shorten the
-section of a run that is already built: its config would change hash, and the
-build would no longer match it.
+Leave the polymer entry out of `solutes:`.
 
 ---
 
@@ -260,9 +276,9 @@ build would no longer match it.
 
 ```yaml
 solvent:
-  primary:
-    type: "water"                        # The only type the build makes
-    model: "tip3p"                       # Water model
+  force_field: ["openff-2.3.0.offxml"]   # water, ions and co-solvents (required)
+  water:
+    model: "tip3p"                       # Water model (required)
   
   co_solvents: []                        # List of co-solvents (optional)
   
@@ -276,6 +292,11 @@ solvent:
     target_density: 1.0                  # g/mL
     tolerance: 2.0                       # PACKMOL tolerance (Angstrom)
 ```
+
+`force_field` names the file that parameterizes water, ions and co-solvents;
+Sage carries the TIP3P water and the ion parameters. `water.model` is
+required: PolyzyMD assumes no water model. Water and co-solvents carry
+segment ID `SOL` (co-solvents are told apart by residue name) and ions `ION`.
 
 `nacl_concentration` sets the number of NaCl pairs. With `neutralize: true`,
 the Na+ or Cl- ions that cancel the charge of the solute and co-solvents are
@@ -306,7 +327,7 @@ the cell is the solute diameter (its largest atom-to-atom distance) plus
 rhombic dodecahedron is at least one edge long. The solute
 therefore starts at least `2 * padding` from each of its periodic copies, in
 any orientation. The solute's bounding box is centred in the brick. When
-polymers are configured, `polymers.packing.padding` is added to it and the
+a polymer solute is configured, its `packing.padding` is added to it and the
 resulting cell is computed from the protein and substrate before any packing
 happens, so it is identical across replicates of a condition; the packed
 topology is not re-centred afterwards. Without polymers the box is computed
@@ -316,7 +337,8 @@ solvent counts.
 
 ### Water Models
 
-`tip3p` (TIP3P) is the only water model PolyzyMD builds. The force fields it
+`tip3p` (TIP3P) is the only water model PolyzyMD builds, and
+`solvent.water.model` must name it. The force fields it
 loads carry the TIP3P water parameters, so `validate`, `build`, `run` and
 `submit` refuse any other `model`. A config of an existing run with another
 model still loads for `status` and analysis.
@@ -353,7 +375,13 @@ Use this when you want a specific molecule fraction of the neutral solvent mixtu
 co_solvents:
   - name: "dmso"
     mole_fraction: 0.10      # 10 mol% DMSO
+    charges: {method: preset}
 ```
+
+Every co-solvent names its charges. `preset` takes the charges PolyzyMD ships
+for a library co-solvent (see the table below); `validate` refuses `preset`
+for any other molecule, including a library name given another SMILES. A new
+molecule takes `nagl` (with `model`), `am1bcc` or `espaloma`.
 
 **Formula:**
 
@@ -381,6 +409,7 @@ Use this when you want a specific molar concentration (e.g., "2 M urea for prote
 co_solvents:
   - name: "urea"
     concentration: 2.0       # 2 M urea
+    charges: {method: preset}
 ```
 
 **Formula:**
@@ -420,12 +449,14 @@ PolyzyMD includes a library of common co-solvents with pre-defined SMILES and de
 
 A co-solvent's residue name must not be an amino-acid, nucleic-acid, water or ion name, because selections such as `protein` would then include it. Without `residue_name`, a custom co-solvent gets the first three letters of its name, or, when those clash, the first two letters and the next letter or digit that does not clash (`methylurea` becomes `MEH`, not `MET`); the dry run prints it. `validate` and `build` refuse a `residue_name` you set that clashes. Library co-solvents whose short name clashed use the PDB chemical-component code (glycerol is `GOL`, not `GLY`). Topologies built before PolyzyMD 1.3 still have the old names (`GLY` glycerol, `MET` methanol, `ACE` acetone and acetonitrile, `ETH` ethylene glycol); an older build has the clash when one of these residues has no `CA` atom, which MDAnalysis shows with `[r for r in u.select_atoms("resname GLY MET").residues if "CA" not in r.atoms.names]`.
 
-For library co-solvents, you only need to specify the `name` and either `mole_fraction` or `concentration`:
+For library co-solvents, you only need to specify the `name`, the amount and
+`charges: {method: preset}`:
 
 ```yaml
 co_solvents:
   - name: "dmso"
     mole_fraction: 0.10      # 10 mol% DMSO - smiles auto-populated
+    charges: {method: preset}
 ```
 
 #### Custom Co-solvents
@@ -438,11 +469,13 @@ co_solvents:
   - name: "ethyl_acetate"
     smiles: "CCOC(=O)C"
     mole_fraction: 0.05
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
 
   # Custom co-solvent with concentration (density not needed)
   - name: "my_additive"
     smiles: "CC(=O)NC"
     concentration: 0.5       # 0.5 M
+    charges: {method: am1bcc}
 ```
 
 #### Multiple Co-solvents
@@ -453,8 +486,10 @@ You can combine multiple co-solvents. Each can use either specification method i
 co_solvents:
   - name: "dmso"
     mole_fraction: 0.10      # 10 mol% DMSO
+    charges: {method: preset}
   - name: "urea"
     concentration: 1.0       # Plus 1 M urea
+    charges: {method: preset}
 ```
 
 **Warning:** When using multiple co-solvents with `mole_fraction`, ensure the total is less than 1.0 (100%). The remaining mole fraction is filled with water. Non-water primary solvents and 100% DMSO systems are out of scope for now; model solvent mixtures as water primary solvent plus `co_solvents` entries with `mole_fraction < 1.0`.
@@ -515,7 +550,7 @@ PolyzyMD solves this by computing charges **once** and reusing them:
 1. Check in-memory cache (fastest)
 2. Check bundled library: src/polyzymd/data/solvents/dmso.sdf (used when no SMILES or the library SMILES is given)
 3. Check user cache: ~/.polyzymd/solvent_cache/<name>.<charge method>.<hash of SMILES, method and NAGL model>.sdf
-4. Generate from SMILES, charge with charge_method (default nagl), save to user cache
+4. Generate from SMILES, charge with the co-solvent's charges method, save to user cache
 ```
 
 #### Available Pre-computed Solvents
@@ -543,11 +578,10 @@ All 12 library co-solvents plus water models have pre-computed charges:
 When you use a custom co-solvent (not in the library), PolyzyMD:
 
 1. Generates the molecule from your SMILES string.
-2. Assigns partial charges with `charge_method`: `nagl` by default, the
-   OpenFF graph network trained on AM1-BCC. Set `charge_method: am1bcc` for
-   AM1-BCC itself, which needs AmberTools. When you leave the default, the
-   build writes a warning that asks you to check that NAGL charges suit the
-   molecule.
+2. Assigns partial charges with the method its `charges` names: `nagl`
+   (the OpenFF graph network trained on AM1-BCC, with the `model` you name),
+   `am1bcc` (needs AmberTools) or `espaloma`. With `nagl`, the build writes a
+   warning that asks you to check that NAGL charges suit the molecule.
 3. Caches the charged molecule in `~/.polyzymd/solvent_cache/`, one file per
    SMILES, charge method and NAGL model, and reuses it. A changed SMILES gives a new
    molecule, even under the same `name`.
@@ -566,7 +600,7 @@ co_solvents:
     smiles: "CCCCCCCCCCCCOS(=O)(=O)[O-].[Na+]"   # sodium dodecyl sulfate with Na+
     residue_name: "SDS"
     count: 8
-    charge_method: nagl                          # the default; am1bcc needs AmberTools
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}   # or am1bcc (needs AmberTools)
 ```
 
 #### Managing the Cache
@@ -597,17 +631,25 @@ restraints:
   - type: "flat_bottom"                  # Restraint type
     name: "substrate_active_site"        # Identifier
     atom1:
-      selection: "resid 76 and name OG"  # First atom selection
+      component: "LipA"                  # The solute the atom belongs to
+      selection: "resid 76 and name OG"  # Selection inside that component
       description: "Catalytic serine"    # Optional description
     atom2:
-      selection: "resname LIG and name C1"
+      component: "Resorufin-Butyrate"
+      selection: "name C1"
       description: "Substrate carbon"
     distance: 3.3                        # Angstroms
     force_constant: 10000.0              # kJ/mol/nm²
     enabled: true                        # Enable/disable
 ```
 
-See {doc}`../how_to/restraints` for detailed selection syntax.
+Each atom names the solute it belongs to (`component`), and the selection is
+matched only inside that component's atoms, so `resid 76` cannot pick a
+polymer residue 76. Each selection must give exactly one atom. The physics
+audit selects the atom again, with another library, and checks that the
+restraint in the built system joins the atoms the config names
+(`restraint.atom_identity`). See {doc}`../how_to/restraints` for detailed
+selection syntax.
 
 Only the OpenMM engine applies distance restraints. With `engine: gromacs`,
 `validate` refuses an enabled restraint, and `build --format gromacs`,
@@ -617,7 +659,7 @@ engines. On GROMACS they work for `protein_heavy`, `protein_backbone`,
 `protein_calpha`, `ligand_heavy` and `polymer_heavy`; each group must have
 the same `force_constant` in every stage, and all stages must use the same
 protein group. `validate` refuses other position restraints on GROMACS, and
-refuses `ligand_heavy` without a substrate or `polymer_heavy` without polymers
+refuses `ligand_heavy` without a small-molecule solute or `polymer_heavy` without a polymer solute
 on both engines.
 
 ### Restraint Types
@@ -628,6 +670,32 @@ on both engines.
 | `harmonic` | Harmonic potential at target distance |
 | `upper_wall` | Prevent distance exceeding threshold |
 | `lower_wall` | Prevent distance below threshold |
+
+---
+
+## Modeling Exceptions
+
+Every build runs the physics audit ({doc}`physics_checks`). A check that fails
+stops the build. When a departure is deliberate, accept it here, with the
+reason:
+
+```yaml
+modeling_exceptions:
+  - check: geometry.buried_water
+    component: LipA          # optional; every component the check runs on when left out
+    reason: "Crystal waters in the active-site pocket are kept on purpose."
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `check` | string | Yes | A check ID from {doc}`physics_checks`. `validate` refuses an unknown ID and names the closest ones |
+| `component` | string | No | A solute name, `solvent`, `ions` or `system`. It must be a component the check runs on |
+| `reason` | string | Yes | Why the departure is deliberate. No code reads it; it is there for the reader of the published config |
+
+An accepted failure is recorded in `build_provenance.json` and
+`build_provenance.md` with its reason and the atoms it covered. An entry that
+accepted nothing is reported by the `modeling_exceptions.unused` check, so a
+stale entry does not stay in a published config unnoticed.
 
 ---
 
@@ -682,7 +750,7 @@ accepted. The quickstart uses one stage of 0.002 ns.
 
 Energy minimization runs before the first equilibration stage. It is a
 runtime-only setting: changing it does not alter the built system or its
-`build_manifest.json` hash.
+`build_provenance.json` config hash.
 
 ```yaml
 simulation_phases:
@@ -773,8 +841,8 @@ template without `{replicate}`, since the replicates would share one folder.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `{enzyme}` | Enzyme name | "LipA" |
-| `{substrate}` | Substrate name (hyphens removed), or `apo` without a substrate | "ResorufinButyrate" |
+| `{enzyme}` | Name of the protein solute | "LipA" |
+| `{substrate}` | Name of the small-molecule solute (hyphens removed), or `apo` without one | "ResorufinButyrate" |
 | `{polymer_type}` | Polymer type prefix and composition, or `none` without polymers | "SBMA-EGPMA_A70_B30" |
 | `{duration}` | Production duration in ns: whole ns from 1 ns up, in full below 1 ns | "100", "0.005" |
 | `{temperature}` | Temperature in K | "300" |
@@ -789,35 +857,34 @@ The removed `volume_fraction` field is not part of naming-template resolution.
 
 ---
 
-## Force Field Configuration
+## Force Fields
+
+There is no `force_field:` section. Each solute names its own force field files
+in `force_field:`, and `solvent.force_field` names the file for water, ions
+and co-solvents:
 
 ```yaml
-force_field:
-  protein: "ff14sb_off_impropers_0.0.4.offxml"  # Protein force field
-  small_molecule: "openff-2.0.0.offxml"          # Ligand/polymer force field
-  nagl_model: "openff-gnn-am1bcc-1.0.0.pt"       # NAGL charge model (charge_method: nagl)
+solutes:
+  - type: protein
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    ...
+solvent:
+  force_field: ["openff-2.3.0.offxml"]
 ```
 
-`nagl_model` names the NAGL model that charges every molecule with
-`charge_method: nagl`: the substrate, co-solvents generated from SMILES and
-dynamically generated polymers. The default, `openff-gnn-am1bcc-1.0.0.pt`, is the
-first production release of OpenFF's AM1-BCC graph model (openff-nagl-models
-2025.09.0) and the model OpenFF Sage 2.3.0 names in its own `NAGLCharges`
-section. PolyzyMD 1.3 release candidates used `openff-gnn-am1bcc-0.1.0-rc.3.pt`;
-name it here to rebuild a system exactly as they did. Co-solvent charges are
-cached per model, so changing it never reuses charges from another model.
-Pre-built polymer SDFs and bundled co-solvents keep the charges stored in them.
+`validate` refuses a name that is not an installed force field or an
+`.offxml` file. PolyzyMD recommends none: choose the force fields for your
+system and cite them. Installed files include
+`ff14sb_off_impropers_0.0.4.offxml` (Amber ff14SB, ported to OpenFF) and the
+OpenFF Sage releases (`openff-2.0.0.offxml` to `openff-2.3.0.offxml`).
+A config of 1.3.0rc4 or earlier that named no small-molecule force field was
+built with `openff-2.0.0.offxml`; name that file to build the same physics.
 
-### Available Force Fields
-
-`validate` refuses a name that is not an installed force field or an `.offxml` file.
-
-**Protein:**
-- `ff14sb_off_impropers_0.0.4.offxml` - Amber ff14SB (recommended)
-
-**Small Molecule:**
-- `openff-2.0.0.offxml` - OpenFF Sage 2.0 (recommended)
-- `openff-2.1.0.offxml` - OpenFF Sage 2.1
+Each component is parameterized by its own files alone. The
+`parameters.bonded`, `parameters.nonbonded` and `charges.source` checks rebuild
+every component from the files its entry names and compare the built system
+with them term by term, so a term taken from another component's force field
+fails the build.
 
 ### Key Collision Warnings
 
@@ -833,7 +900,7 @@ Key collision with different parameters, fixing. Key is [#6X4:1]-[#1:2]
 
 PolyzyMD uses different force fields for different molecule types:
 - **Proteins**: ff14SB (Amber force field ported to OpenFF format)
-- **Small molecules**: OpenFF Sage 2.0 (general small molecule force field)
+- **Small molecules**: OpenFF Sage (general small molecule force field)
 
 When these force fields are combined, the same SMIRKS pattern (e.g., `[#6X4:1]-[#1:2]` for sp³ carbon-hydrogen bonds) may appear in both, but with **different parameter values**. This is expected because:
 
@@ -1052,15 +1119,15 @@ Start from one of these complete configs:
 
 - `polyzymd study add-condition "<label>" --new`, run in a study folder,
   writes `conditions/<label>/config.yaml`. This template has every section.
-  The substrate, co-solvent, polymer and restraint sections are commented
-  out, with a comment on each key.
+  The small-molecule, polymer, co-solvent, restraint and
+  `modeling_exceptions` entries are commented out, with a comment on each key.
 - `examples/quickstart/config.yaml` (OpenMM) and
   `examples/quickstart/config_gromacs.yaml` (GROMACS), in the PolyzyMD
   repository, are a protein in water with NaCl. See
   {doc}`../get_started/quickstart`.
 
-To add a substrate, co-solvents or polymers, copy the blocks of this page
-into one of these configs.
+To add a small molecule, co-solvents or polymers, copy the entries of this
+page into one of these configs.
 
 ---
 
@@ -1071,3 +1138,5 @@ into one of these configs.
 - {doc}`../how_to/polymers` - Polymer setup guide
 - {doc}`../how_to/restraints` - Atom selection and restraints
 - {doc}`cli_reference` - CLI documentation
+- {doc}`physics_checks` - The checks every build must pass
+- {doc}`../how_to/rewrite_config_rc5` - Rewrite a 1.3.0rc4 config
