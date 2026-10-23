@@ -1140,7 +1140,10 @@ def run(
         sim_config = load_config_or_exit(config)
         colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
         colored_echo(f"Engine: {engine}", phase="simulation")
-        sim_config.require_buildable(engine)
+        # The input files are checked when a replicate is built (the builder
+        # checks them); a run that reuses a build, as in a sim-cuda-*
+        # environment without RDKit or OpenFF, does not read them.
+        sim_config.require_buildable(engine, inputs=False)
 
         # Override directories if provided via CLI
         if scratch_dir:

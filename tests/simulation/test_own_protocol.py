@@ -207,3 +207,19 @@ def test_a_queued_gromacs_job_stops_before_touching_an_own_protocol_run(tmp_path
     )
     assert result.returncode == 0
     assert ("RAN" in result.stdout) is not declared
+
+
+def test_run_does_not_need_the_build_inputs_to_reuse_a_build(campaign, monkeypatch) -> None:
+    """A sim-cuda-* environment has no RDKit or OpenFF; run there only reuses the build."""
+    from click.testing import CliRunner
+
+    from polyzymd.cli import main
+    from polyzymd.config.schema import SimulationConfig
+
+    calls = []
+    monkeypatch.setattr(
+        SimulationConfig, "require_buildable", lambda self, *a, **k: calls.append(k)
+    )
+    monkeypatch.setattr(main, "_run_openmm_impl", lambda **kwargs: None)
+    CliRunner().invoke(main.cli, ["run", "-c", str(campaign / "config.yaml"), "-r", "1"])
+    assert calls and all(k.get("inputs") is False for k in calls)
