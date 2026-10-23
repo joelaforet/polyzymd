@@ -46,8 +46,15 @@ yourself, use these values:
 | `--qos` | `normal` | The same as the partition, or `preemptable` |
 
 The simulation presets `blanca-shirts` and `blanca-chbe-rdi` use the
-`preemptable` QoS. The owner's jobs can then stop a job. The job script
-writes a checkpoint and submits a successor.
+`preemptable` QoS. The owner's jobs can then preempt a job at any moment.
+CURC documents a grace period of up to 120 s, with `SIGTERM` sent first (see
+[Blanca: other considerations](https://curc.readthedocs.io/en/latest/clusters/blanca/blanca.html#other-considerations)).
+In October 2026, `sacctmgr` showed `GraceTime=00:00:00` for the `preemptable`
+QoS and `GraceTime=120` for the Blanca partitions, and two preempted PolyzyMD
+jobs left no sign of a `SIGTERM`. PolyzyMD does not depend on the grace
+period: SLURM puts a preempted job back in the queue (the job script allows
+requeueing), and the requeued job continues from the replicate's newest
+restart state, saved every minute.
 
 For example, on Blanca:
 
