@@ -1,0 +1,957 @@
+{
+ "description": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "engine": {
+  "default": null,
+  "required": true,
+  "values": [
+   "gromacs",
+   "openmm"
+  ]
+ },
+ "gromacs": {
+  "default": {
+   "analysis_topology": null,
+   "command_prefix": null,
+   "env_exports": {},
+   "gmx_binary": null,
+   "gpu": false,
+   "gpus": 1,
+   "grompp_flags": "",
+   "mdrun_flags": "",
+   "mdrun_flags_equilibration": null,
+   "mdrun_flags_production": null,
+   "memory": "16G",
+   "module_load": null,
+   "mpi_launcher_flags": "",
+   "ntmpi": 1,
+   "ntomp": 8,
+   "setup_commands": [],
+   "slurm_ntasks": null
+  },
+  "required": false,
+  "values": null
+ },
+ "gromacs.analysis_topology": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "gromacs.command_prefix": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "gromacs.env_exports": {
+  "default": {},
+  "required": false,
+  "values": null
+ },
+ "gromacs.gmx_binary": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "gromacs.gpu": {
+  "default": false,
+  "required": false,
+  "values": null
+ },
+ "gromacs.gpus": {
+  "default": 1,
+  "required": false,
+  "values": null
+ },
+ "gromacs.grompp_flags": {
+  "default": "",
+  "required": false,
+  "values": null
+ },
+ "gromacs.mdrun_flags": {
+  "default": "",
+  "required": false,
+  "values": null
+ },
+ "gromacs.mdrun_flags_equilibration": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "gromacs.mdrun_flags_production": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "gromacs.memory": {
+  "default": "16G",
+  "required": false,
+  "values": null
+ },
+ "gromacs.module_load": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "gromacs.mpi_launcher_flags": {
+  "default": "",
+  "required": false,
+  "values": null
+ },
+ "gromacs.ntmpi": {
+  "default": 1,
+  "required": false,
+  "values": null
+ },
+ "gromacs.ntomp": {
+  "default": 8,
+  "required": false,
+  "values": null
+ },
+ "gromacs.setup_commands": {
+  "default": [],
+  "required": false,
+  "values": null
+ },
+ "gromacs.slurm_ntasks": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "modeling_exceptions": {
+  "default": [],
+  "required": false,
+  "values": null
+ },
+ "modeling_exceptions.check": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "modeling_exceptions.component": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "modeling_exceptions.reason": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "name": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "openmm": {
+  "default": {
+   "device_index": null,
+   "platform": "CUDA",
+   "precision": "mixed"
+  },
+  "required": false,
+  "values": null
+ },
+ "openmm.device_index": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "openmm.platform": {
+  "default": "CUDA",
+  "required": false,
+  "values": null
+ },
+ "openmm.precision": {
+  "default": "mixed",
+  "required": false,
+  "values": null
+ },
+ "output": {
+  "default": {
+   "job_scripts_subdir": "job_scripts",
+   "naming_template": "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}",
+   "projects_directory": ".",
+   "save_checkpoint": true,
+   "save_state_data": true,
+   "scratch_directory": null,
+   "slurm_logs_subdir": "slurm_logs",
+   "trajectory_format": "dcd"
+  },
+  "required": false,
+  "values": null
+ },
+ "output.job_scripts_subdir": {
+  "default": "job_scripts",
+  "required": false,
+  "values": null
+ },
+ "output.naming_template": {
+  "default": "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}",
+  "required": false,
+  "values": null
+ },
+ "output.projects_directory": {
+  "default": ".",
+  "required": false,
+  "values": null
+ },
+ "output.save_checkpoint": {
+  "default": true,
+  "required": false,
+  "values": null
+ },
+ "output.save_state_data": {
+  "default": true,
+  "required": false,
+  "values": null
+ },
+ "output.scratch_directory": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "output.slurm_logs_subdir": {
+  "default": "slurm_logs",
+  "required": false,
+  "values": null
+ },
+ "output.trajectory_format": {
+  "default": "dcd",
+  "required": false,
+  "values": null
+ },
+ "restraints": {
+  "default": [],
+  "required": false,
+  "values": null
+ },
+ "restraints.atom1": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "restraints.atom1.component": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "restraints.atom1.description": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "restraints.atom1.selection": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "restraints.atom2": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "restraints.atom2.component": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "restraints.atom2.description": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "restraints.atom2.selection": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "restraints.distance": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "restraints.enabled": {
+  "default": true,
+  "required": false,
+  "values": null
+ },
+ "restraints.force_constant": {
+  "default": 10000.0,
+  "required": false,
+  "values": null
+ },
+ "restraints.name": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "restraints.type": {
+  "default": null,
+  "required": true,
+  "values": [
+   "flat_bottom",
+   "harmonic",
+   "lower_wall",
+   "upper_wall"
+  ]
+ },
+ "simulation_phases": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.barostat": {
+  "default": null,
+  "required": false,
+  "values": [
+   "MC",
+   "MCA"
+  ]
+ },
+ "simulation_phases.equilibration_stages.barostat_frequency": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.duration": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.ensemble": {
+  "default": "NVT",
+  "required": false,
+  "values": [
+   "NPT",
+   "NVE",
+   "NVT"
+  ]
+ },
+ "simulation_phases.equilibration_stages.name": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.position_restraints": {
+  "default": [],
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.position_restraints.force_constant": {
+  "default": 4184.0,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.position_restraints.group": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.samples": {
+  "default": 100,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.temperature": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.temperature_end": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.temperature_increment": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.temperature_interval_steps": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.temperature_start": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.thermostat": {
+  "default": null,
+  "required": false,
+  "values": [
+   "Andersen",
+   "Langevin",
+   "LangevinMiddle",
+   "NoseHoover"
+  ]
+ },
+ "simulation_phases.equilibration_stages.thermostat_timescale": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.time_step": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.minimization": {
+  "default": {
+   "freeze_solute": true,
+   "max_iterations": 1000,
+   "tolerance": 10.0
+  },
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.minimization.freeze_solute": {
+  "default": true,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.minimization.max_iterations": {
+  "default": 1000,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.minimization.tolerance": {
+  "default": 10.0,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.production": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "simulation_phases.production.barostat": {
+  "default": null,
+  "required": false,
+  "values": [
+   "MC",
+   "MCA"
+  ]
+ },
+ "simulation_phases.production.barostat_frequency": {
+  "default": 25,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.production.checkpoint_interval": {
+  "default": 60.0,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.production.duration": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "simulation_phases.production.ensemble": {
+  "default": null,
+  "required": true,
+  "values": [
+   "NPT",
+   "NVE",
+   "NVT"
+  ]
+ },
+ "simulation_phases.production.samples": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "simulation_phases.production.thermostat": {
+  "default": "LangevinMiddle",
+  "required": false,
+  "values": [
+   "Andersen",
+   "Langevin",
+   "LangevinMiddle",
+   "NoseHoover"
+  ]
+ },
+ "simulation_phases.production.thermostat_timescale": {
+  "default": 1.0,
+  "required": false,
+  "values": null
+ },
+ "simulation_phases.production.time_step": {
+  "default": 2.0,
+  "required": false,
+  "values": null
+ },
+ "solutes": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].cache_directory": {
+  "default": ".polymer_cache",
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].charges": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].charges.method": {
+  "default": null,
+  "required": true,
+  "values": [
+   "am1bcc",
+   "espaloma",
+   "library",
+   "nagl",
+   "preset"
+  ]
+ },
+ "solutes[polymer].charges.model": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].count": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].force_field": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].generation_mode": {
+  "default": "cached",
+  "required": false,
+  "values": [
+   "cached",
+   "dynamic"
+  ]
+ },
+ "solutes[polymer].length": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].max_retries": {
+  "default": 10,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].monomers": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].monomers.label": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].monomers.name": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].monomers.probability": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].monomers.residue_name": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].monomers.smiles": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].name": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].packing": {
+  "default": {
+   "confine_to_sphere": true,
+   "movebadrandom": false,
+   "nloop": 200,
+   "padding": 2.0,
+   "tolerance": 2.0
+  },
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].packing.confine_to_sphere": {
+  "default": true,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].packing.movebadrandom": {
+  "default": false,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].packing.nloop": {
+  "default": 200,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].packing.padding": {
+  "default": 2.0,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].packing.tolerance": {
+  "default": 2.0,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].random_seed": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].reactions": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].reactions.initiation": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].reactions.polymerization": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].reactions.termination": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[polymer].sdf_directory": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].segid": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[polymer].type": {
+  "default": null,
+  "required": true,
+  "values": [
+   "polymer"
+  ]
+ },
+ "solutes[polymer].type_prefix": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[protein].charges": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[protein].charges.method": {
+  "default": null,
+  "required": true,
+  "values": [
+   "am1bcc",
+   "espaloma",
+   "library",
+   "nagl",
+   "preset"
+  ]
+ },
+ "solutes[protein].charges.model": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[protein].custom_substructures_path": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[protein].description": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[protein].force_field": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[protein].name": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[protein].pdb_path": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[protein].segid": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[protein].type": {
+  "default": null,
+  "required": true,
+  "values": [
+   "protein"
+  ]
+ },
+ "solutes[small_molecule].charges": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[small_molecule].charges.method": {
+  "default": null,
+  "required": true,
+  "values": [
+   "am1bcc",
+   "espaloma",
+   "library",
+   "nagl",
+   "preset"
+  ]
+ },
+ "solutes[small_molecule].charges.model": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[small_molecule].conformer_index": {
+  "default": 0,
+  "required": false,
+  "values": null
+ },
+ "solutes[small_molecule].force_field": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[small_molecule].name": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[small_molecule].residue_name": {
+  "default": "LIG",
+  "required": false,
+  "values": null
+ },
+ "solutes[small_molecule].sdf_path": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solutes[small_molecule].segid": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solutes[small_molecule].type": {
+  "default": null,
+  "required": true,
+  "values": [
+   "small_molecule"
+  ]
+ },
+ "solvent": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solvent.box": {
+  "default": {
+   "padding": 1.2,
+   "shape": "rhombic_dodecahedron",
+   "target_density": 1.0,
+   "tolerance": 2.0
+  },
+  "required": false,
+  "values": null
+ },
+ "solvent.box.padding": {
+  "default": 1.2,
+  "required": false,
+  "values": null
+ },
+ "solvent.box.shape": {
+  "default": "rhombic_dodecahedron",
+  "required": false,
+  "values": [
+   "cube",
+   "rhombic_dodecahedron"
+  ]
+ },
+ "solvent.box.target_density": {
+  "default": 1.0,
+  "required": false,
+  "values": null
+ },
+ "solvent.box.tolerance": {
+  "default": 2.0,
+  "required": false,
+  "values": null
+ },
+ "solvent.co_solvents": {
+  "default": [],
+  "required": false,
+  "values": null
+ },
+ "solvent.co_solvents.charges": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solvent.co_solvents.charges.method": {
+  "default": null,
+  "required": true,
+  "values": [
+   "am1bcc",
+   "espaloma",
+   "library",
+   "nagl",
+   "preset"
+  ]
+ },
+ "solvent.co_solvents.charges.model": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solvent.co_solvents.concentration": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solvent.co_solvents.count": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solvent.co_solvents.density": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solvent.co_solvents.mole_fraction": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solvent.co_solvents.name": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solvent.co_solvents.residue_name": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solvent.co_solvents.smiles": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solvent.force_field": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solvent.ions": {
+  "default": {
+   "kcl_concentration": 0.0,
+   "mgcl2_concentration": 0.0,
+   "nacl_concentration": 0.0,
+   "neutralize": true
+  },
+  "required": false,
+  "values": null
+ },
+ "solvent.ions.ionic_strength": {
+  "default": null,
+  "required": false,
+  "values": null
+ },
+ "solvent.ions.kcl_concentration": {
+  "default": 0.0,
+  "required": false,
+  "values": null
+ },
+ "solvent.ions.mgcl2_concentration": {
+  "default": 0.0,
+  "required": false,
+  "values": null
+ },
+ "solvent.ions.nacl_concentration": {
+  "default": 0.0,
+  "required": false,
+  "values": null
+ },
+ "solvent.ions.neutralize": {
+  "default": true,
+  "required": false,
+  "values": null
+ },
+ "solvent.water": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "solvent.water.model": {
+  "default": null,
+  "required": true,
+  "values": [
+   "opc",
+   "spce",
+   "tip3p",
+   "tip4p",
+   "tip4pew"
+  ]
+ },
+ "thermodynamics": {
+  "default": null,
+  "required": true,
+  "values": null
+ },
+ "thermodynamics.pressure": {
+  "default": 1.0,
+  "required": false,
+  "values": null
+ },
+ "thermodynamics.temperature": {
+  "default": null,
+  "required": true,
+  "values": null
+ }
+}

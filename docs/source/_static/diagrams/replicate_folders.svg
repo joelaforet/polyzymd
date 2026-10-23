@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 584" role="img" aria-labelledby="t d">
   <title id="t">Replicate folder by engine</title>
-  <desc id="d">Both engines write build_manifest.json, solvated_system.pdb and progress.json; OpenMM keeps them and its per-segment folders in the replicate folder, while GROMACS keeps solvated_system.pdb, its engine files and progress.json in gromacs/.</desc>
+  <desc id="d">Both engines write build_provenance.json (with build_provenance.md), solvated_system.pdb and progress.json; OpenMM keeps them and its per-segment folders in the replicate folder, while GROMACS keeps solvated_system.pdb, its engine files and progress.json in gromacs/, with audited_files.sha256 after a passing audit.</desc>
   <rect width="1040" height="584" fill="#ffffff"/>
 
   <g font-family="Helvetica, Arial, sans-serif">
@@ -11,7 +11,7 @@
 
     <g font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">
       <rect x="40" y="72" width="448" height="48" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
-      <text x="56" y="92">build_manifest.json</text>
+      <text x="56" y="92">build_provenance.json · .md</text>
       <rect x="40" y="128" width="448" height="48" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
       <text x="56" y="148">solvated_system.pdb</text>
       <rect x="40" y="184" width="448" height="48" rx="6" fill="#e8f0fd" stroke="#2f6fdf" stroke-width="1.5"/>
@@ -26,7 +26,7 @@
       <text x="56" y="428">production_0/ … production_N/</text>
     </g>
     <g font-size="12" fill="#52606d">
-      <text x="56" y="110">file hashes, config hash, seeds, box</text>
+      <text x="56" y="110">file hashes, config hash, seeds, physics audit</text>
       <text x="56" y="166">starting coordinates</text>
       <text x="56" y="222">OpenMM System, analysis topology</text>
       <text x="56" y="278">stages and segments: status, seeds, versions</text>
@@ -42,13 +42,13 @@
 
     <g font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">
       <rect x="552" y="72" width="448" height="48" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
-      <text x="568" y="92">build_manifest.json</text>
+      <text x="568" y="92">build_provenance.json · .md</text>
       <rect x="552" y="128" width="448" height="48" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5" stroke-dasharray="6 4"/>
       <text x="568" y="148">solvated_system.pdb</text>
     </g>
     <g font-size="12" fill="#52606d">
       <text x="568" y="110">same keys; openmm_version is null</text>
-      <text x="568" y="166">only after build --export gromacs</text>
+      <text x="568" y="166">only after build --format gromacs</text>
     </g>
 
     <!-- gromacs/ sub-folder -->
