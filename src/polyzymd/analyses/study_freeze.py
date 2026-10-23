@@ -230,6 +230,13 @@ def stale_runs(protocol: Any, conditions: dict[str, Any] | None = None) -> dict[
                     found.append(
                         f"the trajectories of {label} replicate {record['replicate']} changed"
                     )
+                own_now = "run_protocol" in on_disk.get("simulated_with", {})
+                if own_now != (record.get("run_protocol") == "own"):
+                    found.append(
+                        f"{label} replicate {record['replicate']} is "
+                        f"{'now' if own_now else 'no longer'} declared as run with its own "
+                        "protocol (protocol/), which its stored results do not record"
+                    )
             for name, sha in _recorded_files(record.get("arguments")).items():
                 if name in current_files and current_files[name] != sha:
                     found.append(f"the content of {name} changed")
@@ -1241,6 +1248,20 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
     ]
     first = resolved[0] if resolved else {}
     polymers = _has_polymers(protocol)
+    # Replicates run outside PolyzyMD: the config's run settings are not what they ran.
+    own = {
+        label: sorted(
+            int(i)
+            for i, r in c["replicates"].items()
+            if "run_protocol" in r.get("simulated_with", {})
+        )
+        for label, c in manifest["conditions"].items()
+    }
+    own = {label: indices for label, indices in own.items() if indices}
+    own_note = (
+        "ran its own protocol: the inputs that ran are in deposit/engine_inputs/<condition>/"
+        "replicate_<N>/protocol/, and these settings do not describe that run"
+    )
 
     def item(answer: Any, evidence: Any = None) -> dict[str, Any]:
         return {"answer": answer, **({"evidence": evidence} if evidence is not None else {})}
@@ -1272,8 +1293,14 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         "1d_independent_starting_configurations": item(
             "each replicate's starting structure is built with its replicate number as the "
             "seed of Packmol" + (" and of polymer draws" if polymers else "") + "; the replicate "
-            "number also seeds the initial velocities and the thermostat noise of each stage",
-            None,
+            "number also seeds the initial velocities and the thermostat noise of each stage"
+            + (
+                "; the replicates run with their own protocol drew velocities and noise as "
+                "their protocol/ files say"
+                if own
+                else ""
+            ),
+            {"own_protocol_replicates": own} if own else None,
         ),
         "2a_connection_to_experiment": item(
             [e.get("description") or e.get("doi") for e in meta["related"]["experimental"]]
@@ -1287,7 +1314,19 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
                 "solvent": (first.get("solvent") or {}).get("force_field"),
             },
         ),
-        "3c_enhanced_sampling": _sampling(restraints),
+        "3c_enhanced_sampling": (
+            _sampling(restraints)
+            if not own
+            else {
+                **_sampling(restraints),
+                "answer": "for the replicates PolyzyMD ran: " + _sampling(restraints)["answer"],
+                "own_protocol": item(
+                    "TODO: describe the protocol (such as enhanced sampling) of the replicates "
+                    "run with their own protocol, and how their frames were reweighted",
+                    own,
+                ),
+            }
+        ),
         "4a_system_setup_table": item(SUMMARY),
         "4b_simulation_parameters": item(
             "thermodynamics, restraints, cutoffs, thermostat and barostat of each condition",
@@ -1302,6 +1341,11 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
                     **(
                         {"gromacs_production": _gromacs_production(c["resolved_config"])}
                         if c.get("engine") == "gromacs"
+                        else {}
+                    ),
+                    **(
+                        {"own_protocol_replicates": own[label], "own_protocol": own_note}
+                        if label in own
                         else {}
                     ),
                 }
