@@ -5,13 +5,19 @@ name: "trpcage_water"
 engine: "openmm"
 description: "Trp-cage in water with NaCl"
 
-enzyme:
-  name: "trpcage"
-  pdb_path: "trpcage.pdb"
+# Everything added to the box. Each solute names its force field; "name" is
+# the handle restraints and analysis use (it defaults to the type).
+solutes:
+  - type: protein
+    name: "trpcage"
+    pdb_path: "trpcage.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
 
+# Water, co-solvents and ions. Sage carries the TIP3P water and ion parameters.
 solvent:
-  primary:
-    type: "water"
+  force_field: ["openff-2.3.0.offxml"]
+  water:
     model: "tip3p"
   ions:
     neutralize: true

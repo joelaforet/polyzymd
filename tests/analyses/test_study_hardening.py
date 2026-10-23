@@ -185,7 +185,11 @@ class TestCompositionWarnings:
             substrate=None,
             polymers=None,
             solvent=SimpleNamespace(
-                co_solvents=[CoSolventSpec(name="ethylene_glycol", mole_fraction=0.1)]
+                co_solvents=[
+                    CoSolventSpec(
+                        name="ethylene_glycol", mole_fraction=0.1, charges={"method": "preset"}
+                    )
+                ]
             ),
         )
         u = self._universe(["ALA", "HOH", "ETH", "ETH"])

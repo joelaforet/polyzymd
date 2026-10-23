@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Optional, Union
 if TYPE_CHECKING:
     from openff.toolkit import Topology
 
-    from polyzymd.config.schema import EnzymeConfig
+    from polyzymd.config.schema import ProteinSolute
 
 LOGGER = logging.getLogger(__name__)
 
@@ -107,11 +107,11 @@ class EnzymeBuilder:
 
         return topology
 
-    def build_from_config(self, config: "EnzymeConfig") -> Topology:
+    def build_from_config(self, config: "ProteinSolute") -> Topology:
         """Load enzyme from a configuration object.
 
         Args:
-            config: EnzymeConfig with PDB path.
+            config: ProteinSolute with PDB path.
 
         Returns:
             OpenFF Topology with the enzyme structure.

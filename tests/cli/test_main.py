@@ -34,7 +34,7 @@ def _make_dry_run_config() -> SimpleNamespace:
         substrate=None,
         polymers=None,
         solvent=SimpleNamespace(
-            primary=SimpleNamespace(model=WaterModel.TIP3P),
+            water=SimpleNamespace(model=WaterModel.TIP3P),
             box=SimpleNamespace(padding=1.2),
             ions=SimpleNamespace(nacl_concentration=0.15, neutralize=True, ionic_strength=None),
             co_solvents=[],
@@ -81,13 +81,36 @@ def _config_with_pdb(tmp_path: Path) -> dict[str, object]:
     return _minimal_cli_config_data(tmp_path / "enz.pdb")
 
 
+_SMALL_MOLECULE_FF = ["openff-2.3.0.offxml"]
+
+#: NAGL charges with the model the config must name.
+_NAGL = {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"}
+
+
+def _solvent(**extra: object) -> dict[str, object]:
+    """Solvent section with the small-molecule force field, TIP3P water and any ``extra`` keys."""
+    return {"force_field": list(_SMALL_MOLECULE_FF), "water": {"model": "tip3p"}, **extra}
+
+
+def _solute(type_: str, **keys: object) -> dict[str, object]:
+    """A ``solutes`` entry of ``type_``; non-protein entries use the solvent force field.
+
+    A protein takes its library (ff14SB) charges unless ``keys`` name others.
+    """
+    if type_ == "protein":
+        keys = {"charges": {"method": "library"}, **keys}
+    ff = ["ff14sb_off_impropers_0.0.4.offxml"] if type_ == "protein" else _SMALL_MOLECULE_FF
+    return {"type": type_, **keys, "force_field": list(ff)}
+
+
 def _minimal_cli_config_data(pdb_path: str | Path) -> dict[str, object]:
     """Create minimal YAML-serializable config data for CLI tests."""
 
     return {
         "name": "cli_reference_validation",
         "engine": "openmm",
-        "enzyme": {"name": "Enz", "pdb_path": str(pdb_path)},
+        "solutes": [_solute("protein", name="Enz", pdb_path=str(pdb_path))],
+        "solvent": _solvent(),
         "thermodynamics": {"temperature": 300.0},
         "simulation_phases": {
             "equilibration_stages": [
@@ -362,10 +385,10 @@ class TestValidateCommandReferenceWarnings:
 
     def test_validate_prints_engine_and_cosolvents(self, tmp_path: Path) -> None:
         data = _config_with_pdb(tmp_path)
-        data["solvent"] = {
-            "primary": {"type": "water", "model": "tip3p"},
-            "co_solvents": [{"name": "dmso", "mole_fraction": 0.1}],
-        }
+        data["solvent"] = _solvent(
+            water={"model": "tip3p"},
+            co_solvents=[{"name": "dmso", "mole_fraction": 0.1, "charges": {"method": "preset"}}],
+        )
         config_path = tmp_path / "config.yaml"
         config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
@@ -379,10 +402,24 @@ class TestValidateCommandReferenceWarnings:
 _DISTANCE_RESTRAINT = {
     "type": "flat_bottom",
     "name": "substrate_active_site",
-    "atom1": {"selection": "protein and resid 76 and name OG"},
-    "atom2": {"selection": "resname LIG and name C1"},
+    "atom1": {"component": "Enz", "selection": "resid 76 and name OG"},
+    "atom2": {"component": "LIG", "selection": "name C1"},
     "distance": 3.5,
 }
+
+
+def _add_distance_restraint(data: dict) -> None:
+    """Add the LIG substrate and a restraint from the enzyme to it."""
+    data["solutes"].append(
+        _solute(
+            "small_molecule",
+            name="LIG",
+            sdf_path="missing.sdf",
+            residue_name="LIG",
+            charges=_NAGL,
+        )
+    )
+    data["restraints"] = [_DISTANCE_RESTRAINT]
 
 
 @pytest.mark.parametrize("command", [["validate"], ["build", "--dry-run"], ["run", "--dry-run"]])
@@ -391,7 +428,7 @@ def test_new_builds_refuse_a_water_model_the_build_cannot_make(
 ) -> None:
     """validate, build and run refuse spce, which would build SPC/E charges on TIP3P water."""
     data = _minimal_cli_config_data("missing.pdb")
-    data["solvent"] = {"primary": {"type": "water", "model": "spce"}}
+    data["solvent"] = _solvent(water={"model": "spce"})
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
@@ -405,7 +442,7 @@ def test_validate_refuses_distance_restraints_with_engine_gromacs(tmp_path: Path
     """GROMACS runs apply no distance restraints, so validate refuses them."""
     data = _minimal_cli_config_data("missing.pdb")
     data["engine"] = "gromacs"
-    data["restraints"] = [_DISTANCE_RESTRAINT]
+    _add_distance_restraint(data)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
@@ -426,7 +463,7 @@ def test_validate_refuses_distance_restraints_with_engine_gromacs(tmp_path: Path
 def test_gromacs_overrides_refuse_distance_restraints(tmp_path: Path, args: list[str]) -> None:
     """A GROMACS build, run or submit of an OpenMM config never lists a restraint it drops."""
     data = _minimal_cli_config_data("missing.pdb")
-    data["restraints"] = [_DISTANCE_RESTRAINT]
+    _add_distance_restraint(data)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
@@ -513,13 +550,17 @@ class TestBuildCommandReplicateFlags:
     def test_build_dry_run_warns_for_missing_referenced_files(self, tmp_path: Path) -> None:
         """Build dry-run warns about missing polymer files, which a build checks later."""
         data = _config_with_pdb(tmp_path)
-        data["polymers"] = {
-            "type_prefix": "P",
-            "length": 5,
-            "count": 1,
-            "sdf_directory": str(tmp_path / "missing_sdfs"),
-            "monomers": [{"label": "A", "probability": 1.0}],
-        }
+        data["solutes"].append(
+            _solute(
+                "polymer",
+                type_prefix="P",
+                length=5,
+                count=1,
+                sdf_directory=str(tmp_path / "missing_sdfs"),
+                monomers=[{"label": "A", "probability": 1.0}],
+                charges={"method": "preset"},
+            )
+        )
         config_path = tmp_path / "config.yaml"
         config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
@@ -2208,9 +2249,16 @@ def test_build_follows_the_config_engine(tmp_path: Path) -> None:
     (tmp_path / "c" / "test.pdb").write_text(_ONE_ATOM_PDB)
     data = yaml.safe_load(path.read_text())
     data["engine"] = "gromacs"
-    data["solvent"] = {
-        "co_solvents": [{"name": "sds", "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]", "count": 8}]
-    }
+    data["solvent"] = _solvent(
+        co_solvents=[
+            {
+                "name": "sds",
+                "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]",
+                "count": 8,
+                "charges": _NAGL,
+            }
+        ]
+    )
     path.write_text(yaml.safe_dump(data))
     result = CliRunner().invoke(cli, ["build", "-c", str(path), "--dry-run"])
     assert "Files to Generate (GROMACS)" in result.output, result.output
@@ -2369,7 +2417,7 @@ def test_dry_run_box_report_says_a_substrate_is_left_out(tmp_path: Path) -> None
         Chem.MolToMolBlock(Chem.MolFromSmiles("CCO")) + "$$$$\n"
     )
     data = yaml.safe_load(path.read_text())
-    data["substrate"] = {"name": "lig", "sdf_path": "lig.sdf"}
+    data["solutes"].append(_solute("small_molecule", name="lig", sdf_path="lig.sdf", charges=_NAGL))
     path.write_text(yaml.safe_dump(data))
 
     result = CliRunner().invoke(cli, ["build", "-c", str(path), "--dry-run"])
@@ -2601,8 +2649,8 @@ def _remove_thermodynamics(data: dict) -> None:
     ("edit", "expected"),
     [
         (
-            lambda data: data.update(pdb=data["enzyme"].pop("pdb_path")),
-            ["error: pdb: unknown key; did you mean enzyme.pdb_path?"],
+            lambda data: data.update(pdb=data["solutes"][0].pop("pdb_path")),
+            ["error: pdb: unknown key; did you mean solutes[].pdb_path?"],
         ),
         (
             _remove_thermodynamics,

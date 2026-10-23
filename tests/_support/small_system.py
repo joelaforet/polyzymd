@@ -47,27 +47,36 @@ def write_inputs(folder: Path) -> Path:
 
     config: dict[str, Any] = yaml.safe_load((QUICKSTART / "config.yaml").read_text())
     config["name"] = "audit_small_system"
-    config["substrate"] = {
-        "name": "acetamidophenyl_acetate",
-        "sdf_path": "substrate.sdf",
-        "conformer_index": 0,
-        "charge_method": "nagl",
-        "residue_name": "LIG",
-    }
-    config["polymers"] = {
-        "enabled": True,
-        "type_prefix": "TP",
-        "monomers": [
-            {"label": "A", "probability": 0.5, "name": "MA"},
-            {"label": "B", "probability": 0.5, "name": "HEMA"},
-        ],
-        "length": 2,
-        "count": 6,
-        "sdf_directory": "polymers",
-        "packing": {"padding": 0.6, "tolerance": 2.0},
-    }
+    sage = config["solvent"]["force_field"]
+    config["solutes"] += [
+        {
+            "type": "small_molecule",
+            "name": "substrate",
+            "sdf_path": "substrate.sdf",
+            "conformer_index": 0,
+            "residue_name": "LIG",
+            "force_field": sage,
+            "charges": {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"},
+        },
+        {
+            "type": "polymer",
+            "type_prefix": "TP",
+            "monomers": [
+                {"label": "A", "probability": 0.5, "name": "MA"},
+                {"label": "B", "probability": 0.5, "name": "HEMA"},
+            ],
+            "length": 2,
+            "count": 6,
+            "sdf_directory": "polymers",
+            "packing": {"padding": 0.6, "tolerance": 2.0},
+            "force_field": sage,
+            "charges": {"method": "preset"},
+        },
+    ]
     config["solvent"]["box"]["padding"] = 0.8
-    config["solvent"]["co_solvents"] = [{"name": "dmso", "concentration": 0.2}]
+    config["solvent"]["co_solvents"] = [
+        {"name": "dmso", "concentration": 0.2, "charges": {"method": "preset"}}
+    ]
     config["output"]["projects_directory"] = str(folder)
     config["output"]["scratch_directory"] = str(folder / "scratch")
     path = folder / "config.yaml"

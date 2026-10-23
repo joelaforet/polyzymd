@@ -63,7 +63,7 @@ def test_components_cover_the_system_in_build_order(built) -> None:
     builder, _, _ = built
     components = builder.components()
     assert [(c.name, c.type, c.segid, c.placement) for c in components] == [
-        ("protein", "protein", "PROT", "fixed"),
+        ("trpcage", "protein", "PROT", "fixed"),
         ("substrate", "small_molecule", "LIG", "fixed"),
         ("polymer", "polymer", "POLY", "packed"),
         ("solvent", "solvent", "SOL", "packed"),
@@ -71,8 +71,8 @@ def test_components_cover_the_system_in_build_order(built) -> None:
     ]
     assert sum(c.n_atoms for c in components) == builder.solvated_topology.n_atoms
     info = builder.get_component_info()
-    sizes = {c.name: c.n_atoms for c in components}
-    assert (sizes["protein"], sizes["substrate"], sizes["polymer"]) == (
+    sizes = {c.type: c.n_atoms for c in components}
+    assert (sizes["protein"], sizes["small_molecule"], sizes["polymer"]) == (
         info.n_protein_atoms,
         info.n_substrate_atoms,
         info.n_polymer_atoms,
@@ -82,11 +82,11 @@ def test_components_cover_the_system_in_build_order(built) -> None:
 def test_each_component_names_its_parameter_and_charge_sources(built) -> None:
     """The records say what the config asked for, per domain."""
     builder, config, _ = built
-    components = {c.name: c for c in builder.components()}
+    components = {c.type: c for c in builder.components()}
     protein = components["protein"].domains[0]
     assert protein.force_field == (config.force_field.protein,)
     assert protein.charges.method == "library"
-    substrate = components["substrate"].domains[0]
+    substrate = components["small_molecule"].domains[0]
     assert substrate.force_field == (config.force_field.small_molecule,)
     assert (substrate.charges.method, substrate.charges.model) == (
         "nagl",

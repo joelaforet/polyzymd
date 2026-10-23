@@ -16,13 +16,15 @@ import warnings
 from enum import Enum
 from pathlib import Path
 from string import Formatter
-from typing import Any, ClassVar, Literal, Self, get_args
+from typing import Annotated, Any, ClassVar, Literal, Self, Union, get_args
 
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Discriminator,
     Field,
     SerializerFunctionWrapHandler,
+    Tag,
     field_validator,
     model_serializer,
     model_validator,
@@ -224,19 +226,123 @@ def load_custom_substructures(path: Path) -> dict[str, dict[str, list[str]]]:
     return data
 
 
-class EnzymeConfig(_ConfigModel):
-    """Configuration for the enzyme/protein component.
+#: The page that maps every key of a 1.3.0rc4 config to its place in rc5.
+REWRITE_GUIDE = "https://polyzymd.readthedocs.io/en/latest/how_to/rewrite_config_rc5.html"
 
-    Attributes:
-        name: Identifier for the enzyme (e.g., "LipA")
-        pdb_path: Path to the PDB file containing the enzyme structure
-        description: Optional description of the enzyme
-        custom_substructures_path: Optional JSON file of residue templates for
-            residues that OpenFF's template matcher does not know
+#: Same default as polyzymd.utils.charging.DEFAULT_NAGL_MODEL (not imported: it loads RDKit).
+DEFAULT_NAGL_MODEL = "openff-gnn-am1bcc-1.0.0.pt"
+
+
+class ChargeSpec(_ConfigModel):
+    """Where a component's partial charges come from.
+
+    - ``library``: the force field's library charges (ff14SB for proteins).
+    - ``preset``: the charges stored in the component's SDF files.
+    - ``nagl``: OpenFF NAGL; ``model`` names the network file (required).
+    - ``am1bcc`` (needs AmberTools) and ``espaloma``: computed for each molecule.
+
+    PolyzyMD assumes no charge model: the config names one for every component,
+    so the choice is on record with the system it made.
     """
 
-    name: str = Field(..., description="Enzyme identifier")
-    pdb_path: Path = Field(..., description="Path to enzyme PDB file")
+    method: Literal["library", "preset", "nagl", "am1bcc", "espaloma"] = Field(
+        ..., description="library, preset, nagl, am1bcc or espaloma"
+    )
+    model: str | None = Field(
+        None,
+        description=(
+            "NAGL model file, required for method nagl (for example "
+            f"{DEFAULT_NAGL_MODEL}, the model Sage 2.3.0 names)"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _model_only_for_nagl(self) -> Self:
+        """Require a NAGL model with nagl, and refuse one for any other method."""
+        if self.method == "nagl":
+            if self.model is None:
+                raise ValueError(
+                    "method nagl needs model: the NAGL network file, for example "
+                    f"model: {DEFAULT_NAGL_MODEL} (the model Sage 2.3.0 names)"
+                )
+        elif self.model is not None:
+            raise ValueError(
+                f"model names a NAGL model, but method {self.method} does not use one; "
+                "remove model or set method: nagl"
+            )
+        return self
+
+
+#: Names of the components PolyzyMD adds itself (and their segment IDs), so no solute takes them.
+_BUILT_IN_COMPONENT_NAMES = frozenset({"solvent", "ions", "SOL", "ION"})
+
+#: Charge methods that compute charges from a molecule's graph.
+COMPUTED_CHARGES = ("nagl", "am1bcc", "espaloma")
+
+
+class _Solute(_ConfigModel):
+    """The keys every entry of ``solutes:`` has.
+
+    ``type`` selects the component class and is never inferred, so a typo is
+    an error rather than a silently different component. ``name`` is the
+    handle that restraints, ``modeling_exceptions``, provenance and analysis
+    use; it defaults to the type. ``segid`` is the PSF segment ID the
+    component's atoms carry; it defaults from the type.
+    """
+
+    name: str = Field(
+        None,  # type: ignore[assignment]  # filled from the type below
+        description="Handle for restraints, exceptions and analysis (default: the type)",
+    )
+    segid: str = Field(
+        None,  # type: ignore[assignment]  # filled from the type below
+        description="PSF segment ID, 1-4 characters (default from the type)",
+    )
+    force_field: list[str] = Field(
+        ..., min_length=1, description="Force field files (.offxml) that parameterize it"
+    )
+
+    @model_validator(mode="after")
+    def _defaults_from_type(self) -> Self:
+        """Name and segment ID default from the type; check the segment ID fits a PSF."""
+        from polyzymd.core.components import DEFAULT_SEGIDS, validate_segid
+
+        type_: str = self.type  # type: ignore[attr-defined]  # each subclass defines it
+        if self.name is None:
+            object.__setattr__(self, "name", type_)
+        if (
+            not self.name.strip()
+            or any(c in self.name for c in "/\\")
+            or self.name.split() != [self.name]
+        ):
+            raise ValueError(
+                f"name {self.name!r} must be non-empty, without '/', '\\' or spaces (it names "
+                "run folders and GROMACS index groups)"
+            )
+        if self.name in _BUILT_IN_COMPONENT_NAMES:
+            raise ValueError(
+                f"name {self.name!r} is taken by a component PolyzyMD adds itself; choose another"
+            )
+        if self.segid is None:
+            object.__setattr__(self, "segid", DEFAULT_SEGIDS[type_])
+        validate_segid(self.segid)
+        return self
+
+
+class ProteinSolute(_Solute):
+    """A protein (``type: protein``), read from a PDB file through residue templates.
+
+    Its charges are the protein force field's library charges.
+
+    Attributes:
+        pdb_path: PDB file of the protein, protonated.
+        description: Optional description.
+        custom_substructures_path: Optional JSON file of residue templates for
+            residues that OpenFF's template matcher does not know.
+    """
+
+    type: Literal["protein"]
+    pdb_path: Path = Field(..., description="Path to the protein PDB file")
     description: str | None = Field(None, description="Optional description")
     custom_substructures_path: Path | None = Field(
         None,
@@ -245,6 +351,9 @@ class EnzymeConfig(_ConfigModel):
             "Topology.from_pdb(_custom_substructures=...): "
             '{"RESNAME": {"SMARTS": ["ATOM", ...]}}. Relative to the config.'
         ),
+    )
+    charges: ChargeSpec = Field(
+        ..., description="library: the protein force field's library charges"
     )
 
     @field_validator("custom_substructures_path")
@@ -264,28 +373,31 @@ class EnzymeConfig(_ConfigModel):
             raise ValueError(f"Expected .pdb file, got {v.suffix}")
         return v
 
+    @model_validator(mode="after")
+    def _library_charges(self) -> Self:
+        if self.charges.method != "library":
+            raise ValueError(
+                "a protein takes the library charges of its force field; use "
+                "charges: {method: library} or leave charges out"
+            )
+        return self
 
-# =============================================================================
-# Substrate/Ligand Configuration
-# =============================================================================
 
-
-class SubstrateConfig(_ConfigModel):
-    """Configuration for the docked substrate/ligand.
+class SmallMoleculeSolute(_Solute):
+    """A small molecule placed as given (``type: small_molecule``), such as a docked substrate.
 
     Attributes:
-        name: Identifier for the substrate (e.g., "Resorufin-Butyrate")
-        sdf_path: Path to SDF file with docked conformers
-        conformer_index: Which conformer to use (0-indexed)
-        charge_method: Method for assigning partial charges
-        residue_name: 3-letter residue name for topology (default: "LIG")
+        sdf_path: SDF file with the molecule's conformers.
+        conformer_index: Which conformer to place (0-indexed).
+        residue_name: 3-letter residue name.
+        charges: How its partial charges are computed (nagl, am1bcc or espaloma).
     """
 
-    name: str = Field(..., description="Substrate identifier")
-    sdf_path: Path = Field(..., description="Path to docked conformers SDF")
-    conformer_index: int = Field(0, ge=0, description="Index of conformer to use")
-    charge_method: ChargeMethod = Field(ChargeMethod.NAGL, description="Charge assignment method")
+    type: Literal["small_molecule"]
+    sdf_path: Path = Field(..., description="Path to the SDF with the docked conformers")
+    conformer_index: int = Field(0, ge=0, description="Index of the conformer to place")
     residue_name: str = Field("LIG", max_length=3, description="3-letter residue name")
+    charges: ChargeSpec = Field(..., description="nagl (with model), am1bcc or espaloma")
 
     @field_validator("sdf_path")
     @classmethod
@@ -294,6 +406,20 @@ class SubstrateConfig(_ConfigModel):
         if v.suffix.lower() != ".sdf":
             raise ValueError(f"Expected .sdf file, got {v.suffix}")
         return v
+
+    @model_validator(mode="after")
+    def _computed_charges(self) -> Self:
+        if self.charges.method not in COMPUTED_CHARGES:
+            raise ValueError(
+                f"charges method {self.charges.method} is not built for a small molecule; "
+                "use nagl, am1bcc or espaloma"
+            )
+        return self
+
+    @property
+    def charge_method(self) -> ChargeMethod:
+        """The charge method, as the builders take it."""
+        return ChargeMethod(self.charges.method)
 
 
 # =============================================================================
@@ -484,8 +610,8 @@ class ReactionConfig(_ConfigModel):
         return v
 
 
-class PolymerConfig(_ConfigModel):
-    """Configuration for polymer components.
+class PolymerSolute(_Solute):
+    """Polymer chains packed around the fixed solutes (``type: polymer``).
 
     Supports two generation modes:
     - "cached": Load pre-built polymer SDF files from sdf_directory
@@ -496,7 +622,6 @@ class PolymerConfig(_ConfigModel):
     - Reaction templates in the reactions field
 
     Attributes:
-        enabled: Whether to include polymers in the system
         generation_mode: "cached" for pre-built SDFs, "dynamic" for on-the-fly generation
         type_prefix: Prefix for polymer type in filenames (e.g., "SBMA-EGPMA")
         monomers: List of monomer specifications with probabilities (and SMILES for dynamic)
@@ -504,19 +629,20 @@ class PolymerConfig(_ConfigModel):
         count: Number of polymer chains to add
         sdf_directory: Path to pre-built polymer SDF files (for cached mode)
         reactions: Reaction templates for ATRP (required for dynamic mode)
-        charger: Charge assignment method for generated polymers
+        charges: preset (the charges in the cached SDFs) or, for dynamic
+            generation, nagl, am1bcc or espaloma
         max_retries: Maximum retries for polymer generation (ring-piercing failures)
         cache_directory: Directory for caching generated polymers and fragments
         packing: Settings for packing polymers around the solute
         random_seed: Random seed for polymer sequence generation (for reproducibility)
     """
 
-    enabled: bool = Field(True, description="Include polymers in system")
+    type: Literal["polymer"]
     generation_mode: PolymerGenerationMode = Field(
         PolymerGenerationMode.CACHED,
         description="Polymer generation mode: 'cached' (pre-built SDFs) or 'dynamic' (generate from SMILES)",
     )
-    type_prefix: str = Field(..., description="Polymer type prefix for filenames")
+    type_prefix: str = Field(..., min_length=1, description="Polymer type prefix for filenames")
     monomers: list[MonomerSpec] = Field(..., min_length=1, description="Monomer specifications")
     length: int = Field(..., ge=1, description="Monomers per chain")
     count: int = Field(..., ge=1, description="Number of polymer chains")
@@ -526,9 +652,8 @@ class PolymerConfig(_ConfigModel):
     reactions: ReactionConfig | None = Field(
         None, description="ATRP reaction templates (required for dynamic mode)"
     )
-    charger: ChargeMethod = Field(
-        ChargeMethod.NAGL,
-        description="Charge assignment method for generated polymers",
+    charges: ChargeSpec = Field(
+        ..., description="preset (cached SDFs) or nagl, am1bcc, espaloma (dynamic generation)"
     )
     max_retries: int = Field(
         10,
@@ -548,20 +673,16 @@ class PolymerConfig(_ConfigModel):
     )
 
     @model_validator(mode="after")
-    def validate_probabilities_sum_to_one(self) -> "PolymerConfig":
+    def validate_probabilities_sum_to_one(self) -> "PolymerSolute":
         """Ensure monomer probabilities sum to 1.0."""
-        if self.enabled:
-            total = sum(m.probability for m in self.monomers)
-            if abs(total - 1.0) > 1e-6:
-                raise ValueError(f"Monomer probabilities must sum to 1.0, got {total}")
+        total = sum(m.probability for m in self.monomers)
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(f"Monomer probabilities must sum to 1.0, got {total}")
         return self
 
     @model_validator(mode="after")
-    def validate_generation_mode_requirements(self) -> "PolymerConfig":
+    def validate_generation_mode_requirements(self) -> "PolymerSolute":
         """Validate that required fields are present for the selected generation mode."""
-        if not self.enabled:
-            return self
-
         if self.generation_mode == PolymerGenerationMode.DYNAMIC:
             if self.length < 3:
                 raise ValueError(
@@ -589,8 +710,55 @@ class PolymerConfig(_ConfigModel):
                 raise ValueError(
                     "Cached generation mode requires 'sdf_directory' with pre-built polymer SDFs"
                 )
+            if self.charges.method != "preset":
+                raise ValueError(
+                    "cached polymers carry the charges stored in their SDFs; use "
+                    "charges: {method: preset}"
+                )
+        if (
+            self.generation_mode == PolymerGenerationMode.DYNAMIC
+            and self.charges.method not in COMPUTED_CHARGES
+        ):
+            raise ValueError(
+                "dynamically generated polymers are charged as they are built; use charges "
+                "method nagl, am1bcc or espaloma"
+            )
 
         return self
+
+    @property
+    def enabled(self) -> bool:
+        """Always True: a config without polymers has no polymer solute."""
+        return True
+
+    @property
+    def charger(self) -> ChargeMethod:
+        """The charger dynamic generation uses (not read for cached polymers)."""
+        if self.charges.method in COMPUTED_CHARGES:
+            return ChargeMethod(self.charges.method)
+        return ChargeMethod.NAGL
+
+
+def _solute_type(value: Any) -> str | None:
+    """Return the ``type`` of a solutes entry, from YAML data or a model."""
+    if isinstance(value, dict):
+        return value.get("type")
+    return getattr(value, "type", None)
+
+
+#: One entry of ``solutes:``; ``type`` picks the class.
+Solute = Annotated[
+    Union[
+        Annotated[ProteinSolute, Tag("protein")],
+        Annotated[SmallMoleculeSolute, Tag("small_molecule")],
+        Annotated[PolymerSolute, Tag("polymer")],
+    ],
+    Discriminator(
+        _solute_type,
+        custom_error_type="solute_type",
+        custom_error_message="type must be protein, small_molecule or polymer",
+    ),
+]
 
 
 # =============================================================================
@@ -638,12 +806,11 @@ class CoSolventSpec(_ConfigModel):
     # Specification method 3: number of molecules
     count: int | None = Field(None, ge=1, description="Number of molecules in the box")
 
-    charge_method: ChargeMethod = Field(
-        ChargeMethod.NAGL,
+    charges: ChargeSpec = Field(
+        None,  # type: ignore[assignment]  # required; refused below with a fix that names preset
         description=(
-            "How partial charges are assigned to a co-solvent that is not in the bundled "
-            "library: 'nagl' (default, the OpenFF graph network trained on AM1-BCC), "
-            "'am1bcc' (needs AmberTools) or 'espaloma'"
+            "preset (the charges PolyzyMD ships for molecules such as dmso), or nagl "
+            "(with model), am1bcc or espaloma"
         ),
     )
 
@@ -659,12 +826,20 @@ class CoSolventSpec(_ConfigModel):
     @model_validator(mode="before")
     @classmethod
     def reject_volume_fraction(cls, data: Any) -> Any:
-        """Reject removed volume-fraction configuration keys."""
+        """Reject removed volume-fraction and charge_method keys."""
         if isinstance(data, dict) and "volume_fraction" in data:
             raise ValueError(
                 "Co-solvent 'volume_fraction' has been removed. Use 'mole_fraction' "
                 "for solvent mole fractions or 'concentration' for molarity; values are "
                 "not converted automatically."
+            )
+        if isinstance(data, dict) and "charge_method" in data:
+            raise ValueError(
+                "co-solvent 'charge_method' is now 'charges'. Releases up to 1.3.0rc4 gave a "
+                "co-solvent PolyzyMD ships charges for (such as dmso) those shipped charges "
+                "whatever charge_method said; to keep them, write charges: {method: preset}. "
+                "Any other co-solvent: charges: {method: nagl, model: ...} (or am1bcc, "
+                f"espaloma). See {REWRITE_GUIDE}"
             )
         return data
 
@@ -675,12 +850,37 @@ class CoSolventSpec(_ConfigModel):
 
         # Check that exactly one composition method is specified
         given = [
-            key for key in ("mole_fraction", "concentration", "count") if getattr(self, key) is not None
+            key
+            for key in ("mole_fraction", "concentration", "count")
+            if getattr(self, key) is not None
         ]
         if len(given) != 1:
             raise ValueError(
                 f"Co-solvent '{self.name}': give exactly one of mole_fraction, concentration "
                 f"and count, not {given or 'none'}"
+            )
+
+        from polyzymd.data.solvent_molecules import is_bundled_solvent
+
+        if self.charges is None:
+            shipped = (
+                "charges: {method: preset} (the charges PolyzyMD ships with it) or "
+                if is_bundled_solvent(self.name)
+                else ""
+            )
+            raise ValueError(
+                f"Co-solvent '{self.name}' needs charges, for example {shipped}"
+                "charges: {method: nagl, model: ...} (or am1bcc, espaloma)"
+            )
+        if self.charges.method == "library":
+            raise ValueError(
+                f"Co-solvent '{self.name}': charges method library is for proteins; use "
+                "preset, nagl, am1bcc or espaloma"
+            )
+        if self.charges.method == "preset" and not is_bundled_solvent(self.name):
+            raise ValueError(
+                f"Co-solvent '{self.name}': charges preset reads the charges PolyzyMD ships, "
+                "and it ships none for this molecule; use nagl, am1bcc or espaloma"
             )
 
         # Look up from library
@@ -731,16 +931,14 @@ def reserved_residue_names() -> frozenset[str]:
     )
 
 
-class PrimarySolventConfig(_ConfigModel):
-    """Configuration for the primary solvent (usually water).
+class WaterConfig(_ConfigModel):
+    """The water of the box.
 
     Attributes:
-        type: Solvent type identifier
-        model: Water model to use (if type is "water")
+        model: Water model; only TIP3P is built.
     """
 
-    type: str = Field("water", description="Primary solvent type")
-    model: WaterModel = Field(WaterModel.TIP3P, description="Water model")
+    model: WaterModel = Field(..., description="Water model (tip3p is the one built)")
 
 
 class IonConfig(_ConfigModel):
@@ -816,14 +1014,36 @@ class BoxConfig(_ConfigModel):
 
 
 class SolventConfig(_ConfigModel):
-    """Complete solvent configuration."""
+    """Everything PolyzyMD packs around the solutes: water, co-solvents and ions.
 
-    primary: PrimarySolventConfig = Field(
-        default_factory=PrimarySolventConfig, description="Primary solvent"
+    Water and co-solvents carry segment ID ``SOL`` (co-solvents are told apart
+    by residue name) and ions ``ION``.
+
+    Attributes:
+        force_field: Force field files for water, ions and co-solvents. Sage
+            carries the TIP3P water and the ion parameters.
+        water: The water model.
+        co_solvents: Co-solvents, each with its amount and charges.
+        ions: Salt and neutralizing ions.
+        box: Box shape and padding.
+    """
+
+    force_field: list[str] = Field(
+        ..., min_length=1, description="Force field files for water, ions and co-solvents"
     )
+    water: WaterConfig = Field(..., description="Water model")
     co_solvents: list[CoSolventSpec] = Field(default_factory=list, description="Co-solvents")
     ions: IonConfig = Field(default_factory=IonConfig, description="Ion settings")
     box: BoxConfig = Field(default_factory=BoxConfig, description="Box settings")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _primary_is_now_water(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "primary" in data:
+            raise ValueError(
+                "solvent.primary is now solvent.water: {model: tip3p}. " f"See {REWRITE_GUIDE}"
+            )
+        return data
 
     @model_validator(mode="after")
     def validate_mole_fractions(self) -> "SolventConfig":
@@ -840,17 +1060,21 @@ class SolventConfig(_ConfigModel):
 
 
 class AtomSelectionConfig(_ConfigModel):
-    """Configuration for selecting atoms for restraints.
+    """An atom of a restraint: a component, and a selection inside it.
 
     The selection is an MDTraj selection in which ``resid``, ``chain`` and
     ``pdbindex`` keep their MDAnalysis meaning (PDB residue number, chain
-    letter, PDB atom serial).
+    letter, PDB atom serial). It is matched only among the atoms of
+    ``component``, so ``resid 106`` cannot pick up a polymer residue 106.
 
     Attributes:
-        selection: Selection string (e.g., "protein and resid 77 and name OG")
+        component: Name of the solute the atom belongs to (a solute's name
+            defaults to its type, so ``protein`` when the protein has no name).
+        selection: Selection string (e.g., "resid 77 and name OG")
         description: Optional human-readable description
     """
 
+    component: str = Field(..., description="Name of the solute the atom belongs to")
     selection: str = Field(..., description="Atom selection, e.g. 'resid 77 and name OG'")
     description: str | None = Field(None, description="Human-readable description")
 
@@ -1540,35 +1764,20 @@ OPENMM_PLATFORMS = {"cuda": "CUDA", "cpu": "CPU", "opencl": "OpenCL", "reference
 
 
 class ForceFieldConfig(_ConfigModel):
-    """Configuration for force field selection.
+    """The force fields and NAGL model a build applies, read from the solutes and solvent.
+
+    Not a config section: :attr:`SimulationConfig.force_field` derives it, so the
+    builders keep one place to read them from.
 
     Attributes:
-        protein: Force field for proteins
-        small_molecule: Force field for small molecules
-        water: Water model force field (derived from solvent config)
+        protein: Force field of the protein solute.
+        small_molecule: Force field of every other molecule (rc5 builds them with one).
+        nagl_model: NAGL model of every component charged with nagl.
     """
 
     protein: str = Field("ff14sb_off_impropers_0.0.4.offxml", description="Protein force field")
-    small_molecule: str = Field("openff-2.0.0.offxml", description="Small molecule force field")
-    # Same default as polyzymd.utils.charging.DEFAULT_NAGL_MODEL.
-    nagl_model: str = Field(
-        "openff-gnn-am1bcc-1.0.0.pt",
-        description=(
-            "NAGL model for every charge_method: nagl (substrate, co-solvents, dynamic "
-            "polymers); PolyzyMD 1.3 release candidates used openff-gnn-am1bcc-0.1.0-rc.3.pt"
-        ),
-    )
-
-    @model_serializer(mode="wrap")
-    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """Omit nagl_model unless the config names it, so older configs keep their build hash.
-
-        The build manifest records the model a build used, with its file hash, either way.
-        """
-        data = handler(self)
-        if "nagl_model" not in self.model_fields_set:
-            data.pop("nagl_model", None)
-        return data
+    small_molecule: str = Field("openff-2.3.0.offxml", description="Small molecule force field")
+    nagl_model: str = Field(DEFAULT_NAGL_MODEL, description="NAGL model")
 
 
 # =============================================================================
@@ -1803,43 +2012,47 @@ class SimulationConfig(_ConfigModel):
     This is the top-level configuration model that contains all settings
     for a PolyzyMD simulation.
 
+    The system is a ``solutes:`` list (everything added to the box: a
+    protein, a docked small molecule, polymer chains) and a ``solvent:`` block
+    (water, co-solvents, ions, box). Each solute names its force field and
+    charge source. :attr:`enzyme`, :attr:`substrate`, :attr:`polymers` and
+    :attr:`force_field` are read-only views of them for the builders.
+
     Attributes:
         name: Simulation name/identifier
         description: Optional description
-        enzyme: Enzyme configuration
-        substrate: Substrate/ligand configuration
-        polymers: Polymer configuration (optional)
-        solvent: Solvent and box configuration
+        solutes: The components added to the box, each with its ``type``
+        solvent: Water, co-solvents, ions and box
         restraints: List of restraint configurations
         thermodynamics: Temperature/pressure settings
         simulation_phases: Equilibration and production settings
         output: Output file settings
-        force_field: Force field selection
 
     Example:
         >>> config = SimulationConfig.from_yaml("simulation.yaml")
-        >>> print(config.enzyme.name)
-        "LipA"
+        >>> [solute.name for solute in config.solutes]
+        ['LipA', 'substrate', 'polymer']
     """
+
+    #: Sections of 1.3.0rc4 and earlier configs, and where they went.
+    REMOVED_SECTIONS: ClassVar[dict[str, str]] = {
+        "enzyme": "a solutes entry with type: protein",
+        "substrate": "a solutes entry with type: small_molecule",
+        "polymers": "a solutes entry with type: polymer",
+        "force_field": "force_field lists on each solute and on solvent",
+    }
 
     name: str = Field(..., description="Simulation identifier")
     description: str | None = Field(None, description="Simulation description")
 
-    enzyme: EnzymeConfig = Field(..., description="Enzyme configuration")
-    substrate: SubstrateConfig | None = Field(None, description="Substrate configuration")
-    polymers: PolymerConfig | None = Field(None, description="Polymer configuration")
-    solvent: SolventConfig = Field(
-        default_factory=SolventConfig, description="Solvent configuration"
-    )
+    solutes: list[Solute] = Field(..., min_length=1, description="Components added to the box")
+    solvent: SolventConfig = Field(..., description="Water, co-solvents, ions and box")
     restraints: list[RestraintConfig] = Field(
         default_factory=list, description="Restraint configurations"
     )
     thermodynamics: ThermodynamicsConfig = Field(..., description="Thermodynamic conditions")
     simulation_phases: SimulationPhasesConfig = Field(..., description="Phase settings")
     output: OutputConfig = Field(default_factory=OutputConfig, description="Output settings")
-    force_field: ForceFieldConfig = Field(
-        default_factory=ForceFieldConfig, description="Force field settings"
-    )
     engine: Literal["openmm", "gromacs"] = Field(..., description="Simulation engine to use")
     openmm: OpenMMEngineConfig = Field(
         default_factory=OpenMMEngineConfig, description="OpenMM engine settings"
@@ -1848,38 +2061,126 @@ class SimulationConfig(_ConfigModel):
         default_factory=GromacsEngineConfig, description="GROMACS engine settings"
     )
 
-    @field_validator("polymers", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _disabled_polymers_need_no_fields(cls, value: Any) -> Any:
-        """Read ``polymers: {enabled: false}`` as no polymers.
-
-        A disabled section that lacks the fields a polymer build needs is
-        ``None``, as ``polymers: null`` is; its other keys are not read, and a
-        warning names them. A disabled section with every required field is
-        kept as written, so the configs and hashes of existing runs do not change.
-        """
-        from pydantic import TypeAdapter, ValidationError
-
-        if not isinstance(value, dict) or "enabled" not in value:
-            return value
-        try:
-            # The same values pydantic reads as false: false, "false", "no", 0, ...
-            if TypeAdapter(bool).validate_python(value["enabled"]):
-                return value
-        except ValidationError:
-            return value
-        required = [
-            name for name, field in PolymerConfig.model_fields.items() if field.is_required()
-        ]
-        if all(name in value for name in required):
-            return value
-        ignored = sorted(str(key) for key in value if key != "enabled")
-        if ignored:
-            LOGGER.warning(
-                "polymers.enabled is false, so these polymer keys are not read: %s",
-                ", ".join(ignored),
+    def _refuse_removed_sections(cls, data: Any) -> Any:
+        """Name where each section of an older config went, instead of a bare unknown-key error."""
+        if not isinstance(data, dict):
+            return data
+        removed = [key for key in cls.REMOVED_SECTIONS if key in data]
+        if removed:
+            moves = "; ".join(f"{key} -> {cls.REMOVED_SECTIONS[key]}" for key in removed)
+            raise ValueError(
+                f"this config uses the layout of PolyzyMD 1.3.0rc4 and earlier ({moves}). "
+                f"Rewrite it from the template (polyzymd init) or see {REWRITE_GUIDE}"
             )
-        return None
+        return data
+
+    @model_validator(mode="after")
+    def _solutes_fit_this_release(self) -> Self:
+        """Check names, segment IDs and the combinations this release builds."""
+        from polyzymd.core.components import DEFAULT_SEGIDS
+
+        types = [solute.type for solute in self.solutes]
+        for type_ in sorted(set(types)):
+            if types.count(type_) > 1:
+                raise ValueError(
+                    f"this release builds one solute of each type, and the config has "
+                    f"{types.count(type_)} of type {type_}"
+                )
+        if "protein" not in types:
+            raise ValueError(
+                "this release builds systems around a protein; add a type: protein solute"
+            )
+        names = [solute.name for solute in self.solutes]
+        repeated = sorted({name for name in names if names.count(name) > 1})
+        if repeated:
+            raise ValueError(
+                f"solute name {', '.join(repeated)} is used twice; give each solute its own "
+                "name (restraints and analysis refer to solutes by name)"
+            )
+        reserved = {
+            DEFAULT_SEGIDS["solvent"]: "water and co-solvents",
+            DEFAULT_SEGIDS["ions"]: "ions",
+        }
+        segids = [solute.segid for solute in self.solutes]
+        for solute in self.solutes:
+            if solute.segid in reserved:
+                raise ValueError(
+                    f"solute {solute.name!r} has segid {solute.segid}, which is the segment "
+                    f"of the {reserved[solute.segid]}; choose another"
+                )
+            if segids.count(solute.segid) > 1:
+                raise ValueError(
+                    f"segid {solute.segid} is used by more than one solute; each solute "
+                    "needs its own segment ID"
+                )
+        for solute in self.solutes:
+            if len(solute.force_field) != 1:
+                raise ValueError(
+                    f"solute {solute.name!r}: this release applies one force field file per "
+                    f"solute, and it lists {len(solute.force_field)}"
+                )
+        if len(self.solvent.force_field) != 1:
+            raise ValueError("solvent.force_field: this release applies one force field file")
+        shared = self.solvent.force_field
+        for solute in self.solutes:
+            if solute.type != "protein" and solute.force_field != shared:
+                raise ValueError(
+                    f"solute {solute.name!r} lists force_field {solute.force_field}, but "
+                    f"solvent lists {shared}; this release parameterizes every molecule but the "
+                    "protein with one force field, so they must be the same"
+                )
+        models = {charges.model for charges in self._charge_specs() if charges.method == "nagl"}
+        if len(models) > 1:
+            raise ValueError(
+                f"components name different NAGL models ({', '.join(sorted(models))}); this "
+                "release charges every nagl component with one model"
+            )
+        for restraint in self.restraints:
+            for atom in (restraint.atom1, restraint.atom2):
+                if atom.component not in names:
+                    raise ValueError(
+                        f"restraint {restraint.name!r} names component {atom.component!r}, "
+                        f"which is not a solute; solutes are {', '.join(names)}"
+                    )
+        return self
+
+    def _charge_specs(self) -> list[ChargeSpec]:
+        return [solute.charges for solute in self.solutes] + [
+            cosolvent.charges for cosolvent in self.solvent.co_solvents
+        ]
+
+    def solute(self, type_: str) -> Solute | None:
+        """Return the solute of ``type_``, or None (this release builds one of each)."""
+        return next((solute for solute in self.solutes if solute.type == type_), None)
+
+    @property
+    def enzyme(self) -> ProteinSolute:
+        """The protein solute."""
+        protein = self.solute("protein")
+        assert isinstance(protein, ProteinSolute)
+        return protein
+
+    @property
+    def substrate(self) -> SmallMoleculeSolute | None:
+        """The small-molecule solute, if any."""
+        return self.solute("small_molecule")  # type: ignore[return-value]
+
+    @property
+    def polymers(self) -> PolymerSolute | None:
+        """The polymer solute, if any."""
+        return self.solute("polymer")  # type: ignore[return-value]
+
+    @property
+    def force_field(self) -> ForceFieldConfig:
+        """The force fields and NAGL model the builders apply, read from the solutes."""
+        models = [c.model for c in self._charge_specs() if c.method == "nagl" and c.model]
+        return ForceFieldConfig(
+            protein=self.enzyme.force_field[0],
+            small_molecule=self.solvent.force_field[0],
+            nagl_model=models[0] if models else DEFAULT_NAGL_MODEL,
+        )
 
     @model_validator(mode="after")
     def validate_barostat_for_engine(self) -> "SimulationConfig":
@@ -1905,7 +2206,7 @@ class SimulationConfig(_ConfigModel):
             replicates that ``build`` has already built.
         """
         engine = engine or self.engine
-        model = self.solvent.primary.model
+        model = self.solvent.water.model
         if model != WaterModel.TIP3P:
             raise ValueError(
                 f"PolyzyMD cannot build water model '{model.value}' correctly: the force fields "
@@ -1936,11 +2237,6 @@ class SimulationConfig(_ConfigModel):
 
     def _require_buildable_settings(self, engine: str) -> None:
         """Raise ``ValueError`` for settings a new build would not run as written."""
-        if self.solvent.primary.type != "water":
-            raise ValueError(
-                f"solvent.primary.type {self.solvent.primary.type!r}: the build makes only water."
-                "\nfix: set type: water; add other solvents as co_solvents."
-            )
         phases = self.simulation_phases
         stages = phases.equilibration_stages or []
         named = [(f"equilibration stage {stage.name!r}", stage) for stage in stages]
@@ -1997,8 +2293,6 @@ class SimulationConfig(_ConfigModel):
                 "output.naming_template has no {replicate}, so every replicate would write to "
                 "the same folder.\nfix: add {replicate} to naming_template."
             )
-        if not self.enzyme.name.strip():
-            raise ValueError("enzyme.name is empty.\nfix: give the enzyme a name.")
         folder = self.format_run_directory_name(1)
         if not folder.strip() or folder in (".", "..") or "/" in folder or "\\" in folder:
             raise ValueError(
@@ -2015,15 +2309,18 @@ class SimulationConfig(_ConfigModel):
         from polyzymd.config.loader import UNSET_VARIABLE
 
         paths = {
-            "enzyme.pdb_path": self.enzyme.pdb_path,
-            "enzyme.custom_substructures_path": self.enzyme.custom_substructures_path,
-            "substrate.sdf_path": self.substrate.sdf_path if self.substrate else None,
+            f"{self.enzyme.name}.pdb_path": self.enzyme.pdb_path,
+            f"{self.enzyme.name}.custom_substructures_path": (
+                self.enzyme.custom_substructures_path
+            ),
             "output.projects_directory": self.output.projects_directory,
             "output.scratch_directory": self.output.scratch_directory,
         }
+        if self.substrate is not None:
+            paths[f"{self.substrate.name}.sdf_path"] = self.substrate.sdf_path
         if self.polymers is not None:
-            paths["polymers.sdf_directory"] = self.polymers.sdf_directory
-            paths["polymers.cache_directory"] = self.polymers.cache_directory
+            paths[f"{self.polymers.name}.sdf_directory"] = self.polymers.sdf_directory
+            paths[f"{self.polymers.name}.cache_directory"] = self.polymers.cache_directory
         for key, path in paths.items():
             unset = UNSET_VARIABLE.search(str(path)) if path is not None else None
             if unset:
@@ -2154,11 +2451,7 @@ class SimulationConfig(_ConfigModel):
         str
             Primary solvent token for naming templates.
         """
-        primary = self.solvent.primary
-        primary_type = _format_safe_token(primary.type)
-        if primary_type == "water":
-            return f"water_{_format_safe_token(primary.model.value)}"
-        return primary_type
+        return f"water_{_format_safe_token(self.solvent.water.model.value)}"
 
     def _cosolvent_composition_token(self) -> str:
         """Format the co-solvent composition naming token.

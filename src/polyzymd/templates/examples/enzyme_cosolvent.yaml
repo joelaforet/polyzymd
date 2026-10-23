@@ -8,36 +8,35 @@
 name: "LipA_ResorufinButyrate_DMSO10mol"
 engine: "openmm"
 description: "LipA enzyme with Resorufin-Butyrate in 10 mol% DMSO co-solvent"
+solutes:
 
-# ============================================================================
-# Enzyme Configuration
-# ============================================================================
-enzyme:
-  name: "LipA"
-  pdb_path: "structures/LipA_prepared.pdb"
-  description: "Bacillus subtilis Lipase A"
+  # ============================================================================
+  # Enzyme Configuration
+  # ============================================================================
+  - type: protein
+    name: "LipA"
+    pdb_path: "structures/LipA_prepared.pdb"
+    description: "Bacillus subtilis Lipase A"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
 
-# ============================================================================
-# Substrate Configuration
-# ============================================================================
-substrate:
-  name: "Resorufin-Butyrate"
-  sdf_path: "structures/resorufin_butyrate_docked.sdf"
-  conformer_index: 0
-  charge_method: "nagl"
-  residue_name: "RBY"
-
-# ============================================================================
-# Polymer Configuration (Disabled)
-# ============================================================================
-polymers: null
+  # ============================================================================
+  # Substrate Configuration
+  # ============================================================================
+  - type: small_molecule
+    name: "Resorufin-Butyrate"
+    sdf_path: "structures/resorufin_butyrate_docked.sdf"
+    conformer_index: 0
+    residue_name: "RBY"
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
 
 # ============================================================================
 # Solvent Configuration with Co-solvent
 # ============================================================================
 solvent:
-  primary:
-    type: "water"
+  force_field: ["openff-2.3.0.offxml"]
+  water:
     model: "tip3p"
   
   # Co-solvent specification
@@ -46,6 +45,7 @@ solvent:
       smiles: "CS(=O)C"  # DMSO SMILES
       mole_fraction: 0.10  # 10 mol% DMSO
       residue_name: "DMS"
+      charges: {method: preset}  # the charges PolyzyMD ships for DMSO
   
   ions:
     neutralize: true
@@ -64,10 +64,12 @@ restraints:
   - type: "flat_bottom"
     name: "substrate_active_site"
     atom1:
+      component: "LipA"
       selection: "resid 77 and name OG"
       description: "Catalytic serine"
     atom2:
-      selection: "resname RBY and name C1"
+      component: "Resorufin-Butyrate"
+      selection: "name C1"
       description: "Substrate reactive carbon"
     distance: 3.3
     force_constant: 10000.0
@@ -148,11 +150,3 @@ output:
   
   # Naming template for run directories
   naming_template: "{enzyme}_{substrate}_DMSO10_{temperature}K_run{replicate}"
-
-# ============================================================================
-# Force Field Selection
-# ============================================================================
-force_field:
-  protein: "ff14sb_off_impropers_0.0.4.offxml"
-  small_molecule: "openff-2.0.0.offxml"
-  nagl_model: "openff-gnn-am1bcc-1.0.0.pt"   # NAGL charge model for charge_method: nagl

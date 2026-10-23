@@ -14,7 +14,7 @@ _CYSTINE_TEMPLATES = (
 
 
 def _config_with_templates(tmp_path: Path, templates):
-    """Load a config whose enzyme.custom_substructures_path is templates.json beside it."""
+    """Load a config whose protein custom_substructures_path is templates.json beside it."""
     import shutil
 
     import yaml
@@ -29,7 +29,7 @@ def _config_with_templates(tmp_path: Path, templates):
     else:
         (tmp_path / "c" / "templates.json").write_text(templates)
     data = yaml.safe_load(path.read_text())
-    data["enzyme"]["custom_substructures_path"] = "templates.json"
+    data["solutes"][0]["custom_substructures_path"] = "templates.json"
     path.write_text(yaml.safe_dump(data))
     return SimulationConfig.from_yaml(path)
 

@@ -48,7 +48,7 @@ def _check_am1bcc(warnings: list[str], config: Any) -> None:
     solvent = getattr(config, "solvent", None)
     polymers = getattr(config, "polymers", None)
     methods = [getattr(substrate, "charge_method", None)]
-    methods += [cs.charge_method for cs in getattr(solvent, "co_solvents", None) or []]
+    methods += [cs.charges.method for cs in getattr(solvent, "co_solvents", None) or []]
     if polymers is not None and getattr(polymers, "enabled", False):
         methods.append(getattr(polymers, "charger", None))
     if "am1bcc" in {getattr(m, "value", m) for m in methods} and not charging.am1bcc_available():
@@ -166,7 +166,8 @@ def require_inputs(config: Any) -> None:
     from polyzymd.data.solvent_molecules import is_bundled_solvent, split_counter_ions
 
     for cosolvent in config.solvent.co_solvents:
-        if is_bundled_solvent(cosolvent.name):
+        if cosolvent.charges.method == "preset" and is_bundled_solvent(cosolvent.name):
+            _require_shipped_molecule(cosolvent)
             continue
         what = f"co-solvent {cosolvent.name!r}"
         smiles, _, _ = split_counter_ions(cosolvent.smiles, cosolvent.name)
@@ -182,7 +183,7 @@ def require_inputs(config: Any) -> None:
                 f"{what} is the ion {smiles}; the build adds only Na+ and Cl- ions.\n"
                 "fix: remove this co-solvent and use solvent.ions.nacl_concentration."
             )
-        _require_chargeable(molecule, cosolvent.charge_method, what)
+        _require_chargeable(molecule, cosolvent.charges.method, what)
 
     polymers = config.polymers
     if polymers is not None and polymers.enabled and polymers.generation_mode.value == "dynamic":
@@ -219,15 +220,16 @@ def require_inputs(config: Any) -> None:
     from openff.toolkit.typing.engines.smirnoff.forcefield import get_available_force_fields
 
     available = set(get_available_force_fields())
-    for key in ("protein", "small_molecule"):
-        name = getattr(config.force_field, key)
-        if name not in available and not Path(name).is_file():
-            raise ValueError(
-                f"force_field.{key} {name!r} is not an installed force field.\n"
-                "fix: correct the name (the default is "
-                f"{type(config.force_field).model_fields[key].default}), or give the path of an "
-                ".offxml file."
-            )
+    named = [(f"solute {s.name!r}", s.force_field) for s in config.solutes]
+    named.append(("solvent", config.solvent.force_field))
+    for what, files in named:
+        for name in files:
+            if name not in available and not Path(name).is_file():
+                raise ValueError(
+                    f"{what}: force_field {name!r} is not an installed force field.\n"
+                    "fix: correct the name (for example ff14sb_off_impropers_0.0.4.offxml or "
+                    "openff-2.3.0.offxml), or give the path of an .offxml file."
+                )
 
     from polyzymd.utils.charging import installed_nagl_model
 
@@ -237,8 +239,30 @@ def require_inputs(config: Any) -> None:
 
         installed = ", ".join(sorted(path.name for path in list_available_nagl_models()))
         raise ValueError(
-            f"force_field.nagl_model {nagl_model!r} is not an installed NAGL model.\n"
-            f"fix: name one of {installed}, or give the path of a model file."
+            f"charges model {nagl_model!r} is not an installed NAGL model.\n"
+            f"fix: in each charges: {{method: nagl, model: ...}}, name one of {installed}, "
+            "or give the path of a model file."
+        )
+
+
+def _require_shipped_molecule(cosolvent: Any) -> None:
+    """Raise ``ValueError`` when a preset co-solvent's SMILES is not the molecule PolyzyMD ships."""
+    from rdkit import Chem
+
+    from polyzymd.data.solvent_molecules import _SOLVENTS_DIR, split_counter_ions
+
+    library = _SOLVENTS_DIR / f"{cosolvent.name.lower().strip()}.sdf"
+    shipped = next(iter(Chem.SDMolSupplier(str(library), removeHs=False)), None)
+    smiles, _, _ = split_counter_ions(cosolvent.smiles, cosolvent.name)
+    given = Chem.MolFromSmiles(smiles)
+    if shipped is None or given is None:
+        return
+    if Chem.MolToSmiles(Chem.RemoveHs(shipped)) != Chem.MolToSmiles(given):
+        raise ValueError(
+            f"co-solvent {cosolvent.name!r}: its SMILES {cosolvent.smiles!r} is not the "
+            f"{cosolvent.name} PolyzyMD ships charges for, so charges preset cannot apply.\n"
+            "fix: remove smiles to use the shipped molecule, or set charges: {method: nagl} "
+            "(or am1bcc, espaloma)."
         )
 
 
@@ -252,15 +276,16 @@ def _require_chargeable(molecule: Any, method: Any, what: str) -> None:
             raise ValueError(
                 f"{what} contains {', '.join(others)}, which the NAGL charge model does not "
                 f"cover (it covers {', '.join(sorted(NAGL_ELEMENTS))}).\n"
-                "fix: set charge_method: am1bcc (needs AmberTools), or leave the molecule out."
+                "fix: set charges: {method: am1bcc} (needs AmberTools), or leave the molecule "
+                "out."
             )
     elif method == "am1bcc":
         from polyzymd.utils import charging
 
         if not charging.am1bcc_available():
             raise ValueError(
-                f"{what}: charge_method am1bcc needs AmberTools or OpenEye, and neither is "
-                "installed in this environment.\nfix: use charge_method: nagl."
+                f"{what}: charges method am1bcc needs AmberTools or OpenEye, and neither is "
+                "installed in this environment.\nfix: use charges: {method: nagl}."
             )
     elif method == "espaloma":
         import importlib.util
@@ -268,5 +293,5 @@ def _require_chargeable(molecule: Any, method: Any, what: str) -> None:
         if importlib.util.find_spec("espaloma_charge") is None:
             raise ValueError(
                 f"{what}: charge_method espaloma needs the espaloma-charge package, which is not "
-                "installed in this environment.\nfix: use charge_method: nagl."
+                "installed in this environment.\nfix: use charges: {method: nagl}."
             )

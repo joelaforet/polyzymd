@@ -12,7 +12,7 @@ import uuid
 import warnings
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 from polyzymd.analyses.shared.file_hashes import file_sha256
 from polyzymd.simulation.analysis_topology import ANALYSIS_TOPOLOGY_NAME, write_analysis_topology
@@ -141,8 +141,12 @@ def publish_build_bundle(
     positions: Any,
     config: Any,
     provenance: dict[str, Any] | None = None,
+    segids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Atomically publish a complete PDB/System bundle, committing manifest last.
+
+    ``segids`` (optional) is each atom's component segment ID, written into
+    columns 73-76 of the PDB.
 
     ``provenance`` (optional) is recorded verbatim under the manifest's
     ``"provenance"`` key alongside the PolyzyMD version; builders use it for
@@ -158,6 +162,10 @@ def publish_build_bundle(
         system_path = staging / _BUILD_ARTIFACTS[1]
         with pdb_path.open("w") as stream:
             PDBFile.writeFile(topology, positions, stream, keepIds=True)
+        if segids is not None:
+            from polyzymd.core.components import write_pdb_segids
+
+            write_pdb_segids(pdb_path, segids)
         system_path.write_text(XmlSerializer.serialize(system))
         written = list(_BUILD_ARTIFACTS)
         if write_analysis_topology(topology, system, positions, staging / ANALYSIS_TOPOLOGY_NAME):

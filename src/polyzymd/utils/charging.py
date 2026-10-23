@@ -303,7 +303,7 @@ class AM1BCCCharger(MoleculeCharger):
 AM1BCC_NEEDS_AMBERTOOLS = (
     "charge_method am1bcc needs AmberTools (antechamber and sqm), which no PolyzyMD pixi "
     "environment includes. Install it into the build environment "
-    "(conda install -c conda-forge ambertools), or use charge_method: nagl."
+    "(conda install -c conda-forge ambertools), or use charges: {method: nagl}."
 )
 
 

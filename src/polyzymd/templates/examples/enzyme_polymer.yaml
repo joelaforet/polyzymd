@@ -8,69 +8,74 @@
 name: "LipA_ResorufinButyrate_SBMA-EGPMA"
 engine: "openmm"
 description: "LipA enzyme with Resorufin-Butyrate and SBMA-EGPMA co-polymers"
+solutes:
 
-# ============================================================================
-# Enzyme Configuration
-# ============================================================================
-enzyme:
-  name: "LipA"
-  pdb_path: "structures/LipA_prepared.pdb"
-  description: "Bacillus subtilis Lipase A"
+  # ============================================================================
+  # Enzyme Configuration
+  # ============================================================================
+  - type: protein
+    name: "LipA"
+    pdb_path: "structures/LipA_prepared.pdb"
+    description: "Bacillus subtilis Lipase A"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
 
-# ============================================================================
-# Substrate Configuration (Docked Ligand)
-# ============================================================================
-substrate:
-  name: "Resorufin-Butyrate"
-  sdf_path: "structures/resorufin_butyrate_docked.sdf"
-  conformer_index: 0
-  charge_method: "nagl"
-  residue_name: "RBY"
+  # ============================================================================
+  # Substrate Configuration (Docked Ligand)
+  # ============================================================================
+  - type: small_molecule
+    name: "Resorufin-Butyrate"
+    sdf_path: "structures/resorufin_butyrate_docked.sdf"
+    conformer_index: 0
+    residue_name: "RBY"
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
 
-# ============================================================================
-# Polymer Configuration
-# ============================================================================
-polymers:
-  enabled: true
-  type_prefix: "SBMA-EGPMA"  # Identifier for the co-polymer type
+  # ============================================================================
+  # Polymer Configuration
+  # ============================================================================
+  - type: polymer
+    type_prefix: "SBMA-EGPMA"  # Identifier for the co-polymer type
   
-  # Monomer composition with probabilities
-  monomers:
-    - label: "A"
-      probability: 0.98
-      name: "SBMA"
-    - label: "B"
-      probability: 0.02
-      name: "EGPMA"
+    # Monomer composition with probabilities
+    monomers:
+      - label: "A"
+        probability: 0.98
+        name: "SBMA"
+      - label: "B"
+        probability: 0.02
+        name: "EGPMA"
   
-  length: 5  # 5-mer chains
-  count: 2  # 2 polymer chains
+    length: 5  # 5-mer chains
+    count: 2  # 2 polymer chains
   
-  # Optional: path to pre-built polymer SDF files
-  # If not provided, polymers will be generated on-the-fly
-  sdf_directory: "polymer_sdfs/SBMA-EGPMA"
+    # Optional: path to pre-built polymer SDF files
+    # If not provided, polymers will be generated on-the-fly
+    sdf_directory: "polymer_sdfs/SBMA-EGPMA"
   
-  # Cache for generated polymers
-  cache_directory: ".polymer_cache"
+    # Cache for generated polymers
+    cache_directory: ".polymer_cache"
   
-  # Random seed for polymer sequence generation (optional)
-  # If not set, uses the replicate number as the seed.
-  # Set this for reproducible polymer sequences across different replicates.
-  # random_seed: 42
+    # Random seed for polymer sequence generation (optional)
+    # If not set, uses the replicate number as the seed.
+    # Set this for reproducible polymer sequences across different replicates.
+    # random_seed: 42
   
-  # Packing settings for polymers around the protein
-  # Larger padding helps PACKMOL converge when packing polymers
-  packing:
-    padding: 2.0  # nm padding around solute for polymer box
-    tolerance: 2.0  # PACKMOL tolerance (Angstrom)
-    # movebadrandom: true  # uncomment for dense/heterogeneous polymer systems
+    # Packing settings for polymers around the protein
+    # Larger padding helps PACKMOL converge when packing polymers
+    packing:
+      padding: 2.0  # nm padding around solute for polymer box
+      tolerance: 2.0  # PACKMOL tolerance (Angstrom)
+      # movebadrandom: true  # uncomment for dense/heterogeneous polymer systems
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: preset}
 
 # ============================================================================
 # Solvent Configuration
 # ============================================================================
 solvent:
-  primary:
-    type: "water"
+  force_field: ["openff-2.3.0.offxml"]
+  water:
     model: "tip3p"
   
   co_solvents: []  # No co-solvents for this simulation
@@ -92,10 +97,12 @@ restraints:
   - type: "flat_bottom"
     name: "substrate_active_site"
     atom1:
+      component: "LipA"
       selection: "resid 77 and name OG"
       description: "Catalytic serine"
     atom2:
-      selection: "resname RBY and name C1"
+      component: "Resorufin-Butyrate"
+      selection: "name C1"
       description: "Substrate reactive carbon"
     distance: 3.3
     force_constant: 10000.0
@@ -177,11 +184,3 @@ output:
   
   # Naming template for run directories
   naming_template: "{enzyme}_{substrate}_{polymer_type}_{temperature}K_run{replicate}"
-
-# ============================================================================
-# Force Field Selection
-# ============================================================================
-force_field:
-  protein: "ff14sb_off_impropers_0.0.4.offxml"
-  small_molecule: "openff-2.0.0.offxml"
-  nagl_model: "openff-gnn-am1bcc-1.0.0.pt"   # NAGL charge model for charge_method: nagl

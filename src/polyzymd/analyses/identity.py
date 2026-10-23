@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
@@ -29,6 +29,21 @@ def _content(path: object) -> str | None:
         return file_sha256(str(path))
     except OSError:
         return None
+
+
+def _new_charges(cosolvent: Any) -> dict[str, Any]:
+    """The charges of a bundled co-solvent charged another way than with its shipped charges.
+
+    Releases up to 1.3.0rc4 always gave a bundled co-solvent its shipped charges,
+    so only a computed method on a bundled molecule is new physics; leaving every
+    other case out keeps the identity of runs built before 1.3.0rc5.
+    """
+    from polyzymd.data.solvent_molecules import is_bundled_solvent
+
+    charges = getattr(cosolvent, "charges", None)
+    if charges is None or charges.method == "preset" or not is_bundled_solvent(cosolvent.name):
+        return {}
+    return {"charges": {"method": charges.method, "model": charges.model}}
 
 
 def compute_config_hash(config: "SimulationConfig") -> str:
@@ -119,6 +134,7 @@ def compute_config_hash(config: "SimulationConfig") -> str:
                     "mole_fraction": c.mole_fraction,
                     "concentration": c.concentration,
                     "count": getattr(c, "count", None),
+                    **_new_charges(c),
                 }
                 for c in solvent.co_solvents
             ),

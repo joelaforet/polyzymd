@@ -78,11 +78,11 @@ def test_from_copies_a_sibling_condition_with_its_inputs(tmp_path: Path) -> None
 
     assert second == created.root / "conditions" / "water_350_k" / "config.yaml"
     copied = yaml.safe_load(second.read_text())
-    assert copied["enzyme"]["pdb_path"] == "structures/protein_X.pdb"
+    assert copied["solutes"][0]["pdb_path"] == "structures/protein_X.pdb"
     assert (second.parent / "structures" / "protein_X.pdb").read_text() == "REMARK protein\nEND\n"
     assert _output(second) == ((created.root / "runs" / "water_350_k").resolve(), None)
     assert list(load_study_file(created.root).conditions) == ["Water", "Water 350 K"]
-    assert "# Enzyme Configuration (REQUIRED)" in second.read_text()  # comments are kept
+    assert "# Solutes (REQUIRED)" in second.read_text()  # comments are kept
 
 
 def test_from_refuses_a_condition_the_study_does_not_have(tmp_path: Path) -> None:
@@ -156,5 +156,5 @@ def test_a_copy_drops_the_machine_path_comment_of_a_deposited_config(tmp_path: P
     copy = add_condition(created.root, "Water 350 K", source="Water")
 
     assert "machine path removed" not in copy.read_text()
-    assert "# Enzyme Configuration (REQUIRED)" in copy.read_text()  # comments are kept
+    assert "# Solutes (REQUIRED)" in copy.read_text()  # comments are kept
     assert _output(copy) == ((created.root / "runs" / "water_350_k").resolve(), None)

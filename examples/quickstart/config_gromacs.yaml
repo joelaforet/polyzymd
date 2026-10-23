@@ -4,14 +4,17 @@
 name: "trpcage_water_gromacs"
 engine: "gromacs"
 description: "Trp-cage in water with NaCl"
+solutes:
 
-enzyme:
-  name: "trpcage"
-  pdb_path: "trpcage.pdb"
+  - type: protein
+    name: "trpcage"
+    pdb_path: "trpcage.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
 
 solvent:
-  primary:
-    type: "water"
+  force_field: ["openff-2.3.0.offxml"]
+  water:
     model: "tip3p"
   ions:
     neutralize: true
@@ -38,7 +41,6 @@ simulation_phases:
     time_step: 2.0
     thermostat: "LangevinMiddle"
     barostat: "MC"
-
 
 output:
   projects_directory: "."

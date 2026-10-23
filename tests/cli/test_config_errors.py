@@ -12,14 +12,14 @@ from polyzymd.cli.config_errors import config_load_lines
 from polyzymd.cli.main import cli
 from tests._support.analysis_testkit import write_simulation_config
 
-UNKNOWN_PDB = "error: pdb: unknown key; did you mean enzyme.pdb_path?"
+UNKNOWN_PDB = "error: pdb: unknown key; did you mean solutes[].pdb_path?"
 
 
 def _misplaced_pdb_config(tmp_path: Path) -> Path:
-    """Write a config whose PDB path is a top-level ``pdb:`` instead of ``enzyme.pdb_path``."""
+    """Write a config whose PDB path is a top-level ``pdb:`` instead of in the protein solute."""
     path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
     data = yaml.safe_load(path.read_text())
-    data["pdb"] = data["enzyme"].pop("pdb_path")
+    data["pdb"] = data["solutes"][0].pop("pdb_path")
     path.write_text(yaml.safe_dump(data))
     return path
 
@@ -69,7 +69,7 @@ def test_study_check_reports_a_bad_condition_config_with_its_label(tmp_path: Pat
     path = created.conditions["B"]
     assert (
         f"error: condition B: cannot read {path}: pdb: unknown key; "
-        "did you mean enzyme.pdb_path?"
+        "did you mean solutes[].pdb_path?"
     ) in result.output
     assert f"fix: correct these keys in {path} and run polyzymd validate -c {path} again." in (
         result.output
