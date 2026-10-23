@@ -131,27 +131,26 @@ For a complete guide on dynamic polymer generation, see {doc}`../how_to/dynamic_
 ### Basic Configuration (Cached Mode)
 
 ```yaml
+solutes:
+  # ... the protein entry ...
   - type: polymer
-    type_prefix: "SBMA-EGPMA"              # Polymer type identifier
-  
-  monomers:                              # Monomer definitions
-    - label: "A"                         # Single character label
-      probability: 0.98                  # Selection probability (0-1)
-      name: "SBMA"                       # Full name (optional)
-    - label: "B"
-      probability: 0.02
-      name: "EGPMA"
-  
-  length: 5                              # Monomers per chain
-  count: 2                               # Number of polymer chains
-  
-  sdf_directory: "polymer_sdfs/SBMA-EGPMA" # Pre-built polymer SDFs (required in cached mode)
-  cache_directory: ".polymer_cache"      # Cache for generated polymers
-  force_field: ["openff-2.3.0.offxml"]
-  charges: {method: preset}              # the charges stored in the SDFs
+    type_prefix: "SBMA-EGPMA"                # Polymer type identifier
+    monomers:                                # Monomer definitions
+      - label: "A"                           # Single character label
+        probability: 0.98                    # Selection probability (0-1)
+        name: "SBMA"                         # Full name (optional)
+      - label: "B"
+        probability: 0.02
+        name: "EGPMA"
+    length: 5                                # Monomers per chain
+    count: 2                                 # Number of polymer chains
+    sdf_directory: "polymer_sdfs/SBMA-EGPMA" # Pre-built polymer SDFs (required in cached mode)
+    cache_directory: ".polymer_cache"        # Cache for generated polymers
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: preset}                # the charges stored in the SDFs
 ```
 
-The entry is one item of `solutes:`; its keys are indented under the `-`.
+The entry is one item of `solutes:`; all its keys are indented under the `-`.
 
 ### Dynamic Generation Configuration
 
@@ -159,33 +158,29 @@ To generate polymers on-the-fly from monomer SMILES (without pre-built SDF files
 
 ```yaml
   - type: polymer
-    generation_mode: "dynamic"             # Enable dynamic generation
-  type_prefix: "SBMA-EGPMA"
-  
-  # ATRP reaction templates (use bundled defaults or custom paths)
-  reactions:
-    initiation: "default"                # or "/path/to/custom.rxn"
-    polymerization: "default"
-    termination: "default"
-  
-  monomers:
-    - label: "A"
-      probability: 0.7
-      name: "SBMA"
-      smiles: "[H]C([H])=C(C(=O)OC...)..."  # Required for dynamic mode
-      residue_name: "SBM"                   # Optional 3-letter residue name
-    - label: "B"
-      probability: 0.3
-      name: "EGPMA"
-      smiles: "[H]C([H])=C(C(=O)OC...)..."
-      residue_name: "EGM"
-  
-  length: 5
-  count: 2
-  force_field: ["openff-2.3.0.offxml"]
-  charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}   # or am1bcc, espaloma
-  max_retries: 10                        # Retries for ring-piercing detection
-  cache_directory: ".polymer_cache"
+    generation_mode: "dynamic"               # Enable dynamic generation
+    type_prefix: "SBMA-EGPMA"
+    reactions:                               # ATRP reaction templates
+      initiation: "default"                  # or "/path/to/custom.rxn"
+      polymerization: "default"
+      termination: "default"
+    monomers:
+      - label: "A"
+        probability: 0.7
+        name: "SBMA"
+        smiles: "[H]C([H])=C(C(=O)OC...)..." # Required for dynamic mode
+        residue_name: "SBM"                  # Optional 3-letter residue name
+      - label: "B"
+        probability: 0.3
+        name: "EGPMA"
+        smiles: "[H]C([H])=C(C(=O)OC...)..."
+        residue_name: "EGM"
+    length: 5
+    count: 2
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}   # or am1bcc, espaloma
+    max_retries: 10                          # Retries for ring-piercing detection
+    cache_directory: ".polymer_cache"
 ```
 
 ### All Polymer Options
@@ -507,12 +502,13 @@ co_solvents:
   - residue_name: "DMS"
 ~~~
 
-**Correct** (one item with 3 fields):
+**Correct** (one item with 4 fields):
 ~~~yaml
 co_solvents:
   - name: "dmso"
     mole_fraction: 0.10
     residue_name: "DMS"
+    charges: {method: preset}
 ~~~
 
 The `-` character starts a **new list item**. All fields belonging to the same item must be indented to the same level *without* a leading `-`.
@@ -676,8 +672,9 @@ on both engines.
 ## Modeling Exceptions
 
 Every build runs the physics audit ({doc}`physics_checks`). A check that fails
-stops the build. When a departure is deliberate, accept it here, with the
-reason:
+stops the build; a check that warns is reported. When a failure or a warning
+is deliberate, accept it here, with the reason. Crystal waters kept inside a
+protein, for example, warn under `geometry.buried_water`:
 
 ```yaml
 modeling_exceptions:

@@ -3,7 +3,8 @@
 PolyzyMD 1.3.0rc5 changes the layout of `config.yaml` once, so that every
 component of the system states its own force field and charges. A config
 written for 1.3.0rc4 or earlier stops with an error that links here. Rewrite
-it by hand, or start again from `polyzymd init` and copy your values in.
+it by hand, or write a new template with
+`polyzymd study add-condition LABEL --new` and copy your values in.
 Later 1.3 releases only add keys; an rc5 config keeps working.
 
 ## What moved
@@ -16,8 +17,8 @@ Later 1.3 releases only add keys; an rc5 config keeps working.
 | `polymers: {enabled: false}` or `polymers: null` | leave the polymer entry out |
 | `force_field.protein` | `force_field:` on the protein entry, as a list |
 | `force_field.small_molecule` | `force_field:` on `solvent:` and on every other solute (the same file) |
-| `force_field.nagl_model` (or nothing: the default was `openff-gnn-am1bcc-1.0.0.pt`) | `model:` in each `charges: {method: nagl}` |
-| `substrate.charge_method: nagl` | `charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}` |
+| `force_field.nagl_model` (or nothing: 1.3.0rc4 and earlier charged with `openff-gnn-am1bcc-0.1.0-rc.3.pt`) | `model:` in each `charges: {method: nagl}` |
+| `substrate.charge_method: nagl` | `charges: {method: nagl, model: ...}` (see below for which model) |
 | `polymers.charger` (dynamic polymers) | `charges: {method: nagl, model: ...}` (or `am1bcc`, `espaloma`) |
 | cached polymers (charges in the SDFs) | `charges: {method: preset}` |
 | `co_solvents[].charge_method`, or nothing, on a co-solvent PolyzyMD ships charges for (dmso, urea, ...) | `charges: {method: preset}`: those always got their shipped charges |
@@ -26,9 +27,12 @@ Later 1.3 releases only add keys; an rc5 config keeps working.
 | the protein's charges (always ff14SB's own) | `charges: {method: library}` on the protein entry |
 | `restraints[].atom1: {selection: "protein and resid 105 and name OG"}` | `atom1: {component: <protein name>, selection: "resid 105 and name OG"}` |
 
-A config that did not name a force field was built with
-`openff-2.0.0.offxml` for everything but the protein. To build the same
-physics, write that file; the templates now show `openff-2.3.0.offxml`.
+A config that did not name them was built with `openff-2.0.0.offxml` for
+everything but the protein, and charged every `nagl` molecule with
+`openff-gnn-am1bcc-0.1.0-rc.3.pt`. To build the same physics, write those
+two names. The templates now show `openff-2.3.0.offxml` and
+`openff-gnn-am1bcc-1.0.0.pt` (the model Sage 2.3.0 names); moving to them is
+a change of force field and charges, so make it on purpose.
 
 ## Example
 
@@ -158,7 +162,8 @@ its result. {doc}`../explanation/physics_audit` explains the checks, and
 {doc}`../reference/physics_checks` lists them.
 
 On GROMACS, the audit also reads every `.mdp` file the export wrote and
-compares it with the config. Each GROMACS job checks `audited_files.sha256`
+compares it with the config. Each GROMACS job script, local or SLURM, checks
+`gromacs/audited_files.sha256`
 before `grompp`. If you edit an exported `.top`, `.itp` or `.mdp` file by
 hand, the job stops: change the config and export again instead.
 
@@ -169,16 +174,20 @@ The build stops and prints each failing check:
 ```text
 The physics audit failed: the system is not what the config asks for.
   FAIL parameters.bonded (LipA): <which terms differ, with examples>
-Details: <run folder>/build_provenance.failed.json
+Details: <run folder>/build_provenance.failed.md
 fix: correct the config or the inputs and build again; if a failure is a deliberate choice, accept it under modeling_exceptions with the reason (<link to the check catalog>).
 ```
 
-The full record is in `build_provenance.failed.md`. Read the detail of each
+The full record is in `build_provenance.failed.md` (for GROMACS, in
+`build_provenance.md`, marked failed). Read the detail of each
 failing check: it names the terms or atoms that differ from the config. Most
 failures are a config that does not say what you meant, such as a force field
 file you did not intend or a restraint selection that matches another atom.
 
-If the departure is deliberate, accept it in the config, with the reason:
+A check can also warn: the build goes on and `build_provenance.md` shows
+the warning. If a failure or a warning is deliberate, accept it in the config,
+with the reason. For example, crystal waters kept inside a protein warn under
+`geometry.buried_water`:
 
 ```yaml
 modeling_exceptions:

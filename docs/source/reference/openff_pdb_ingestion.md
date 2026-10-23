@@ -65,8 +65,8 @@ residues 1-99 is written as chain `A` residues 1-198.
 
 ## Custom substructures JSON
 
-PolyzyMD's `enzyme.custom_substructures_path` loads JSON and passes it to
-`Topology.from_pdb(..., _custom_substructures=...)`.
+The `custom_substructures_path` key of the protein solute loads JSON and
+passes it to `Topology.from_pdb(..., _custom_substructures=...)`.
 
 ```{warning}
 `_custom_substructures` is a private/experimental OpenFF API. Treat examples as
