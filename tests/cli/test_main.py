@@ -903,7 +903,7 @@ class TestRunReusesBuild:
         config = self._config(tmp_path)
         _run_openmm_impl(config, replicate=1)
 
-        validate.assert_called_once_with(tmp_path / "run_1", config)
+        validate.assert_called_once_with(tmp_path / "run_1", config, config_path="", replicate=1)
         assert run_initial_segment.call_args.kwargs["skip_build"] is True
         assert f"Reusing the build in {tmp_path / 'run_1'}" in capsys.readouterr().out
 
