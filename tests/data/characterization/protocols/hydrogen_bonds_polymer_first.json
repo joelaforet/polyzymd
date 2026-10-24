@@ -12,7 +12,7 @@
    "control/replicate_1": {},
    "control/replicate_2": {},
    "control/replicate_3": {},
-   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hbond_lifetimes"},"record.json:labels":null,"record.json:name":"hbond_lifetimes_polymer_protein","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hbond_lifetimes"},"record.json:labels":null,"record.json:name":"hbond_lifetimes_polymer_protein","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "hydrogen_bonds_polymer_protein": {
    "B/replicate_1": {},
@@ -21,7 +21,7 @@
    "control/replicate_1": {},
    "control/replicate_2": {},
    "control/replicate_3": {},
-   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hydrogen_bonds"},"record.json:labels":null,"record.json:name":"hydrogen_bonds_polymer_protein","record.json:parts":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hydrogen_bonds"},"record.json:labels":null,"record.json:name":"hydrogen_bonds_polymer_protein","record.json:parts":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "residue_hbond_occupancy_polymer_protein": {
    "B/replicate_1": {"record.json:labels":[1,2]},
@@ -30,7 +30,7 @@
    "control/replicate_1": {"record.json:labels":[]},
    "control/replicate_2": {"record.json:labels":[]},
    "control/replicate_3": {"record.json:labels":[]},
-   "shared": {"files":["record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_hbond_occupancy"},"record.json:name":"residue_hbond_occupancy_polymer_protein","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_hbond_occupancy"},"record.json:name":"residue_hbond_occupancy_polymer_protein","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "residue_pair_hbond_occupancy_polymer_protein": {
    "B/replicate_1": {"labels.json:":["EGM-45","SBM-12"]},
@@ -39,7 +39,7 @@
    "control/replicate_1": {"labels.json:":[]},
    "control/replicate_2": {"labels.json:":[]},
    "control/replicate_3": {"labels.json:":[]},
-   "shared": {"files":["labels.json","record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_pair_hbond_occupancy"},"record.json:labels":"returned","record.json:missing":0.0,"record.json:name":"residue_pair_hbond_occupancy_polymer_protein","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["labels.json","record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_pair_hbond_occupancy"},"record.json:labels":"returned","record.json:missing":0.0,"record.json:name":"residue_pair_hbond_occupancy_polymer_protein","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   }
  },
  "shared": {},
@@ -57,7 +57,7 @@
   "pairwise": [],
   "problems": [],
   "protocol_version": "2",
-  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.B": "d19df94f4f261473",
   "provenance.mdanalysis_version": "<masked>",
   "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hydrogen_bonds_polymer_protein",
@@ -110,7 +110,7 @@
   "pairwise": [],
   "problems": [],
   "protocol_version": "2",
-  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.B": "d19df94f4f261473",
   "provenance.mdanalysis_version": "<masked>",
   "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hbond_lifetimes_polymer_protein",
@@ -163,7 +163,7 @@
   "pairwise": [],
   "problems": [],
   "protocol_version": "2",
-  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.B": "d19df94f4f261473",
   "provenance.mdanalysis_version": "<masked>",
   "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hbond_lifetimes_polymer_protein",
@@ -216,7 +216,7 @@
   "pairwise": [],
   "problems": [],
   "protocol_version": "2",
-  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.B": "d19df94f4f261473",
   "provenance.mdanalysis_version": "<masked>",
   "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hydrogen_bonds_polymer_protein",
@@ -269,7 +269,7 @@
   "pairwise": [],
   "problems": [],
   "protocol_version": "2",
-  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.B": "d19df94f4f261473",
   "provenance.mdanalysis_version": "<masked>",
   "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hbond_lifetimes_polymer_protein",
@@ -322,7 +322,7 @@
   "pairwise": [],
   "problems": [],
   "protocol_version": "2",
-  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.B": "d19df94f4f261473",
   "provenance.mdanalysis_version": "<masked>",
   "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hydrogen_bonds_polymer_protein",
@@ -382,7 +382,7 @@
   "pairwise": [],
   "problems": [],
   "protocol_version": "2",
-  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.B": "d19df94f4f261473",
   "provenance.mdanalysis_version": "<masked>",
   "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_pair_hbond_occupancy_polymer_protein",
