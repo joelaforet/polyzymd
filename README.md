@@ -165,7 +165,16 @@ polyzymd build -c config.yaml -r 1 --dry-run
 To add more conditions, go back to the project folder (`my_paper`) and run
 `polyzymd study add-condition LABEL --from "No polymer" --study my_protein`.
 
-Run `polyzymd submit` from the `build` environment. The job script activates
+`submit` does not build. Build each replicate first, in the `build`
+environment. For a large system, run the build in a compute job, as the
+[SLURM guide](https://polyzymd.readthedocs.io/en/latest/how_to/hpc_slurm.html)
+shows:
+
+```bash
+polyzymd build -c config.yaml -r 1-5
+```
+
+Then run `polyzymd submit` from the `build` environment. The job script activates
 the CUDA simulation environment on the compute node:
 
 ```bash
@@ -176,7 +185,11 @@ polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2
 
 The `--preset` flag selects the SLURM settings and the pixi environment of
 the job script (`sim-cuda-12-4` for Blanca, `sim-cuda-12-6` for Bridges2).
-You can override the environment with `--pixi-env`:
+The default preset is `aa100` (CU Boulder Alpine). Other presets are `al40`,
+`blanca-chbe-rdi` and `testing`; the
+[SLURM guide](https://polyzymd.readthedocs.io/en/latest/how_to/hpc_slurm.html)
+lists them all. You can override the environment with `--pixi-env`
+(`auto`, `build`, `sim-cuda-12-0`, `sim-cuda-12-4` or `sim-cuda-12-6`):
 
 ```bash
 polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2 --pixi-env sim-cuda-12-6
@@ -203,6 +216,7 @@ options.
 | `polyzymd recover -c config.yaml` | Resume a stalled or interrupted simulation |
 | `polyzymd cancel -c config.yaml` | Stop self-resubmitting job chains |
 | `polyzymd analyze NAME -c config.yaml` | Run one analysis and print a validated result |
+| `polyzymd analyze --project my_paper` | Run every analysis of `project.yaml` in each study, or only `NAME` |
 | `polyzymd clean-pdb -i protein.pdb` | Replace nonstandard residues and add hydrogens |
 | `polyzymd analysis-topology`, `hash-trajectories` | Add `system.prmtop` or trajectory hashes to existing runs |
 | `polyzymd info` | Show installation information |
@@ -221,6 +235,7 @@ PolyzyMD uses [pixi](https://pixi.sh) instead of conda/mamba. Key differences:
 | `build` | System building, PDB prep, validation, package work | Python 3.12 + NumPy 2 | No |
 | `analysis` | Trajectory analysis, comparison, and plotting | Python 3.12 + NumPy 2 | No |
 | `test` | CI/local tests and lint/docs tooling | Python 3.12 + NumPy 2 | No |
+| `sim-cuda-12-0` | Simulation execution on CUDA 12.0 drivers (older Blanca nodes) | Python 3.12 + NumPy 1.x + OpenMM 8.1.x | Yes |
 | `sim-cuda-12-4` | Simulation execution on CUDA 12.4 clusters (Blanca) | Python 3.12 + NumPy 1.x + OpenMM 8.1.x | Yes |
 | `sim-cuda-12-6` | Simulation execution on CUDA 12.6 clusters (Bridges2) | Python 3.12 + current OpenMM | Yes |
 
