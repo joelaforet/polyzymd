@@ -128,6 +128,36 @@ def production_dynamics(production: Any) -> Dict[str, Any]:
     }
 
 
+#: Files an interrupted segment leaves for the next one to resume from.
+STALE_RESUME_FILES = (
+    "INTERRUPTED",
+    "interrupted_state.xml",
+    "interrupted_system.xml",
+    "interrupted_checkpoint.chk",
+    "restart_state.xml",
+    "restart_system.xml",
+)
+
+
+def _remove_stale_resume_files(phase_dir: Path, phase_name: str) -> None:
+    """Remove the resume files of an earlier attempt at a segment that starts over.
+
+    A segment that runs from its first step replaces the trajectory of any
+    earlier attempt. That attempt's ``INTERRUPTED`` marker and saved states
+    would otherwise stay beside the new files and make the segment look
+    interrupted.
+    """
+    stale = [phase_dir / name for name in STALE_RESUME_FILES if (phase_dir / name).exists()]
+    if not stale:
+        return
+    LOGGER.warning(
+        f"{phase_name} starts from its first step; removing "
+        f"{', '.join(path.name for path in stale)} left by an earlier attempt"
+    )
+    for path in stale:
+        path.unlink()
+
+
 class SimulationRunner:
     """Runner for executing OpenMM molecular dynamics simulations.
 
@@ -1542,6 +1572,7 @@ class SimulationRunner:
         phase_name = f"{output_prefix}_{segment_index}"
         phase_dir = self._working_dir / phase_name
         phase_dir.mkdir(exist_ok=True)
+        _remove_stale_resume_files(phase_dir, phase_name)
 
         # Calculate steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
@@ -1607,7 +1638,9 @@ class SimulationRunner:
         state_path = phase_dir / f"{phase_name}_state_data.csv"
         pdb_path = phase_dir / f"{phase_name}_topology.pdb"
 
-        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
+        from polyzymd.simulation.report_state import production_dcd_reporter
+
+        self._simulation.reporters.append(production_dcd_reporter(traj_path, report_interval))
         self._simulation.reporters.append(
             StateDataReporter(
                 str(state_path),

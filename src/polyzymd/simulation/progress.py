@@ -515,8 +515,10 @@ def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path
     # before or after its record exists; attach it to the record here.
     for seg in progress.segments:
         if seg.system_check is None:
-            check = working_dir / f"production_{seg.index}" / (
-                f"production_{seg.index}_system_check.json"
+            check = (
+                working_dir
+                / f"production_{seg.index}"
+                / (f"production_{seg.index}_system_check.json")
             )
             if check.is_file():
                 try:
@@ -857,8 +859,24 @@ def _scan_segment_dir(
     # progress.json is rebuilt from scratch (see #90).
     provenance = _read_segment_provenance(params_json)
 
+    # A marker older than the segment's final state was left by an earlier
+    # attempt that the segment then ran again to the end.
+    stale_marker = (
+        interrupted_marker.exists()
+        and state_xml.exists()
+        and state_xml.stat().st_mtime > interrupted_marker.stat().st_mtime
+    )
+    if stale_marker:
+        LOGGER.warning(
+            "Segment %d: %s is older than %s; the segment ran to its end after that "
+            "interruption, so it is read as completed",
+            seg_idx,
+            interrupted_marker.name,
+            state_xml.name,
+        )
+
     # Determine status
-    if interrupted_marker.exists():
+    if interrupted_marker.exists() and not stale_marker:
         status = SegmentStatus.INTERRUPTED
         # Read metadata from the INTERRUPTED marker
         steps_completed, total_steps = _parse_interrupted_marker(interrupted_marker)

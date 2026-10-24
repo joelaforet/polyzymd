@@ -317,6 +317,30 @@ polyzymd run -c config.yaml -r 1-3 --engine gromacs --dry-run
 GROMACS output is streamed in real-time for familiar user experience.
 On any failure, execution stops immediately and intermediate files are preserved.
 
+A replicate whose production has started is not run from its start again:
+
+- OpenMM: `run` continues production from the saved state, as `run-segment`
+  does in a SLURM chain. A complete replicate prints `already complete;
+  nothing to do`.
+- GROMACS: a complete replicate prints `already complete; nothing to do`. A
+  started production that is not complete is refused, since the local
+  workflow cannot continue it. The message gives `polyzymd submit` and the
+  `gmx mdrun -cpi` command that continue it from its checkpoint. A run that
+  stopped before production runs again from minimization, after the same
+  audit checks as a new run.
+
+A replicate that has no usable build stops before it writes anything when the
+environment cannot build (a `sim-cuda-*` environment has no RDKit or OpenFF).
+The message gives the `polyzymd build` command to run in `build`.
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Every replicate is complete |
+| 1 | Error, or a refusal by a check |
+| 99 | A signal (`SIGTERM` or `SIGUSR1`) stopped the run after it saved its state. Run the same command again to continue |
+
 ### Notes
 
 - Requires GROMACS only when `--engine gromacs` is selected
@@ -675,7 +699,7 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | Verdict | Meaning |
 |---------|---------|
 | `COMPLETED` | `progress.json` reports all production steps done |
-| `RUNNING` | A SLURM job that works in this replicate's run directory is in state `R` (or completing/configuring) |
+| `RUNNING` | A SLURM job that works in this replicate's run directory is in state `R` (or completing/configuring), or, with the note `local run`, a `polyzymd run` on this machine holds the replicate lock |
 | `QUEUED` | A matching job exists but is pending; the reason is shown in parentheses |
 | `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log whose `Work dir:` line names this run directory, with the log filename in brackets. |
 | `STOPPED` | `polyzymd cancel` left a `STOP` file and no job is queued or running. The footer gives `polyzymd cancel --resume` and `polyzymd submit` to restart the chain. |
@@ -683,7 +707,7 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
 | `CORRUPT` | `progress.json` exists but cannot be read (empty, truncated or of the wrong shape). The `last:` field says why. `status` leaves the file as it is; fix or remove it by hand. |
 
-Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package and anything unrecognised. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list (`<preset nodes>` in the example above stands for that list).
+Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package and anything unrecognised. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A replicate that a signal stopped after it saved its state, with no SLURM log, gets `resubmit` and the note `stopped by a signal, state saved; no SLURM log`. The footer gives `polyzymd run` for it: run that on the workstation that ran it, or `polyzymd submit` on a cluster. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list (`<preset nodes>` in the example above stands for that list).
 
 Throughput (`ns/d`) of OpenMM runs comes from segment file timestamps: the parameters JSON written at segment start and the state-data CSV written on every report. A running segment that has run for at least an hour sets the rate, since it reflects the GPU the chain is on now; otherwise the newest stopped segment does. GROMACS runs, and OpenMM runs without those files, use the times in `progress.json`. The ETA is remaining nanoseconds divided by that rate and is only printed for `RUNNING` and `QUEUED` replicates.
 

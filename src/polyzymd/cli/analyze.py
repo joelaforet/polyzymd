@@ -900,7 +900,8 @@ def _analyze_project(
         sys.exit(EXIT_ANALYSIS_ERROR)
     failed = []
     for label in labels:
-        click.echo(f"== study {label}")
+        # With --format json, stdout holds only the report.
+        click.echo(f"== study {label}", err=ctx.params.get("output_format") == "json")
         folder = project.protocol.studies[label]
         try:
             ctx.invoke(
@@ -948,7 +949,7 @@ def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
     _quiet_console(ctx, study_path, None, "analyze")
     failed = []
     for run in runs:
-        click.echo(f"== {run}")
+        click.echo(f"== {run}", err=ctx.params.get("output_format") == "json")
         try:
             ctx.invoke(analyze_command, **{**ctx.params, "name": run})
         except SystemExit as exit_:

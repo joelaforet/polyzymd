@@ -102,3 +102,66 @@ def test_larger_overlaps_and_gaps_still_raise(tmp_path, second_start) -> None:
     loader = TrajectoryLoader(SimulationConfig.from_yaml(_config(tmp_path, [0, second_start])))
     with pytest.raises(TrajectoryLineageError, match="repaired"):
         loader.load_universe(1, cache=False)
+
+
+INTERVAL = 2500
+
+
+def _write_openmm_segment(run_dir: Path, index: int, csv_steps: list[int] | None) -> None:
+    """Write production_<index> as OpenMM 8.2+ does: the header's first step is the interval.
+
+    ``csv_steps`` are the steps the state-data CSV records for its frames;
+    ``None`` writes no CSV.
+    """
+    segment = run_dir / f"production_{index}"
+    segment.mkdir(parents=True, exist_ok=True)
+    universe = mda.Universe.empty(4, n_residues=1, atom_resindex=[0] * 4, trajectory=True)
+    universe.add_TopologyAttr("names", ["C1", "C2", "C3", "C4"])
+    universe.add_TopologyAttr("resnames", ["MOL"])
+    universe.atoms.positions = np.asarray(CROSS, dtype=np.float32)
+    universe.atoms.write(str(run_dir / "solvated_system.pdb"))
+    path = segment / f"production_{index}_trajectory.dcd"
+    n_frames = len(csv_steps) if csv_steps else 4
+    with mda.Writer(str(path), n_atoms=4, dt=DT_PS, istart=INTERVAL, nsavc=INTERVAL) as writer:
+        for k in range(n_frames):
+            universe.atoms.positions = np.asarray(CROSS, dtype=np.float32) * (1.0 + 0.01 * k)
+            writer.write(universe.atoms)
+    if csv_steps is not None:
+        rows = ['#"Step","Time (ps)"'] + [f"{step},{step / INTERVAL * DT_PS}" for step in csv_steps]
+        (segment / f"production_{index}_state_data.csv").write_text("\n".join(rows) + "\n")
+
+
+def _openmm_config(tmp_path: Path, segments: list[list[int] | None]) -> Path:
+    config = write_simulation_config(tmp_path / "cond", scratch=tmp_path / "scratch")
+    run_dir = SimulationConfig.from_yaml(config).get_working_directory(1)
+    for index, steps in enumerate(segments):
+        _write_openmm_segment(run_dir, index, steps)
+    return config
+
+
+def test_continuation_written_by_openmm_8_2_reads_its_times_from_the_csv(tmp_path, caplog) -> None:
+    """A segment that resumed at step 10000 is read at its recorded steps, not from t=0 again."""
+    steps = [[2500, 5000, 7500, 10000], [12500, 15000, 17500, 20000]]
+    with caplog.at_level(logging.WARNING):
+        replicate = _replicate(_openmm_config(tmp_path, steps))
+        times = replicate.times
+    assert replicate.frames.tolist() == list(range(8))
+    assert times * 1000 == pytest.approx(DT_PS * np.arange(1, 9), abs=1e-3)
+    trajectory = replicate.universe().trajectory
+    assert [round(ts.time, 3) for ts in trajectory] == pytest.approx(DT_PS * np.arange(1, 9))
+    assert any("records step 12500" in record.message for record in caplog.records)
+
+
+def test_continuation_without_a_csv_still_raises(tmp_path) -> None:
+    """Without the CSV nothing vouches for the real steps, so the chain is refused."""
+    config = _openmm_config(tmp_path, [[2500, 5000, 7500, 10000], None])
+    loader = TrajectoryLoader(SimulationConfig.from_yaml(config))
+    with pytest.raises(TrajectoryLineageError, match="overlaps or runs backwards"):
+        loader.load_universe(1, cache=False)
+
+
+def test_csv_that_disagrees_with_the_frame_interval_is_not_used(tmp_path) -> None:
+    config = _openmm_config(tmp_path, [[2500, 5000, 7500, 10000], [12500, 13000, 13500, 14000]])
+    loader = TrajectoryLoader(SimulationConfig.from_yaml(config))
+    with pytest.raises(TrajectoryLineageError):
+        loader.load_universe(1, cache=False)

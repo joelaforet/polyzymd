@@ -31,7 +31,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from polyzymd.workflow.daisy_chain import is_within_run_dir, job_belongs_to_run
 
@@ -62,6 +62,8 @@ _ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
 # What to do about a dead chain, decided from its last error line.
 ACTION_RESUBMIT = "resubmit"
 ACTION_INSPECT = "inspect"
+#: Note of a dead replicate that a signal stopped after saving its state, with no SLURM log.
+NOTE_STOPPED_OUTSIDE_SLURM = "stopped by a signal, state saved; no SLURM log"
 # Causes that leave a valid checkpoint behind: node, scheduler or GPU faults.
 _TRANSIENT_MARKERS = (
     "CUDA routing failed",
@@ -295,7 +297,7 @@ def assign_actions(reports: Sequence["SystemReport"]) -> None:
     """Set ``action`` on every dead replicate. Run after :func:`fill_end_states`."""
     for report in reports:
         for rep in report.replicates:
-            if rep.verdict == VERDICT_DEAD:
+            if rep.verdict == VERDICT_DEAD and rep.action is None:
                 rep.action = death_action(rep.last_error, rep.directory)
 
 
@@ -551,6 +553,14 @@ def classify(
     return VERDICT_DEAD
 
 
+def _stopped_gracefully(engine_dir: Path, progress: Any) -> bool:
+    """Whether the last production segment was stopped by a signal after saving its state."""
+    if not progress.segments:
+        return False
+    last = max(seg.index for seg in progress.segments)
+    return (Path(engine_dir) / f"production_{last}" / "INTERRUPTED").is_file()
+
+
 def _run_started(run_dir: Path) -> bool:
     """Return whether minimization, equilibration or production wrote output in *run_dir*."""
     from polyzymd.simulation.artifact_integrity import (
@@ -700,6 +710,15 @@ def build_system_report(
             stopped=_stop_file_present(rep_path),
             run_started=_run_started(rep_path),
         )
+        local_run = False
+        if verdict in (VERDICT_DEAD, VERDICT_NOT_STARTED) and not rep_jobs:
+            # A local `polyzymd run` has no SLURM job but holds the replicate lock
+            # for as long as its process lives.
+            from polyzymd.simulation.artifact_integrity import replicate_lock_held_elsewhere
+
+            if replicate_lock_held_elsewhere(rep_path):
+                verdict = VERDICT_RUNNING
+                local_run = True
         live = verdict == VERDICT_RUNNING
         rate = None
         eta = None
@@ -727,12 +746,23 @@ def build_system_report(
                 last_err = last_error_line(log_path)
 
         note = None
-        if jobs is None:
+        action = None
+        if local_run:
+            note = "local run (a process holds the replicate lock)"
+        elif jobs is None:
             note = "slurm unavailable"
         elif verdict == VERDICT_STOPPED:
             note = "STOP file present"
         elif verdict == VERDICT_DEAD and status_str == "not_started":
             note = "killed before production"
+        if (
+            verdict == VERDICT_DEAD
+            and last_log is None
+            and _stopped_gracefully(engine_dir, progress)
+        ):
+            # A signal stopped the run after it saved its state, outside SLURM.
+            action = ACTION_RESUBMIT
+            note = NOTE_STOPPED_OUTSIDE_SLURM
 
         replicates.append(
             ReplicateReport(
@@ -749,6 +779,7 @@ def build_system_report(
                 last_error=last_err,
                 last_log=last_log,
                 note=note,
+                action=action,
                 diverged=_diverged_segments(progress),
             )
         )
@@ -925,10 +956,13 @@ def render_agent(
     dead = [(r, rep) for r in reports for rep in r.replicates if rep.verdict == VERDICT_DEAD]
     restart: dict[tuple[str, str], list[int]] = {}
     inspect: list[str] = []
+    local: list[tuple[str, int]] = []
     for report, rep in dead:
         action = rep.action or ACTION_RESUBMIT
         if action == ACTION_INSPECT:
             inspect.append(f"{report.name} run{rep.replicate}")
+        elif rep.note == NOTE_STOPPED_OUTSIDE_SLURM:
+            local.append((report.config_path, rep.replicate))
         else:
             # A chain that failed CUDA routing names the nodes to leave out.
             exclude = _EXCLUDE.search(rep.last_error or "")
@@ -942,6 +976,14 @@ def render_agent(
             flag = f" --exclude {_with_preset_exclude(nodes, preset_hint)}" if nodes else ""
             rep_arg = ",".join(str(r) for r in sorted(reps))
             lines.append(f"polyzymd submit -c {cfg} -r {rep_arg}{preset}{flag}")
+    if local:
+        lines.append("")
+        lines.append(
+            "# interrupted runs with no SLURM log — continue each where it ran: "
+            "polyzymd run on a workstation, polyzymd submit on a cluster:"
+        )
+        for cfg, replicate in local:
+            lines.append(f"polyzymd run -c {cfg} -r {replicate}")
     if inspect:
         lines.append("")
         lines.append("# dead chains that need a look before restarting:")

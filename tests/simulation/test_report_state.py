@@ -47,7 +47,7 @@ from polyzymd.simulation.report_state import (
 def _write_dcd_header(path: Path, frames: int, interval: int) -> None:
     """Write the 100-byte header OpenMM's DCDReporter starts every trajectory with.
 
-    DCDReporter always passes ``firstStep=reportInterval``, whatever step the
+    OpenMM 8.2 and later pass ``firstStep=reportInterval``, whatever step the
     simulation starts at, so the header steps are relative to the segment start.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -363,6 +363,34 @@ class TestRestartEndToEnd:
         assert seg.start_step == 0
         assert seg.last_reported_step == 20
         assert seg.samples_written == 4
+
+    def test_trajectory_headers_give_the_step_of_the_first_frame(self, tmp_path):
+        """Each segment's DCD header starts at its first frame's step, whatever the OpenMM."""
+        from polyzymd.simulation.report_state import dcd_frame_info
+
+        _run_segment_zero(tmp_path)
+        _run_segment_one(tmp_path)
+        seg0 = dcd_frame_info(tmp_path / "production_0" / "production_0_trajectory.dcd")
+        seg1 = dcd_frame_info(tmp_path / "production_1" / "production_1_trajectory.dcd")
+        assert seg0 == (4, 5, REPORT_INTERVAL)
+        assert seg1 == (2, 25, REPORT_INTERVAL)
+        assert _csv_steps(tmp_path / "production_1" / "production_1_state_data.csv")[0] == 25
+
+    def test_segment_started_again_removes_the_earlier_attempts_resume_files(
+        self, tmp_path, caplog
+    ):
+        """Its old INTERRUPTED marker would otherwise make the new segment look interrupted."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        for name in ("INTERRUPTED", "interrupted_state.xml", "interrupted_checkpoint.chk"):
+            (seg_dir / name).write_text("old")
+
+        _run_segment_zero(tmp_path)
+
+        assert not (seg_dir / "INTERRUPTED").exists()
+        assert not (seg_dir / "interrupted_state.xml").exists()
+        assert not (seg_dir / "interrupted_checkpoint.chk").exists()
+        assert "left by an earlier attempt" in caplog.text
 
     def test_hard_kill_resumes_after_the_last_frame(self, tmp_path):
         """Pattern B: a hard-killed segment is continued without a repeated step."""

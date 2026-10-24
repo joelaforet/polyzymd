@@ -840,3 +840,46 @@ def test_a_replicate_run_with_its_own_protocol_is_never_called_dead(tmp_path: Pa
     text = render_agent([report], now=NOW, preset_hint="p")
     assert "OWN_PROTOCOL" in text and "does not run or resubmit it" in text
     assert "polyzymd submit" not in text
+
+
+def _local_report(tmp_path: Path, seg_status: SegmentStatus):
+    from polyzymd.cli.status_report import build_system_report
+
+    scratch = tmp_path / "scratch"
+    rep_dir = scratch / "SYS_run1"
+    progress = _write_progress(rep_dir, 13_500, SimulationStatus.INTERRUPTED, seg_status)
+    (rep_dir / "production_0").mkdir()
+    cfg = _mock_cfg(scratch, tmp_path / "slurm_logs")
+    cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+    engine = MagicMock()
+    engine.resolve_engine_working_directory.side_effect = lambda p: p
+    engine.load_or_scan_progress.return_value = progress
+    return rep_dir, lambda: build_system_report(
+        cfg, "c.yaml", engine_inst=engine, jobs=[], now=NOW, job_name_fn=lambda c, r: f"SYS_run{r}"
+    )
+
+
+def test_a_local_run_that_holds_the_lock_is_running(tmp_path: Path):
+    """A `polyzymd run` on a workstation has no SLURM job, but it is alive."""
+    from tests.simulation.test_progress import _lock_held_by_another_process
+
+    rep_dir, build = _local_report(tmp_path, SegmentStatus.RUNNING)
+    with _lock_held_by_another_process(rep_dir):
+        report = build()
+    (rep,) = report.replicates
+    assert rep.verdict == "running"
+    assert rep.note.startswith("local run")
+
+
+def test_a_local_run_stopped_by_a_signal_gets_the_local_resume_command(tmp_path: Path):
+    from polyzymd.cli.status_report import assign_actions
+
+    rep_dir, build = _local_report(tmp_path, SegmentStatus.INTERRUPTED)
+    (rep_dir / "production_0" / "INTERRUPTED").write_text("steps_completed=13500\n")
+    report = build()
+    assign_actions([report])
+    (rep,) = report.replicates
+    assert (rep.verdict, rep.action) == ("dead", "resubmit")
+    text = render_agent([report], now=NOW, preset_hint="p")
+    assert "polyzymd run -c c.yaml -r 1" in text.splitlines()
+    assert not any(line.startswith("polyzymd submit") for line in text.splitlines())

@@ -399,6 +399,26 @@ def test_a_project_logs_once_in_its_own_folder(tmp_path: Path) -> None:
 
 @pytest.mark.filterwarnings("ignore")
 @pytest.mark.usefixtures("git_identity")
+def test_a_project_report_in_json_is_the_only_text_on_stdout(tmp_path: Path) -> None:
+    """With --format json the study headers go to stderr, so stdout parses as JSON."""
+    import json
+
+    pytest.importorskip("MDAnalysis")
+    from tests.analyses.test_project import _study as project_study
+
+    paper = tmp_path / "Paper"
+    project_study(paper, tmp_path / "data", "lipa", "{core: name C1 C2}")
+    (paper / "project.yaml").write_text("studies: {lipa: lipa}\nanalyses: {rg: {selection: all}}\n")
+    result = CliRunner().invoke(
+        cli, ["analyze", "--project", str(paper), "rg", "--format", "json", "--no-plots"]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["analysis"] == "rg"
+    assert "== study lipa" in result.stderr
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
 def test_a_partial_report_names_no_machine_path(tmp_path: Path) -> None:
     """A partial report keeps each error's message, with no absolute path; the log has the traceback."""
     import json
