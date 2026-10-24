@@ -1325,9 +1325,11 @@ class ReplicateValues:
         Each row gives ``mean(b) - mean(a)`` with its 95 percent interval from
         the same t test, the p value, the Benjamini-Hochberg adjusted p value,
         and Cohen's d and Hedges' g oriented like the difference. A row is not
-        testable when a condition has fewer than two replicates, or when both
-        conditions have the same value in every replicate; it then takes no
-        part in the correction.
+        testable when a condition has fewer than three replicates
+        (:data:`~polyzymd.analyses.protocols.MIN_REPLICATES_TO_TEST`), or when
+        both conditions have the same value in every replicate; it then takes
+        no part in the correction. Below three replicates the row also has no
+        interval and no effect size, only the difference of the means.
 
         The correction family is every tested row of this call. For one
         number per replicate that is the conditions compared with their
@@ -1412,7 +1414,11 @@ class ReplicateValues:
         untested: Sequence = (),
     ) -> ProtocolReport:
         """Report the conditions of ``chosen`` and their controls, and test ``pairs``."""
-        from polyzymd.analyses.protocols import PairwiseReport, _difference_ci
+        from polyzymd.analyses.protocols import (
+            MIN_REPLICATES_TO_TEST,
+            PairwiseReport,
+            _difference_ci,
+        )
         from polyzymd.analyses.shared.inferential_statistics import (
             NO_SIGNIFICANT_CHANGE,
             benjamini_hochberg,
@@ -1455,8 +1461,12 @@ class ReplicateValues:
                     None,
                 )
                 testable = (
-                    reason is None and min(len(a), len(b)) >= 2 and len(set(a)) + len(set(b)) > 2
+                    reason is None
+                    and min(len(a), len(b)) >= MIN_REPLICATES_TO_TEST
+                    and len(set(a)) + len(set(b)) > 2
                 )
+                # Below that many replicates no interval or effect size is reported either.
+                described = min(len(a), len(b)) >= MIN_REPLICATES_TO_TEST
                 effect = cohens_d(b, a)
                 rows.append(
                     PairwiseReport(
@@ -1465,11 +1475,11 @@ class ReplicateValues:
                         stratum=stratum,
                         entry=entry,
                         delta=sum(b) / len(b) - sum(a) / len(a),
-                        delta_ci95=_difference_ci(a, b, f"{test}_t"),
+                        delta_ci95=_difference_ci(a, b, f"{test}_t") if described else None,
                         p=independent_ttest(b, a, method=test).p_value if testable else None,
                         test=f"{test}_t",
-                        cohens_d=_finite(effect.cohens_d),
-                        hedges_g=_finite(effect.hedges_g),
+                        cohens_d=_finite(effect.cohens_d) if described else None,
+                        hedges_g=_finite(effect.hedges_g) if described else None,
                         testable=testable,
                         reason=reason,
                     )
@@ -1589,13 +1599,13 @@ class ReplicateValues:
                 # One note for the pair; its rows stay in the report's pairwise table.
                 notes.append(
                     f"{a} vs {b} is not testable at any of its {total} labels: a condition has "
-                    "fewer than two replicates, or both have one value in every replicate"
+                    "fewer than three replicates, or both have one value in every replicate"
                 )
                 continue
             for row in rows:
                 at = "" if row.entry is None else f" at {row.entry}"
                 notes.append(
-                    f"{row.a} vs {row.b}{at} is not testable: a condition has fewer than two "
+                    f"{row.a} vs {row.b}{at} is not testable: a condition has fewer than three "
                     "replicates, or both have one value in every replicate"
                 )
         study, versions = self.source.study, _versions()
@@ -1677,7 +1687,7 @@ def _labelled_verdict(
             why = (
                 f", as {rows[0].reason}"
                 if rows[0].reason
-                else " needs at least two replicates per condition and values that vary"
+                else " needs at least three replicates per condition and values that vary"
             )
             sentences.append(
                 f"{VERDICT_NOT_TESTABLE}: {metric} for {rows[0].a} vs {label}{why} ({n_text})"

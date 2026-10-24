@@ -126,7 +126,7 @@ def test_decomposition_bands_are_intervals_of_each_line(tmp_path, saved) -> None
     ("test", "method"), [("welch", "Welch t"), ("student", "Student t (pooled variance)")]
 )
 def test_difference_bands_name_the_test_of_the_difference(tmp_path, saved, test, method) -> None:
-    profile = _profile({"A": [1.0, 1.2, 1.4], "B": [2.0, 2.3]})
+    profile = _profile({"A": [1.0, 1.2, 1.4], "B": [2.0, 2.3, 2.6]})
     report = profile.compare(test=test)
     study_figures.plot_differences(profile, report, tmp_path, "delta", xlabel="Residue")
     note = _note(saved["delta"])

@@ -1578,32 +1578,53 @@ def _run_openmm_impl(
 BUILD_MODULES = ("rdkit", "openff.toolkit", "openff.interchange")
 
 
+def _recorded_production_lengths(working_dir: Path) -> list[tuple[float, int]]:
+    """Return the (duration in ns, samples) a started chain may have been built with.
+
+    The first is what ``production_0_parameters.json`` recorded when the
+    chain's first segment started, the config the build was made with; the
+    second is the totals in ``progress.json``.
+    """
+    import json
+
+    from polyzymd.simulation.progress import load_progress
+
+    found: list[tuple[float, int]] = []
+    params = working_dir / "production_0" / "production_0_parameters.json"
+    try:
+        values = json.loads(params.read_text())["__values__"]["integ_params"]["__values__"]
+        found.append(
+            (float(values["total_time"]["__values__"]["value"]), int(values["num_samples"]))
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    prior = load_progress(working_dir)
+    if prior is not None and prior.total_steps_requested and prior.timestep_fs:
+        duration = prior.total_steps_requested * prior.timestep_fs / 1e6
+        found.append((duration, prior.total_samples_requested or 0))
+        found.append((round(duration, 9), prior.total_samples_requested or 0))
+    return list(dict.fromkeys(found))
+
+
 def _build_matches_recorded_length(
     working_dir: Path, sim_config: "SimulationConfig", config_path: str, replicate: int
 ) -> bool:
     """Whether the build matches the config once production length is set back.
 
-    The production duration and samples that ``progress.json`` recorded
-    are put back into a copy of the config; True when the build record then
-    validates. Those are the only settings a started chain may change.
+    Each production duration and samples the chain recorded
+    (:func:`_recorded_production_lengths`) is put back into a copy of the
+    config; True when the build record then validates. Those are the only
+    settings a started chain may change.
     """
     from polyzymd.simulation.artifact_integrity import (
         ArtifactIntegrityError,
         validate_build_bundle,
     )
-    from polyzymd.simulation.progress import load_progress
 
-    prior = load_progress(working_dir)
-    if prior is None or not prior.total_steps_requested or not prior.timestep_fs:
-        return False
     phases = sim_config.simulation_phases
-    duration = prior.total_steps_requested * prior.timestep_fs / 1e6
-    for candidate in dict.fromkeys((duration, round(duration, 9))):
+    for duration, samples in _recorded_production_lengths(working_dir):
         production = phases.production.model_copy(
-            update={
-                "duration": candidate,
-                "samples": prior.total_samples_requested or phases.production.samples,
-            }
+            update={"duration": duration, "samples": samples or phases.production.samples}
         )
         adjusted = sim_config.model_copy(
             update={"simulation_phases": phases.model_copy(update={"production": production})}

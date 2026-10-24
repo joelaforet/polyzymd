@@ -153,6 +153,8 @@ complete, it prints `already complete; nothing to do` and exits with code 0.
 While a local run is alive, `polyzymd status` shows it as `RUNNING` with the
 note `local run`.
 
+To run a finished replicate longer, see {doc}`run_longer`.
+
 ## Run on a CPU
 
 Set the platform in the simulation configuration:

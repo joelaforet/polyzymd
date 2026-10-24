@@ -178,7 +178,7 @@ control, on one value per replicate:
 - **Effect sizes**, Cohen's d and Hedges' g, oriented like the difference, so
   you can see not just whether a difference is significant but how large it is.
 
-A row is not testable when a condition has fewer than two replicates, or when
+A row is not testable when a condition has fewer than three replicates, or when
 both conditions have the same value in every replicate; it then takes no part
 in the correction. The report states a verdict per comparison in plain words.
 For the report's fields, see {doc}`../reference/analysis_protocol_report`, and

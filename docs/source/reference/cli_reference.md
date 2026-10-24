@@ -939,14 +939,14 @@ as `gmx rmsf -od` reports. An unknown name is refused with the list of all of th
 | `NAME` | Yes, without `--study` | Canonical analysis name, for example `rg`; with `--study`, a run of the study file, and every run when left out. |
 | `-c, --config PATH` | Yes, without `--study` | Simulation `config.yaml`. Repeatable; the first one is the control. Refused with `--study`. |
 | `--data DIR` | No | Directory holding the run directories of every condition, for this command only, in place of each config's `scratch_directory` and of a study's `data.local.yaml`. The config hash is that of the config as written. |
-| `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. Refused with `--study`, `-c` or `--output-dir`. |
+| `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. A partial report, and no failure, exits 3. Refused with `--study`, `-c` or `--output-dir`. |
 | `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates` and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study, and that report is printed but not saved as the run's `report.json`. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
 | `--list` | No | Print every shipped analysis, what it measures, and its settings with their defaults, then exit. |
 | `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example one atom pair for distances. Default: the first one the analysis lists; the rest appear in `all_runs`. |
-| `--set KEY=VALUE` | No | Top-level analysis setting. Repeatable. The value is read as YAML, so `--set threshold=3.0` gives a number and `--set groups='{protein: chainid A, polymer: chainid C}'` a mapping. A dotted key such as `groups.protein` is refused; give the whole top-level setting as a mapping instead. |
+| `--set KEY=VALUE` | No | Top-level analysis setting. Repeatable. With `--study` or `--project`, a `--set` that changes the run's settings in the study file gives a one-off answer: it is printed, and nothing is stored in `<study>/results/<run>/`. To keep it, add a named analysis under `analyses:`, or give `--output-dir`. The value is read as YAML, so `--set threshold=3.0` gives a number and `--set groups='{protein: chainid A, polymer: chainid C}'` a mapping. A dotted key such as `groups.protein` is refused; give the whole top-level setting as a mapping instead. |
 | `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. |
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
 | `--output-dir PATH` | No | Directory for `polyzymd_results/`, where the measured values are stored, and `figures/`. Default: the current directory. |
@@ -1036,17 +1036,27 @@ The verdict vocabulary is fixed so a caller can branch on it:
 | `no significant difference` | The test ran and the adjusted p value did not clear alpha |
 | `no test recorded` | The comparison stored no multiplicity-corrected p value, so the comparison describes a difference without deciding it |
 | `changed` | The difference is significant but the two means are equal at the stored precision |
-| `not testable` | A condition has fewer than two replicates, or every replicate of both conditions has the same value, so the test is undefined |
+| `not testable` | A condition has fewer than three replicates, or every replicate of both conditions has the same value, so the test is undefined |
 
 `--format json` prints the full report. Every field is documented in
-{doc}`analysis_protocol_report`.
+{doc}`analysis_protocol_report`. With `--project`, or with `--study` and no
+`RUN`, stdout holds one JSON document for every study and run:
+
+```json
+{"status": "complete", "studies": {"<study>": {"<run>": {"analysis": "rg", "...": "..."}}}}
+```
+
+`status` is `failed` when a run failed (its entry is `{"status": "failed"}`),
+`partial` when a report left a condition or replicate out, and `complete`
+otherwise. The `== study` and `== run` lines go to stderr.
 
 ### Exit codes
 
 | Code | Meaning |
 |------|---------|
-| 0 | The analysis ran and the report was printed |
+| 0 | The analysis ran and every report is complete |
 | 2 | A typed analysis error: unknown analysis name, missing config, bad `--replicates` or `--set`, an invalid study file, or a pipeline failure; with `--study` and no `RUN`, any run that failed. The message is printed on one line prefixed `error:` and the fix on the next prefixed `fix:`, both on stderr |
+| 3 | A report is partial: a condition or a replicate folder was left out. The report is printed (and stored), and its `problem:` lines say what was left out. With `--project` or `--study` and no `RUN`, any partial report gives 3 when no run failed |
 
 ### Example
 

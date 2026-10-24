@@ -124,7 +124,7 @@ For the format of each line and the verdict words, see
   diagnostic and changes no value.
 - `family` is the number of comparisons that the BH correction covers.
 - `not_testable` on a comparison line, and `not testable:` in its verdict,
-  mean that no test is possible: a condition has fewer than two replicates,
+  mean that no test is possible: a condition has fewer than three replicates,
   or every replicate of both conditions has the same value, so there is no
   variance to test. It does not mean that the conditions are the same.
 - `no test recorded` means that a stored comparison holds a raw p value but no

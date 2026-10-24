@@ -50,6 +50,8 @@ VERDICT_CHANGED = "changed"
 VERDICT_NO_DIFFERENCE = "no significant difference"
 VERDICT_NO_TEST = "no test recorded"
 VERDICT_NOT_TESTABLE = "not testable"
+#: Fewest replicates per condition for a comparison or a trend to be tested.
+MIN_REPLICATES_TO_TEST = 3
 #: The reason of a trend whose condition means are equal, printed as "no trend".
 FLAT_TREND = "every condition mean is the same"
 VERDICT_VOCABULARY = (
@@ -2090,6 +2092,11 @@ def _trend_line(trend: TrendReport) -> str:
     )
 
 
+def _mean_of(conditions: Sequence[ConditionReport], label: str) -> float:
+    """Return the mean of condition ``label`` (NaN when it is not among ``conditions``)."""
+    return next((item.mean for item in conditions if item.label == label), float("nan"))
+
+
 def _verdict(
     metric: str,
     unit: str | None,
@@ -2118,29 +2125,29 @@ def _verdict(
             f"delta {_signed(pair.delta)}{unit_text}, 95% CI {_interval(pair.delta_ci95)}, "
             f"p_adj {_num(pair.p_adjusted)}, p {_num(pair.p)}, {n_text}"
         )
-        # Fewer than 3 replicates or no variance leave a test with about one degree of freedom.
-        few = [label for label in (pair.a, pair.b) if counts.get(label, 0) < 3]
+        # No variance leaves a test with little power.
         weak = [
             f"{label} has the same value in every replicate"
             for label in (pair.a, pair.b)
             if counts.get(label, 0) >= 2 and len(set(values.get(label, []))) == 1
         ]
-        if few:
-            verb = "has" if len(few) == 1 else "have"
-            weak.insert(0, f"{' and '.join(few)} {verb} fewer than 3 replicates")
         if weak:
             evidence += f"; little power: {', '.join(weak)}"
-        if not pair.testable:
-            few = min(counts.get(pair.a, 0), counts.get(pair.b, 0)) < 2
+        few = min(counts.get(pair.a, 0), counts.get(pair.b, 0)) < MIN_REPLICATES_TO_TEST
+        if few and not pair.reason:
+            # No comparison verdict below three replicates per condition.
+            sentences.append(
+                f"{VERDICT_NOT_TESTABLE} (n < {MIN_REPLICATES_TO_TEST}): {metric} for {pair.a} "
+                f"vs {pair.b} needs at least {MIN_REPLICATES_TO_TEST} replicates per condition; "
+                f"means {_num(_mean_of(conditions, pair.a))} vs "
+                f"{_num(_mean_of(conditions, pair.b))}{unit_text} ({n_text})"
+            )
+        elif not pair.testable:
             why = (
                 f", as {pair.reason}"
                 if pair.reason
-                else (
-                    " needs at least two replicates per condition"
-                    if few
-                    else " has the same value in every replicate of both conditions, so no "
-                    "variance to test"
-                )
+                else " has the same value in every replicate of both conditions, so no "
+                "variance to test"
             )
             sentences.append(
                 f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b}{why} ({n_text})"

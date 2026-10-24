@@ -15,8 +15,12 @@ EXIT_STUDY_ERROR = 2
 PROJECT_CHECK = "polyzymd.project_check"
 
 
-def _report_status(path: Path) -> str:
-    """Return how ``study check`` describes a run's ``report.json``: absent, complete or partial."""
+def _report_status(path: Path, settings: dict | None = None) -> str:
+    """Return how ``study check`` describes a run's ``report.json``: absent, complete or partial.
+
+    With ``settings``, the settings the study file gives the run, a report
+    whose recorded settings differ is named as made with other settings.
+    """
     import json
 
     if not path.is_file():
@@ -25,10 +29,20 @@ def _report_status(path: Path) -> str:
         report = json.loads(path.read_text())
     except (OSError, ValueError):
         return " with an unreadable report"
+    other = ""
+    recorded = ((report.get("provenance") or {}).get("study") or {}).get("settings")
+    if settings is not None and isinstance(recorded, dict):
+        canonical = json.dumps(settings, sort_keys=True, default=str)
+        if json.dumps(recorded, sort_keys=True, default=str) != canonical:
+            shown = ", ".join(f"{k}={v}" for k, v in recorded.items()) or "defaults"
+            other = (
+                f", but that report was made with other settings ({shown}); "
+                "polyzymd analyze with --study remakes it"
+            )
     problems = report.get("problems") or []
     if report.get("status", "complete") == "complete":
-        return " with its report"
-    return f" with a partial report ({len(problems)} problems): " + "; ".join(problems)
+        return " with its report" + other
+    return f" with a partial report ({len(problems)} problems){other}: " + "; ".join(problems)
 
 
 @click.group("study")
@@ -183,7 +197,11 @@ def check_command(path: Path, production: bool = False) -> None:
         click.echo(
             f"analysis {what}: {settings}; {window}; "
             + (
-                f"stored results in {folder}" + _report_status(folder / REPORT_FILE)
+                f"stored results in {folder}"
+                + _report_status(
+                    folder / REPORT_FILE,
+                    dict(entry.settings) if entry.function is None else None,
+                )
                 if stored
                 else "no stored results"
             )

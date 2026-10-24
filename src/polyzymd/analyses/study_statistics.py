@@ -301,6 +301,12 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
                 levels.append(float(level))
                 means.append(sum(values) / len(values))
         trend = TrendReport(factor=name, conditions=used, n_replicates=n_values)
+        from polyzymd.analyses.protocols import MIN_REPLICATES_TO_TEST
+
+        fewest = min(
+            (len(item.replicate_values) for item in report.conditions if item.label in used),
+            default=0,
+        )
         if not numeric:
             reason = "some levels are text (YAML reads 1e-3 as text; write 1.0e-3)"
         elif bad:
@@ -308,6 +314,11 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
         elif len(set(levels)) < 3:
             n = len(set(levels))
             reason = f"{n} level{'s' if n != 1 else ''}; a trend needs at least three"
+        elif fewest < MIN_REPLICATES_TO_TEST:
+            reason = (
+                f"a condition has {fewest} replicate{'s' if fewest != 1 else ''}; a trend needs "
+                f"at least {MIN_REPLICATES_TO_TEST} per condition"
+            )
         elif len(set(means)) == 1:
             reason = FLAT_TREND
         else:
@@ -378,8 +389,7 @@ def trend_sentence(metric: str, unit: str | None, trend: Any) -> str:
     evidence = (
         f"slope {_num(trend.slope)}{per}, 95% CI {_interval(trend.slope_ci95)}, "
         f"p_adj {_num(trend.p_adjusted)}, fitted on {len(trend.conditions)} condition means "
-        f"of {trend.n_replicates} replicates"
-        + (f"; {trend.reason}" if trend.reason else "")
+        f"of {trend.n_replicates} replicates" + (f"; {trend.reason}" if trend.reason else "")
     )
     if trend.significant:
         direction = "rises" if trend.slope > 0 else "falls"

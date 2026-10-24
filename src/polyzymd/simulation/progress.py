@@ -1294,13 +1294,22 @@ def check_report_interval_unchanged(
     if previous is None or previous[1] == report_interval:
         return
     source_segment, previous_interval = previous
+    keep = ""
+    total = progress.total_steps_requested
+    if total and total % previous_interval == 0:
+        samples = total // previous_interval
+        keep = (
+            f" To run longer with the same frame spacing, raise production.samples with "
+            f"production.duration: samples: {samples} for this duration."
+        )
     message = (
         f"Segment {segment_index} would write a frame every {report_interval} steps, "
         f"but segment {source_segment} wrote one every {previous_interval} steps. "
         f"Changing production duration or samples part-way through a chain changes "
         f"the frame spacing, and the segments can then no longer be joined into one "
-        f"evenly spaced trajectory. Restore the configuration that started the chain, "
-        f"or pass --allow-report-interval-change to run-segment to accept the change."
+        f"evenly spaced trajectory.{keep} Otherwise restore the configuration that "
+        f"started the chain, or pass --allow-report-interval-change to run-segment to "
+        f"accept the change."
     )
     if not allow_change:
         raise ReportIntervalChangeError(message)

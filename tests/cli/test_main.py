@@ -2881,6 +2881,52 @@ class TestBuildMatchesRecordedLength:
         )
         assert _build_matches_recorded_length(tmp_path, longer, "", 1)
 
+    def test_the_first_segments_parameters_win_over_a_rewritten_progress(
+        self, tmp_path: Path, passing_audit
+    ) -> None:
+        """A failed attempt with other samples rewrites progress.json; segment 0 still knows."""
+        import json
+
+        from polyzymd.cli.main import _build_matches_recorded_length
+        from polyzymd.simulation.progress import SimulationProgress, save_progress
+
+        config = self._built(tmp_path)
+        production = config.simulation_phases.production
+        params = tmp_path / "production_0" / "production_0_parameters.json"
+        params.parent.mkdir()
+        params.write_text(
+            json.dumps(
+                {
+                    "__values__": {
+                        "integ_params": {
+                            "__values__": {
+                                "total_time": {"__values__": {"value": production.duration}},
+                                "num_samples": production.samples,
+                            }
+                        }
+                    }
+                }
+            )
+        )
+        save_progress(
+            tmp_path,
+            SimulationProgress(
+                total_steps_requested=123, total_samples_requested=1, timestep_fs=2.0
+            ),
+        )
+        longer = config.model_copy(
+            update={
+                "simulation_phases": config.simulation_phases.model_copy(
+                    update={
+                        "production": production.model_copy(
+                            update={"duration": production.duration * 2}
+                        )
+                    }
+                )
+            }
+        )
+        assert _build_matches_recorded_length(tmp_path, longer, "", 1)
+
     def test_another_temperature_does_not(self, tmp_path: Path, passing_audit) -> None:
         from polyzymd.cli.main import _build_matches_recorded_length
 

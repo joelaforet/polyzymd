@@ -247,6 +247,13 @@ class TestReportIntervalCheck:
         with pytest.raises(ReportIntervalChangeError, match="every 20000 steps"):
             check_report_interval_unchanged(progress, tmp_path, 1, 200000)
 
+    def test_the_refusal_gives_the_samples_that_keep_the_spacing(self, tmp_path):
+        """Running longer with the same frame spacing needs samples raised with the duration."""
+        progress = self._progress(report_interval=20000)
+        progress.total_steps_requested = 400000
+        with pytest.raises(ReportIntervalChangeError, match="samples: 20 for this duration"):
+            check_report_interval_unchanged(progress, tmp_path, 1, 40000)
+
     def test_override_allows_the_change(self, tmp_path, caplog):
         progress = self._progress(report_interval=20000)
         # `polyzymd status` raises this logger to ERROR for the rest of the process.

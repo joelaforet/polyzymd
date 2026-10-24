@@ -75,7 +75,7 @@ rows the JSON form holds; every one of them is kept there.
 | `hedges_g` | `float \| None` | `cohens_d` with the Hedges small-sample correction, oriented like `cohens_d`. |
 | `direction` | `str` | `increased` or `decreased` for a significant row, otherwise `no significant change`. |
 | `significant` | `bool` | Whether `p_adjusted` is at most 0.05. Always `False` when `testable` is `False`. |
-| `testable` | `bool` | `False` when a condition has fewer than two replicates, or both conditions have the same value in every replicate, which makes the test undefined rather than non-significant, or when a condition has no partner (see `no_partner`). |
+| `testable` | `bool` | `False` when a condition has fewer than three replicates, or both conditions have the same value in every replicate, which makes the test undefined rather than non-significant, or when a condition has no partner (see `no_partner`). |
 | `reason` | `str \| None` | Why the row is not testable when a condition has no partner. Left out of the JSON otherwise. |
 
 ## TrendReport
@@ -118,7 +118,7 @@ branch on them without parsing the rest.
 | `no significant difference` | the test ran and `p_adjusted` did not clear alpha |
 | `no test recorded` | the row has no multiplicity-corrected p value, so it describes a difference without deciding it |
 | `changed` | the difference is significant but the two means are equal at the stored precision |
-| `not testable` | a condition has fewer than two replicates, has no variance in either condition, or has no partner, so no test exists |
+| `not testable` | a condition has fewer than three replicates (the sentence then starts `not testable (n < 3)` and gives both means), has no variance in either condition, or has no partner, so no test exists. A trend needs three replicates in every condition too |
 
 A single-condition report has no comparison, and its one sentence states the
 label, the metric, the mean with its unit, the interval and the replicate

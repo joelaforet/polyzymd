@@ -358,10 +358,17 @@ class TestSummaryAndCompare:
         # The untestable row takes no part in the correction.
         assert testable.p_adjusted == pytest.approx(testable.p)
 
+    def test_two_replicates_give_the_difference_but_no_test(self) -> None:
+        """Below three replicates per condition: no p value, interval or effect size."""
+        row = replicate_values({"A": [1.0, 2.0], "B": [3.0, 5.0]}).compare().pairwise[0]
+        assert row.delta == pytest.approx(2.5)
+        assert not row.testable and row.p is None and row.p_adjusted is None
+        assert row.delta_ci95 is None and row.cohens_d is None and not row.significant
+
     def test_family_size_counts_the_tests_corrected_together(self) -> None:
         """Each outcome is one family: the conditions compared with the control."""
         values = replicate_values(
-            {"A": [0.0, 0.0], "B": [0.0, 0.0], "C": [1.0, 2.0], "D": [3.0, 5.0]}
+            {"A": [0.0, 0.0, 0.0], "B": [0.0, 0.0, 0.0], "C": [1.0, 2.0, 3.0], "D": [3.0, 5.0, 6.0]}
         )
         report = values.compare()
         untestable, c_row, d_row = report.pairwise

@@ -36,10 +36,13 @@ compared with the control only, not with every other condition.
   variances with Welch-Satterthwaite degrees of freedom for Welch's t. It
   carries no multiplicity correction, so a row can be non-significant after
   the correction while its interval excludes zero.
-- A row is **not testable** when a condition has fewer than two replicates,
+- A row is **not testable** when a condition has fewer than three replicates,
   or when both conditions have the same value in every replicate. It then has
   no `p` and takes no part in the correction, and the verdict reads
-  `not testable`.
+  `not testable`. Below three replicates the row also has no `delta_ci95`
+  and no effect size, and the verdict reads `not testable (n < 3)` with the
+  two condition means. Two replicates leave a t test with about one degree of
+  freedom, so PolyzyMD does not decide a difference from them.
 
 ---
 
