@@ -1500,6 +1500,10 @@ class ReplicateValues:
                 if row.significant
                 else NO_SIGNIFICANT_CHANGE
             )
+            if not row.testable:
+                # Untested: neither a change nor its absence was found.
+                row.significant = None
+                row.direction = "not testable"
         report = self._report(chosen, rows)
         left_out = [str(key) for key in untested if str(key) in map(str, self.labels or [])]
         if left_out:

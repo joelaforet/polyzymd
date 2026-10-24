@@ -367,7 +367,12 @@ def _echo_box_plan(sim_config: "SimulationConfig", *, phase: str) -> None:
             margin_nm=box.tolerance / 10.0,
         )
     except Exception as exc:  # a diagnostic never stops the dry run
-        colored_echo(f"    Box: not estimated ({exc})", phase=phase, level=logging.WARNING)
+        reason = (
+            "needs OpenFF, which only the build environment has"
+            if isinstance(exc, ImportError)
+            else exc
+        )
+        colored_echo(f"    Box: not estimated ({reason})", phase=phase, level=logging.WARNING)
         return
     source = " (from the enzyme PDB only; the substrate is not included)"
     colored_echo(
@@ -1009,6 +1014,7 @@ def _print_run_dry_run_report(
     colored_echo(phase=phase)
 
     colored_echo("Planned output:", phase=phase)
+    unbuildable: list[int] = []
     for rep in replicate_list:
         working_dir = sim_config.get_working_directory(rep)
         colored_echo(f"  Replicate {rep}:", phase=phase)
@@ -1017,16 +1023,63 @@ def _print_run_dry_run_report(
             gromacs_dir = sim_config.get_working_directory(rep) / "gromacs"
             colored_echo(f"    GROMACS dir: {_shown(gromacs_dir)}", phase=phase)
         else:
-            colored_echo(
-                "    Workflow: build -> minimize -> equilibrate -> production", phase=phase
-            )
-            colored_echo(
-                "    Outputs: solvated_system.pdb, system.xml, production_0/*", phase=phase
-            )
+            plan, can_run = _openmm_run_plan(sim_config, rep, config_path)
+            colored_echo(f"    Workflow: {plan}", phase=phase)
+            if not can_run:
+                unbuildable.append(rep)
 
     colored_echo(phase=phase)
+    if unbuildable:
+        colored_echo(
+            f"Dry run complete. No files were written. Replicates {unbuildable} need a build "
+            "that this environment cannot make; the run would stop.",
+            phase=phase,
+            level=logging.ERROR,
+        )
+        colored_echo("=" * 60, phase=phase)
+        sys.exit(1)
     colored_echo("Dry run complete. No files were written.", phase=phase)
     colored_echo("=" * 60, phase=phase)
+
+
+def _openmm_run_plan(sim_config: "SimulationConfig", replicate: int, config_path: str) -> tuple:
+    """Return what ``polyzymd run`` would do for one replicate, and whether it can.
+
+    Reads ``progress.json`` and checks the build as the run does, without
+    writing anything.
+    """
+    from polyzymd.simulation.artifact_integrity import (
+        ArtifactIntegrityError,
+        run_started,
+        validate_build_bundle,
+    )
+    from polyzymd.simulation.progress import load_progress
+
+    working_dir = sim_config.get_working_directory(replicate)
+    progress = load_progress(working_dir) if working_dir.is_dir() else None
+    if progress is not None and progress.segments:
+        if progress.is_complete:
+            return "already complete; nothing to run", True
+        return (
+            "continue production from its saved state "
+            f"({progress.total_steps_completed}/{progress.total_steps_requested} steps)",
+            True,
+        )
+    try:
+        validate_build_bundle(working_dir, sim_config, config_path=config_path, replicate=replicate)
+        return "reuse the audited build -> minimize -> equilibrate -> production", True
+    except ArtifactIntegrityError:
+        pass
+    if run_started(working_dir):
+        return "refused: the run has started but its build no longer matches the config", False
+    missing = _missing_build_modules()
+    if missing:
+        return (
+            "needs a build, which this environment cannot make (it has no "
+            f"{', '.join(missing)}): run polyzymd build in the build environment first",
+            False,
+        )
+    return "build -> minimize -> equilibrate -> production", True
 
 
 @cli.command(
@@ -1208,17 +1261,21 @@ def run(
     except ArtifactIntegrityError as e:
         # A failed physics audit, or a build that no audit vouches for.
         colored_echo(str(e), err=True, level=logging.ERROR)
+        _record_run_error(locals().get("sim_config"), locals().get("current_rep"), str(e))
         sys.exit(1)
 
     except FileNotFoundError as e:
         colored_echo(f"File not found: {e}", err=True, level=logging.ERROR)
+        _record_run_error(locals().get("sim_config"), locals().get("current_rep"), str(e))
         sys.exit(1)
 
     except ValueError as e:
         colored_echo(f"Validation error: {e}", err=True, level=logging.ERROR)
+        _record_run_error(locals().get("sim_config"), locals().get("current_rep"), str(e))
         sys.exit(1)
 
     except (RuntimeError, OSError) as e:
+        _record_run_error(locals().get("sim_config"), locals().get("current_rep"), str(e))
         colored_echo(f"Unexpected error: {e}", err=True, level=logging.ERROR)
         colored_echo(
             "This may be a bug. Re-run with --verbose for details.",
@@ -1230,6 +1287,51 @@ def run(
 
             traceback.print_exc()
         sys.exit(1)
+
+    except Exception as e:  # noqa: BLE001 - only OpenMM's own exception is handled here
+        if type(e).__name__ != "OpenMMException":
+            raise
+        message = " ".join(str(e).split())
+        colored_echo(f"OpenMM error: {message}", err=True, level=logging.ERROR)
+        hint = _openmm_error_hint(message)
+        if hint:
+            colored_echo(hint, err=True, level=logging.ERROR)
+        _record_run_error(locals().get("sim_config"), locals().get("current_rep"), message)
+        sys.exit(1)
+
+
+def _openmm_error_hint(message: str) -> str | None:
+    """Return what to do about an OpenMM platform error, or None."""
+    from polyzymd.cli.env_warnings import get_active_pixi_environment
+
+    env = get_active_pixi_environment()
+    if "CUDA_ERROR_UNSUPPORTED_PTX_VERSION" in message or ("CUDA" in message and env == "build"):
+        return (
+            "fix: the OpenMM of this environment needs a newer NVIDIA driver than this "
+            "machine has. Run in a sim-cuda-* environment whose CUDA version the driver "
+            "supports (nvidia-smi prints it), for example: pixi run -e sim-cuda-12-6 "
+            "polyzymd run ... See Hardware platforms, Run on a local NVIDIA GPU."
+        )
+    if "CUDA" in message:
+        return (
+            "fix: check the CUDA platform and driver; see Hardware platforms, Run on a "
+            "local NVIDIA GPU."
+        )
+    return None
+
+
+def _record_run_error(sim_config: object, replicate: object, message: str) -> None:
+    """Write the error that stopped a local run beside it, for ``polyzymd status``."""
+    from polyzymd.cli.status_report import LOCAL_RUN_ERROR
+
+    if sim_config is None or replicate is None:
+        return
+    try:
+        working_dir = Path(sim_config.get_working_directory(replicate))
+        if working_dir.is_dir():
+            (working_dir / LOCAL_RUN_ERROR).write_text(" ".join(message.split()) + "\n")
+    except Exception:  # noqa: BLE001 - recording the error must not hide it
+        return
 
 
 def _run_gromacs_impl(
@@ -1278,7 +1380,7 @@ def _run_gromacs_impl(
             config_path=config_path or None,
             replicate=replicate,
         )
-        colored_echo(f"Reusing the GROMACS files in {gromacs_dir}", phase="export")
+        colored_echo(f"Reusing the GROMACS files in {_shown(gromacs_dir)}", phase="export")
         eq_mdp_names = sorted(path.name for path in gromacs_dir.glob("eq_*.mdp"))
     else:
         from polyzymd.simulation.artifact_integrity import assert_rebuild_allowed
@@ -1327,7 +1429,7 @@ def _run_gromacs_impl(
             components=builder.components(),
         )
 
-        colored_echo(f"\nGROMACS files exported to: {gromacs_dir}", phase="export")
+        colored_echo(f"\nGROMACS files exported to: {_shown(gromacs_dir)}", phase="export")
         _echo_audit(working_dir, phase="export")
         colored_echo("Files generated:", phase="export")
         colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
@@ -1389,7 +1491,7 @@ def _run_gromacs_impl(
 
     except GromacsError as e:
         colored_echo(f"\nGROMACS simulation failed: {e}", err=True, level=logging.ERROR)
-        colored_echo(f"Check log files in: {gromacs_dir}", err=True, level=logging.ERROR)
+        colored_echo(f"Check log files in: {_shown(gromacs_dir)}", err=True, level=logging.ERROR)
         sys.exit(1)
 
     except FileNotFoundError as e:
@@ -1452,7 +1554,7 @@ def _gromacs_production_done_or_started(
         return False
     config_shown = _shown(Path(config_path)) if config_path else "<config.yaml>"
     raise ArtifactIntegrityError(
-        f"Production of replicate {replicate} has started in {gromacs_dir} "
+        f"Production of replicate {replicate} has started in {_shown(gromacs_dir)} "
         f"({', '.join(started[:4])}) but is not complete "
         f"({progress.total_steps_completed}/{progress.total_steps_requested} steps). "
         "polyzymd run would start it again from minimization and replace that "
@@ -1506,7 +1608,7 @@ def _run_openmm_impl(
     except ArtifactIntegrityError as reason:
         not_reused = reason
     if not_reused is not None and not run_started(working_dir):
-        _require_build_environment(working_dir, replicate, config_path, not_reused)
+        _require_build_environment(working_dir, replicate, config_path, not_reused, sim_config)
     # A started production may continue with a new production length, as a
     # SLURM chain does; any other change to the build or config is refused.
     length_changed_only = not_reused is not None and _build_matches_recorded_length(
@@ -1518,6 +1620,10 @@ def _run_openmm_impl(
     working_dir.mkdir(parents=True, exist_ok=True)
     # The lock tells `status` and later jobs that this run is alive.
     with replicate_lock(working_dir):
+        from polyzymd.cli.status_report import LOCAL_RUN_ERROR
+
+        # The error of an earlier attempt no longer describes this replicate.
+        (working_dir / LOCAL_RUN_ERROR).unlink(missing_ok=True)
         progress = load_or_scan_progress(
             working_dir=working_dir,
             config_path=config_path,
@@ -1541,7 +1647,7 @@ def _run_openmm_impl(
                 return
             if not_reused is not None and not length_changed_only:
                 raise ArtifactIntegrityError(
-                    f"Not continuing replicate {replicate}: its build in {working_dir} does not "
+                    f"Not continuing replicate {replicate}: its build in {_shown(working_dir)} does not "
                     f"match this config: {not_reused}\n"
                     "Production has started, so it continues only with the config and build "
                     "it started with. Restore the config (and any changed build file), or "
@@ -1563,15 +1669,15 @@ def _run_openmm_impl(
         if not reuse_build and (working_dir / "system.xml").exists():
             # Say why the existing build is not used; never rebuild a started run.
             colored_echo(
-                f"Not reusing the build in {working_dir}: {not_reused}", phase="simulation"
+                f"Not reusing the build in {_shown(working_dir)}: {not_reused}", phase="simulation"
             )
             from polyzymd.simulation.artifact_integrity import assert_rebuild_allowed
 
             assert_rebuild_allowed(working_dir)
         if reuse_build:
-            colored_echo(f"Reusing the build in {working_dir}", phase="simulation")
+            colored_echo(f"Reusing the build in {_shown(working_dir)}", phase="simulation")
         else:
-            colored_echo(f"Building the system in {working_dir}", phase="simulation")
+            colored_echo(f"Building the system in {_shown(working_dir)}", phase="simulation")
         _run_initial_segment(
             sim_config=sim_config,
             working_dir=working_dir,
@@ -1692,7 +1798,11 @@ def _missing_build_modules() -> list[str]:
 
 
 def _require_build_environment(
-    working_dir: Path, replicate: int, config_path: str, reason: Exception
+    working_dir: Path,
+    replicate: int,
+    config_path: str,
+    reason: Exception,
+    sim_config: "SimulationConfig | None" = None,
 ) -> None:
     """Stop before writing anything when the replicate needs a build this environment cannot make.
 
@@ -1707,17 +1817,26 @@ def _require_build_environment(
     if not missing:
         return
     config_shown = _shown(Path(config_path)) if config_path else "<config.yaml>"
+    project = os.environ.get("PIXI_PROJECT_MANIFEST")
+    manifest = f" --manifest-path {project}" if project else ""
     built = (working_dir / "system.xml").exists()
     if built:
-        state = f"has a build that cannot be used ({working_dir}): {reason}"
+        state = f"has a build that cannot be used ({_shown(working_dir)}): {reason}"
     else:
-        state = f"has not been built ({working_dir})."
+        state = f"has not been built ({_shown(working_dir)})."
+        template = getattr(getattr(sim_config, "output", None), "naming_template", "")
+        if isinstance(template, str) and "{" in template.replace("{replicate}", ""):
+            state += (
+                f" The folder name comes from output.naming_template ({template}); if you "
+                "changed a setting it uses, such as production.duration or the temperature, "
+                "an existing replicate is in a folder with the old name."
+            )
     raise ArtifactIntegrityError(
         f"Replicate {replicate} {state}\n"
         f"This environment cannot build systems (it has no {', '.join(missing)}). "
         + ("Restore the build's files if you changed them, or build" if built else "Build")
         + " the replicate in the build environment, then run it here:\n"
-        f"  pixi run -e build polyzymd build -c {config_shown} -r {replicate}\n"
+        f"  pixi run{manifest} -e build polyzymd build -c {config_shown} -r {replicate}\n"
         f"  polyzymd run -c {config_shown} -r {replicate}"
     )
 
@@ -1773,7 +1892,7 @@ def _resume_production_locked(
             raise RuntimeError(
                 f"Replicate {replicate} made no progress in its last segment "
                 f"({current.total_steps_completed}/{current.total_steps_requested} steps); "
-                f"inspect {working_dir / 'progress.json'}."
+                f"inspect {_shown(working_dir / 'progress.json')}."
             )
         done = current.total_steps_completed
 

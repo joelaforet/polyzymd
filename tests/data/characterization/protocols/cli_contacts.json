@@ -11,11 +11,11 @@
    "B": [12,12,12]
   },
   "metric": "coverage",
-  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":null,"test":"welch_t","testable":false}],
   "problems": [],
   "protocol_version": "2",
   "provenance": {
-   "config_hashes": {"A":"c4429a507b8cea42","B":"c4429a507b8cea42"},
+   "config_hashes": {"A":"d19df94f4f261473","B":"d19df94f4f261473"},
    "mdanalysis_version": "<masked>",
    "output_paths": {"results":"<out>/polyzymd_results/residue_occlusion"},
    "polyzymd_version": "<masked>",

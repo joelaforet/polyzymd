@@ -1061,6 +1061,20 @@ class ContinuationManager:
                 if progress.timestep_fs:
                     seg.duration_ns = actual * progress.timestep_fs / 1e6
                 changed = True
+            # A segment that stopped before it finished recorded no trajectory hash;
+            # its file is final now that the next segment starts.
+            if seg.trajectory_sha256 is None:
+                from polyzymd.simulation.progress import trajectory_digest
+
+                digest = trajectory_digest(
+                    self._working_dir
+                    / f"production_{seg.index}"
+                    / f"production_{seg.index}_trajectory.dcd"
+                )
+                if digest["trajectory_sha256"] is not None:
+                    seg.trajectory_sha256 = digest["trajectory_sha256"]
+                    seg.trajectory_bytes = digest["trajectory_bytes"]
+                    changed = True
             # A hard-killed segment never recorded its frames; read them from its files.
             if seg.last_reported_step is None:
                 frame = segment_frames(self._working_dir, seg.index)

@@ -159,7 +159,8 @@ class TestVerdict:
         report = _report(tmp_path, {"A": [10.0], "B": [12.0]})
 
         assert report.pairwise[0].testable is False
-        assert report.pairwise[0].significant is False
+        assert report.pairwise[0].significant is None
+        assert report.pairwise[0].direction == "not testable"
         assert report.pairwise[0].delta_ci95 is None
         assert report.verdict[0].startswith(VERDICT_NOT_TESTABLE)
         assert any("one replicate" in warning for warning in report.warnings)

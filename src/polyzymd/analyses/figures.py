@@ -629,7 +629,7 @@ def plot_differences(
         ax.axhline(0.0, color="0.5", linewidth=0.8)
         ax.plot(x, delta, color=color, linewidth=1.5, label="difference")
         ax.fill_between(x, low, high, color=color, alpha=0.25, label="95% interval")
-        marked = [row.significant for row in rows]
+        marked = [bool(row.significant) for row in rows]
         ax.scatter(x[marked], delta[marked], color="red", s=14, zorder=3, label="significant")
         n = f"n = {len(values.values[label])} vs {len(values.values[rows[0].a])}"
         apply_axis_style(

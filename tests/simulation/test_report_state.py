@@ -404,6 +404,24 @@ class TestRestartEndToEnd:
         ]
         assert "left by an earlier attempt" in caplog.text
 
+    def test_an_interrupted_segment_gets_its_trajectory_hash_when_the_next_starts(self, tmp_path):
+        """freeze then finds a hash for every segment of a resumed replicate."""
+        from polyzymd.simulation.progress import trajectory_digest
+
+        _run_segment_zero(tmp_path)
+        progress = load_progress(tmp_path)
+        seg0 = progress.segments[0]
+        seg0.status = SegmentStatus.INTERRUPTED
+        seg0.trajectory_sha256 = None
+        seg0.trajectory_bytes = None
+        save_progress(tmp_path, progress)
+
+        _run_segment_one(tmp_path)
+        seg0 = load_progress(tmp_path).segments[0]
+        expected = trajectory_digest(tmp_path / "production_0" / "production_0_trajectory.dcd")
+        assert seg0.trajectory_sha256 == expected["trajectory_sha256"]
+        assert seg0.trajectory_bytes == expected["trajectory_bytes"]
+
     def test_hard_kill_resumes_after_the_last_frame(self, tmp_path):
         """Pattern B: a hard-killed segment is continued without a repeated step."""
         _run_segment_zero(tmp_path)

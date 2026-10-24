@@ -27,6 +27,29 @@ EXIT_PARTIAL = 3
 #: document, and the label of the study running now.
 _JSON_REPORTS = "polyzymd.analyze.json_reports"
 _JSON_STUDY = "polyzymd.analyze.json_study"
+_JSON_ERROR = "polyzymd.analyze.json_error"
+
+
+def _error_exit(message: str, fix: str | None = None, code: int = EXIT_ANALYSIS_ERROR) -> None:
+    """Print ``error:`` and ``fix:`` on stderr and exit; with --format json, as JSON too.
+
+    Within a --project or --study run of several reports, the error is kept
+    for the caller to put in that run's entry of the one JSON document;
+    otherwise stdout gets ``{"status": "failed", "error": ..., "fix": ...}``.
+    """
+    import json
+
+    click.echo(f"error: {message}", err=True)
+    if fix:
+        click.echo(f"fix: {_one_line(fix)}", err=True)
+    ctx = click.get_current_context(silent=True)
+    if ctx is not None and ctx.params.get("output_format") == "json":
+        error = {"error": message, "fix": _one_line(fix) if fix else None}
+        if _JSON_REPORTS in ctx.meta:
+            ctx.meta[_JSON_ERROR] = error
+        else:
+            click.echo(json.dumps({"status": "failed", **error}, indent=2))
+    sys.exit(code)
 
 
 def _comparable(value: Any, folder: Path) -> Any:
@@ -615,11 +638,7 @@ def analyze_command(
                 output_dir=output_dir,
             )
         except AnalysisError as exc:
-            hint = getattr(exc, "hint", None)
-            click.echo(f"error: {_one_line(str(exc))}", err=True)
-            if hint:
-                click.echo(f"fix: {_one_line(hint)}", err=True)
-            sys.exit(EXIT_ANALYSIS_ERROR)
+            _error_exit(_one_line(str(exc)), getattr(exc, "hint", None))
         from polyzymd.analyses.study_file import load_study_file as _load_study
 
         # A run the study file does not list has no stored settings to protect.
@@ -633,17 +652,12 @@ def analyze_command(
             except AnalysisError:
                 one_off = False  # the run itself reports the bad setting
         if one_off and requested_output is None and (submit or dry_run) and not is_task:
-            click.echo(
-                f"error: --set changes the settings of {run_name} in the study file, and a "
+            _error_exit(
+                f"--set changes the settings of {run_name} in the study file, and a "
                 "submitted run of such settings would replace its stored results.",
-                err=True,
-            )
-            click.echo(
-                "fix: Give --output-dir for these results, or add a named analysis under "
+                "Give --output-dir for these results, or add a named analysis under "
                 "analyses: and submit that.",
-                err=True,
             )
-            sys.exit(EXIT_ANALYSIS_ERROR)
         if one_off and requested_output is None and not is_task:
             import atexit
             import shutil
@@ -678,14 +692,12 @@ def analyze_command(
             folder = find_study_file(study_path).parent
             shown = stored.resolve()
             shown = shown.relative_to(folder) if shown.is_relative_to(folder) else shown
-            click.echo(f"error: no runs of study {folder.name} are on this machine.", err=True)
-            click.echo(
-                f"fix: The stored report is {shown}, readable with "
+            _error_exit(
+                f"no runs of study {folder.name} are on this machine.",
+                f"The stored report is {shown}, readable with "
                 f"pz.Study(...).results({run_name!r}); to analyse again, give the runs with "
                 "polyzymd study locate DIR --verify or --data.",
-                err=True,
             )
-            sys.exit(EXIT_ANALYSIS_ERROR)
     stride = stride or 1
     if study_path is not None and until is None:
         until = study_until
@@ -701,11 +713,7 @@ def analyze_command(
         try:
             until = _common_until(*every, equilibration, replicate_spec, stride, data)
         except AnalysisError as exc:
-            hint = getattr(exc, "hint", None)
-            click.echo(f"error: {_one_line(str(exc))}", err=True)
-            if hint:
-                click.echo(f"fix: {_one_line(hint)}", err=True)
-            sys.exit(EXIT_ANALYSIS_ERROR)
+            _error_exit(_one_line(str(exc)), getattr(exc, "hint", None))
     study_record = (
         _study_record(study_path, run_name, _settings(setting_overrides))
         if study_path is not None
@@ -758,11 +766,7 @@ def analyze_command(
                 },
             )
         except AnalysisError as exc:
-            hint = getattr(exc, "hint", None)
-            click.echo(f"error: {_one_line(str(exc))}", err=True)
-            if hint:
-                click.echo(f"fix: {_one_line(hint)}", err=True)
-            sys.exit(EXIT_ANALYSIS_ERROR)
+            _error_exit(_one_line(str(exc)), getattr(exc, "hint", None))
         return
 
     run_options = {
@@ -804,16 +808,9 @@ def analyze_command(
                 "report leaves the condition out of the statistics."
             )
             return
-        hint = getattr(exc, "hint", None)
-        click.echo(f"error: {_one_line(str(exc))}", err=True)
-        if hint:
-            click.echo(f"fix: {_one_line(hint)}", err=True)
-        sys.exit(EXIT_ANALYSIS_ERROR)
+        _error_exit(_one_line(str(exc)), getattr(exc, "hint", None))
     except (FileNotFoundError, ValueError, OSError) as exc:
-        wrapped = ProtocolError(str(exc), hint="Check the -c paths and the replicate directories.")
-        click.echo(f"error: {_one_line(str(wrapped))}", err=True)
-        click.echo(f"fix: {wrapped.hint}", err=True)
-        sys.exit(EXIT_ANALYSIS_ERROR)
+        _error_exit(_one_line(str(exc)), "Check the -c paths and the replicate directories.")
 
     if study_path is not None:
         from polyzymd.analyses.results import REPORT_FILE
@@ -952,31 +949,29 @@ def _analyze_project(
     from polyzymd.analyses.project import Project
 
     if study_path is not None or configs:
-        click.echo("error: --project runs every study; give it without --study or -c.", err=True)
-        click.echo("fix: Use --study to run one study of the project.", err=True)
-        sys.exit(EXIT_ANALYSIS_ERROR)
+        _error_exit(
+            "--project runs every study; give it without --study or -c.",
+            "Use --study to run one study of the project.",
+        )
     if ctx.params.get("output_dir") is not None:
         # Studies with the same condition labels would overwrite each other's results.
-        click.echo("error: --output-dir cannot be given with --project.", err=True)
-        click.echo(
-            "fix: Leave out --output-dir; each study keeps its results in its own folder.", err=True
+        _error_exit(
+            "--output-dir cannot be given with --project.",
+            "Leave out --output-dir; each study keeps its results in its own folder.",
         )
-        sys.exit(EXIT_ANALYSIS_ERROR)
     try:
         project = Project(project_path)
         labels = project.runs_in(name) if name is not None else project.labels
     except ProtocolError as exc:
-        click.echo(f"error: {_one_line(str(exc))}", err=True)
-        if exc.hint:
-            click.echo(f"fix: {_one_line(exc.hint)}", err=True)
-        sys.exit(EXIT_ANALYSIS_ERROR)
+        _error_exit(_one_line(str(exc)), exc.hint)
     # One log for the whole command, in the project's logs/, before any study
     # sets up its own.
     _quiet_console(ctx, None, project.root, "analyze")
     if not labels:
-        click.echo(f"error: no study of {project.protocol.path} runs {name}.", err=True)
-        click.echo("fix: Add it under analyses: in project.yaml or a study.yaml.", err=True)
-        sys.exit(EXIT_ANALYSIS_ERROR)
+        _error_exit(
+            f"no study of {project.protocol.path} runs {name}.",
+            "Add it under analyses: in project.yaml or a study.yaml.",
+        )
     json_output = ctx.params.get("output_format") == "json"
     if json_output:
         ctx.meta[_JSON_REPORTS] = {}
@@ -997,14 +992,12 @@ def _analyze_project(
                 failed.append(label)
                 if json_output:
                     runs = ctx.meta[_JSON_REPORTS].setdefault(label, {})
+                    error = ctx.meta.pop(_JSON_ERROR, {"error": "see stderr"})
                     if name is not None:
-                        runs.setdefault(name, {"status": "failed"})
+                        runs.setdefault(name, {"status": "failed", **error})
                     elif not runs:
                         # The study failed before any of its runs: say so for the study.
-                        ctx.meta[_JSON_REPORTS][label] = {
-                            "status": "failed",
-                            "error": "the study could not be analysed; the error is on stderr",
-                        }
+                        ctx.meta[_JSON_REPORTS][label] = {"status": "failed", **error}
     if json_output:
         _echo_json_document(ctx.meta.pop(_JSON_REPORTS), ctx.params.get("output_path"))
     if failed:
@@ -1063,25 +1056,18 @@ def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
     from polyzymd.analyses.study_file import load_study_file
 
     if study_path is None:
-        click.echo(
-            "error: polyzymd analyze needs NAME, or --study to run every listed analysis.", err=True
+        _error_exit(
+            "polyzymd analyze needs NAME, or --study to run every listed analysis.",
+            "Run polyzymd analyze rg -c A/config.yaml, or polyzymd analyze --study study.yaml.",
         )
-        click.echo(
-            "fix: Run polyzymd analyze rg -c A/config.yaml, or polyzymd analyze --study study.yaml.",
-            err=True,
-        )
-        sys.exit(EXIT_ANALYSIS_ERROR)
     try:
         runs = list(load_study_file(study_path).analyses)
     except ProtocolError as exc:
-        click.echo(f"error: {_one_line(str(exc))}", err=True)
-        if exc.hint:
-            click.echo(f"fix: {_one_line(exc.hint)}", err=True)
-        sys.exit(EXIT_ANALYSIS_ERROR)
+        _error_exit(_one_line(str(exc)), exc.hint)
     if not runs:
-        click.echo(f"error: {study_path} lists no analyses.", err=True)
-        click.echo("fix: Add runs under analyses: in the study file.", err=True)
-        sys.exit(EXIT_ANALYSIS_ERROR)
+        _error_exit(
+            f"{study_path} lists no analyses.", "Add runs under analyses: in the study file."
+        )
     _quiet_console(ctx, study_path, None, "analyze")
     json_output = ctx.params.get("output_format") == "json"
     owner = json_output and _JSON_REPORTS not in ctx.meta
@@ -1102,7 +1088,10 @@ def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
                 failed.append(run)
                 if json_output:
                     study_label = ctx.meta.get(_JSON_STUDY, "")
-                    ctx.meta[_JSON_REPORTS].setdefault(study_label, {})[run] = {"status": "failed"}
+                    ctx.meta[_JSON_REPORTS].setdefault(study_label, {})[run] = {
+                        "status": "failed",
+                        **ctx.meta.pop(_JSON_ERROR, {"error": "see stderr"}),
+                    }
     if owner:
         _echo_json_document(ctx.meta.pop(_JSON_REPORTS), ctx.params.get("output_path"))
     if failed:

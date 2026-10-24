@@ -3178,3 +3178,80 @@ class TestRunWithoutBuildEnvironment:
         with pytest.raises(ArtifactIntegrityError, match="Restore the build's files"):
             _run_openmm_impl(TestRunReusesBuild._config(tmp_path), replicate=1)
         assert sorted(p.name for p in run_dir.iterdir()) == ["system.xml"]
+
+
+class TestRunReportsOpenMMErrors:
+    """An OpenMM platform error gets a hint and is recorded for `status`."""
+
+    def test_ptx_error_names_the_sim_environment_and_is_recorded(self, tmp_path, monkeypatch):
+        from polyzymd.cli.status_report import LOCAL_RUN_ERROR
+
+        class OpenMMException(Exception):
+            pass
+
+        run_dir = tmp_path / "run_2"
+
+        def fail(sim_config, replicate, config_path=""):
+            run_dir.mkdir()
+            raise OpenMMException(
+                "Error loading CUDA module: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)"
+            )
+
+        monkeypatch.setattr("polyzymd.cli.main._run_openmm_impl", fail)
+        monkeypatch.setattr(
+            "polyzymd.config.schema.SimulationConfig.get_working_directory",
+            lambda self, replicate=1: tmp_path / f"run_{replicate}",
+        )
+        config = Path(__file__).parents[2] / "examples/quickstart/config.yaml"
+        result = CliRunner().invoke(cli, ["run", "-c", str(config), "-r", "2"])
+
+        assert result.exit_code == 1
+        assert "OpenMM error: Error loading CUDA module" in result.output
+        assert "sim-cuda" in result.output
+        assert "UNSUPPORTED_PTX_VERSION" in (run_dir / LOCAL_RUN_ERROR).read_text()
+
+
+class TestRunDryRunPlan:
+    """`run --dry-run` says what the run would do, and fails when it could not."""
+
+    def test_an_unbuilt_replicate_in_a_sim_environment_fails_the_dry_run(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("polyzymd.cli.main._missing_build_modules", lambda: ["openff.toolkit"])
+        monkeypatch.setattr(
+            "polyzymd.config.schema.SimulationConfig.get_working_directory",
+            lambda self, replicate=1: tmp_path / f"run_{replicate}",
+        )
+        config = Path(__file__).parents[2] / "examples/quickstart/config.yaml"
+        result = CliRunner().invoke(cli, ["run", "-c", str(config), "-r", "1", "--dry-run"])
+
+        assert result.exit_code == 1
+        assert "needs a build, which this environment cannot make" in result.output
+        assert "run polyzymd build in the build environment first" in result.output
+        assert not (tmp_path / "run_1").exists()
+
+    def test_a_complete_replicate_is_reported_as_such(self, tmp_path, monkeypatch):
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            save_progress,
+        )
+
+        monkeypatch.setattr(
+            "polyzymd.config.schema.SimulationConfig.get_working_directory",
+            lambda self, replicate=1: tmp_path / f"run_{replicate}",
+        )
+        save_progress(
+            tmp_path / "run_1",
+            SimulationProgress(
+                total_steps_requested=10,
+                segments=[
+                    SegmentRecord(index=0, status=SegmentStatus.COMPLETED, steps_completed=10)
+                ],
+            ),
+        )
+        config = Path(__file__).parents[2] / "examples/quickstart/config.yaml"
+        result = CliRunner().invoke(cli, ["run", "-c", str(config), "-r", "1", "--dry-run"])
+        assert result.exit_code == 0, result.output
+        assert "already complete; nothing to run" in result.output

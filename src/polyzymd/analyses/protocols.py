@@ -158,7 +158,7 @@ class PairwiseReport(BaseModel):
     cohens_d: float | None = None
     hedges_g: float | None = None
     direction: str = "unchanged"
-    significant: bool = False
+    significant: bool | None = False
     testable: bool = True
     reason: str | None = None
 

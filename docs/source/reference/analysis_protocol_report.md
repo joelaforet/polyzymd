@@ -73,8 +73,8 @@ rows the JSON form holds; every one of them is kept there.
 | `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with their control for this one outcome, over every stratum, or for a labelled result every tested label of every compared condition. `None` for a row that was not tested. Printed as `family <m>` on the comparison line. |
 | `cohens_d` | `float \| None` | Standardised mean difference, the difference of the means over the pooled standard deviation, oriented like `delta`: positive means `b` is larger. `None` when a condition has fewer than three replicate values. |
 | `hedges_g` | `float \| None` | `cohens_d` with the Hedges small-sample correction, oriented like `cohens_d`. `None` when a condition has fewer than three replicate values. |
-| `direction` | `str` | `increased` or `decreased` for a significant row, otherwise `no significant change`. |
-| `significant` | `bool` | Whether `p_adjusted` is at most 0.05. Always `False` when `testable` is `False`. |
+| `direction` | `str` | `increased` or `decreased` for a significant row, `not testable` for a row that was not tested, otherwise `no significant change`. |
+| `significant` | `bool \| None` | Whether `p_adjusted` is at most 0.05. `None` (`null` in JSON) when `testable` is `False`: no test decided it either way. |
 | `testable` | `bool` | `False` when a condition has fewer than three replicates, or both conditions have the same value in every replicate, which makes the test undefined rather than non-significant, or when a condition has no partner (see `no_partner`). |
 | `reason` | `str \| None` | Why the row is not testable when a condition has no partner. Left out of the JSON otherwise. |
 
