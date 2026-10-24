@@ -157,9 +157,36 @@ class AtomSelection:
             scope = set(components[self.component])
             indices = [i for i in indices if i in scope]
         if not indices:
-            where = f" in component {self.component!r}" if self.component else ""
-            raise ValueError(f"No atoms match selection: '{self.selection}'{where}")
+            if self.component is None:
+                raise ValueError(f"No atoms match selection: '{self.selection}'")
+            names = component_atom_names(topology, components[self.component])
+            raise ValueError(
+                f"No atoms match selection: '{self.selection}' in component "
+                f"{self.component!r}. Its atom names are: {names}"
+            )
         return indices
+
+
+#: How many distinct atom names a "no atoms match" error lists at most.
+MAX_LISTED_ATOM_NAMES = 60
+
+
+def component_atom_names(topology: OpenMMTopology, indices: Iterable[int]) -> str:
+    """Return the distinct atom names of the atoms ``indices``, in order, as one string.
+
+    A small molecule's atoms are named by OpenFF in the built system (``C1x``,
+    ``C2x``, ``H1x``, ...), so the names a restraint can use are not the names
+    of the input file. At most :data:`MAX_LISTED_ATOM_NAMES` names are listed.
+    """
+    wanted = set(indices)
+    names: list[str] = []
+    for atom in topology.atoms():
+        if atom.index in wanted and atom.name not in names:
+            names.append(atom.name)
+    shown = ", ".join(names[:MAX_LISTED_ATOM_NAMES])
+    if len(names) > MAX_LISTED_ATOM_NAMES:
+        shown += f", ... ({len(names) - MAX_LISTED_ATOM_NAMES} more)"
+    return shown or "none"
 
 
 def _parse_selection(

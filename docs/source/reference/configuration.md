@@ -633,7 +633,7 @@ restraints:
       description: "Catalytic serine"    # Optional description
     atom2:
       component: "Resorufin-Butyrate"
-      selection: "name C1"
+      selection: "name C1x"
       description: "Substrate carbon"
     distance: 3.3                        # Angstroms
     force_constant: 10000.0              # kJ/mol/nm²
@@ -646,7 +646,9 @@ polymer residue 76. Each selection must give exactly one atom. The physics
 audit selects the atom again, with another library, and checks that the
 restraint in the built system joins the atoms the config names
 (`restraint.atom_identity`). See {doc}`../how_to/restraints` for detailed
-selection syntax.
+selection syntax. The atoms of a small molecule from an SDF without atom names
+are named `C1x`, `C2x`, ..., `H1x` in the built system (see
+{ref}`restraint-ligand-atom-names`).
 
 Only the OpenMM engine applies distance restraints. With `engine: gromacs`,
 `validate` refuses an enabled restraint, and `build --format gromacs`,

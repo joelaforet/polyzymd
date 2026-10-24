@@ -101,3 +101,27 @@ def test_a_missing_mdtraj_names_the_environment_and_extra(monkeypatch):
     monkeypatch.setitem(sys.modules, "mdtraj", None)
     with pytest.raises(ImportError, match=r"polyzymd\[analysis\]"):
         AtomSelection("index 6").resolve(_topology())
+
+
+def test_a_component_selection_that_matches_nothing_lists_the_component_atom_names():
+    """A ligand's atoms are C1x ... in the built system; the error says so."""
+    components = {"LIG": [12, 13, 14], "SER": list(range(12))}
+    with pytest.raises(ValueError) as error:
+        AtomSelection("name C9", component="LIG").resolve(_topology(), components)
+    assert str(error.value) == (
+        "No atoms match selection: 'name C9' in component 'LIG'. " "Its atom names are: C1, C4x, H1"
+    )
+    with pytest.raises(ValueError, match="Its atom names are: N, CA, OG, HG$"):
+        AtomSelection("name CB", component="SER").resolve(_topology(), components)
+
+
+def test_a_long_list_of_atom_names_is_cut_short():
+    from polyzymd.core.restraints import MAX_LISTED_ATOM_NAMES, component_atom_names
+
+    elements = app.element
+    topology = app.Topology()
+    residue = topology.addResidue("BIG", topology.addChain("A"))
+    for number in range(MAX_LISTED_ATOM_NAMES + 5):
+        topology.addAtom(f"C{number}x", elements.get_by_symbol("C"), residue)
+    listed = component_atom_names(topology, range(MAX_LISTED_ATOM_NAMES + 5))
+    assert listed.startswith("C0x, C1x") and listed.endswith(", ... (5 more)")

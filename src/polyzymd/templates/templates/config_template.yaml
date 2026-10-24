@@ -206,7 +206,7 @@ solvent:
 #       description: "Catalytic residue"
 #     atom2:
 #       component: "substrate"
-#       selection: "name C1"                    # Example: Ligand carbon
+#       selection: "name C1x"                   # Ligand atoms: C1x, C2x, ..., H1x
 #       description: "Substrate reactive atom"
 #     distance: 3.5                           # Angstroms (flat-bottom threshold)
 #     force_constant: 10000.0                 # kJ/mol/nm^2

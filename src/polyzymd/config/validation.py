@@ -172,6 +172,7 @@ def require_inputs(config: Any) -> None:
                 "fix: write the SDF again from your docking or drawing program."
             )
         _require_chargeable(molecule, substrate.charge_method, f"solute {substrate.name!r}")
+        _require_restraint_atom_names(config, substrate, molecule)
 
     from polyzymd.data.solvent_molecules import is_bundled_solvent, split_counter_ions
 
@@ -254,6 +255,100 @@ def require_inputs(config: Any) -> None:
             f"fix: in each charges: {{method: nagl, model: ...}}, name one of {installed}, "
             "or give the path of a model file."
         )
+
+
+def small_molecule_atom_names(molecule: Any) -> list[str]:
+    """Return the atom names a small molecule read from an SDF gets in the built system.
+
+    OpenFF keeps the atom names of a molecule only when every atom has one and
+    no two are alike. An SDF has no atom names unless it carries an
+    ``atom.prop._Name`` data field, so OpenFF names each atom when it writes
+    the topology: element symbol, count of that element so far in the file's
+    atom order, and an ``x`` suffix (``C1x``, ``C2x``, ``O1x``, ``H1x``; see
+    ``openff.toolkit.Molecule.generate_unique_atom_names``).
+
+    Parameters
+    ----------
+    molecule : rdkit.Chem.Mol
+        The molecule, with its hydrogens, in the SDF's atom order.
+    """
+    atoms = list(molecule.GetAtoms())
+    given = [atom.GetProp("_Name") if atom.HasProp("_Name") else "" for atom in atoms]
+    if len(set(given)) == len(given):
+        return given
+    counts: dict[str, int] = {}
+    names = []
+    for atom in atoms:
+        symbol = atom.GetSymbol()
+        counts[symbol] = counts.get(symbol, 0) + 1
+        names.append(f"{symbol}{counts[symbol]}x")
+    return names
+
+
+#: Words that end the list of values after ``name`` in a selection.
+_SELECTION_STOP_WORDS = frozenset({"and", "or", "not", "to"})
+
+
+def selection_atom_names(selection: str) -> list[str] | None:
+    """Return the atom names a selection asks for with ``name``, or None when it uses a pattern.
+
+    ``"resname LIG and name C1 C2"`` gives ``["C1", "C2"]``; a selection
+    without ``name`` gives ``[]``. A regular expression (``name =~ 'C.*'``)
+    gives None, because no list of names can be checked against it.
+    """
+    import re
+    import shlex
+
+    try:
+        words = shlex.split(re.sub(r"([()])", r" \1 ", selection))
+    except ValueError:
+        return None
+    names: list[str] = []
+    for position, word in enumerate(words):
+        if word != "name":
+            continue
+        for value in words[position + 1 :]:
+            if value == "=~":
+                return None
+            if value == "==":
+                continue
+            if value in ("(", ")") or value.lower() in _SELECTION_STOP_WORDS:
+                break
+            names.append(value)
+    return names
+
+
+def _require_restraint_atom_names(config: Any, solute: Any, molecule: Any) -> None:
+    """Raise ``ValueError`` when a restraint names atoms the small molecule will not have.
+
+    The built system names the atoms of a small molecule from an SDF without
+    atom names ``C1x``, ``C2x``, ... (:func:`small_molecule_atom_names`), so
+    ``name C1`` matches nothing and the build would fail only after solvation
+    and parameterisation. Only
+    selections whose every ``name`` value is missing are refused; a selection
+    without ``name`` is left to the build.
+    """
+    available = small_molecule_atom_names(molecule)
+    if not all(available):
+        return  # an unnamed single atom keeps its empty name; no name selects it
+    for index, restraint in enumerate(getattr(config, "restraints", None) or []):
+        if not restraint.enabled:
+            continue
+        for key in ("atom1", "atom2"):
+            atom = getattr(restraint, key)
+            if atom.component != solute.name:
+                continue
+            asked = selection_atom_names(atom.selection)
+            if not asked or any(name in available for name in asked):
+                continue
+            raise ValueError(
+                f"restraint {restraint.name!r}: {key} selection {atom.selection!r} names "
+                f"{', '.join(asked)}, which the small molecule {solute.name!r} will not have. "
+                f"In the built system its atoms, in the order of {Path(solute.sdf_path).name}, "
+                f"are named {', '.join(available)}.\n"
+                f"fix: in restraints.{index}.{key}.selection, use one of these names "
+                f"(for example name {available[0]})."
+            )
 
 
 def _require_shipped_molecule(cosolvent: Any) -> None:
