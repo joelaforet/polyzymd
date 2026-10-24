@@ -103,6 +103,20 @@ pixi shell -e sim-cuda-12-6
 
 After `pixi shell`, the `polyzymd` command is on PATH and works normally.
 
+`pixi run` and `pixi shell` look for `pixi.toml` in the current folder and
+its parent folders. In a project folder outside the clone, they stop with
+`could not find pixi.toml`. Give them the clone's `pixi.toml` with
+`--manifest-path`:
+
+```bash
+pixi run --manifest-path ~/polyzymd/pixi.toml -e build polyzymd validate -c config.yaml
+```
+
+Or start `pixi shell -e build` once in the clone and then `cd` to your
+project. The shell keeps its environment in every folder. To build in `build`
+and run in a `sim-cuda-*` environment on the same machine, open one shell for
+each environment, or use `--manifest-path`.
+
 PolyzyMD v1.3 intentionally splits environments by workflow. Use `build` to
 prepare systems, use `sim-cuda-*` only to run simulations on an NVIDIA GPU (a
 cluster node or this machine, after `polyzymd build` in `build`), and
