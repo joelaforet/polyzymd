@@ -287,7 +287,7 @@ If you use PolyzyMD in your research, please cite:
 ```bibtex
 @software{polyzymd,
   author = {Laforet Jr., Joseph R.},
-  title = {PolyzyMD: Polymer-Enzyme Interactions Studied with Molecular Dynamics},
+  title = {PolyzyMD: build, run and analyse molecular dynamics of complex biomolecular systems},
   year = {2026},
   url = {https://github.com/joelaforet/polyzymd}
 }

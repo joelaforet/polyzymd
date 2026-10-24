@@ -141,7 +141,7 @@ what, and did the built system pass the physics audit. It replaced
 | `components` | One record per component (each solute, `solvent`, `ions`): `name`, `type`, `segid`, `placement` (`fixed` or `packed`), `n_atoms`, `n_molecules`, the atom ranges of each molecule, and its `domains`. A domain is a set of atoms with one `force_field` list and one `charges` source (`method`, `model`, `source_file`), and the inputs it can be rebuilt from (`reference`). `provenance` holds each input file's path and SHA-256 |
 | `provenance` | Seeds and the box: see below |
 | `audit` | The physics audit: `passed`, `counts` per status, every `finding` (`check`, `component`, `status`, `detail`, and `examples` of the first terms that differ) and `accepted_exceptions` |
-| `cite` | References of what this build used: PolyzyMD at its version, the engine (OpenMM 8 or GROMACS), the OpenFF Toolkit (its paper and release DOI), OpenFF Interchange (its release DOI) and the Open Force Field Initiative paper, as OpenFF asks, each force-field file (the Sage 2.3.0 paper too for `openff-2.3.0*`, and the openff-forcefields release DOI for OpenFF files), the water model, the Na+ and Cl- parameters (Joung and Cheatham) when the build added ions with an OpenFF Sage or Parsley file, the charge models (AshGC or another NAGL model with the AM1-BCC papers, AM1-BCC, or EspalomaCharge), Packmol when the build packed solvent or polymer chains with it, and Machado and Pantano when `ionic_strength` set the ions. A force-field file PolyzyMD has no reference for is listed with a note to cite its source. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
+| `cite` | References of what this build used: PolyzyMD at its version, the engine (OpenMM 8 or GROMACS), the OpenFF Toolkit (its paper and release DOI), OpenFF Interchange (its release DOI) and the Open Force Field Initiative paper, as OpenFF asks, each force-field file (the Sage 2.3.0 paper too for `openff-2.3.0*`, and the openff-forcefields release DOI for OpenFF files), the water model, the Na+ and Cl- parameters (Joung and Cheatham) when the build added ions with an OpenFF Sage or Parsley file, the charge models (AshGC or another NAGL model with the AM1-BCC papers, AM1-BCC, or EspalomaCharge; AM1-BCC also for a library co-solvent's shipped charges), Packmol when the build packed solvent or polymer chains with it, and Machado and Pantano when `ionic_strength` set the ions. A force-field file PolyzyMD has no reference for is listed with a note to cite its source. A reference cited for two things, such as the Sage 2.3.0 and AshGC paper, is listed once. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
 
 `provenance` keys:
 
@@ -276,7 +276,9 @@ and production trajectories as indexed daisy-chain segments:
   IDs, so the loader takes them from `solvated_system.pdb` beside it, and
   `chainid A` selects the protein. For this it reads only the residue name and
   chain ID columns of the PDB's `ATOM` and `HETATM` lines, so it works at any
-  system size.
+  system size. A build with a distance restraint has no `system.prmtop`,
+  because ParmEd cannot convert the restraint. Its analyses read
+  `solvated_system.pdb`.
 - `solvated_system.pdb` is the viewer topology, for PyMOL or VMD with the DCD
   segments. Above 99,999 atoms OpenMM writes its serials in hex and MDAnalysis
   cannot read its CONECT records, and OpenMM writes CONECT records only for

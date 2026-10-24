@@ -207,11 +207,42 @@ def test_methods_to_cite_name_polyzymd_the_force_fields_water_and_charge_models(
     assert cited[8].startswith("openff-2.3.0.offxml (the openff-forcefields release)")
     assert FORCEFIELDS_ZENODO in cited[8]
     assert cited[9].startswith("TIP3P water") and "doi:10.1063/1.445869" in cited[9]
-    assert cited[10].startswith("AshGC (OpenFF NAGL model openff-gnn-am1bcc-1.0.0.pt)")
-    assert "doi:10.1021/acs.jctc.6c00169" in cited[10]
-    assert "doi:10.1002/(SICI)1096-987X(20000130)21:2<132::AID-JCC5>3.0.CO;2-P" in cited[11]
-    assert "doi:10.1002/jcc.10128" in cited[12]
-    assert "doi:10.1002/jcc.21224" in cited[13] and len(cited) == 14
+    # Sage 2.3.0 and AshGC share one paper; it is listed once, for both.
+    assert cited[7].startswith(
+        "openff-2.3.0.offxml (OpenFF Sage 2.3.0) and AshGC (OpenFF NAGL model "
+        "openff-gnn-am1bcc-1.0.0.pt)"
+    )
+    assert sum("doi:10.1021/acs.jctc.6c00169" in c for c in cited) == 1
+    assert "doi:10.1002/(SICI)1096-987X(20000130)21:2<132::AID-JCC5>3.0.CO;2-P" in cited[10]
+    assert "doi:10.1002/jcc.10128" in cited[11]
+    assert "doi:10.1002/jcc.21224" in cited[12] and len(cited) == 13
+
+
+def test_methods_to_cite_name_the_shipped_co_solvent_charges() -> None:
+    """A library co-solvent with preset charges cites AM1-BCC, which made them."""
+    from types import SimpleNamespace
+
+    from polyzymd.simulation.artifact_integrity import methods_to_cite
+
+    config = _build_config()
+    preset = SimpleNamespace(method="preset", model=None)
+    config.solvent.co_solvents = [SimpleNamespace(name="urea", charges=preset)]
+
+    cited = methods_to_cite(config)
+
+    line = next(c for c in cited if c.startswith("Charges of urea"))
+    assert "shipped with PolyzyMD, computed with AM1-BCC" in line
+    assert any("doi:10.1002/jcc.10128" in c for c in cited)
+    assert not any("AM1-BCC" in c for c in methods_to_cite(_build_config()))
+
+
+def test_merge_repeated_references_keeps_the_first_and_names_both_uses() -> None:
+    from polyzymd.simulation.build_citations import SAGE_2_3, TIP3P, merge_repeated_references
+
+    merged = merge_repeated_references(
+        [f"a: {SAGE_2_3}", TIP3P, f"b: {SAGE_2_3}", TIP3P, "no reference"]
+    )
+    assert merged == [f"a and b: {SAGE_2_3}", TIP3P, "no reference"]
 
 
 #: The references https://openforcefield.org/science/how-to-cite/ lists for OpenFF.

@@ -234,16 +234,17 @@ def methods_to_cite(
     with it (its seeds in ``provenance`` say so), and Machado and Pantano when
     ``ionic_strength`` set the ions. ``record`` is the build record without
     ``cite``. Each part comes from one function in
-    :data:`polyzymd.simulation.build_citations.CITATION_SOURCES`.
+    :data:`polyzymd.simulation.build_citations.CITATION_SOURCES`. A reference
+    two parts share (Sage 2.3.0 and AshGC have one paper) is listed once.
     """
-    from polyzymd.simulation.build_citations import CITATION_SOURCES
+    from polyzymd.simulation.build_citations import CITATION_SOURCES, merge_repeated_references
 
     context = dict(record or {})
     context["provenance"] = dict(provenance or context.get("provenance") or {})
     cited: list[str] = []
     for source in CITATION_SOURCES:
         cited.extend(source(config, context))
-    return cited
+    return merge_repeated_references(cited)
 
 
 def _audit(realize: Any, components: Sequence[Any] | None, config: Any) -> Any:

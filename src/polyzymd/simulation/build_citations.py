@@ -221,7 +221,21 @@ def cite_charge_models(config: Any, record: dict[str, Any]) -> list[str]:
                 f"({NAGL_REPOSITORY}); it has no journal article, so cite the model release and "
                 "AM1-BCC."
             )
-    if "nagl" in methods or "am1bcc" in methods:
+    shipped = sorted(
+        {
+            str(cosolvent.name)
+            for cosolvent in _co_solvents(config)
+            if getattr(getattr(cosolvent, "charges", None), "method", None) == "preset"
+        }
+    )
+    if shipped:
+        # scripts/generate_solvent_sdfs.py made the shipped charges with the
+        # OpenFF Toolkit's AM1-BCC (docs: reference/configuration.md).
+        cited.append(
+            f"Charges of {', '.join(shipped)}: shipped with PolyzyMD, computed with AM1-BCC "
+            "(cited below)."
+        )
+    if shipped or "nagl" in methods or "am1bcc" in methods:
         cited.extend(AM1BCC)
     if "espaloma" in methods:
         cited.append(ESPALOMA_CHARGE)
@@ -265,6 +279,41 @@ def cite_ion_rule(config: Any, record: dict[str, Any]) -> list[str]:
 
     ions = getattr(getattr(config, "solvent", None), "ions", None)
     return [MACHADO_PANTANO] if getattr(ions, "ionic_strength", None) is not None else []
+
+
+def _references() -> list[str]:
+    """Every full reference this module defines, longest first."""
+    found: list[str] = []
+    for value in globals().values():
+        items = value if isinstance(value, tuple) else (value,)
+        found += [item for item in items if isinstance(item, str) and " doi:" in item]
+    return sorted(set(found), key=len, reverse=True)
+
+
+def merge_repeated_references(cited: list[str]) -> list[str]:
+    """Drop repeated references, keeping the first line that cites each one.
+
+    A line is either a reference or ``"<what>: <reference>"``. When a later
+    line cites the same reference for something else, its ``<what>`` joins the
+    first line, so the reference is printed once and still says what it is for.
+    """
+    references = _references()
+    merged: list[str] = []
+    first: dict[str, int] = {}
+    for line in cited:
+        reference = next(
+            (ref for ref in references if line == ref or line.endswith(": " + ref)), line
+        )
+        if reference not in first:
+            first[reference] = len(merged)
+            merged.append(line)
+            continue
+        what = line[: -len(reference) - 2] if line != reference else ""
+        if what:
+            index = first[reference]
+            head = merged[index][: -len(reference) - 2] if merged[index] != reference else ""
+            merged[index] = f"{head} and {what}: {reference}" if head else line
+    return merged
 
 
 #: The parts of a build that have references, in the order the record lists them.
