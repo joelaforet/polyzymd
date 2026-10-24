@@ -176,6 +176,8 @@ VERDICT_DEAD = "dead"
 VERDICT_INTERRUPTED = "interrupted"
 #: Action of an interrupted local run.
 ACTION_CONTINUE = "continue"
+#: Production finished the length it started with, but the config now asks for more.
+VERDICT_EXTENDABLE = "extendable"
 VERDICT_STOPPED = "stopped"
 VERDICT_NOT_STARTED = "not_started"
 VERDICT_NOT_FOUND = "not_found"
@@ -191,6 +193,7 @@ VERDICT_ORDER = (
     VERDICT_QUEUED,
     VERDICT_DEAD,
     VERDICT_INTERRUPTED,
+    VERDICT_EXTENDABLE,
     VERDICT_STOPPED,
     VERDICT_NOT_STARTED,
     VERDICT_NOT_FOUND,
@@ -741,6 +744,13 @@ def build_system_report(
             if replicate_lock_held_elsewhere(rep_path):
                 verdict = VERDICT_RUNNING
                 local_run = True
+        if (
+            verdict == VERDICT_COMPLETED
+            and progress.total_steps_requested
+            and progress.total_steps_completed < progress.total_steps_requested
+        ):
+            # The config was raised after production finished: run it longer.
+            verdict = VERDICT_EXTENDABLE
         live = verdict == VERDICT_RUNNING
         rate = None
         eta = None
@@ -789,6 +799,12 @@ def build_system_report(
             verdict = VERDICT_INTERRUPTED
             action = ACTION_CONTINUE
             note = NOTE_STOPPED_OUTSIDE_SLURM
+        if verdict == VERDICT_EXTENDABLE:
+            action = ACTION_CONTINUE
+            note = (
+                f"the config now asks for {total_ns:g} ns; continue from "
+                f"{completed_ns:g} ns with polyzymd run, or polyzymd submit on a cluster"
+            )
         if last_err is None and verdict in (VERDICT_DEAD, VERDICT_NOT_STARTED):
             # A local `polyzymd run` that failed wrote its error beside the run.
             last_err = _local_run_error(rep_path)
@@ -888,7 +904,7 @@ def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
             fields.append("this PolyzyMD job will stop without running; cancel it with scancel")
     elif rep.verdict == VERDICT_COMPLETED:
         pass
-    elif rep.verdict == VERDICT_INTERRUPTED:
+    elif rep.verdict in (VERDICT_INTERRUPTED, VERDICT_EXTENDABLE):
         fields.append(rep.note or "")
         fields.append(f"action: {rep.action or ACTION_CONTINUE}")
     elif rep.verdict in (VERDICT_RUNNING, VERDICT_QUEUED):

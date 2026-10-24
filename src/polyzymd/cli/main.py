@@ -1031,8 +1031,8 @@ def _print_run_dry_run_report(
     colored_echo(phase=phase)
     if unbuildable:
         colored_echo(
-            f"Dry run complete. No files were written. Replicates {unbuildable} need a build "
-            "that this environment cannot make; the run would stop.",
+            f"Dry run complete. No files were written. The run would stop at replicates "
+            f"{unbuildable} (see above).",
             phase=phase,
             level=logging.ERROR,
         )
@@ -1045,31 +1045,51 @@ def _print_run_dry_run_report(
 def _openmm_run_plan(sim_config: "SimulationConfig", replicate: int, config_path: str) -> tuple:
     """Return what ``polyzymd run`` would do for one replicate, and whether it can.
 
-    Reads ``progress.json`` and checks the build as the run does, without
-    writing anything.
+    Reads ``progress.json`` with the config's production length, and checks
+    the build and the frame spacing as the run does, without writing anything.
     """
     from polyzymd.simulation.artifact_integrity import (
         ArtifactIntegrityError,
         run_started,
         validate_build_bundle,
     )
-    from polyzymd.simulation.progress import load_progress
+    from polyzymd.simulation.progress import load_or_scan_progress
 
     working_dir = sim_config.get_working_directory(replicate)
-    progress = load_progress(working_dir) if working_dir.is_dir() else None
-    if progress is not None and progress.segments:
-        if progress.is_complete:
-            return "already complete; nothing to run", True
-        return (
-            "continue production from its saved state "
-            f"({progress.total_steps_completed}/{progress.total_steps_requested} steps)",
-            True,
+    production = sim_config.simulation_phases.production
+    total_steps = int(production.duration * 1e6 / production.time_step)
+    progress = None
+    if working_dir.is_dir() and (working_dir / "progress.json").is_file():
+        progress = load_or_scan_progress(
+            working_dir=working_dir,
+            total_steps=total_steps,
+            total_samples=production.samples,
+            timestep_fs=production.time_step,
+            replicate=replicate,
         )
     try:
         validate_build_bundle(working_dir, sim_config, config_path=config_path, replicate=replicate)
-        return "reuse the audited build -> minimize -> equilibrate -> production", True
+        build_ok = True
     except ArtifactIntegrityError:
-        pass
+        build_ok = False
+    if progress is not None and progress.segments:
+        if progress.is_complete:
+            return "already complete; nothing to run", True
+        if not build_ok and not _build_matches_recorded_length(
+            working_dir, sim_config, config_path, replicate
+        ):
+            return "refused: the build no longer matches the config", False
+        try:
+            _refuse_frame_spacing_change(progress, working_dir, replicate, total_steps, production)
+        except ArtifactIntegrityError as exc:
+            return f"refused: {' '.join(str(exc).split())}", False
+        return (
+            "continue production from its saved state, from step "
+            f"{progress.total_steps_completed} to {progress.total_steps_requested}",
+            True,
+        )
+    if build_ok:
+        return "reuse the audited build -> minimize -> equilibrate -> production", True
     if run_started(working_dir):
         return "refused: the run has started but its build no longer matches the config", False
     missing = _missing_build_modules()
@@ -1678,7 +1698,8 @@ def _run_openmm_impl(
             timestep_fs=production.time_step,
             replicate=replicate,
         )
-        save_progress(working_dir, progress)
+        # Nothing is written until the run is sure to go ahead: a refusal
+        # leaves progress.json as it was.
 
         # A replicate whose production has started continues from its own
         # saved state, as the SLURM chain does; it is never started again.
@@ -1693,13 +1714,16 @@ def _run_openmm_impl(
                 return
             if not_reused is not None and not length_changed_only:
                 raise ArtifactIntegrityError(
-                    f"Not continuing replicate {replicate}: its build in {_shown(working_dir)} does not "
-                    f"match this config: {not_reused}\n"
-                    "Production has started, so it continues only with the config and build "
-                    "it started with. Restore the config (and any changed build file), or "
-                    "build and run the changed config in a new output directory "
-                    "(--scratch-dir)."
+                    f"Cannot continue replicate {replicate}: its build in {_shown(working_dir)} "
+                    f"does not match this config: {not_reused}\n"
+                    "Production has started, so it continues only with the config it started "
+                    "with, apart from production.duration and samples. The build record keeps "
+                    "only a hash of the config, so PolyzyMD cannot say which setting changed. "
+                    "Restore the config (and any changed build file). To simulate the changed "
+                    "settings, make them a new condition (polyzymd study add-condition NAME "
+                    "--from <this condition>) and build it."
                 )
+            _refuse_frame_spacing_change(progress, working_dir, replicate, total_steps, production)
             if length_changed_only:
                 colored_echo(
                     "The config changes only the production length; continuing to "
@@ -1711,6 +1735,7 @@ def _run_openmm_impl(
             colored_echo(f"Output directory: {_shown(working_dir)}", phase="simulation")
             return
 
+        save_progress(working_dir, progress)
         reuse_build = not_reused is None
         if not reuse_build and (working_dir / "system.xml").exists():
             # Say why the existing build is not used; never rebuild a started run.
@@ -1827,6 +1852,36 @@ def _require_build_environment(
         f"  pixi run{manifest} -e build polyzymd build -c {config_shown} -r {replicate}\n"
         f"  polyzymd run -c {config_shown} -r {replicate}"
     )
+
+
+def _refuse_frame_spacing_change(
+    progress: "SimulationProgress",
+    working_dir: Path,
+    replicate: int,
+    total_steps: int,
+    production: object,
+) -> None:
+    """Refuse, before anything is written, a continuation that would change the frame spacing."""
+    from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+    from polyzymd.simulation.progress import (
+        ReportIntervalChangeError,
+        check_report_interval_unchanged,
+        get_next_segment_info,
+    )
+
+    following = get_next_segment_info(progress, total_steps, production.samples)
+    if following is None:
+        return
+    try:
+        check_report_interval_unchanged(
+            progress,
+            working_dir,
+            following["segment_index"],
+            following["report_interval"],
+            command="run",
+        )
+    except ReportIntervalChangeError as exc:
+        raise ArtifactIntegrityError(f"Cannot continue replicate {replicate}: {exc}") from exc
 
 
 def _resume_production_locked(
@@ -3343,10 +3398,10 @@ def check_progress(
         sys.exit(0)
     else:
         remaining_ns = (progress.steps_remaining * timestep_fs) / 1e6
-        colored_echo(
-            f"Status: {progress.status.value} — {remaining_ns:.3f} ns remaining",
-            phase="progress",
-        )
+        # A chain that finished its old length reads "completed" until it runs
+        # again; the config now asks for more, so work remains.
+        state = "work remains" if progress.status.value == "completed" else progress.status.value
+        colored_echo(f"Status: {state} — {remaining_ns:.3f} ns remaining", phase="progress")
         sys.exit(1)
 
 
@@ -3916,6 +3971,11 @@ def _status_table(config: str) -> None:
                 status_display = "interrupted before production"
             elif status_str == "interrupted" and _stopped_gracefully(engine_dir, progress):
                 status_display = "interrupted (state saved)"
+                saved_reps.append(rep_num)
+            elif status_str == "completed" and frac < 1.0:
+                # The config was raised after production finished.
+                status_str = "interrupted"
+                status_display = "finished its old length; the config asks for more"
                 saved_reps.append(rep_num)
 
         bar = render_progress_bar(frac, status_str)

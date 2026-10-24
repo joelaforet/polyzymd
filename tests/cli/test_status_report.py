@@ -946,3 +946,25 @@ def test_a_system_without_replicate_folders_is_not_started():
     text = render_agent([SystemReport("SYS", "c.yaml", "/s", [])], now=NOW)
     assert "## SYS  (c.yaml)  not started: no replicate folders" in text
     assert "0/0 completed" not in text
+
+
+def test_a_finished_replicate_whose_config_asks_for_more_is_extendable(tmp_path: Path):
+    from polyzymd.cli.status_report import build_system_report
+
+    scratch = tmp_path / "scratch"
+    rep_dir = scratch / "SYS_run1"
+    progress = _write_progress(
+        rep_dir, 250_000_000, SimulationStatus.COMPLETED, SegmentStatus.COMPLETED
+    )
+    cfg = _mock_cfg(scratch, tmp_path / "slurm_logs")
+    cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+    engine = MagicMock()
+    engine.resolve_engine_working_directory.side_effect = lambda p: p
+    engine.load_or_scan_progress.return_value = progress
+    report = build_system_report(
+        cfg, "c.yaml", engine_inst=engine, jobs=[], now=NOW, job_name_fn=lambda c, r: "x"
+    )
+    (rep,) = report.replicates
+    assert (rep.verdict, rep.action) == ("extendable", "continue")
+    assert "the config now asks for 1000 ns" in rep.note
+    assert "EXTENDABLE" in render_agent([report], now=NOW)

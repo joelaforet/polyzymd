@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 import logging
 import math
+import os
 import re
 import shlex
 import warnings
@@ -1718,8 +1719,14 @@ class OutputConfig(_ConfigModel):
 
     @property
     def effective_scratch_directory(self) -> Path:
-        """Get the effective scratch directory (falls back to projects if not set)."""
-        return self.scratch_directory if self.scratch_directory else self.projects_directory
+        """Get the effective scratch directory (falls back to projects if not set).
+
+        ``..`` parts are collapsed (``conditions/water/../../../runs`` becomes
+        ``runs``), so printed and recorded paths are readable; the config
+        keeps the value as written.
+        """
+        directory = self.scratch_directory if self.scratch_directory else self.projects_directory
+        return Path(os.path.normpath(directory)) if directory else directory
 
     def format_directory_name(
         self,
@@ -1791,7 +1798,7 @@ class OutputConfig(_ConfigModel):
         Returns:
             Path to job scripts directory (within projects)
         """
-        return self.projects_directory / self.job_scripts_subdir
+        return Path(os.path.normpath(self.projects_directory / self.job_scripts_subdir))
 
     def get_slurm_logs_directory(self) -> Path:
         """Get the directory for SLURM log files.
@@ -1799,7 +1806,7 @@ class OutputConfig(_ConfigModel):
         Returns:
             Path to SLURM logs directory (within projects)
         """
-        return self.projects_directory / self.slurm_logs_subdir
+        return Path(os.path.normpath(self.projects_directory / self.slurm_logs_subdir))
 
 
 # =============================================================================

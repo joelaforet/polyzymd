@@ -1279,6 +1279,7 @@ def check_report_interval_unchanged(
     report_interval: int,
     *,
     allow_change: bool = False,
+    command: str = "run-segment",
 ) -> None:
     """Refuse to resume a chain at a different trajectory frame interval.
 
@@ -1319,8 +1320,12 @@ def check_report_interval_unchanged(
         f"Changing production duration or samples part-way through a chain changes "
         f"the frame spacing, and the segments can then no longer be joined into one "
         f"evenly spaced trajectory.{keep} Otherwise restore the configuration that "
-        f"started the chain, or pass --allow-report-interval-change to run-segment to "
-        f"accept the change."
+        f"started the chain"
+        + (
+            ", or pass --allow-report-interval-change to run-segment to accept the change."
+            if command == "run-segment"
+            else "."
+        )
     )
     if not allow_change:
         raise ReportIntervalChangeError(message)

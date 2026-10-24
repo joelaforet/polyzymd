@@ -2812,10 +2812,10 @@ class TestRunContinuesStartedProduction:
         )
         (tmp_path / "run_1" / "production_0").mkdir(parents=True)
 
-        with pytest.raises(ArtifactIntegrityError, match="Not continuing replicate 1") as raised:
+        with pytest.raises(ArtifactIntegrityError, match="Cannot continue replicate 1") as raised:
             _run_openmm_impl(self._config(tmp_path), replicate=1)
         assert "Configuration does not match" in str(raised.value)
-        assert "--scratch-dir" in str(raised.value)
+        assert "study add-condition" in str(raised.value)
         run_segment.assert_not_called()
 
     @patch("polyzymd.cli.main._run_segment_locked")
@@ -3266,9 +3266,9 @@ class TestRunDryRunPlan:
         save_progress(
             tmp_path / "run_1",
             SimulationProgress(
-                total_steps_requested=10,
+                total_steps_requested=2000,
                 segments=[
-                    SegmentRecord(index=0, status=SegmentStatus.COMPLETED, steps_completed=10)
+                    SegmentRecord(index=0, status=SegmentStatus.COMPLETED, steps_completed=2000)
                 ],
             ),
         )
@@ -3276,3 +3276,94 @@ class TestRunDryRunPlan:
         result = CliRunner().invoke(cli, ["run", "-c", str(config), "-r", "1", "--dry-run"])
         assert result.exit_code == 0, result.output
         assert "already complete; nothing to run" in result.output
+
+    def test_a_raised_production_length_is_previewed_as_a_continuation(self, tmp_path, monkeypatch):
+        """After duration is raised, the preview says from which step to which."""
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            save_progress,
+        )
+
+        monkeypatch.setattr(
+            "polyzymd.config.schema.SimulationConfig.get_working_directory",
+            lambda self, replicate=1: tmp_path / f"run_{replicate}",
+        )
+        monkeypatch.setattr(
+            "polyzymd.simulation.artifact_integrity.validate_build_bundle", lambda *a, **k: None
+        )
+        save_progress(
+            tmp_path / "run_1",
+            SimulationProgress(
+                total_steps_requested=1000,
+                segments=[
+                    SegmentRecord(
+                        index=0,
+                        status=SegmentStatus.COMPLETED,
+                        steps_completed=1000,
+                        report_interval=500,
+                    )
+                ],
+            ),
+        )
+        (tmp_path / "run_1" / "production_0").mkdir()
+        (tmp_path / "run_1" / "production_0" / "production_0_state.xml").write_text("<State/>")
+        config = Path(__file__).parents[2] / "examples/quickstart/config.yaml"
+        result = CliRunner().invoke(cli, ["run", "-c", str(config), "-r", "1", "--dry-run"])
+        assert result.exit_code == 0, result.output
+        assert "continue production from its saved state, from step 1000 to 2000" in result.output
+
+
+class TestRefusedRunWritesNothing:
+    """A refused `polyzymd run` leaves progress.json as it was."""
+
+    @patch("polyzymd.simulation.artifact_integrity.validate_build_bundle")
+    @patch("polyzymd.cli.main._run_segment_locked")
+    def test_a_frame_spacing_change_is_refused_before_any_write(
+        self, run_segment, _validate, tmp_path: Path
+    ) -> None:
+        from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            save_progress,
+        )
+
+        run_dir = tmp_path / "run_1"
+        save_progress(
+            run_dir,
+            SimulationProgress(
+                total_steps_requested=2000,
+                total_samples_requested=4,
+                timestep_fs=2.0,
+                segments=[
+                    SegmentRecord(
+                        index=0,
+                        status=SegmentStatus.COMPLETED,
+                        steps_completed=2000,
+                        report_interval=500,
+                    )
+                ],
+            ),
+        )
+        (run_dir / "production_0").mkdir()
+        (run_dir / "production_0" / "production_0_state.xml").write_text("<State/>")
+        before = (run_dir / "progress.json").read_text()
+        production = SimpleNamespace(
+            duration=0.008, samples=4, time_step=2.0, checkpoint_interval=60.0
+        )
+        config = SimpleNamespace(
+            simulation_phases=SimpleNamespace(production=production),
+            require_engine_barostats=lambda engine: None,
+            get_working_directory=lambda replicate: tmp_path / f"run_{replicate}",
+        )
+
+        with pytest.raises(ArtifactIntegrityError, match="Cannot continue replicate 1") as raised:
+            _run_openmm_impl(config, replicate=1)
+
+        assert "samples: 8" in str(raised.value)
+        assert "run-segment" not in str(raised.value)
+        assert (run_dir / "progress.json").read_text() == before
+        run_segment.assert_not_called()

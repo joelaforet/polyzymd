@@ -705,6 +705,7 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | `RUNNING` | A SLURM job that works in this replicate's run directory is in state `R` (or completing/configuring), or, with the note `local run`, a `polyzymd run` on this machine holds the replicate lock |
 | `QUEUED` | A matching job exists but is pending; the reason is shown in parentheses |
 | `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log whose `Work dir:` line names this run directory, with the log filename in brackets. |
+| `EXTENDABLE` | Production finished the length it started with, but the config now asks for more (see {doc}`../how_to/run_longer`). `action: continue`; the note gives the new length. |
 | `INTERRUPTED` | A run stopped by a signal outside SLURM after it saved its state (note `stopped by a signal outside SLURM, state saved`, `action: continue`). The footer gives the `polyzymd run` command that continues it on the machine that ran it. |
 | `STOPPED` | `polyzymd cancel` left a `STOP` file and no job is queued or running. The footer gives `polyzymd cancel --resume` and `polyzymd submit` to restart the chain. |
 | `NOT_STARTED` | Directory exists but no minimization, equilibration or production output was written (typically a failed build; the build log is consulted). A replicate whose job died during minimization or equilibration is `DEAD`. |
