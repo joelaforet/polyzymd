@@ -186,7 +186,7 @@ The build command creates:
   bond; MDAnalysis reads it directly and it has no atom limit
 - `system.xml` - OpenMM serialized system with restraints
 - `build_provenance.json` - the build record: SHA-256 hashes of the files
-  above, the config hash, OpenMM and PolyzyMD versions, the PACKMOL seeds
+  above, the build config hash, OpenMM and PolyzyMD versions, the PACKMOL seeds
   under `provenance`, a record of each component, and the physics audit with
   any accepted `modeling_exceptions`
 - `build_provenance.md` - the same record, for people to read

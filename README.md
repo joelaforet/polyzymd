@@ -24,13 +24,31 @@
 
 ## Overview
 
-PolyzyMD provides a streamlined workflow for setting up and running MD simulations of enzymes with co-polymer chains. It handles:
+PolyzyMD builds, runs and analyzes molecular dynamics of a protein alone or
+with a ligand, co-polymer chains and co-solvents. You describe each condition
+in one `config.yaml`.
 
-- **System Building**: Combine enzyme structures, docked substrates, and random co-polymers
-- **Solvation**: Add water, ions, and optional co-solvents with PACKMOL
-- **Simulation**: Run equilibration and production with OpenMM
-- **HPC Integration**: Self-resubmitting job submission for SLURM clusters
-- **Configuration**: YAML-based configuration with validation
+- **System building**: places the protein, a docked or crystal ligand and
+  random co-polymer chains, and packs water, ions and co-solvents with
+  PACKMOL. Each solute and the solvent name their own force-field files and
+  charge source.
+- **Physics audit and build record**: every build rebuilds each component
+  alone with OpenFF and compares it term by term with the built system, and
+  checks the system against the config (counts, ions, cutoffs, clashes,
+  restraints, GROMACS `.mdp` files). The result goes into
+  `build_provenance.json` and `build_provenance.md`, with the versions, seeds,
+  file hashes and the methods to cite. `run` and `submit` start a replicate
+  only from a build whose audit passed and whose config and files are
+  unchanged. See
+  [the physics audit](https://polyzymd.readthedocs.io/en/latest/explanation/physics_audit.html).
+- **Simulation**: equilibration and production with OpenMM or GROMACS, on
+  this machine or as self-resubmitting SLURM jobs.
+- **Projects and studies**: a project holds the studies of one paper; a study
+  holds conditions that share one analysis frame and one control. `study
+  freeze` and `project freeze` prepare a deposit with hashes and citation
+  files.
+- **Analysis**: `polyzymd analyze` compares conditions across replicates and
+  stores each result with the hashes of its inputs.
 
 ## Analysis Status
 
@@ -168,17 +186,25 @@ See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/get_starte
 
 ## CLI Commands
 
+`polyzymd --help` lists every command, and `polyzymd COMMAND --help` its
+options.
+
 | Command | Description |
 |---------|-------------|
 | `polyzymd project init my_paper --study my_protein` | Make a project folder with one study |
+| `polyzymd project add-study`, `check`, `freeze` | Add a study, check a project, freeze it for a deposit |
 | `polyzymd study add-condition LABEL --new` | Add a condition with a template config |
-| `polyzymd validate -c config.yaml` | Validate configuration file |
-| `polyzymd build -c config.yaml` | Build simulation system |
-| `polyzymd run -c config.yaml --engine gromacs` | Build and run GROMACS simulation |
-| `polyzymd submit -c config.yaml` | Submit self-resubmitting jobs to SLURM |
-| `polyzymd run-segment -c config.yaml` | Run a single production segment |
-| `polyzymd check-progress -c config.yaml` | Check simulation completion status |
-| `polyzymd recover -c config.yaml` | Resume a stalled simulation |
+| `polyzymd study init`, `check`, `locate`, `freeze` | Make, check, locate the runs of, and freeze a study |
+| `polyzymd validate -c config.yaml` | Check a config and its input files |
+| `polyzymd build -c config.yaml -r 1` | Build and audit a replicate; writes `build_provenance.md` |
+| `polyzymd run -c config.yaml -r 1` | Build if needed and run on this machine (OpenMM or GROMACS) |
+| `polyzymd submit -c config.yaml --replicates 1-5` | Submit self-resubmitting SLURM jobs |
+| `polyzymd status -c config.yaml` | Show progress and job state of each replicate |
+| `polyzymd recover -c config.yaml` | Resume a stalled or interrupted simulation |
+| `polyzymd cancel -c config.yaml` | Stop self-resubmitting job chains |
+| `polyzymd analyze NAME -c config.yaml` | Run one analysis and print a validated result |
+| `polyzymd clean-pdb -i protein.pdb` | Replace nonstandard residues and add hydrogens |
+| `polyzymd analysis-topology`, `hash-trajectories` | Add `system.prmtop` or trajectory hashes to existing runs |
 | `polyzymd info` | Show installation information |
 
 ## Pixi Environments
