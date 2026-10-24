@@ -290,11 +290,12 @@ _SELECTION_STOP_WORDS = frozenset({"and", "or", "not", "to"})
 
 
 def selection_atom_names(selection: str) -> list[str] | None:
-    """Return the atom names a selection asks for with ``name``, or None when it uses a pattern.
+    """Return the atom names a selection asks for with ``name``, or None when they cannot be listed.
 
     ``"resname LIG and name C1 C2"`` gives ``["C1", "C2"]``; a selection
     without ``name`` gives ``[]``. A regular expression (``name =~ 'C.*'``)
-    gives None, because no list of names can be checked against it.
+    or a ``not`` gives None: a missing name then need not mean that the
+    selection matches nothing.
     """
     import re
     import shlex
@@ -302,6 +303,8 @@ def selection_atom_names(selection: str) -> list[str] | None:
     try:
         words = shlex.split(re.sub(r"([()])", r" \1 ", selection))
     except ValueError:
+        return None
+    if any(word.lower() == "not" for word in words):
         return None
     names: list[str] = []
     for position, word in enumerate(words):
@@ -324,9 +327,8 @@ def _require_restraint_atom_names(config: Any, solute: Any, molecule: Any) -> No
     The built system names the atoms of a small molecule from an SDF without
     atom names ``C1x``, ``C2x``, ... (:func:`small_molecule_atom_names`), so
     ``name C1`` matches nothing and the build would fail only after solvation
-    and parameterisation. Only
-    selections whose every ``name`` value is missing are refused; a selection
-    without ``name`` is left to the build.
+    and parameterisation. Only selections whose every ``name`` value is
+    missing are refused; any other selection is left to the build.
     """
     available = small_molecule_atom_names(molecule)
     if not all(available):

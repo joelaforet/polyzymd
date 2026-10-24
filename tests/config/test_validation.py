@@ -345,7 +345,8 @@ def test_small_molecule_atom_names_follow_openff() -> None:
     [
         ("name C1", ["C1"]),
         ("resname LIG and name C1x", ["C1x"]),
-        ("(name C1 or name C2) and not element H", ["C1", "C2"]),
+        ("(name C1 or name C2) and element C", ["C1", "C2"]),
+        ("resname LIG and not name H1", None),
         ("name C1 C2", ["C1", "C2"]),
         ("name == 'C1'", ["C1"]),
         ("resid 1", []),

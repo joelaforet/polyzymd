@@ -179,10 +179,7 @@ def component_atom_names(topology: OpenMMTopology, indices: Iterable[int]) -> st
     of the input file. At most :data:`MAX_LISTED_ATOM_NAMES` names are listed.
     """
     wanted = set(indices)
-    names: list[str] = []
-    for atom in topology.atoms():
-        if atom.index in wanted and atom.name not in names:
-            names.append(atom.name)
+    names = list(dict.fromkeys(atom.name for atom in topology.atoms() if atom.index in wanted))
     shown = ", ".join(names[:MAX_LISTED_ATOM_NAMES])
     if len(names) > MAX_LISTED_ATOM_NAMES:
         shown += f", ... ({len(names) - MAX_LISTED_ATOM_NAMES} more)"
