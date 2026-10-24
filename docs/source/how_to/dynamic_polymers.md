@@ -140,7 +140,8 @@ For every other key of the config, see {doc}`../reference/configuration`.
 For each chain, the build does these steps:
 
 1. It draws a sequence from the monomer probabilities. The replicate number
-   seeds the draw, unless you set `random_seed`.
+   seeds the draw, unless you set `random_seed`. The sequence is read from
+   head to tail, so `AAB` and `BAA` are different chains.
 2. It joins the repeat units of the sequence and the two caps: each bond
    between two units replaces the `*` of both. The bond orders and formal
    charges are those of your SMILES.

@@ -688,6 +688,13 @@ class PolymerSolute(_Solute):
                         f"end_groups.{end}: {smiles!r} has {stars} '*' sites; a cap needs "
                         "exactly 1, on the atom that bonds to the chain ([*][H], [*]C)."
                     )
+            for key in ("label", "name"):
+                values = [getattr(m, key) for m in self.monomers if getattr(m, key)]
+                repeated = sorted({v for v in values if values.count(v) > 1})
+                if repeated:
+                    raise ValueError(
+                        f"monomers share {key} {repeated}; give each monomer its own {key}."
+                    )
             residue_names = [m.residue_name for m in self.monomers]
             repeated = sorted({r for r in residue_names if r and residue_names.count(r) > 1})
             if repeated:

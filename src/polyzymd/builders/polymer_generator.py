@@ -513,7 +513,7 @@ def relax_in_vacuum(molecule: "OFFMolecule", force_field: Sequence[str]) -> None
     )
     system = interchange.to_openmm_system()
     integrator = openmm.VerletIntegrator(0.001)
-    platform = openmm.Platform.getPlatformByName("Reference")
+    platform = openmm.Platform.getPlatformByName("CPU")
     context = openmm.Context(system, integrator, platform)
     context.setPositions(molecule.conformers[0].m_as(unit.nanometer))
     openmm.LocalEnergyMinimizer.minimize(context, 10.0, 2000)

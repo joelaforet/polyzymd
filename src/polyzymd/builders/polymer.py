@@ -275,8 +275,14 @@ class PolymerBuilder:
             for _ in range(count)
         ]
 
-        # Convert to canonical form
-        canonical_sequences = [canonical_sequence(seq) for seq in raw_sequences]
+        # A chain built from star-sited SMILES has a direction: its first repeat
+        # unit carries the head cap, so "AAB" and "BAA" are different molecules
+        # and dynamic mode keeps the drawn sequence. Cached SDF libraries are
+        # named by the canonical form of each sequence.
+        if self._generation_mode == "dynamic":
+            canonical_sequences = list(raw_sequences)
+        else:
+            canonical_sequences = [canonical_sequence(seq) for seq in raw_sequences]
         self._generated_sequences = canonical_sequences
 
         # Count unique sequences
@@ -431,7 +437,16 @@ class PolymerBuilder:
         """
         # Format: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
         filename = f"{self._type_prefix}_seq={sequence}_{self._length}-mer_charged.sdf"
-        return directory / filename
+        path = directory / filename
+        if self._generation_mode != "dynamic" and not path.exists():
+            # A chain dynamic mode built is named in its drawn direction.
+            reverse = sequence[::-1]
+            reversed_path = directory / (
+                f"{self._type_prefix}_seq={reverse}_{self._length}-mer_charged.sdf"
+            )
+            if reversed_path.exists():
+                return reversed_path
+        return path
 
     def _is_dynamic_cache_like_sdf(self, sdf_path: Path, sequence: str) -> bool:
         """Return whether an SDF path looks like a generated dynamic cache artifact.

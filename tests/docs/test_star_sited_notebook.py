@@ -50,3 +50,14 @@ def test_notebook_runs_top_to_bottom(capsys: pytest.CaptureFixture[str]) -> None
     assert namespace["repeat_unit"] == "*CC(*)(C)C(=O)OC"
     assert 'smiles: "*CC(*)(C)C(=O)OC"' in printed
     assert "47 atoms, total charge" in printed
+
+
+def test_the_star_helper_keeps_aromatic_hydrogens_on_other_atoms() -> None:
+    """Placing stars on a vinyl group leaves an imidazole [nH] as it is."""
+    namespace: dict[str, object] = {"__name__": "__notebook__"}
+    first, _, third = _code_cells()[:3]
+    exec(
+        compile(first.replace("C=C(C)C(=O)OC", "C=Cc1c[nH]cn1"), str(NOTEBOOK), "exec"), namespace
+    )  # noqa: S102
+    exec(compile(third, str(NOTEBOOK), "exec"), namespace)  # noqa: S102
+    assert namespace["repeat_unit"] == "*CC(*)c1c[nH]cn1"

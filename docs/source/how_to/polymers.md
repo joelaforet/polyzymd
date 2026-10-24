@@ -70,9 +70,11 @@ For a homopolymer, give one monomer with `probability: 1.0`.
 
 ## Name the SDF files
 
-For each chain, the builder draws a sequence such as `AABAA`. It reads a
-sequence and its reverse as the same chain. It uses the form that comes first
-in alphabetical order. For example, `ABAAA` becomes `AAABA`.
+For each chain, the builder draws a sequence such as `AABAA`. In `cached`
+mode it reads a sequence and its reverse as the same chain. It uses the form
+that comes first in alphabetical order. For example, `ABAAA` becomes `AAABA`.
+If that file is missing, it loads the file of the reversed sequence, which is
+how `dynamic` mode names a chain it built in that direction.
 
 The builder then loads this file from `sdf_directory`:
 

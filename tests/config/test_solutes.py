@@ -327,7 +327,7 @@ def test_star_counts_are_checked_at_load(data, monomer, head, message) -> None:
     "names",
     [
         {"residue_name": "PMA"},
-        {"name": "HEMA2"},
+        {},
     ],
     ids=["explicit", "from_name"],
 )
@@ -339,6 +339,25 @@ def test_monomers_cannot_share_a_residue_name(data, names) -> None:
     ]
     data["solutes"].append(_dynamic(monomers=monomers))
     with pytest.raises(ValidationError, match="share residue_name"):
+        load(data)
+
+
+@pytest.mark.parametrize(
+    ("second", "message"),
+    [
+        ({"label": "A", "name": "HEMA", "residue_name": "HEM"}, "share label \\['A'\\]"),
+        ({"label": "B", "name": "MMA", "residue_name": "HEM"}, "share name \\['MMA'\\]"),
+    ],
+    ids=["label", "name"],
+)
+def test_monomers_cannot_share_a_label_or_name(data, second, message) -> None:
+    """Each monomer is looked up by label and by name, so neither may repeat."""
+    monomers = [
+        {"label": "A", "probability": 0.5, "name": "MMA", "smiles": MMA, "residue_name": "MMA"},
+        {"probability": 0.5, "smiles": HEMA, **second},
+    ]
+    data["solutes"].append(_dynamic(monomers=monomers))
+    with pytest.raises(ValidationError, match=message):
         load(data)
 
 

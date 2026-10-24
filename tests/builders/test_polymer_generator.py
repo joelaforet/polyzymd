@@ -401,19 +401,48 @@ def test_the_same_seed_draws_the_same_chains(monkeypatch: pytest.MonkeyPatch, tm
     assert first.sequence_counts == second.sequence_counts
 
 
-def test_each_unique_canonical_sequence_is_generated_once(
+def test_dynamic_mode_builds_each_drawn_sequence_once_in_its_direction(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """A star-sited chain has a direction, so dynamic mode keeps the drawn sequence."""
     builder = _builder(tmp_path)
     calls = _count_generations(monkeypatch, builder)
 
+    random_state = __import__("random").Random(3)
+    drawn = ["".join(random_state.choices(["A", "B"], weights=[0.5, 0.5], k=5)) for _ in range(30)]
     molecules, counts = builder.build(count=30, seed=3)
 
     sequences = builder._generated_sequences
-    assert all(sequence == canonical_sequence(sequence) for sequence in sequences)
+    assert sequences == drawn
+    assert any(sequence != canonical_sequence(sequence) for sequence in sequences)
     assert sorted(calls) == sorted(set(sequences))
     assert molecules == [f"molecule {sequence}" for sequence in builder.sequence_counts]
     assert sum(counts) == 30
+
+
+def test_a_sequence_and_its_reverse_are_different_chains() -> None:
+    """The head cap sits on the first unit's first '*', so AAB is not BAA."""
+    units = _units(A=MMA, B=HEMA)
+    forward, _ = assemble_chain("AAB", units, _cap(H_CAP), _cap(H_CAP))
+    backward, _ = assemble_chain("BAA", units, _cap(H_CAP), _cap(H_CAP))
+    assert Chem.MolToSmiles(forward) != Chem.MolToSmiles(backward)
+
+
+def test_cached_mode_reads_a_dynamic_chain_named_in_its_drawn_direction(tmp_path: Path) -> None:
+    """Cached mode looks for the canonical name, then for the reversed one."""
+    reversed_file = tmp_path / "MH_seq=BAA_3-mer_charged.sdf"
+    reversed_file.write_text("chain", encoding="utf-8")
+    builder = PolymerBuilder(
+        characters=["A", "B"],
+        probabilities=[0.5, 0.5],
+        length=3,
+        type_prefix="MH",
+        sdf_directory=tmp_path,
+    )
+    assert builder._get_sdf_path("AAB", tmp_path) == reversed_file
+    canonical_file = tmp_path / "MH_seq=AAB_3-mer_charged.sdf"
+    canonical_file.write_text("chain", encoding="utf-8")
+    assert builder._get_sdf_path("AAB", tmp_path) == canonical_file
 
 
 def test_canonical_sequence_reads_a_chain_from_its_smaller_end() -> None:
