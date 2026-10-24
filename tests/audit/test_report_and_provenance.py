@@ -143,14 +143,84 @@ def test_the_build_record_lists_the_methods_to_cite() -> None:
             solvent=SimpleNamespace(ions=SimpleNamespace(ionic_strength=strength))
         )
 
-    assert methods_to_cite(config(None)) == []
+    def others(cited):
+        return [c for c in cited if not c.startswith("Laforet")]
+
+    assert others(methods_to_cite(config(None))) == []
     packed = {"packmol_seed": 1, "solvent_packmol_seed": 1}
-    cited = methods_to_cite(config(None), packed)
+    cited = others(methods_to_cite(config(None), packed))
     assert len(cited) == 1 and "doi:10.1002/jcc.21224" in cited[0]
     # packmol_seed alone is recorded before anything is packed; it is not evidence.
-    assert methods_to_cite(config(None), {"packmol_seed": 1}) == []
-    cited = methods_to_cite(config(0.13), {"polymer_packmol_seed": 2})
+    assert others(methods_to_cite(config(None), {"packmol_seed": 1})) == []
+    cited = others(methods_to_cite(config(0.13), {"polymer_packmol_seed": 2}))
     assert [c.split(" ")[0] for c in cited] == ["Martínez,", "Machado,"]
     assert "doi:10.1021/acs.jctc.9b00953" in cited[1]
     text = provenance_markdown({"components": [], "cite": cited})
     assert "## Methods to cite" in text and "PACKMOL" in text and "Machado" in text
+    assert "explanation/physics_audit.html" in text
+
+
+def _build_config(*, ligand_charges=None, polymer=None, force_field="openff-2.3.0.offxml"):
+    """A config-shaped namespace with a protein, an optional ligand and polymer, and water."""
+    from types import SimpleNamespace
+
+    def solute(fields, method, model=None, **keys):
+        return SimpleNamespace(
+            force_field=fields, charges=SimpleNamespace(method=method, model=model), **keys
+        )
+
+    solutes = [solute(["ff14sb_off_impropers_0.0.4.offxml"], "library")]
+    if ligand_charges:
+        solutes.append(solute([force_field], *ligand_charges))
+    if polymer is not None:
+        solutes.append(solute(["openff-1.3.0.offxml"], "preset", enabled=polymer))
+    return SimpleNamespace(
+        solutes=solutes,
+        solvent=SimpleNamespace(
+            force_field=[force_field],
+            water=SimpleNamespace(model=SimpleNamespace(value="tip3p")),
+            ions=SimpleNamespace(ionic_strength=None),
+            co_solvents=[],
+        ),
+    )
+
+
+def test_methods_to_cite_name_polyzymd_the_force_fields_water_and_charge_models() -> None:
+    from polyzymd import __version__
+    from polyzymd.simulation.artifact_integrity import methods_to_cite
+
+    cited = methods_to_cite(
+        _build_config(ligand_charges=("nagl", "openff-gnn-am1bcc-1.0.0.pt")),
+        {"solvent_packmol_seed": 1},
+    )
+    assert cited[0].startswith("Laforet, Joseph R., Jr. PolyzyMD") and __version__ in cited[0]
+    assert cited[1].startswith("ff14sb_off_impropers_0.0.4.offxml (the OpenFF SMIRNOFF port")
+    assert "doi:10.1021/acs.jctc.5b00255" in cited[1]
+    assert cited[2].startswith("openff-2.3.0.offxml (a release of OpenFF Sage 2)")
+    assert "doi:10.1021/acs.jctc.3c00039" in cited[2]
+    assert cited[3].startswith("TIP3P water") and "doi:10.1063/1.445869" in cited[3]
+    assert "openff-gnn-am1bcc-1.0.0.pt" in cited[4]
+    assert "doi:10.1002/(SICI)1096-987X(20000130)21:2<132::AID-JCC5>3.0.CO;2-P" in cited[5]
+    assert "doi:10.1002/jcc.10128" in cited[6]
+    assert "doi:10.1002/jcc.21224" in cited[7] and len(cited) == 8
+
+
+def test_methods_to_cite_follow_what_the_build_used() -> None:
+    from polyzymd.simulation.artifact_integrity import methods_to_cite
+
+    apo = methods_to_cite(_build_config())
+    assert not any("AM1-BCC" in c or "NAGL" in c or "Espaloma" in c for c in apo)
+    # One file named by several components is cited once.
+    assert sum(c.startswith("openff-2.3.0.offxml") for c in apo) == 1
+    espaloma = methods_to_cite(_build_config(ligand_charges=("espaloma",)))
+    assert any("doi:10.1021/acs.jpca.4c01287" in c for c in espaloma)
+    assert not any("AM1-BCC model" in c for c in espaloma)
+    parsley = methods_to_cite(_build_config(force_field="openff_unconstrained-1.3.0.offxml"))
+    assert any("doi:10.1021/acs.jctc.1c00571" in c for c in parsley)
+    custom = methods_to_cite(_build_config(force_field="/data/my_ff.offxml"))
+    assert "my_ff.offxml: PolyzyMD has no reference for this file; cite its source." in custom
+    # A disabled polymer entry is not built, so its force field is not cited.
+    assert methods_to_cite(_build_config(polymer=False)) == apo
+    assert any(
+        "doi:10.1021/acs.jctc.1c00571" in c for c in methods_to_cite(_build_config(polymer=True))
+    )

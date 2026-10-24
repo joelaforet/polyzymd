@@ -219,22 +219,19 @@ def _manifest(
 
 
 def methods_to_cite(config: Any, provenance: dict[str, Any] | None = None) -> list[str]:
-    """Return the references of the methods this build used.
+    """Return the references of what this build used, for "Methods to cite".
 
-    The force fields and charge models are named in the component records;
-    this lists the other methods: Packmol when the build packed solvent or
-    polymer chains with it (its seeds in ``provenance`` say so), and how
-    ``ionic_strength`` set the ions.
+    PolyzyMD itself, each force-field file, the water model, the charge
+    models (NAGL, AM1-BCC, espaloma), Packmol when the build packed solvent or
+    polymer chains with it (its seeds in ``provenance`` say so), and Machado
+    and Pantano when ``ionic_strength`` set the ions. Each part comes from one
+    function in :data:`polyzymd.simulation.build_citations.CITATION_SOURCES`.
     """
-    from polyzymd.builders.solvent import MACHADO_PANTANO
-    from polyzymd.utils.packmol import PACKMOL
+    from polyzymd.simulation.build_citations import CITATION_SOURCES
 
-    cited = []
-    if any(key in (provenance or {}) for key in ("solvent_packmol_seed", "polymer_packmol_seed")):
-        cited.append(PACKMOL)
-    ions = getattr(getattr(config, "solvent", None), "ions", None)
-    if getattr(ions, "ionic_strength", None) is not None:
-        cited.append(MACHADO_PANTANO)
+    cited: list[str] = []
+    for source in CITATION_SOURCES:
+        cited.extend(source(config, provenance or {}))
     return cited
 
 
@@ -263,6 +260,10 @@ def _audit(realize: Any, components: Sequence[Any] | None, config: Any) -> Any:
                 )
             ]
         )
+
+
+#: The documentation page that explains the physics audit of a build record.
+PHYSICS_AUDIT_PAGE = "https://polyzymd.readthedocs.io/en/latest/explanation/physics_audit.html"
 
 
 def provenance_markdown(record: dict[str, Any], audit: Any = None) -> str:
@@ -297,13 +298,14 @@ def provenance_markdown(record: dict[str, Any], audit: Any = None) -> str:
         lines += ["", audit.to_markdown()]
     elif record.get("audit") is None:
         lines += ["", "No physics audit was recorded for this build."]
+    lines += ["", f"What the physics audit checks, and what it does not: {PHYSICS_AUDIT_PAGE}"]
     lines += [
         "",
         "## Methods to cite",
         "",
-        "Cite the force fields and charge models of the components above, and:",
+        "The software, force fields, models and methods this build used:",
         "",
-    ] + ([f"- {reference}" for reference in record.get("cite") or []] or ["- nothing else"])
+    ] + ([f"- {reference}" for reference in record.get("cite") or []] or ["- none recorded"])
     seeds = record.get("provenance") or {}
     if seeds:
         lines += ["", "## Inputs and seeds", ""] + [

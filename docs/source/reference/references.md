@@ -9,12 +9,16 @@ For contributors: when you add a method, add its reference here and in the
 `References` section of the module docstring.
 ```
 
-To cite PolyzyMD itself, see `CITATION.cff` in the repository root.
+To cite PolyzyMD itself, see
+[`CITATION.cff`](https://github.com/joelaforet/polyzymd/blob/main/CITATION.cff)
+in the repository root. The "Methods to cite" list of each `build_provenance.md`
+starts with PolyzyMD at the version that made the build.
 
 ## Building the system
 
-Cite each of these methods that your build used. The build log names each one
-when it runs, and `build_provenance.md` lists them under "Methods to cite".
+Cite each of these methods that your build used. `build_provenance.md` lists
+the ones a build used under "Methods to cite", together with the force fields,
+the water model and the charge models below.
 
 - Martínez, L., Andrade, R., Birgin, E. G. and Martínez, J. M. (2009).
   PACKMOL: a package for building initial configurations for molecular
@@ -27,6 +31,53 @@ when it runs, and `build_provenance.md` lists them under "Methods to cite".
   doi:10.1021/acs.jctc.9b00953. Used by `solvent.ions.ionic_strength`: the
   neutralizing charge is split between Na+ and Cl-, so the counter-ions count
   toward the ionic strength.
+
+## Force fields, water and charge models
+
+The build cites each force-field file by its name: ff14SB for
+`ff14sb_off_impropers_*.offxml` (the OpenFF port of Amber ff14SB), the Sage
+paper for `openff-2.*.offxml`, and the Parsley paper for `openff-1.*.offxml`.
+The Sage paper describes 2.0.0; PolyzyMD cites it for every Sage 2 release.
+For any other file, cite its source.
+
+- Maier, J. A., Martinez, C., Kasavajhala, K., Wickstrom, L., Hauser, K. E.
+  and Simmerling, C. (2015). ff14SB: improving the accuracy of protein side
+  chain and backbone parameters from ff99SB. *Journal of Chemical Theory and
+  Computation*, 11(8), 3696-3713. doi:10.1021/acs.jctc.5b00255
+- Boothroyd, S., Behara, P. K., Madin, O. C., Hahn, D. F., Jang, H.,
+  Gapsys, V., Wagner, J. R., Horton, J. T., Dotson, D. L., Thompson, M. W.,
+  Maat, J., Gokey, T., Wang, L.-P., Cole, D. J., Gilson, M. K., Chodera, J. D.,
+  Bayly, C. I., Shirts, M. R. and Mobley, D. L. (2023). Development and
+  benchmarking of Open Force Field 2.0.0: the Sage small molecule force field.
+  *Journal of Chemical Theory and Computation*, 19(11), 3251-3275.
+  doi:10.1021/acs.jctc.3c00039
+- Qiu, Y., Smith, D. G. A., Boothroyd, S., Jang, H., Hahn, D. F., Wagner, J.,
+  Bannan, C. C., Gokey, T., Lim, V. T., Stern, C. D., Rizzi, A., Tjanaka, B.,
+  Tresadern, G., Lucas, X., Shirts, M. R., Gilson, M. K., Chodera, J. D.,
+  Bayly, C. I., Mobley, D. L. and Wang, L.-P. (2021). Development and
+  benchmarking of Open Force Field v1.0.0, the Parsley small-molecule force
+  field. *Journal of Chemical Theory and Computation*, 17(10), 6262-6280.
+  doi:10.1021/acs.jctc.1c00571
+- Jorgensen, W. L., Chandrasekhar, J., Madura, J. D., Impey, R. W. and
+  Klein, M. L. (1983). Comparison of simple potential functions for simulating
+  liquid water. *Journal of Chemical Physics*, 79(2), 926-935.
+  doi:10.1063/1.445869. TIP3P, the only water model PolyzyMD builds.
+- Jakalian, A., Bush, B. L., Jack, D. B. and Bayly, C. I. (2000). Fast,
+  efficient generation of high-quality atomic charges. AM1-BCC model: I.
+  Method. *Journal of Computational Chemistry*, 21(2), 132-146.
+  doi:10.1002/(SICI)1096-987X(20000130)21:2<132::AID-JCC5>3.0.CO;2-P
+- Jakalian, A., Jack, D. B. and Bayly, C. I. (2002). Fast, efficient
+  generation of high-quality atomic charges. AM1-BCC model: II.
+  Parameterization and validation. *Journal of Computational Chemistry*,
+  23(16), 1623-1641. doi:10.1002/jcc.10128. Cite both AM1-BCC papers for
+  `charges: {method: am1bcc}` and for a NAGL model of AM1-BCC charges.
+- OpenFF NAGL models, <https://github.com/openforcefield/openff-nagl-models>.
+  The NAGL models have no journal article; cite the model file the build
+  names (for example `openff-gnn-am1bcc-1.0.0.pt`) and its release.
+- Wang, Y., Pulido, I., Takaba, K., Kaminow, B., Scheen, J., Wang, L. and
+  Chodera, J. D. (2024). EspalomaCharge: machine learning-enabled ultrafast
+  partial charge assignment. *Journal of Physical Chemistry A*, 128(20),
+  4160-4167. doi:10.1021/acs.jpca.4c01287. For `charges: {method: espaloma}`.
 
 ## Libraries we build on
 
