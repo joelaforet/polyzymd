@@ -7,7 +7,10 @@ build did not use it. :data:`CITATION_SOURCES` lists them in the order the recor
 them; :func:`polyzymd.simulation.artifact_integrity.methods_to_cite` joins
 their results. To cite one more method, add a function and list it there.
 
-Every DOI below was checked against Crossref.
+Every DOI below was checked against Crossref (papers) or DataCite (Zenodo).
+OpenFF parameters and software are cited as
+https://openforcefield.org/science/how-to-cite/ asks: every reference it
+lists for an item, the paper and the Zenodo DOI of the release.
 """
 
 from __future__ import annotations
@@ -81,9 +84,23 @@ GROMACS = (
     "(2015). GROMACS: high performance molecular simulations through multi-level parallelism "
     "from laptops to supercomputers. SoftwareX 1-2, 19-25. doi:10.1016/j.softx.2015.06.001"
 )
+OPENFF_TOOLKIT = (
+    "Mobley, D. L., Bannan, C. C., Rizzi, A., Bayly, C. I., Chodera, J. D., Lim, V. T., "
+    "Lim, N. M., Beauchamp, K. A., Slochower, D. R., Shirts, M. R., Gilson, M. K. and "
+    "Eastman, P. K. (2018). Escaping atom types in force fields using direct chemical "
+    "perception. J. Chem. Theory Comput. 14(11), 6076-6092. doi:10.1021/acs.jctc.8b00640"
+)
+OPENFF_INITIATIVE = (
+    "Wang, L., Behara, P. K., Thompson, M. W., Gokey, T., Wang, Y., Wagner, J. R., Cole, D. J., "
+    "Gilson, M. K., Shirts, M. R. and Mobley, D. L. (2024). The Open Force Field Initiative: "
+    "open software and open science for molecular modeling. J. Phys. Chem. B 128(29), "
+    "7043-7067. doi:10.1021/acs.jpcb.4c01558"
+)
+#: Zenodo DOIs OpenFF lists for its releases (each resolves to the release list).
+OPENFF_TOOLKIT_ZENODO = "doi:10.5281/zenodo.597754"
+OPENFF_INTERCHANGE_ZENODO = "doi:10.5281/zenodo.8147764"
+OPENFF_FORCEFIELDS_ZENODO = "doi:10.5281/zenodo.3473553"
 NAGL_REPOSITORY = "https://github.com/openforcefield/openff-nagl-models"
-OPENFF_TOOLKIT_REPOSITORY = "https://github.com/openforcefield/openff-toolkit"
-OPENFF_INTERCHANGE_REPOSITORY = "https://github.com/openforcefield/openff-interchange"
 
 
 def _solutes(config: Any) -> list[Any]:
@@ -119,13 +136,14 @@ def _force_field_references(name: str) -> list[str]:
     release = _openff_release(name)
     if "ff14sb" in file.lower():
         return [f"{file} (the OpenFF SMIRNOFF port of Amber ff14SB): {FF14SB}"]
+    release_doi = f"{file} (the openff-forcefields release): {OPENFF_FORCEFIELDS_ZENODO}"
     if release is not None and release[0] == 2:
         cited = [f"{file} (a release of OpenFF Sage 2): {SAGE}"]
         if release == (2, 3):
             cited.append(f"{file} (OpenFF Sage 2.3.0): {SAGE_2_3}")
-        return cited
+        return cited + [release_doi]
     if release is not None and release[0] == 1:
-        return [f"{file} (a release of OpenFF Parsley 1): {PARSLEY}"]
+        return [f"{file} (a release of OpenFF Parsley 1): {PARSLEY}", release_doi]
     return [f"{file}: PolyzyMD has no reference for this file; cite its source."]
 
 
@@ -148,18 +166,24 @@ def cite_engine(config: Any, record: dict[str, Any]) -> list[str]:
 
 
 def cite_openff_software(config: Any, record: dict[str, Any]) -> list[str]:
-    """The OpenFF Toolkit and OpenFF Interchange, which parameterize every build."""
-    cited = []
-    for name, key, repository in (
-        ("OpenFF Toolkit", "openff_toolkit_version", OPENFF_TOOLKIT_REPOSITORY),
-        ("OpenFF Interchange", "openff_interchange_version", OPENFF_INTERCHANGE_REPOSITORY),
-    ):
+    """The OpenFF Toolkit, OpenFF Interchange and the Open Force Field Initiative.
+
+    The Toolkit and Interchange parameterize every build. OpenFF asks for the
+    Toolkit's paper and release DOI, Interchange's release DOI (it has no
+    paper), and the Initiative's paper.
+    """
+
+    def release(key: str, doi: str) -> str:
         version = record.get(key)
-        cited.append(
-            f"{name}{f' {version}' if version else ''}: no journal article; cite the release "
-            f"({repository})."
-        )
-    return cited
+        return f"{f'version {version}, ' if version else ''}{doi}"
+
+    return [
+        f"OpenFF Toolkit: {OPENFF_TOOLKIT}",
+        f"OpenFF Toolkit release: {release('openff_toolkit_version', OPENFF_TOOLKIT_ZENODO)}",
+        "OpenFF Interchange release: "
+        f"{release('openff_interchange_version', OPENFF_INTERCHANGE_ZENODO)}",
+        f"Open Force Field Initiative: {OPENFF_INITIATIVE}",
+    ]
 
 
 def cite_force_fields(config: Any, record: dict[str, Any]) -> list[str]:

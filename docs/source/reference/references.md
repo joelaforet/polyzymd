@@ -32,12 +32,25 @@ the water model, the ion parameters and the charge models below.
   and Lindahl, E. (2015). GROMACS: high performance molecular simulations
   through multi-level parallelism from laptops to supercomputers. *SoftwareX*,
   1-2, 19-25. doi:10.1016/j.softx.2015.06.001. For a build for GROMACS.
-- OpenFF Toolkit, <https://github.com/openforcefield/openff-toolkit>, and
-  OpenFF Interchange, <https://github.com/openforcefield/openff-interchange>.
-  Every build uses both to assign parameters. They have no journal article;
-  cite the release. `build_provenance.json` records their versions
-  (`openff_toolkit_version`, `openff_interchange_version`), and "Methods to
-  cite" names them.
+- Every build uses the OpenFF Toolkit and OpenFF Interchange to assign
+  parameters. They are cited as OpenFF asks
+  (<https://openforcefield.org/science/how-to-cite/>): the Toolkit with
+  Mobley, D. L., Bannan, C. C., Rizzi, A., Bayly, C. I., Chodera, J. D.,
+  Lim, V. T., Lim, N. M., Beauchamp, K. A., Slochower, D. R., Shirts, M. R.,
+  Gilson, M. K. and Eastman, P. K. (2018). Escaping atom types in force fields
+  using direct chemical perception. *Journal of Chemical Theory and
+  Computation*, 14(11), 6076-6092. doi:10.1021/acs.jctc.8b00640, and its
+  release, doi:10.5281/zenodo.597754; Interchange, which has no paper, with
+  its release, doi:10.5281/zenodo.8147764; and the Open Force Field
+  Initiative with Wang, L., Behara, P. K., Thompson, M. W., Gokey, T.,
+  Wang, Y., Wagner, J. R., Cole, D. J., Gilson, M. K., Shirts, M. R. and
+  Mobley, D. L. (2024). The Open Force Field Initiative: open software and
+  open science for molecular modeling. *Journal of Physical Chemistry B*,
+  128(29), 7043-7067. doi:10.1021/acs.jpcb.4c01558. `build_provenance.json`
+  records the versions (`openff_toolkit_version`,
+  `openff_interchange_version`), and "Methods to cite" names them. An OpenFF
+  Sage or Parsley file is cited with its paper and the openff-forcefields
+  release, doi:10.5281/zenodo.3473553.
 
 - Martínez, L., Andrade, R., Birgin, E. G. and Martínez, J. M. (2009).
   PACKMOL: a package for building initial configurations for molecular

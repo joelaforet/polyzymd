@@ -194,24 +194,32 @@ def test_methods_to_cite_name_polyzymd_the_force_fields_water_and_charge_models(
         {"solvent_packmol_seed": 1},
     )
     assert cited[0].startswith("Laforet, Joseph R., Jr. PolyzyMD") and __version__ in cited[0]
-    assert cited[1].startswith("OpenFF Toolkit") and OPENFF_TOOLKIT in cited[1]
-    assert cited[2].startswith("OpenFF Interchange") and OPENFF_INTERCHANGE in cited[2]
-    assert cited[3].startswith("ff14sb_off_impropers_0.0.4.offxml (the OpenFF SMIRNOFF port")
-    assert "doi:10.1021/acs.jctc.5b00255" in cited[3]
-    assert cited[4].startswith("openff-2.3.0.offxml (a release of OpenFF Sage 2)")
-    assert "doi:10.1021/acs.jctc.3c00039" in cited[4]
-    assert cited[5].startswith("openff-2.3.0.offxml (OpenFF Sage 2.3.0)")
-    assert "doi:10.1021/acs.jctc.6c00169" in cited[5]
-    assert cited[6].startswith("TIP3P water") and "doi:10.1063/1.445869" in cited[6]
-    assert cited[7].startswith("AshGC (OpenFF NAGL model openff-gnn-am1bcc-1.0.0.pt)")
+    assert cited[1].startswith("OpenFF Toolkit: Mobley, D. L.") and TOOLKIT_PAPER in cited[1]
+    assert cited[2].startswith("OpenFF Toolkit release:") and TOOLKIT_ZENODO in cited[2]
+    assert cited[3].startswith("OpenFF Interchange release:") and INTERCHANGE_ZENODO in cited[3]
+    assert cited[4].startswith("Open Force Field Initiative: Wang, L.") and INITIATIVE in cited[4]
+    assert cited[5].startswith("ff14sb_off_impropers_0.0.4.offxml (the OpenFF SMIRNOFF port")
+    assert "doi:10.1021/acs.jctc.5b00255" in cited[5]
+    assert cited[6].startswith("openff-2.3.0.offxml (a release of OpenFF Sage 2)")
+    assert "doi:10.1021/acs.jctc.3c00039" in cited[6]
+    assert cited[7].startswith("openff-2.3.0.offxml (OpenFF Sage 2.3.0)")
     assert "doi:10.1021/acs.jctc.6c00169" in cited[7]
-    assert "doi:10.1002/(SICI)1096-987X(20000130)21:2<132::AID-JCC5>3.0.CO;2-P" in cited[8]
-    assert "doi:10.1002/jcc.10128" in cited[9]
-    assert "doi:10.1002/jcc.21224" in cited[10] and len(cited) == 11
+    assert cited[8].startswith("openff-2.3.0.offxml (the openff-forcefields release)")
+    assert FORCEFIELDS_ZENODO in cited[8]
+    assert cited[9].startswith("TIP3P water") and "doi:10.1063/1.445869" in cited[9]
+    assert cited[10].startswith("AshGC (OpenFF NAGL model openff-gnn-am1bcc-1.0.0.pt)")
+    assert "doi:10.1021/acs.jctc.6c00169" in cited[10]
+    assert "doi:10.1002/(SICI)1096-987X(20000130)21:2<132::AID-JCC5>3.0.CO;2-P" in cited[11]
+    assert "doi:10.1002/jcc.10128" in cited[12]
+    assert "doi:10.1002/jcc.21224" in cited[13] and len(cited) == 14
 
 
-OPENFF_TOOLKIT = "https://github.com/openforcefield/openff-toolkit"
-OPENFF_INTERCHANGE = "https://github.com/openforcefield/openff-interchange"
+#: The references https://openforcefield.org/science/how-to-cite/ lists for OpenFF.
+TOOLKIT_PAPER = "doi:10.1021/acs.jctc.8b00640"
+INITIATIVE = "doi:10.1021/acs.jpcb.4c01558"
+TOOLKIT_ZENODO = "doi:10.5281/zenodo.597754"
+INTERCHANGE_ZENODO = "doi:10.5281/zenodo.8147764"
+FORCEFIELDS_ZENODO = "doi:10.5281/zenodo.3473553"
 
 
 def test_methods_to_cite_name_the_engine_and_the_openff_versions() -> None:
@@ -227,10 +235,10 @@ def test_methods_to_cite_name_the_engine_and_the_openff_versions() -> None:
     assert openmm[1].startswith("OpenMM 8.2.0: Eastman, P.")
     assert "doi:10.1021/acs.jpcb.3c06662" in openmm[1]
     assert not any("doi:10.1016/j.softx.2015.06.001" in c for c in openmm)
-    assert openmm[2] == (
-        f"OpenFF Toolkit 0.16.9: no journal article; cite the release ({OPENFF_TOOLKIT})."
-    )
-    assert openmm[3].startswith("OpenFF Interchange 0.4.2:") and OPENFF_INTERCHANGE in openmm[3]
+    assert openmm[2].startswith("OpenFF Toolkit: Mobley") and TOOLKIT_PAPER in openmm[2]
+    assert openmm[3] == f"OpenFF Toolkit release: version 0.16.9, {TOOLKIT_ZENODO}"
+    assert openmm[4] == f"OpenFF Interchange release: version 0.4.2, {INTERCHANGE_ZENODO}"
+    assert openmm[5].startswith("Open Force Field Initiative:") and INITIATIVE in openmm[5]
     gromacs = methods_to_cite(_build_config(), record={**record, "engine": "gromacs"})
     assert gromacs[1].startswith("GROMACS: Abraham, M. J.")
     assert "doi:10.1016/j.softx.2015.06.001" in gromacs[1]
