@@ -163,9 +163,12 @@ Edit these keys of `config.yaml`:
 name: "ubiquitin_water"
 description: "Ubiquitin in water with NaCl"
 
-enzyme:
-  name: "ubiquitin"
-  pdb_path: "structures/ubq_clean.pdb"
+solutes:
+  - type: protein
+    name: "ubiquitin"
+    pdb_path: "structures/ubq_clean.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
 ```
 
 Validate the config, then build replicate 1:
@@ -179,8 +182,14 @@ The build takes about 30 seconds. It ends with:
 
 ```
 System built successfully!
+Physics audit: PASSED (25 pass, 2 info)
+Build record: /home/me/ubq_prep/ubiquitin_300K_run1/build_provenance.md
 Output directory: /home/me/ubq_prep/ubiquitin_300K_run1
 ```
+
+`build_provenance.md` lists the components with their force fields and
+charges, and the result of every physics check (see
+{doc}`../explanation/physics_audit`).
 
 The build can also print a warning that a few atoms lie between 1 and 2 Å of
 a periodic image. Energy minimization removes these contacts before the
@@ -251,7 +260,7 @@ Run the OpenFF check of Step 5 on `structures/t4l_clean.pdb`. It now prints
 (ligand-sdf-from-crystal)=
 ### Make the ligand SDF from the crystal pose
 
-The `substrate:` block of the config needs an SDF file with bond orders and
+The `small_molecule` entry of `solutes:` needs an SDF file with bond orders and
 hydrogens. A PDB file has neither. RDKit, in the `build` environment, makes
 the SDF from the `HETATM` records of the ligand and a SMILES string. The SDF
 keeps the crystal coordinates, so the ligand stays in its pocket. Save this
@@ -305,14 +314,18 @@ by its chain or residue number.
 Point the config at the two files:
 
 ```yaml
-enzyme:
-  name: "t4l_l99a"
-  pdb_path: "structures/t4l_clean.pdb"
-
-substrate:
-  name: "benzene"
-  sdf_path: "structures/benzene.sdf"
-  residue_name: "BNZ"
+solutes:
+  - type: protein
+    name: "t4l_l99a"
+    pdb_path: "structures/t4l_clean.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+  - type: small_molecule
+    name: "benzene"
+    sdf_path: "structures/benzene.sdf"
+    residue_name: "BNZ"
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
 ```
 
 ## What you did

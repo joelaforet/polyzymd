@@ -1,0 +1,1574 @@
+{
+ "description": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "engine": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "typing.Literal['openmm', 'gromacs']",
+  "values": [
+   "gromacs",
+   "openmm"
+  ]
+ },
+ "gromacs": {
+  "alias": null,
+  "bounds": {},
+  "default": {
+   "analysis_topology": null,
+   "command_prefix": null,
+   "env_exports": {},
+   "gmx_binary": null,
+   "gpu": false,
+   "gpus": 1,
+   "grompp_flags": "",
+   "mdrun_flags": "",
+   "mdrun_flags_equilibration": null,
+   "mdrun_flags_production": null,
+   "memory": "16G",
+   "module_load": null,
+   "mpi_launcher_flags": "",
+   "ntmpi": 1,
+   "ntomp": 8,
+   "setup_commands": [],
+   "slurm_ntasks": null
+  },
+  "required": false,
+  "type": "<class 'polyzymd.config.schema.GromacsEngineConfig'>",
+  "values": null
+ },
+ "gromacs.analysis_topology": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "gromacs.command_prefix": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "gromacs.env_exports": {
+  "alias": null,
+  "bounds": {},
+  "default": {},
+  "required": false,
+  "type": "dict[str, str]",
+  "values": null
+ },
+ "gromacs.gmx_binary": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "gromacs.gpu": {
+  "alias": null,
+  "bounds": {},
+  "default": false,
+  "required": false,
+  "type": "<class 'bool'>",
+  "values": null
+ },
+ "gromacs.gpus": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": 1,
+  "required": false,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "gromacs.grompp_flags": {
+  "alias": null,
+  "bounds": {},
+  "default": "",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "gromacs.mdrun_flags": {
+  "alias": null,
+  "bounds": {},
+  "default": "",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "gromacs.mdrun_flags_equilibration": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "gromacs.mdrun_flags_production": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "gromacs.memory": {
+  "alias": null,
+  "bounds": {},
+  "default": "16G",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "gromacs.module_load": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "gromacs.mpi_launcher_flags": {
+  "alias": null,
+  "bounds": {},
+  "default": "",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "gromacs.ntmpi": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": 1,
+  "required": false,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "gromacs.ntomp": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": 8,
+  "required": false,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "gromacs.setup_commands": {
+  "alias": null,
+  "bounds": {},
+  "default": [],
+  "required": false,
+  "type": "list[str]",
+  "values": null
+ },
+ "gromacs.slurm_ntasks": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": null,
+  "required": false,
+  "type": "int | None",
+  "values": null
+ },
+ "modeling_exceptions": {
+  "alias": null,
+  "bounds": {},
+  "default": [],
+  "required": false,
+  "type": "list[polyzymd.config.schema.ModelingException]",
+  "values": null
+ },
+ "modeling_exceptions.check": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "modeling_exceptions.component": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "modeling_exceptions.reason": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "name": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "openmm": {
+  "alias": null,
+  "bounds": {},
+  "default": {
+   "device_index": null,
+   "platform": "CUDA",
+   "precision": "mixed"
+  },
+  "required": false,
+  "type": "<class 'polyzymd.config.schema.OpenMMEngineConfig'>",
+  "values": null
+ },
+ "openmm.device_index": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "openmm.platform": {
+  "alias": null,
+  "bounds": {},
+  "default": "CUDA",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "openmm.precision": {
+  "alias": null,
+  "bounds": {},
+  "default": "mixed",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "output": {
+  "alias": null,
+  "bounds": {},
+  "default": {
+   "job_scripts_subdir": "job_scripts",
+   "naming_template": "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}",
+   "projects_directory": ".",
+   "save_checkpoint": true,
+   "save_state_data": true,
+   "scratch_directory": null,
+   "slurm_logs_subdir": "slurm_logs",
+   "trajectory_format": "dcd"
+  },
+  "required": false,
+  "type": "<class 'polyzymd.config.schema.OutputConfig'>",
+  "values": null
+ },
+ "output.job_scripts_subdir": {
+  "alias": null,
+  "bounds": {},
+  "default": "job_scripts",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "output.naming_template": {
+  "alias": null,
+  "bounds": {},
+  "default": "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "output.projects_directory": {
+  "alias": null,
+  "bounds": {},
+  "default": ".",
+  "required": false,
+  "type": "<class 'pathlib.Path'>",
+  "values": null
+ },
+ "output.save_checkpoint": {
+  "alias": null,
+  "bounds": {},
+  "default": true,
+  "required": false,
+  "type": "<class 'bool'>",
+  "values": null
+ },
+ "output.save_state_data": {
+  "alias": null,
+  "bounds": {},
+  "default": true,
+  "required": false,
+  "type": "<class 'bool'>",
+  "values": null
+ },
+ "output.scratch_directory": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "pathlib.Path | None",
+  "values": null
+ },
+ "output.slurm_logs_subdir": {
+  "alias": null,
+  "bounds": {},
+  "default": "slurm_logs",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "output.trajectory_format": {
+  "alias": null,
+  "bounds": {},
+  "default": "dcd",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "restraints": {
+  "alias": null,
+  "bounds": {},
+  "default": [],
+  "required": false,
+  "type": "list[polyzymd.config.schema.RestraintConfig]",
+  "values": null
+ },
+ "restraints.atom1": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'polyzymd.config.schema.AtomSelectionConfig'>",
+  "values": null
+ },
+ "restraints.atom1.component": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "restraints.atom1.description": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "restraints.atom1.selection": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "restraints.atom2": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'polyzymd.config.schema.AtomSelectionConfig'>",
+  "values": null
+ },
+ "restraints.atom2.component": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "restraints.atom2.description": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "restraints.atom2.selection": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "restraints.distance": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "restraints.enabled": {
+  "alias": null,
+  "bounds": {},
+  "default": true,
+  "required": false,
+  "type": "<class 'bool'>",
+  "values": null
+ },
+ "restraints.force_constant": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 10000.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "restraints.name": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "restraints.type": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<enum 'RestraintType'>",
+  "values": [
+   "flat_bottom",
+   "harmonic",
+   "lower_wall",
+   "upper_wall"
+  ]
+ },
+ "simulation_phases": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'polyzymd.config.schema.SimulationPhasesConfig'>",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "list[polyzymd.config.schema.EquilibrationStageConfig] | None",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.barostat": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "polyzymd.config.schema.BarostatType | None",
+  "values": [
+   "MC",
+   "MCA"
+  ]
+ },
+ "simulation_phases.equilibration_stages.barostat_frequency": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": null,
+  "required": false,
+  "type": "int | None",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.duration": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.ensemble": {
+  "alias": null,
+  "bounds": {},
+  "default": "NVT",
+  "required": false,
+  "type": "<enum 'Ensemble'>",
+  "values": [
+   "NPT",
+   "NVE",
+   "NVT"
+  ]
+ },
+ "simulation_phases.equilibration_stages.name": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.position_restraints": {
+  "alias": null,
+  "bounds": {},
+  "default": [],
+  "required": false,
+  "type": "list[polyzymd.config.schema.PositionRestraintConfig]",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.position_restraints.force_constant": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 4184.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.position_restraints.group": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.samples": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": 100,
+  "required": false,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.temperature": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.temperature_end": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.temperature_increment": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.temperature_interval_steps": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": null,
+  "required": false,
+  "type": "int | None",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.temperature_start": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.thermostat": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "polyzymd.config.schema.ThermostatType | None",
+  "values": [
+   "Andersen",
+   "Langevin",
+   "LangevinMiddle",
+   "NoseHoover"
+  ]
+ },
+ "simulation_phases.equilibration_stages.thermostat_timescale": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "simulation_phases.equilibration_stages.time_step": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "simulation_phases.minimization": {
+  "alias": null,
+  "bounds": {},
+  "default": {
+   "freeze_solute": true,
+   "max_iterations": 1000,
+   "tolerance": 10.0
+  },
+  "required": false,
+  "type": "<class 'polyzymd.config.schema.MinimizationConfig'>",
+  "values": null
+ },
+ "simulation_phases.minimization.freeze_solute": {
+  "alias": null,
+  "bounds": {},
+  "default": true,
+  "required": false,
+  "type": "<class 'bool'>",
+  "values": null
+ },
+ "simulation_phases.minimization.max_iterations": {
+  "alias": null,
+  "bounds": {
+   "ge": 0
+  },
+  "default": 1000,
+  "required": false,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "simulation_phases.minimization.tolerance": {
+  "alias": null,
+  "bounds": {
+   "gt": 0
+  },
+  "default": 10.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "simulation_phases.production": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'polyzymd.config.schema.SimulationPhaseConfig'>",
+  "values": null
+ },
+ "simulation_phases.production.barostat": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "polyzymd.config.schema.BarostatType | None",
+  "values": [
+   "MC",
+   "MCA"
+  ]
+ },
+ "simulation_phases.production.barostat_frequency": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": 25,
+  "required": false,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "simulation_phases.production.checkpoint_interval": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 60.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "simulation_phases.production.duration": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "simulation_phases.production.ensemble": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<enum 'Ensemble'>",
+  "values": [
+   "NPT",
+   "NVE",
+   "NVT"
+  ]
+ },
+ "simulation_phases.production.samples": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "simulation_phases.production.thermostat": {
+  "alias": null,
+  "bounds": {},
+  "default": "LangevinMiddle",
+  "required": false,
+  "type": "<enum 'ThermostatType'>",
+  "values": [
+   "Andersen",
+   "Langevin",
+   "LangevinMiddle",
+   "NoseHoover"
+  ]
+ },
+ "simulation_phases.production.thermostat_timescale": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 1.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "simulation_phases.production.time_step": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 2.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solutes": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "list[typing.Annotated[typing.Union[typing.Annotated[polyzymd.config.schema.ProteinSolute, Tag(tag='protein')], typing.Annotated[polyzymd.config.schema.SmallMoleculeSolute, Tag(tag='small_molecule')], typing.Annotated[polyzymd.config.schema.PolymerSolute, Tag(tag='polymer')]], Discriminator(discriminator=<function _solute_type>, custom_error_type='solute_type', custom_error_message='type must be protein, small_molecule or polymer', custom_error_context=None)]]",
+  "values": null
+ },
+ "solutes[polymer].cache_directory": {
+  "alias": null,
+  "bounds": {},
+  "default": ".polymer_cache",
+  "required": false,
+  "type": "<class 'pathlib.Path'>",
+  "values": null
+ },
+ "solutes[polymer].charges": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'polyzymd.config.schema.ChargeSpec'>",
+  "values": null
+ },
+ "solutes[polymer].charges.method": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "typing.Literal['library', 'preset', 'nagl', 'am1bcc', 'espaloma']",
+  "values": [
+   "am1bcc",
+   "espaloma",
+   "library",
+   "nagl",
+   "preset"
+  ]
+ },
+ "solutes[polymer].charges.model": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[polymer].count": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "solutes[polymer].force_field": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "list[str]",
+  "values": null
+ },
+ "solutes[polymer].generation_mode": {
+  "alias": null,
+  "bounds": {},
+  "default": "cached",
+  "required": false,
+  "type": "<enum 'PolymerGenerationMode'>",
+  "values": [
+   "cached",
+   "dynamic"
+  ]
+ },
+ "solutes[polymer].length": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "solutes[polymer].max_retries": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": 10,
+  "required": false,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "solutes[polymer].monomers": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "list[polyzymd.config.schema.MonomerSpec]",
+  "values": null
+ },
+ "solutes[polymer].monomers.label": {
+  "alias": null,
+  "bounds": {
+   "max_length": 1,
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[polymer].monomers.name": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[polymer].monomers.probability": {
+  "alias": null,
+  "bounds": {
+   "ge": 0.0,
+   "le": 1.0
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solutes[polymer].monomers.residue_name": {
+  "alias": null,
+  "bounds": {
+   "max_length": 3
+  },
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[polymer].monomers.smiles": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[polymer].name": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[polymer].packing": {
+  "alias": null,
+  "bounds": {},
+  "default": {
+   "confine_to_sphere": true,
+   "movebadrandom": false,
+   "nloop": 200,
+   "padding": 2.0,
+   "tolerance": 2.0
+  },
+  "required": false,
+  "type": "<class 'polyzymd.config.schema.PolymerPackingConfig'>",
+  "values": null
+ },
+ "solutes[polymer].packing.confine_to_sphere": {
+  "alias": null,
+  "bounds": {},
+  "default": true,
+  "required": false,
+  "type": "<class 'bool'>",
+  "values": null
+ },
+ "solutes[polymer].packing.movebadrandom": {
+  "alias": null,
+  "bounds": {},
+  "default": false,
+  "required": false,
+  "type": "<class 'bool'>",
+  "values": null
+ },
+ "solutes[polymer].packing.nloop": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": 200,
+  "required": false,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "solutes[polymer].packing.padding": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 2.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solutes[polymer].packing.tolerance": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 2.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solutes[polymer].random_seed": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "int | None",
+  "values": null
+ },
+ "solutes[polymer].reactions": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "polyzymd.config.schema.ReactionConfig | None",
+  "values": null
+ },
+ "solutes[polymer].reactions.initiation": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'pathlib.Path'>",
+  "values": null
+ },
+ "solutes[polymer].reactions.polymerization": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'pathlib.Path'>",
+  "values": null
+ },
+ "solutes[polymer].reactions.termination": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'pathlib.Path'>",
+  "values": null
+ },
+ "solutes[polymer].sdf_directory": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "pathlib.Path | None",
+  "values": null
+ },
+ "solutes[polymer].segid": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[polymer].type": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "typing.Literal['polymer']",
+  "values": [
+   "polymer"
+  ]
+ },
+ "solutes[polymer].type_prefix": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[protein].charges": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'polyzymd.config.schema.ChargeSpec'>",
+  "values": null
+ },
+ "solutes[protein].charges.method": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "typing.Literal['library', 'preset', 'nagl', 'am1bcc', 'espaloma']",
+  "values": [
+   "am1bcc",
+   "espaloma",
+   "library",
+   "nagl",
+   "preset"
+  ]
+ },
+ "solutes[protein].charges.model": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[protein].custom_substructures_path": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "pathlib.Path | None",
+  "values": null
+ },
+ "solutes[protein].description": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[protein].force_field": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "list[str]",
+  "values": null
+ },
+ "solutes[protein].name": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[protein].pdb_path": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'pathlib.Path'>",
+  "values": null
+ },
+ "solutes[protein].segid": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[protein].type": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "typing.Literal['protein']",
+  "values": [
+   "protein"
+  ]
+ },
+ "solutes[small_molecule].charges": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'polyzymd.config.schema.ChargeSpec'>",
+  "values": null
+ },
+ "solutes[small_molecule].charges.method": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "typing.Literal['library', 'preset', 'nagl', 'am1bcc', 'espaloma']",
+  "values": [
+   "am1bcc",
+   "espaloma",
+   "library",
+   "nagl",
+   "preset"
+  ]
+ },
+ "solutes[small_molecule].charges.model": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[small_molecule].conformer_index": {
+  "alias": null,
+  "bounds": {
+   "ge": 0
+  },
+  "default": 0,
+  "required": false,
+  "type": "<class 'int'>",
+  "values": null
+ },
+ "solutes[small_molecule].force_field": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "list[str]",
+  "values": null
+ },
+ "solutes[small_molecule].name": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[small_molecule].residue_name": {
+  "alias": null,
+  "bounds": {
+   "max_length": 3
+  },
+  "default": "LIG",
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[small_molecule].sdf_path": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'pathlib.Path'>",
+  "values": null
+ },
+ "solutes[small_molecule].segid": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[small_molecule].type": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "typing.Literal['small_molecule']",
+  "values": [
+   "small_molecule"
+  ]
+ },
+ "solvent": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'polyzymd.config.schema.SolventConfig'>",
+  "values": null
+ },
+ "solvent.box": {
+  "alias": null,
+  "bounds": {},
+  "default": {
+   "padding": 1.2,
+   "shape": "rhombic_dodecahedron",
+   "target_density": 1.0,
+   "tolerance": 2.0
+  },
+  "required": false,
+  "type": "<class 'polyzymd.config.schema.BoxConfig'>",
+  "values": null
+ },
+ "solvent.box.padding": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 1.2,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solvent.box.shape": {
+  "alias": null,
+  "bounds": {},
+  "default": "rhombic_dodecahedron",
+  "required": false,
+  "type": "<enum 'BoxShape'>",
+  "values": [
+   "cube",
+   "rhombic_dodecahedron"
+  ]
+ },
+ "solvent.box.target_density": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 1.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solvent.box.tolerance": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 2.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solvent.co_solvents": {
+  "alias": null,
+  "bounds": {},
+  "default": [],
+  "required": false,
+  "type": "list[polyzymd.config.schema.CoSolventSpec]",
+  "values": null
+ },
+ "solvent.co_solvents.charges": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "<class 'polyzymd.config.schema.ChargeSpec'>",
+  "values": null
+ },
+ "solvent.co_solvents.charges.method": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "typing.Literal['library', 'preset', 'nagl', 'am1bcc', 'espaloma']",
+  "values": [
+   "am1bcc",
+   "espaloma",
+   "library",
+   "nagl",
+   "preset"
+  ]
+ },
+ "solvent.co_solvents.charges.model": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solvent.co_solvents.concentration": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "solvent.co_solvents.count": {
+  "alias": null,
+  "bounds": {
+   "ge": 1
+  },
+  "default": null,
+  "required": false,
+  "type": "int | None",
+  "values": null
+ },
+ "solvent.co_solvents.density": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "solvent.co_solvents.mole_fraction": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0,
+   "lt": 1.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "solvent.co_solvents.name": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solvent.co_solvents.residue_name": {
+  "alias": null,
+  "bounds": {
+   "max_length": 3
+  },
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solvent.co_solvents.smiles": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solvent.force_field": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "list[str]",
+  "values": null
+ },
+ "solvent.ions": {
+  "alias": null,
+  "bounds": {},
+  "default": {
+   "kcl_concentration": 0.0,
+   "mgcl2_concentration": 0.0,
+   "nacl_concentration": 0.0,
+   "neutralize": true
+  },
+  "required": false,
+  "type": "<class 'polyzymd.config.schema.IonConfig'>",
+  "values": null
+ },
+ "solvent.ions.ionic_strength": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": false,
+  "type": "float | None",
+  "values": null
+ },
+ "solvent.ions.kcl_concentration": {
+  "alias": null,
+  "bounds": {
+   "ge": 0.0
+  },
+  "default": 0.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solvent.ions.mgcl2_concentration": {
+  "alias": null,
+  "bounds": {
+   "ge": 0.0
+  },
+  "default": 0.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solvent.ions.nacl_concentration": {
+  "alias": null,
+  "bounds": {
+   "ge": 0.0
+  },
+  "default": 0.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solvent.ions.neutralize": {
+  "alias": null,
+  "bounds": {},
+  "default": true,
+  "required": false,
+  "type": "<class 'bool'>",
+  "values": null
+ },
+ "solvent.water": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'polyzymd.config.schema.WaterConfig'>",
+  "values": null
+ },
+ "solvent.water.model": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<enum 'WaterModel'>",
+  "values": [
+   "opc",
+   "spce",
+   "tip3p",
+   "tip4p",
+   "tip4pew"
+  ]
+ },
+ "thermodynamics": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": true,
+  "type": "<class 'polyzymd.config.schema.ThermodynamicsConfig'>",
+  "values": null
+ },
+ "thermodynamics.pressure": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": 1.0,
+  "required": false,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "thermodynamics.temperature": {
+  "alias": null,
+  "bounds": {
+   "gt": 0.0
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'float'>",
+  "values": null
+ }
+}

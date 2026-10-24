@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1144 464" role="img" aria-labelledby="t d">
   <title id="t">System build pipeline</title>
-  <desc id="d">polyzymd build turns a cleaned PDB into an enzyme topology, adds the charged ligand, sizes the box from the solute, optionally packs polymers, solvates, parameterizes with OpenFF Interchange and exports an OpenMM bundle or GROMACS files, each with build_manifest.json.</desc>
+  <desc id="d">polyzymd build turns a cleaned PDB into an enzyme topology, adds the charged ligand, sizes the box from the solute, optionally packs polymers, solvates, parameterizes with OpenFF Interchange and exports an OpenMM bundle or GROMACS files, each audited and recorded in build_provenance.json.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
       <path d="M0,1 L10,5 L0,9 z" fill="#1f2933"/>
@@ -85,8 +85,8 @@
     <text x="616" y="390" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">exporters/gromacs.py</text>
 
     <rect x="912" y="268" width="192" height="80" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
-    <text x="928" y="298" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">build_manifest.json</text>
-    <text x="928" y="318" font-size="12" fill="#52606d">hashes, seeds, box</text>
+    <text x="928" y="298" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">build_provenance.json</text>
+    <text x="928" y="318" font-size="12" fill="#52606d">hashes, seeds, audit</text>
     <text x="928" y="336" font-size="12" fill="#52606d">written last</text>
 
     <!-- Row 2 arrows -->

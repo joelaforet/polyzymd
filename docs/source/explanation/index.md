@@ -67,6 +67,7 @@ analysis_hydrogen_bonds_verification
 :maxdepth: 1
 
 simulation_safeguards
+physics_audit
 residue_assignment
 gromacs_parallelism
 ```

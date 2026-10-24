@@ -81,12 +81,13 @@ Add it to a simple config:
 
 ```yaml
 solvent:
-  primary:
-    type: "water"
+  force_field: ["openff-2.3.0.offxml"]
+  water:
     model: "tip3p"
   co_solvents:
     - name: "formamide"
       mole_fraction: 0.05
+      charges: {method: preset}   # the charges in the generated SDF
 ```
 
 Then verify the build path:

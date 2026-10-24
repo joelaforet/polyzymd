@@ -378,7 +378,7 @@ class ProteinSolute(_Solute):
         if self.charges.method != "library":
             raise ValueError(
                 "a protein takes the library charges of its force field; use "
-                "charges: {method: library} or leave charges out"
+                "charges: {method: library}"
             )
         return self
 
@@ -2121,7 +2121,8 @@ class SimulationConfig(_ConfigModel):
             moves = "; ".join(f"{key} -> {cls.REMOVED_SECTIONS[key]}" for key in removed)
             raise ValueError(
                 f"this config uses the layout of PolyzyMD 1.3.0rc4 and earlier ({moves}). "
-                f"Rewrite it from the template (polyzymd init) or see {REWRITE_GUIDE}"
+                "Rewrite it from the template (polyzymd study add-condition LABEL --new "
+                f"writes one) or see {REWRITE_GUIDE}"
             )
         return data
 
@@ -2214,6 +2215,12 @@ class SimulationConfig(_ConfigModel):
                     "Name one of those, or leave component out to cover all of them."
                 )
         return self
+
+    @property
+    def nagl_model(self) -> str | None:
+        """The NAGL model the components charged with nagl name, or None when none is."""
+        models = sorted({c.model for c in self._charge_specs() if c.method == "nagl" and c.model})
+        return models[0] if models else None
 
     def _charge_specs(self) -> list[ChargeSpec]:
         return [solute.charges for solute in self.solutes] + [

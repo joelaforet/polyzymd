@@ -46,7 +46,7 @@ pixi install -e build
 ### `required key missing` or `required section missing`
 
 ```
-error: enzyme.pdb_path: required key missing
+error: solutes.0.pdb_path: required key missing
 error: thermodynamics: required section missing; expected a mapping with temperature and pressure
 fix: start from the complete commented config that polyzymd study add-condition LABEL --new writes in a study folder (polyzymd study init DIR makes one), and copy your values into it.
 ```
@@ -54,10 +54,21 @@ fix: start from the complete commented config that polyzymd study add-condition 
 A required key or a whole section is missing. Add it. For the required keys
 of each section, see {doc}`../reference/configuration`.
 
+### `this config uses the layout of PolyzyMD 1.3.0rc4 and earlier`
+
+```
+error: config: this config uses the layout of PolyzyMD 1.3.0rc4 and earlier (enzyme -> a solutes entry with type: protein). Rewrite it from the template (polyzymd study add-condition LABEL --new writes one) or see https://polyzymd.readthedocs.io/en/latest/how_to/rewrite_config_rc5.html
+```
+
+The config has an `enzyme:`, `substrate:`, `polymers:` or top-level
+`force_field:` section. PolyzyMD 1.3.0rc5 lists each solute as an entry of
+`solutes:`, with its own `force_field`. Rewrite the config as
+{doc}`rewrite_config_rc5` shows.
+
 ### An unknown key
 
 ```
-error: pdb: unknown key; did you mean enzyme.pdb_path?
+error: solutes.0.pdb: unknown key; did you mean solutes.0.pdb_path?
 ```
 
 Every section of the config refuses a key that it does not define. A
@@ -72,8 +83,9 @@ PolyzyMD reads a relative path in `config.yaml` relative to the folder of
 of the config. You can also give an absolute path:
 
 ```yaml
-enzyme:
-  pdb_path: "/full/path/to/enzyme.pdb"
+solutes:
+  - type: protein
+    pdb_path: "/full/path/to/enzyme.pdb"
 ```
 
 ### `yaml.scanner.ScannerError: mapping values are not allowed here`
@@ -106,13 +118,14 @@ co_solvents:
   - residue_name: "DMS"
 ```
 
-Correct (one item with three keys):
+Correct (one item with four keys):
 
 ```yaml
 co_solvents:
   - name: "dmso"
     mole_fraction: 0.1
     residue_name: "DMS"
+    charges: {method: preset}
 ```
 
 The same rule applies to every list, such as `co_solvents`, `monomers` and
@@ -124,9 +137,12 @@ The same rule applies to every list, such as `co_solvents`, `monomers` and
 
 1. Check that the SDF file has correct bond orders, formal charges and
    explicit hydrogens.
-2. Use `charge_method: nagl` ({term}`NAGL`). It needs no extra program.
-3. For a molecule that NAGL cannot charge, compute the charges outside
-   PolyzyMD and store them in the SDF file.
+2. Use `charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}`
+   ({term}`NAGL`). It needs no extra program.
+3. For a polymer that NAGL cannot charge, compute the charges outside
+   PolyzyMD, store them in the cached SDF files and use
+   `charges: {method: preset}`. A small molecule takes `nagl`, `am1bcc` or
+   `espaloma` only.
 
 The `am1bcc` method ({term}`AM1-BCC`) needs AmberTools, which the PolyzyMD
 environments do not include. Use it only in an environment where you
@@ -145,9 +161,10 @@ PACKMOL output. Do one or more of these steps:
        padding: 2.0    # default 1.2 nm
    ```
 
-2. Use fewer or shorter polymer chains (`polymers.count`, `polymers.length`).
-3. For polymer packing, raise `polymers.packing.nloop`, or set
-   `polymers.packing.movebadrandom: true`. See {doc}`polymers`.
+2. Use fewer or shorter polymer chains (`count` and `length` of the polymer
+   solute).
+3. For polymer packing, raise `packing.nloop` of the polymer solute, or set
+   its `packing.movebadrandom: true`. See {doc}`polymers`.
 
 Exit code 173 ("imperfect packing") is not an error. The build uses the best
 placement that PACKMOL found, and energy minimization removes the remaining
@@ -234,8 +251,9 @@ The GPU has no more memory. Make the system smaller:
 solvent:
   box:
     padding: 1.0    # a smaller box
-polymers:
-  count: 1          # fewer polymer chains
+solutes:
+  - type: polymer
+    count: 1        # fewer polymer chains
 ```
 
 ### `slurmstepd: error: Detected 1 oom_kill event`

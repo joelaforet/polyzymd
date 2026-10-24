@@ -57,7 +57,8 @@ scratch or in the projects directory) grows to:
 ├── solvated_system.pdb                # Viewer topology: names and coordinates (polyzymd build)
 ├── system.prmtop                      # Analysis topology: every atom and bond (polyzymd build)
 ├── system.xml                         # OpenMM System with restraints (polyzymd build)
-├── build_manifest.json                # Hashes, config hash, versions, PACKMOL seeds
+├── build_provenance.json              # What was built, from what, and its physics audit
+├── build_provenance.md                # The same record, to read
 ├── progress.json                      # Stage/segment records with runtime provenance
 ├── minimization/
 │   ├── minimized_state.xml
@@ -67,7 +68,8 @@ scratch or in the projects directory) grows to:
 ├── production_0/                      # First production segment
 │   ├── production_0_trajectory.dcd    # Trajectory
 │   ├── production_0_topology.pdb      # Topology snapshot
-│   └── production_0_parameters.json   # Parameters + "provenance" block
+│   ├── production_0_parameters.json   # Parameters + "provenance" block
+│   └── production_0_system_check.json # This segment's System compared with the audited build
 ├── production_1/                      # Daisy-chain continuation segment
 │   ├── production_1_trajectory.dcd
 │   └── production_1_topology.pdb
@@ -84,10 +86,10 @@ A GROMACS run writes a different set of files. The figure compares the two
 replicate folders.
 
 ```{figure} ../_static/diagrams/replicate_folders.svg
-:alt: Both engines write build_manifest.json, solvated_system.pdb and progress.json; GROMACS keeps solvated_system.pdb, its engine files and progress.json in gromacs/.
+:alt: Both engines write build_provenance.json, solvated_system.pdb and progress.json; GROMACS keeps solvated_system.pdb, its engine files and progress.json in gromacs/.
 :width: 100%
 
-The replicate folder after build and run. `build_manifest.json`,
+The replicate folder after build and run. `build_provenance.json`,
 `solvated_system.pdb` and `progress.json` exist for both engines. GROMACS
 keeps its engine files, `progress.json` and, for runs started by `submit`,
 `solvated_system.pdb` in `gromacs/`; `build --export gromacs` writes
@@ -112,12 +114,36 @@ never retired: the next job resumes from that portable state.
 
 | File | Key contents |
 |------|--------------|
-| `build_manifest.json` | SHA-256 of `solvated_system.pdb`, `system.xml` and `system.prmtop` when written, the config hash, `openmm_version`, `polyzymd_version`, and `provenance` (see below). `polyzymd submit` and the job refuse bundles whose config hash no longer matches `config.yaml`. The hash counts input files by their SHA-256 and leaves out the config's folder and output folders, so a copy of `config.yaml` in another folder matches. A bundle written with the earlier hash of absolute paths is still accepted |
-| `progress.json` | One record per equilibration stage and production segment with `polyzymd_version`, `openmm_version`, `pixi_environment` (null in files written by older versions). A production segment also records `openmm_platform`: the platform name and the property values its Context used, such as `DeterministicForces`. Each record holds `started_at`, `finished_at` and `seeds`, the random seeds it ran with: `integrator`, `barostat` and, when it drew new velocities, `velocities` (OpenMM; 0 means OpenMM chose one), or `ld_seed` and `gen_seed` (GROMACS; null means GROMACS chose a seed it did not log). An OpenMM equilibration stage that was interrupted and resumed holds the seeds of its last job in `seeds` and those of every job, oldest first, in `seeds_by_attempt`. A GROMACS record of a run that was killed or is still going ends at the last write of its log. A GROMACS run keeps its `progress.json` in `gromacs/` and its `build_manifest.json` (with `openmm_version` null) in the replicate folder. Rebuilt from a filesystem scan after a chain is cancelled and resubmitted; the segment provenance is then recovered from each `production_N_parameters.json` rather than lost. Published atomically (unique temporary file, fsync, rename) so a second writer cannot corrupt it |
+| `build_provenance.json` | The build record: versions, seeds, config hash, the SHA-256 of every file the engine reads, one record per component and the physics audit. `build_provenance.md` holds the same record as tables to read. See {ref}`build-record` below |
+| `progress.json` | One record per equilibration stage and production segment with `polyzymd_version`, `openmm_version`, `pixi_environment` (null in files written by older versions). A production segment also records `openmm_platform`: the platform name and the property values its Context used, such as `DeterministicForces`. Each record holds `started_at`, `finished_at` and `seeds`, the random seeds it ran with: `integrator`, `barostat` and, when it drew new velocities, `velocities` (OpenMM; 0 means OpenMM chose one), or `ld_seed` and `gen_seed` (GROMACS; null means GROMACS chose a seed it did not log). An OpenMM equilibration stage that was interrupted and resumed holds the seeds of its last job in `seeds` and those of every job, oldest first, in `seeds_by_attempt`. A GROMACS record of a run that was killed or is still going ends at the last write of its log. A production segment's record also holds `system_check`, the comparison of the System it ran with the audited build (see below). A GROMACS run keeps its `progress.json` in `gromacs/` and its `build_provenance.json` in the replicate folder. Rebuilt from a filesystem scan after a chain is cancelled and resubmitted; the segment provenance is then recovered from each `production_N_parameters.json` rather than lost. Published atomically (unique temporary file, fsync, rename) so a second writer cannot corrupt it |
 | `production_N/production_N_parameters.json` | Simulation parameters plus a top-level `provenance` block (`polyzymd_version`, `openmm_version`, `pixi_environment`, `hostname`, `slurm_job_id`, `openmm_platform`) of the process that ran the segment |
 | `minimization/phase.json` | Phase status, state path, `frozen_atoms` (the number of solute **heavy** atoms held fixed), `frozen_rmsd_angstrom` (0.0 when the solute was frozen), and `hydrogen_max_displacement_angstrom` (how far the furthest solute hydrogen moved onto its force-field constraint length; `null` for unfrozen minimization and for records written by older versions) |
 
-#### `build_manifest.json` provenance keys
+(build-record)=
+### The build record: `build_provenance.json`
+
+Every build writes `build_provenance.json` and `build_provenance.md` beside
+the files it built. The record answers three questions: what was built, from
+what, and did the built system pass the physics audit. It replaced
+`build_manifest.json`, which PolyzyMD still reads for runs built before
+1.3.0rc5. A record without an audit cannot vouch for new runs: `run` and
+`submit` refuse a replicate that has not started until it is rebuilt.
+
+| Key | Meaning |
+|-----|---------|
+| `schema_version` | 2 for records with an audit; 1 for `build_manifest.json` |
+| `engine` | `openmm` or `gromacs`: the engine these files are for |
+| `polyzymd_version`, `openmm_version`, `openff_toolkit_version`, `openff_interchange_version` | The software that built the system |
+| `build_uuid` | A unique ID of this build |
+| `config_hash` | SHA-256 of the config as built. `run` and `submit` refuse a build whose hash no longer matches `config.yaml`. The hash counts input files by their SHA-256 and leaves out the config's folder and output folders, so a copy of `config.yaml` in another folder matches |
+| `particle_count` | Number of atoms |
+| `artifacts` | Each file the engine reads (`system.xml`, `solvated_system.pdb`, `system.prmtop`; for GROMACS the `.top`, `.itp`, `.gro` and `.mdp` files), with its SHA-256. A file changed after the build is refused |
+| `components` | One record per component (each solute, `solvent`, `ions`): `name`, `type`, `segid`, `placement` (`fixed` or `packed`), `n_atoms`, `n_molecules`, the atom ranges of each molecule, and its `domains`. A domain is a set of atoms with one `force_field` list and one `charges` source (`method`, `model`, `source_file`), and the inputs it can be rebuilt from (`reference`). `provenance` holds each input file's path and SHA-256 |
+| `provenance` | Seeds and the box: see below |
+| `audit` | The physics audit: `passed`, `counts` per status, every `finding` (`check`, `component`, `status`, `detail`, and `examples` of the first terms that differ) and `accepted_exceptions` |
+| `cite` | References of the methods this build used beyond its force fields and charge models, such as Machado and Pantano when `ionic_strength` set the ions. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
+
+`provenance` keys:
 
 | Key | Meaning |
 |-----|---------|
@@ -126,13 +152,28 @@ never retired: the next job resumes from that portable state.
 | `solvent_packmol_seed` | Seed passed to the solvation PACKMOL run |
 | `box_vectors_nm` | The periodic cell as a 3x3 row-major matrix in nm |
 | `brick_nm` | Diagonal of the cell — the rectangular brick that PACKMOL fills, in nm |
-| `deterministic_box` | `true` when the cell was computed from the protein + substrate before packing (the default for polymer builds); `false` for solute-only builds |
+| `deterministic_box` | `true` when the cell was computed from the fixed solutes before packing (the default for polymer builds); `false` for solute-only builds |
 | `polymer_sphere_radius_nm` | Radius of the confinement sphere used for the chains (absent when `confine_to_sphere: false`) |
+| `nagl_model`, `nagl_model_sha256`, `openff_nagl_models` | The NAGL model file, its SHA-256 and the model package version, when a component is charged with `nagl` |
 
 Replicates of one condition must agree on `box_vectors_nm`, `brick_nm` and
 `polymer_sphere_radius_nm`, and therefore on their water and ion counts; they
-differ only in the seeds. Diffing two manifests is the quickest way to confirm
+differ only in the seeds. Diffing two records is the quickest way to confirm
 that.
+
+`audit.findings` lists one finding per check and component. `status` is
+`PASS`, `INFO` (recorded, not judged), `WARN` (reported; the build goes on),
+`FAIL` (the build stops) or `ACCEPTED` (a failure or warning the config
+accepts under `modeling_exceptions`; the finding then holds the `reason`, and
+`accepted_from` holds the status it would have had). {doc}`physics_checks` lists every check.
+
+Files written next to the record:
+
+| File | Written when | Meaning |
+|------|--------------|---------|
+| `build_provenance.failed.json`, `build_provenance.failed.md` | The audit of an OpenMM build fails | The full record of the failed build, to read. No `system.xml` is committed, so nothing can run from it. A failed GROMACS build keeps `build_provenance.json` with `audit.passed: false` and writes no `audited_files.sha256` |
+| `gromacs/audited_files.sha256` | A GROMACS build passes its audit | `sha256sum` lines for every file GROMACS reads. The local and SLURM GROMACS job scripts run `sha256sum --check` on it before `grompp` and stop if a file changed. A run that started before 1.3.0rc5 has none and continues from its own files |
+| `production_N/production_N_system_check.json` | Each OpenMM production segment starts | `compared` (whether a passing build record vouched for `system.xml`), `matches_build`, and the terms that differ. A segment whose System differs from the audited build is logged as an error and shown by `polyzymd status` as `SYSTEM DIVERGED FROM THE AUDITED BUILD`. The run goes on |
 
 When loading multi-segment trajectories, the analysis loader verifies that the
 segments form one contiguous, evenly spaced time line and raises
@@ -157,8 +198,8 @@ how per-replicate directories are named.
 
 | Placeholder | Source | Example Value |
 |---|---|---|
-| `{enzyme}` | `enzyme.name` | `LipA` |
-| `{substrate}` | `substrate.name` (hyphens removed), or `apo` if null | `ResorufinButyrate` |
+| `{enzyme}` | `name` of the protein solute | `LipA` |
+| `{substrate}` | `name` of the small-molecule solute (hyphens removed), or `apo` without one | `ResorufinButyrate` |
 | `{polymer_type}` | Derived from polymer config, or `none` if disabled | `SBMA-EGPMA_A70_B30` |
 | `{temperature}` | `thermodynamics.temperature` (integer) | `300` |
 | `{replicate}` | Replicate number (1-indexed) | `1` |
@@ -305,10 +346,10 @@ directory and referenced from `config.yaml`.
 
 | File | Format | Config Field | Requirements |
 |---|---|---|---|
-| Protein structure | PDB (`.pdb`) | `enzyme.pdb_path` | Standard residue names, protonated at simulation pH, no missing heavy atoms in regions of interest |
-| Substrate | SDF (`.sdf`) | `substrate.sdf_path` | 3D coordinates with docked pose, explicit hydrogens preferred. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
-| Polymer (if pre-built) | SDF (`.sdf`) | `polymers.sdf_directory` | One SDF per chain, or use dynamic generation from SMILES |
-| Reaction templates | RXN or `"default"` | `polymers.reactions.*` | The string `"default"` loads bundled ATRP templates; a file path loads a custom template |
+| Protein structure | PDB (`.pdb`) | `pdb_path` of the protein solute | Standard residue names, protonated at simulation pH, no missing heavy atoms in regions of interest |
+| Substrate | SDF (`.sdf`) | `sdf_path` of the small-molecule solute | 3D coordinates with docked pose, explicit hydrogens preferred. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
+| Polymer (if pre-built) | SDF (`.sdf`) | `sdf_directory` of the polymer solute | One SDF per chain, or use dynamic generation from SMILES |
+| Reaction templates | RXN or `"default"` | `reactions.*` of the polymer solute | The string `"default"` loads bundled ATRP templates; a file path loads a custom template |
 
 ```{note}
 The sentinel value `"default"` for reaction templates is **not** a file path.
@@ -367,7 +408,7 @@ topology and trajectory files of each replicate.
 
 ```{warning}
 **Path resolution is config-relative, not CWD-relative.**
-Relative paths in `config.yaml` (e.g., `enzyme.pdb_path: "structures/enzyme.pdb"`)
+Relative paths in `config.yaml` (e.g., `pdb_path: "structures/enzyme.pdb"` of the protein solute)
 are resolved relative to the directory containing `config.yaml`, not your
 shell's current working directory. Relative `-c` paths of `polyzymd analyze`
 are resolved from the current directory.
@@ -379,7 +420,7 @@ are resolved from the current directory.
   `config.yaml` must match where the trajectory files actually reside.
 
 - **The `"default"` sentinel for reactions.** Setting
-  `polymers.reactions.initiation: "default"` tells PolyzyMD to use a bundled
+  `reactions.initiation: "default"` on a polymer solute tells PolyzyMD to use a bundled
   reaction template. Writing `"structures/default"` or any path containing
   `"default"` will fail because no such file exists.
 

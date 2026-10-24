@@ -296,3 +296,89 @@ def test_the_gromacs_job_refuses_files_no_audit_vouched_for() -> None:
     check = template.index("sha256sum --check --quiet audited_files.sha256")
     assert check < template.index("$GMX grompp")
     assert "no passing physics audit vouches for these files" in template
+
+
+def _hash_check_block(template_name: str) -> str:
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "src/polyzymd/engines/gromacs/templates"
+        / template_name
+    ).read_text()
+    start = text.index("# Run only files a passing physics audit vouched for")
+    end = text.index("\nfi\n", start) + len("\nfi\n")
+    return text[start:end]
+
+
+def test_both_gromacs_scripts_check_the_audited_files_the_same_way() -> None:
+    assert _hash_check_block("run_gromacs.sh.jinja") == _hash_check_block(
+        "slurm_self_resubmitting.sh.jinja"
+    )
+
+
+@pytest.mark.parametrize(
+    "case, runs",
+    [
+        ("not started, no hashes", False),
+        ("started before rc.5", True),
+        ("edited after the audit", False),
+        ("as audited", True),
+    ],
+)
+def test_the_gromacs_hash_check_refuses_unvouched_files_but_not_old_runs(
+    tmp_path, case, runs
+) -> None:
+    import subprocess
+
+    (tmp_path / "prod.mdp").write_text("dt = 0.002\n")
+    if case == "started before rc.5":
+        (tmp_path / "em.gro").write_text("")
+    if case in ("edited after the audit", "as audited"):
+        subprocess.run(
+            "sha256sum prod.mdp > audited_files.sha256", shell=True, cwd=tmp_path, check=True
+        )
+    if case == "edited after the audit":
+        (tmp_path / "prod.mdp").write_text("dt = 0.004\n")
+    script = _hash_check_block("run_gromacs.sh.jinja") + "echo RAN\n"
+    result = subprocess.run(["bash", "-c", script], cwd=tmp_path, capture_output=True, text=True)
+    assert ("RAN" in result.stdout) is runs, result.stdout + result.stderr
+
+
+def test_a_config_without_nagl_names_no_nagl_model() -> None:
+    from polyzymd.config.loader import load_config
+
+    root = Path(__file__).resolve().parents[2]
+    assert load_config(root / "examples/quickstart/config.yaml").nagl_model is None
+    with_nagl = load_config(root / "tests/config/data/rc5_configs/enzyme_cosolvent.yaml")
+    models = {
+        c.charges.model for c in with_nagl.solvent.co_solvents if c.charges.method == "nagl"
+    } | {s.charges.model for s in with_nagl.solutes if s.charges.method == "nagl"}
+    assert with_nagl.nagl_model == (models.pop() if models else None)
+
+
+def test_a_build_prints_its_audit_in_a_fixed_order_with_its_record(tmp_path, capsys) -> None:
+    from polyzymd.cli.main import _echo_audit
+
+    (tmp_path / MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "audit": {
+                    "passed": True,
+                    "counts": {"INFO": 2, "PASS": 25, "WARN": 1},
+                    "findings": [
+                        {
+                            "check": "geometry.buried_water",
+                            "component": "protein",
+                            "status": "WARN",
+                            "detail": "3 buried waters",
+                        }
+                    ],
+                }
+            }
+        )
+    )
+    _echo_audit(tmp_path, phase="build")
+    shown = capsys.readouterr()
+    text = shown.out + shown.err
+    assert "Physics audit: PASSED (25 pass, 1 warn, 2 info)" in text
+    assert "WARN geometry.buried_water (protein): 3 buried waters" in text
+    assert "build_provenance.md" in text

@@ -1,0 +1,152 @@
+# ============================================================================
+# PolyzyMD Configuration: Enzyme + Co-solvent Simulation
+# ============================================================================
+# Enzyme simulation with mixed solvent (water + DMSO)
+# Useful for studying solvent effects on enzyme activity
+# ============================================================================
+
+name: "LipA_ResorufinButyrate_DMSO10mol"
+engine: "openmm"
+description: "LipA enzyme with Resorufin-Butyrate in 10 mol% DMSO co-solvent"
+solutes:
+
+  # ============================================================================
+  # Enzyme Configuration
+  # ============================================================================
+  - type: protein
+    name: "LipA"
+    pdb_path: "structures/LipA_prepared.pdb"
+    description: "Bacillus subtilis Lipase A"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+
+  # ============================================================================
+  # Substrate Configuration
+  # ============================================================================
+  - type: small_molecule
+    name: "Resorufin-Butyrate"
+    sdf_path: "structures/resorufin_butyrate_docked.sdf"
+    conformer_index: 0
+    residue_name: "RBY"
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+
+# ============================================================================
+# Solvent Configuration with Co-solvent
+# ============================================================================
+solvent:
+  force_field: ["openff-2.3.0.offxml"]
+  water:
+    model: "tip3p"
+  
+  # Co-solvent specification
+  co_solvents:
+    - name: "dmso"
+      smiles: "CS(=O)C"  # DMSO SMILES
+      mole_fraction: 0.10  # 10 mol% DMSO
+      residue_name: "DMS"
+      charges: {method: preset}  # the charges PolyzyMD ships for DMSO
+  
+  ions:
+    neutralize: true
+    nacl_concentration: 0.1  # 100 mM of NaCl pairs; neutralizing ions are added on top
+  
+  box:
+    padding: 2.0  # nm padding (2.0 recommended for PACKMOL convergence)
+    shape: "rhombic_dodecahedron"
+    target_density: 1.05  # Adjusted for DMSO mixture
+    tolerance: 2.0
+
+# ============================================================================
+# Restraints
+# ============================================================================
+restraints:
+  - type: "flat_bottom"
+    name: "substrate_active_site"
+    atom1:
+      component: "LipA"
+      selection: "resid 77 and name OG"
+      description: "Catalytic serine"
+    atom2:
+      component: "Resorufin-Butyrate"
+      selection: "name C1"
+      description: "Substrate reactive carbon"
+    distance: 3.3
+    force_constant: 10000.0
+    enabled: true
+
+# ============================================================================
+# Thermodynamics
+# ============================================================================
+thermodynamics:
+  temperature: 298.0  # 25°C (common for DMSO solutions)
+  pressure: 1.0
+
+# ============================================================================
+# Simulation Phases
+# ============================================================================
+simulation_phases:
+  equilibration_stages:
+    - name: "heating"
+      samples: 20
+      ensemble: "NVT"
+      temperature_start: 60.0
+      temperature_end: 298.0
+      temperature_increment: 1.0
+      temperature_interval_steps: 600  # increase temperature by `temperature_increment` every this many steps
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+        - group: "ligand_heavy"
+          force_constant: 4184.0
+    - name: "solvent_relaxation"
+      duration: 0.3
+      samples: 30
+      ensemble: "NVT"
+      temperature: 298.0
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+    - name: "free_equilibration"
+      duration: 0.5  # Longer equilibration for co-solvent
+      samples: 50
+      ensemble: "NPT"
+      temperature: 298.0
+  
+  production:
+    ensemble: "NPT"
+    duration: 50.0  # 50 ns production
+    samples: 1250
+    checkpoint_interval: 60.0
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0
+    barostat: "MC"
+    barostat_frequency: 25
+  
+# ============================================================================
+# Output Configuration
+# ============================================================================
+# HPC systems often separate long-term storage (projects) from high-performance
+# scratch storage. Configure both directories here, or use CLI overrides.
+#
+# Memory requirements:
+#   - Co-solvent systems may need slightly more memory due to additional molecules
+#   - Default 3G is usually sufficient, increase with: polyzymd submit --memory 4G
+#
+output:
+  # Long-term storage: scripts, logs, configs (survives job completion)
+  # Example: /projects/$USER/polyzymd or just "." for local development
+  projects_directory: "."
+  
+  # High-performance scratch: trajectories, checkpoints (may be purged)
+  # Example: /scratch/alpine/$USER/simulations
+  # If not set, defaults to projects_directory (good for local testing)
+  scratch_directory: null
+  
+  # Subdirectory organization within projects_directory
+  job_scripts_subdir: "job_scripts"
+  slurm_logs_subdir: "slurm_logs"
+  
+  # Naming template for run directories
+  naming_template: "{enzyme}_{substrate}_DMSO10_{temperature}K_run{replicate}"

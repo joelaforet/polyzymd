@@ -120,6 +120,12 @@ def _check_cached_polymer_sdfs(warnings: list[str], polymers: Any, sdf_directory
 NAGL_ELEMENTS = frozenset({"H", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I"})
 
 
+def _key(config: Any, solute: Any, field: str) -> str:
+    """The config key of ``field`` on ``solute``, as the loader names it (``solutes.0.pdb_path``)."""
+    index = next(i for i, entry in enumerate(config.solutes) if entry is solute)
+    return f"solutes.{index}.{field}"
+
+
 def require_inputs(config: Any) -> None:
     """Raise ``ValueError`` when an input of a new build is missing or cannot be used.
 
@@ -131,11 +137,14 @@ def require_inputs(config: Any) -> None:
     """
     pdb = Path(config.enzyme.pdb_path)
     if not pdb.is_file():
-        raise ValueError(f"enzyme PDB {pdb} does not exist.\nfix: correct enzyme.pdb_path.")
+        raise ValueError(
+            f"protein PDB {pdb} does not exist.\n"
+            f"fix: correct {_key(config, config.enzyme, 'pdb_path')}."
+        )
     with open(pdb, errors="replace") as stream:
         if not any(line.startswith(("ATOM", "HETATM")) for line in stream):
             raise ValueError(
-                f"enzyme PDB {pdb} has no ATOM or HETATM records.\n"
+                f"protein PDB {pdb} has no ATOM or HETATM records.\n"
                 "fix: give a PDB file of the prepared protein (polyzymd clean-pdb writes one)."
             )
 
@@ -146,12 +155,13 @@ def require_inputs(config: Any) -> None:
         sdf = Path(substrate.sdf_path)
         if not sdf.is_file():
             raise ValueError(
-                f"substrate SDF {sdf} does not exist.\nfix: correct substrate.sdf_path."
+                f"small-molecule SDF {sdf} does not exist.\n"
+                f"fix: correct {_key(config, substrate, 'sdf_path')}."
             )
         molecules = list(Chem.SDMolSupplier(str(sdf), removeHs=False))
         if substrate.conformer_index >= len(molecules):
             raise ValueError(
-                f"substrate SDF {sdf} holds {len(molecules)} conformer(s), so conformer_index "
+                f"small-molecule SDF {sdf} holds {len(molecules)} conformer(s), so conformer_index "
                 f"{substrate.conformer_index} does not exist.\n"
                 f"fix: set conformer_index between 0 and {max(len(molecules) - 1, 0)}."
             )
@@ -161,7 +171,7 @@ def require_inputs(config: Any) -> None:
                 f"RDKit cannot read conformer {substrate.conformer_index} of {sdf}.\n"
                 "fix: write the SDF again from your docking or drawing program."
             )
-        _require_chargeable(molecule, substrate.charge_method, f"substrate {substrate.name!r}")
+        _require_chargeable(molecule, substrate.charge_method, f"solute {substrate.name!r}")
 
     from polyzymd.data.solvent_molecules import is_bundled_solvent, split_counter_ions
 
@@ -193,7 +203,8 @@ def require_inputs(config: Any) -> None:
         if not initiation.is_file():
             raise ValueError(
                 f"polymer initiation reaction {initiation} does not exist.\n"
-                "fix: correct polymers.reactions.initiation, or set it to default."
+                f"fix: correct {_key(config, polymers, 'reactions.initiation')}, or set it to "
+                "default."
             )
         reaction = AllChem.ReactionFromRxnFile(str(initiation))
         templates = [
@@ -233,8 +244,8 @@ def require_inputs(config: Any) -> None:
 
     from polyzymd.utils.charging import installed_nagl_model
 
-    nagl_model = config.force_field.nagl_model
-    if installed_nagl_model(nagl_model) is None:
+    nagl_model = getattr(config, "nagl_model", None)
+    if nagl_model is not None and installed_nagl_model(nagl_model) is None:
         from openff.nagl_models import list_available_nagl_models
 
         installed = ", ".join(sorted(path.name for path in list_available_nagl_models()))
@@ -292,6 +303,6 @@ def _require_chargeable(molecule: Any, method: Any, what: str) -> None:
 
         if importlib.util.find_spec("espaloma_charge") is None:
             raise ValueError(
-                f"{what}: charge_method espaloma needs the espaloma-charge package, which is not "
+                f"{what}: charges method espaloma needs the espaloma-charge package, which is not "
                 "installed in this environment.\nfix: use charges: {method: nagl}."
             )

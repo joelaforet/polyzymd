@@ -3,7 +3,7 @@
 Build polymer chains from monomer SMILES with `generation_mode: "dynamic"`.
 In this mode you do not need an SDF file for each sequence. PolyzyMD builds
 each chain with Polymerist and ATRP (atom-transfer radical polymerization)
-reaction templates, and assigns partial charges with the method in `charger`.
+reaction templates, and assigns partial charges with the method in `charges`.
 
 For the keys that both modes share, such as `monomers`, `length`, `count` and
 `packing`, see {doc}`polymers`.
@@ -27,33 +27,35 @@ Alternatively, prefix each command with `pixi run -e build`.
 | `cached` | You have checked SDF files for each sequence and want to use exactly those structures. |
 | `dynamic` | You have only the monomer SMILES, or you test a new monomer. |
 
-## Write the `polymers:` section
+## Write the polymer entry
 
 ```yaml
-polymers:
-  enabled: true
-  generation_mode: "dynamic"
-  type_prefix: "SBMA-EGPMA"
-  reactions:
-    initiation: "default"
-    polymerization: "default"
-    termination: "default"
-  monomers:
-    - label: "A"
-      probability: 0.7
-      name: "SBMA"
-      residue_name: "SBM"
-      smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
-    - label: "B"
-      probability: 0.3
-      name: "EGPMA"
-      residue_name: "EGM"
-      smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
-  length: 5
-  count: 2
-  charger: "nagl"
-  max_retries: 10
-  cache_directory: ".polymer_cache"
+solutes:
+  # ... the protein entry ...
+  - type: polymer
+    generation_mode: "dynamic"
+    type_prefix: "SBMA-EGPMA"
+    reactions:
+      initiation: "default"
+      polymerization: "default"
+      termination: "default"
+    monomers:
+      - label: "A"
+        probability: 0.7
+        name: "SBMA"
+        residue_name: "SBM"
+        smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
+      - label: "B"
+        probability: 0.3
+        name: "EGPMA"
+        residue_name: "EGM"
+        smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
+    length: 5
+    count: 2
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+    max_retries: 10
+    cache_directory: ".polymer_cache"
 ```
 
 `dynamic` mode adds these keys and rules:
@@ -64,13 +66,14 @@ polymers:
 | `name` | The monomer name. Dynamic mode uses it to name the fragments, such as `SBMA_1-site` and `SBMA_2-site`, so give one for every monomer. `polyzymd validate` does not check this; the build stops instead. |
 | `residue_name` | The 3-character residue name of the monomer in the topology. Optional. If you leave it out, PolyzyMD makes one from `name`. |
 | `reactions` | The three ATRP reaction templates. `"default"` selects the templates that ship with PolyzyMD. You can also give the path of your own `.rxn` file. |
-| `charger` | The partial-charge method for the chains: `nagl` (default), `am1bcc` or `espaloma`. |
+| `charges` | The partial-charge method for the chains: `{method: nagl, model: ...}`, `{method: am1bcc}` or `{method: espaloma}`. `preset` is for `cached` mode only. |
 | `max_retries` | The number of attempts to build a chain without a ring piercing (default 10). |
 | `cache_directory` | The folder for the generated fragments and chains (default `.polymer_cache`). |
 | `length` | Must be 3 or more. Polymerist needs at least one middle monomer. |
 
-Use `charger: nagl`. {term}`NAGL` predicts {term}`AM1-BCC` charges and needs
-no extra program. The `am1bcc` method needs AmberTools, and `espaloma` needs
+{term}`NAGL` predicts {term}`AM1-BCC` charges and needs no extra program.
+Its `model` is required, such as `openff-gnn-am1bcc-1.0.0.pt`, the model
+Sage 2.3.0 names. The `am1bcc` method needs AmberTools, and `espaloma` needs
 espaloma-charge. The PolyzyMD environments include neither.
 
 For every other key of the config, see {doc}`../reference/configuration`.
@@ -124,12 +127,13 @@ For each chain, the build does these steps:
    structure, so the same sequence always gives the same coordinates.
 4. It checks that no bond passes through a ring. If one does, it builds the
    chain again, up to `max_retries` times.
-5. It assigns partial charges with `charger`.
+5. It assigns partial charges with the method in `charges`.
 6. It saves the charged chain as
    `<type_prefix>_seq=<sequence>_<length>-mer_charged.sdf` in
    `cache_directory`, with a `.metadata.json` file beside it. This is the name
    that `cached` mode reads, so a later config can set
-   `generation_mode: cached` and `sdf_directory` to this folder.
+   `generation_mode: cached`, `sdf_directory` to this folder and
+   `charges: {method: preset}`.
 
 The next build with the same monomers loads the fragments and chains from
 `cache_directory`. It generates a chain again if the metadata does not match
