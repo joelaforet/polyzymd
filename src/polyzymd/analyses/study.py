@@ -428,6 +428,34 @@ class Condition:
                 found = [index for index in found if index not in self.not_run]
             else:
                 self.not_run = []
+        #: Replicates whose production has not reached its configured total, by
+        #: index, with how far it got; their frames are read (OpenMM) or left out
+        #: (GROMACS, see ``unfinished``).
+        self.incomplete: dict[int, str] = {}
+        #: GROMACS replicates left out because their production did not finish.
+        self.unfinished: dict[int, str] = {}
+        for index in found:
+            share = _production_share(self.config, folders[index], index)
+            if share is None:
+                continue
+            engine_name, text = share
+            if engine_name == "gromacs" and replicates is None and len(found) > 1:
+                # Its raw prod.xtc ends wherever mdrun stopped and was never
+                # post-processed, as an unfinished OpenMM segment is.
+                self.unfinished[index] = f"{text}; its trajectory is not read"
+            else:
+                self.incomplete[index] = text
+        if self.unfinished and len(self.unfinished) < len(found):
+            LOGGER.warning(
+                "Condition %r: replicate %s left out: production did not finish (%s).",
+                label,
+                ", ".join(str(i) for i in self.unfinished),
+                "; ".join(self.unfinished.values()),
+            )
+            found = [index for index in found if index not in self.unfinished]
+        else:
+            self.incomplete.update(self.unfinished)
+            self.unfinished = {}
         chosen = found if replicates is None else sorted({int(index) for index in replicates})
         missing = sorted(set(chosen) - set(found))
         if not chosen or missing:
@@ -447,6 +475,41 @@ class Condition:
 
     def __repr__(self) -> str:
         return f"Condition(label={self.label!r}, replicates={[r.index for r in self.replicates]})"
+
+
+def _production_share(config: Any, folder: Path, index: int) -> tuple[str, str] | None:
+    """Return the engine and how much of its production a replicate has run, if not all.
+
+    Read from the run's own record (``progress.json``, or a scan of its files)
+    without writing anything. ``None`` when production is complete, when the
+    replicate was run with the user's own protocol, or when the record cannot
+    be read.
+    """
+    from polyzymd.simulation.own_protocol import protocol_dir
+
+    if protocol_dir(folder) is not None:
+        return None
+    try:
+        from polyzymd.engines import create_engine
+
+        engine = create_engine(config, defer_binary=True)
+        working_dir = engine.resolve_engine_working_directory(Path(folder))
+        # Judge only a run that keeps a record: progress.json, or for GROMACS
+        # its production log. Files copied without one say nothing about it.
+        if not (working_dir / "progress.json").is_file() and not (
+            engine.name == "gromacs" and (working_dir / "prod.log").is_file()
+        ):
+            return None
+        progress = engine.load_or_scan_progress(working_dir, index)
+    except Exception:  # noqa: BLE001 - a record that cannot be read is not a verdict
+        return None
+    total = progress.total_steps_requested
+    if not total or progress.total_steps_completed >= total:
+        return None
+    done_ns = progress.total_steps_completed * progress.timestep_fs / 1e6
+    total_ns = total * progress.timestep_fs / 1e6
+    share = 100.0 * progress.total_steps_completed / total
+    return engine.name, f"{share:.0f}% of production ({done_ns:.4g} of {total_ns:.4g} ns)"
 
 
 def _has_production(folder: Path) -> bool:

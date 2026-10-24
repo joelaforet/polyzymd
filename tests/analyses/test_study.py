@@ -137,3 +137,55 @@ def test_replicates_left_out_reach_the_report(tmp_path: Path) -> None:
     text = report.to_agent_text()
     assert "status partial" in text
     assert "problem: condition A: replicate 3 left out" in text
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_a_replicate_short_of_its_production_makes_the_report_partial(tmp_path: Path) -> None:
+    """Its frames so far are read, and the report says how far it got."""
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.protocols import analyze
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.progress import (
+        SegmentRecord,
+        SegmentStatus,
+        SimulationProgress,
+        save_progress,
+    )
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+
+    config = write_simulation_config(tmp_path / "cond", scratch=tmp_path / "scratch")
+    for replicate in (1, 2, 3):
+        write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(10)])
+    sim = SimulationConfig.from_yaml(config)
+    total = int(
+        sim.simulation_phases.production.duration * 1e6 / sim.simulation_phases.production.time_step
+    )
+    run_dir = sim.get_working_directory(3)
+    (run_dir / "production_0" / "INTERRUPTED").write_text(
+        f"segment_index=0\nsteps_completed={int(total * 0.63)}\ntotal_steps={total}\n"
+    )
+    save_progress(
+        run_dir,
+        SimulationProgress(
+            total_steps_requested=total,
+            timestep_fs=sim.simulation_phases.production.time_step,
+            segments=[
+                SegmentRecord(
+                    index=0, status=SegmentStatus.INTERRUPTED, steps_completed=int(total * 0.63)
+                )
+            ],
+        ),
+    )
+    report = analyze(
+        "rg",
+        [config],
+        labels=["A"],
+        equilibration="0ns",
+        settings={"selection": "all"},
+        output_dir=tmp_path / "out",
+        plots=False,
+        eq_check=False,
+    )
+    assert report.status == "partial"
+    assert report.conditions[0].n_replicates == 3
+    assert any("replicate 3 has run 63% of production" in p for p in report.problems)

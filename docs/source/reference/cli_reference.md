@@ -325,11 +325,11 @@ A replicate whose production has started is not run from its start again:
   production duration and samples. Otherwise `run` refuses: restore the
   config, or run the changed config in a new output directory.
 - GROMACS: a complete replicate prints `already complete; nothing to do`. A
-  started production that is not complete is refused, since the local
-  workflow cannot continue it. The message gives `polyzymd submit` and the
-  `gmx mdrun -cpi` command that continue it from its checkpoint. A run that
-  stopped before production runs again from minimization, after the same
-  audit checks as a new run. A build made before PolyzyMD 1.3.0rc5 has no
+  started production continues from `prod.cpt` with
+  `gmx mdrun -cpi prod.cpt -append`, after the same audit checks as a new
+  run. Without a checkpoint it is refused, and the message says how to run
+  production again. A run that stopped before production runs again from
+  minimization, after the same audit checks as a new run. A build made before PolyzyMD 1.3.0rc5 has no
   audit record, so it must be built again.
 
 A replicate that has no usable build stops before it writes anything when the

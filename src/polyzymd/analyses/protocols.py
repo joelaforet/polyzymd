@@ -448,16 +448,34 @@ def _record_not_run(report: ProtocolReport, study: Any) -> None:
     """
     for condition in study:
         not_run = getattr(condition, "not_run", None) or []
-        if not not_run:
-            continue
-        report.excluded_replicates[condition.label] = {
-            str(index): NOT_RUN_REASON for index in not_run
-        }
-        report.problems.append(
-            f"condition {condition.label}: replicate {', '.join(str(i) for i in not_run)} "
-            f"left out: {NOT_RUN_REASON}"
-        )
-        report.status = "partial"
+        unfinished = getattr(condition, "unfinished", None) or {}
+        incomplete = getattr(condition, "incomplete", None) or {}
+        if not_run or unfinished:
+            report.excluded_replicates[condition.label] = {
+                **{str(index): NOT_RUN_REASON for index in not_run},
+                **{
+                    str(index): f"production unfinished: {text}"
+                    for index, text in unfinished.items()
+                },
+            }
+        for index in not_run:
+            report.problems.append(
+                f"condition {condition.label}: replicate {index} left out: {NOT_RUN_REASON}"
+            )
+        for index, text in unfinished.items():
+            report.problems.append(
+                f"condition {condition.label}: replicate {index} left out: production "
+                f"unfinished, {text}"
+            )
+        used = {replicate.index for replicate in getattr(condition, "replicates", [])}
+        for index, text in incomplete.items():
+            if index in used:
+                report.problems.append(
+                    f"condition {condition.label}: replicate {index} has run {text}; its "
+                    "frames so far are read"
+                )
+        if not_run or unfinished or any(index in used for index in incomplete):
+            report.status = "partial"
 
 
 def _require_known(name: str) -> None:
