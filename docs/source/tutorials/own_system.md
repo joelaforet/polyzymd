@@ -94,7 +94,7 @@ explain its keys. Change these fields:
 | `name` of the protein under `solutes:` | The name of the protein. It is part of the run folder names |
 | `pdb_path` of the protein | The PDB file, relative to the config: `structures/trpcage.pdb` |
 | `thermodynamics.temperature` | The temperature in K. Also change the temperatures of the equilibration stages |
-| `simulation_phases.production.duration` | The production length in ns. The template has 100 ns |
+| `simulation_phases.production.duration` | The production length in ns. The template has 100 ns. Its equilibration takes about 1.8 ns; for a test run, shorten it as the comment above `equilibration_stages` says |
 | `output.scratch_directory` | On a cluster, your scratch storage. Leave it `null` to write the runs into `runs/` |
 | `openmm.platform` | `CUDA` for an NVIDIA GPU, as `polyzymd submit` needs. A laptop or workstation with an NVIDIA GPU also uses `CUDA`: see {ref}`the local GPU recipe <local-nvidia-gpu>`. `CPU` only for a machine without one |
 
