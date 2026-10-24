@@ -41,8 +41,23 @@ def _label(quantity: str, unit: str | None) -> str:
     return f"{text} ({'Å' if unit == 'A' else unit})" if unit else text
 
 
+def _bounds_text(bounds: Any) -> str | None:
+    """Say where intervals stop for a metric with bounds, or None without bounds."""
+    low, high = (list(bounds or (None, None)) + [None, None])[:2]
+    if low is None and high is None:
+        return None
+    if low is not None and high is not None:
+        return f"intervals are clipped to the metric's range {low:g} to {high:g}"
+    return f"intervals are clipped at {low if low is not None else high:g}, a bound of the metric"
+
+
 def _footnote(
-    fig: Any, replicates: set[int], equilibration: str | None, window: str, **wording: str
+    fig: Any,
+    replicates: set[int],
+    equilibration: str | None,
+    window: str,
+    bounds: Any = (None, None),
+    **wording: str,
 ) -> None:
     """Footnote what the interval is and its n, or say that no interval is drawn.
 
@@ -58,6 +73,9 @@ def _footnote(
         return
     if min(replicates) < 3:
         wording["points"] += "; a condition with fewer than three replicates has no interval"
+    clipped = _bounds_text(bounds)
+    if clipped:
+        wording["points"] += f"; {clipped}"
     n = next(iter(replicates)) if len(replicates) == 1 else None
     add_uncertainty_footnote(fig, n_replicates=n, equilibration=equilibration, **wording)
 
@@ -173,6 +191,7 @@ def plot_timeseries(
         counts,
         equilibration,
         f"production window t >= {equilibration}",
+        bounds=source.bounds,
         drawn="Band",
         of="the condition mean at each time",
         counts="n per condition in the legend",
@@ -436,6 +455,7 @@ def plot_condition_values(
         {len(entry) for entry in data},
         equilibration,
         f"production window t >= {equilibration}",
+        bounds=(0.0, 1.0) if values.is_fraction else getattr(values, "bounds", (None, None)),
         of="the condition mean",
         counts="n per condition under each bar",
         points="Bars: condition means; points: per-replicate values",
@@ -519,6 +539,7 @@ def plot_profile(
         counts,
         equilibration,
         f"production window t >= {equilibration}",
+        bounds=getattr(values, "bounds", (None, None)),
         drawn="Band",
         of=f"the condition mean at each {xlabel.lower()}",
         counts="n per condition in the legend",

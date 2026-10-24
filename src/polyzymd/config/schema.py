@@ -1593,7 +1593,6 @@ def expand_path(path: Path) -> Path:
     Returns:
         Path with variables expanded
     """
-    import os
 
     expanded = os.path.expandvars(str(path))
     expanded = os.path.expanduser(expanded)
@@ -1721,12 +1720,11 @@ class OutputConfig(_ConfigModel):
     def effective_scratch_directory(self) -> Path:
         """Get the effective scratch directory (falls back to projects if not set).
 
-        ``..`` parts are collapsed (``conditions/water/../../../runs`` becomes
-        ``runs``), so printed and recorded paths are readable; the config
-        keeps the value as written.
+        The path is used as written: ``..`` parts are not collapsed as text,
+        because behind a symlinked folder the operating system resolves them
+        to another place. Printed paths are shortened where they are printed.
         """
-        directory = self.scratch_directory if self.scratch_directory else self.projects_directory
-        return Path(os.path.normpath(directory)) if directory else directory
+        return self.scratch_directory if self.scratch_directory else self.projects_directory
 
     def format_directory_name(
         self,
@@ -1798,7 +1796,7 @@ class OutputConfig(_ConfigModel):
         Returns:
             Path to job scripts directory (within projects)
         """
-        return Path(os.path.normpath(self.projects_directory / self.job_scripts_subdir))
+        return self.projects_directory / self.job_scripts_subdir
 
     def get_slurm_logs_directory(self) -> Path:
         """Get the directory for SLURM log files.
@@ -1806,7 +1804,7 @@ class OutputConfig(_ConfigModel):
         Returns:
             Path to SLURM logs directory (within projects)
         """
-        return Path(os.path.normpath(self.projects_directory / self.slurm_logs_subdir))
+        return self.projects_directory / self.slurm_logs_subdir
 
 
 # =============================================================================

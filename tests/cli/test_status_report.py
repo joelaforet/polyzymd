@@ -913,8 +913,10 @@ def test_a_local_run_stopped_by_a_signal_gets_the_local_resume_command(tmp_path:
     assert (rep.verdict, rep.action) == ("interrupted", "continue")
     assert "INTERRUPTED" in render_agent([report], now=NOW)
     text = render_agent([report], now=NOW, preset_hint="p")
-    assert "polyzymd run -c c.yaml -r 1" in text.splitlines()
-    assert not any(line.startswith("polyzymd submit") for line in text.splitlines())
+    lines = text.splitlines()
+    # The workstation command, and the cluster one in case its SLURM logs were purged.
+    assert "polyzymd run -c c.yaml -r 1" in lines
+    assert "polyzymd submit -c c.yaml -r 1 --preset p" in lines
 
 
 def test_a_failed_local_run_shows_its_error(tmp_path: Path):

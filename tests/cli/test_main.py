@@ -3082,13 +3082,34 @@ class TestGromacsRunStartedReplicate:
     ) -> None:
         from polyzymd.cli.main import _run_gromacs_impl
 
-        self._gromacs_dir(tmp_path, "em.gro", "prod.xtc", "prod.cpt")
+        self._gromacs_dir(
+            tmp_path, "em.gro", "prod.xtc", "prod.cpt", "prod_nojump.xtc", "prod_centered.xtc"
+        )
         self._progress(monkeypatch, 2000)
 
         _run_gromacs_impl(TestRunReusesBuild._config(tmp_path), replicate=1, gmx_path="gmx")
 
         gromacs_runner.assert_not_called()
         assert "Replicate 1 is already complete" in capsys.readouterr().out
+
+    @patch("polyzymd.exporters.gromacs.GromacsRunner")
+    @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
+    def test_a_complete_replicate_missing_its_postprocessing_gets_it_again(
+        self, _prefix, gromacs_runner, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        """A stop during trjconv leaves no post-processed file; the next run writes them."""
+        from polyzymd.cli.main import _run_gromacs_impl
+
+        self._gromacs_dir(tmp_path, "em.gro", "prod.xtc", "prod.cpt")
+        gates = self._progress(monkeypatch, 2000)
+        monkeypatch.setattr("polyzymd.cli.main._save_gromacs_progress", lambda *a: None)
+
+        _run_gromacs_impl(TestRunReusesBuild._config(tmp_path), replicate=1, gmx_path="gmx")
+
+        gromacs_runner.return_value.run_postprocessing.assert_called_once()
+        gromacs_runner.return_value.run_full_workflow.assert_not_called()
+        assert gates == []
+        assert "writing them again" in capsys.readouterr().out
 
     @patch("polyzymd.exporters.gromacs.GromacsRunner")
     @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
@@ -3367,3 +3388,21 @@ class TestRefusedRunWritesNothing:
         assert "run-segment" not in str(raised.value)
         assert (run_dir / "progress.json").read_text() == before
         run_segment.assert_not_called()
+
+
+class TestGromacsStopMessages:
+    def test_each_stage_says_what_a_stop_left(self, tmp_path):
+        from polyzymd.cli.main import _gromacs_stop_outcome
+
+        assert (
+            "no checkpoint"
+            in _gromacs_stop_outcome("Running production MD (mdrun)", tmp_path).lower()
+        )
+        (tmp_path / "prod.cpt").write_text("")
+        assert "latest checkpoint" in _gromacs_stop_outcome(
+            "Running production MD (mdrun)", tmp_path
+        )
+        assert "post-processed" in _gromacs_stop_outcome("Removing PBC jumps (trjconv)", tmp_path)
+        assert "starts them again" in _gromacs_stop_outcome(
+            "Running energy minimization (mdrun)", tmp_path
+        )

@@ -156,3 +156,10 @@ def test_the_audit_fails_a_band_saved_without_a_footnote(tmp_path) -> None:
     with pytest.raises(AssertionError, match="without a footnote"):
         plotting.save_figure(fig, tmp_path / "bare.png", PlotSettings())
     plt.close(fig)
+
+
+def test_a_bounded_metric_says_its_intervals_are_clipped(tmp_path, saved) -> None:
+    """An RMSD-like metric bounded below by 0 says so in the footnote."""
+    values = replicate_values(PER_CONDITION, series_bounds=(0.0, None))
+    values.plot(tmp_path, name="bounded")
+    assert "intervals are clipped at 0, a bound of the metric" in _note(saved["bounded"])

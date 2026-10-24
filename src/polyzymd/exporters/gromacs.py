@@ -2417,6 +2417,23 @@ class GromacsError(Exception):
         super().__init__(f"GROMACS command failed: {command} (exit code {returncode})")
 
 
+def postprocessing_needed(working_dir: Path) -> bool:
+    """Whether a finished ``prod.xtc`` lacks its post-processed trajectories.
+
+    True when ``prod_nojump.xtc`` or ``prod_centered.xtc`` is missing or
+    older than ``prod.xtc``, as after a stop during post-processing.
+    """
+    production = Path(working_dir) / "prod.xtc"
+    if not production.is_file():
+        return False
+    written = production.stat().st_mtime
+    for name in ("prod_nojump.xtc", "prod_centered.xtc"):
+        path = Path(working_dir) / name
+        if not path.is_file() or path.stat().st_mtime < written:
+            return True
+    return False
+
+
 class GromacsInterrupted(Exception):
     """Raised when a signal stopped a local GROMACS step after mdrun shut down cleanly.
 
@@ -2631,7 +2648,7 @@ class GromacsRunner:
                         pass
 
             if threading.current_thread() is threading.main_thread():
-                for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGUSR1):
+                for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGUSR1, signal.SIGHUP):
                     previous[signum] = signal.signal(signum, forward)
 
             # If we have stdin input, write it and close
@@ -2831,8 +2848,17 @@ class GromacsRunner:
                 message="Production MD failed: prod.xtc not produced",
             )
 
+    def run_postprocessing(self) -> None:
+        """Write ``prod_nojump.xtc`` and ``prod_centered.xtc`` from a finished ``prod.xtc``."""
+        self._run_postprocessing()
+
     def _run_postprocessing(self) -> None:
-        """Run trajectory post-processing with trjconv."""
+        """Run trajectory post-processing with trjconv.
+
+        Each file is written under a temporary name and renamed when trjconv
+        succeeds, so a stop part-way never leaves a truncated trajectory under
+        the name analysis reads.
+        """
         self._print_banner("Step 4: Trajectory Post-processing")
 
         logger.info("Removing periodic boundary jumps and centering trajectory...")
@@ -2848,13 +2874,14 @@ class GromacsRunner:
                 "-f",
                 "prod.xtc",
                 "-o",
-                "prod_nojump.xtc",
+                "prod_nojump.part.xtc",
                 "-pbc",
                 "nojump",
             ],
             "Removing PBC jumps (trjconv)",
             stdin_input="System\n",
         )
+        (self._working_dir / "prod_nojump.part.xtc").replace(self._working_dir / "prod_nojump.xtc")
 
         # Step 2: Center on protein and make molecules whole
         # echo -e "Protein\nSystem" | gmx trjconv -s prod.tpr -f prod_nojump.xtc -o prod_centered.xtc -center -pbc mol -ur compact
@@ -2867,7 +2894,7 @@ class GromacsRunner:
                 "-f",
                 "prod_nojump.xtc",
                 "-o",
-                "prod_centered.xtc",
+                "prod_centered.part.xtc",
                 "-center",
                 "-pbc",
                 "mol",
@@ -2876,6 +2903,9 @@ class GromacsRunner:
             ],
             "Centering trajectory (trjconv)",
             stdin_input="Protein\nSystem\n",
+        )
+        (self._working_dir / "prod_centered.part.xtc").replace(
+            self._working_dir / "prod_centered.xtc"
         )
 
     def _print_banner(self, title: str, subtitle: str = "") -> None:

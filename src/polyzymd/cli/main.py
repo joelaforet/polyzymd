@@ -53,9 +53,14 @@ def _shown(path: object) -> str:
     """Return ``path`` without ``..`` parts, for printing.
 
     The config keeps its output paths as written (``../../runs/...``), so
-    its hash does not change; only the printed path is shortened.
+    its hash does not change; only the printed path is shortened. The path
+    is resolved as the operating system resolves it, so a folder reached
+    through a symlink is printed where it really is.
     """
-    return os.path.normpath(str(path))
+    try:
+        return str(Path(str(path)).resolve())
+    except (OSError, RuntimeError):
+        return os.path.normpath(str(path))
 
 
 def _refuse_own_protocol(working_dir: Path, action: str) -> None:
@@ -1400,15 +1405,25 @@ def _run_gromacs_impl(
             sim_config, working_dir, replicate, config_path
         )
         if production_state == "complete":
-            return
-        # Only files a passing audit vouches for, unchanged since, may run.
-        require_audited_build(
-            working_dir,
-            sim_config,
-            "gromacs",
-            config_path=config_path or None,
-            replicate=replicate,
-        )
+            from polyzymd.exporters.gromacs import postprocessing_needed
+
+            if not postprocessing_needed(gromacs_dir):
+                return
+            colored_echo(
+                "Its post-processed trajectories (prod_nojump.xtc, prod_centered.xtc) are "
+                "missing or older than prod.xtc; writing them again.",
+                phase="export",
+            )
+            production_state = "postprocess"
+        if production_state != "postprocess":
+            # Only files a passing audit vouches for, unchanged since, may run.
+            require_audited_build(
+                working_dir,
+                sim_config,
+                "gromacs",
+                config_path=config_path or None,
+                replicate=replicate,
+            )
         colored_echo(f"Reusing the GROMACS files in {_shown(gromacs_dir)}", phase="export")
         eq_mdp_names = sorted(path.name for path in gromacs_dir.glob("eq_*.mdp"))
     else:
@@ -1504,15 +1519,20 @@ def _run_gromacs_impl(
         try:
             if production_state == "continue":
                 runner.continue_production()
+            elif production_state == "postprocess":
+                runner.run_postprocessing()
             else:
                 runner.run_full_workflow()
         except GromacsInterrupted as stop:
             _save_gromacs_progress(sim_config, gromacs_dir, replicate, config_path, run_start)
-            colored_echo(
-                f"\n{stop.description} was stopped by signal {stop.signal_number}; mdrun "
-                "wrote its checkpoint. Continue it with: "
+            command = (
                 f"polyzymd run -c {_shown(Path(config_path)) if config_path else '<config.yaml>'}"
-                f" -r {replicate}",
+                f" -r {replicate}"
+            )
+            colored_echo(
+                f"\n{stop.description} was stopped by signal {stop.signal_number}. "
+                f"{_gromacs_stop_outcome(stop.description, gromacs_dir)} Run again with: "
+                f"{command}",
                 err=True,
                 level=logging.WARNING,
             )
@@ -1608,6 +1628,20 @@ def _gromacs_production_state(
         f"equilibration, move the prod.* files of {_shown(gromacs_dir)} into another "
         "folder (keep prod.mdp), then run the same command again."
     )
+
+
+def _gromacs_stop_outcome(description: str, gromacs_dir: Path) -> str:
+    """Say what a signal stop of one GROMACS step left, and what the next run does."""
+    if "production" in description.lower():
+        if (gromacs_dir / "prod.cpt").is_file():
+            return "prod.cpt holds its latest checkpoint; the next run continues from it."
+        return (
+            "No checkpoint (prod.cpt) was found, so production cannot continue; the next "
+            "run says how to start it again."
+        )
+    if "trjconv" in description:
+        return "The next run writes the post-processed trajectories again."
+    return "Minimization and equilibration have no checkpoint; the next run starts them again."
 
 
 def _save_gromacs_progress(

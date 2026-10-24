@@ -1040,11 +1040,13 @@ def render_agent(
     if local:
         lines.append("")
         lines.append(
-            "# interrupted runs (stopped by a signal outside SLURM, state saved) — continue "
-            "each on the machine that ran it with:"
+            "# interrupted runs (stopped by a signal, state saved, no SLURM log) — continue "
+            "each with the first command on a workstation, or the second on a cluster:"
         )
+        preset = f" --preset {preset_hint}" if preset_hint else " --preset <preset>"
         for cfg, replicate in local:
             lines.append(f"polyzymd run -c {cfg} -r {replicate}")
+            lines.append(f"polyzymd submit -c {cfg} -r {replicate}{preset}")
     if inspect:
         lines.append("")
         lines.append("# dead chains that need a look before restarting:")

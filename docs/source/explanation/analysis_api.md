@@ -117,6 +117,12 @@ n = 5 replicates; production window t >= 10ns." When the conditions have
 different numbers of replicates, the footnote says that n is given per
 condition.
 
+A condition with fewer than three replicates gets no error bar or band. For a
+metric with a bound, such as an RMSD (at least 0) or a fraction (0 to 1), a
+drawn interval is clipped to that range, and the footnote says so: a t
+interval is symmetric, so near a bound it reaches values the metric cannot
+take.
+
 A distribution figure draws a Gaussian kernel density estimate of the frame
 values. Near a finite bound of the series, PolyzyMD corrects the estimate by
 reflection (Schuster 1985; Silverman 1986, section 2.10). So the curve stays
