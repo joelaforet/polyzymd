@@ -7,7 +7,6 @@ GROMACS paths, and reads both back as realized systems.
 
 from __future__ import annotations
 
-import shutil
 import sys
 from pathlib import Path
 
@@ -49,8 +48,7 @@ def engines(built):
     )
     pdb = folder / "build" / "solvated_system.pdb"
     openmm_side = RealizedSystem.from_openmm(xml, pdb, timestep_fs=2.0)
-    if shutil.which("gmx") is None and not Path.home().joinpath(".pixi/bin/gmx").exists():
-        pytest.skip("GROMACS is not installed")
+    # Exporting and reading GROMACS files needs no GROMACS binary, so this runs in CI.
     files = GromacsExporter(interchange, config, builder.get_component_info()).export(
         folder / "gromacs"
     )

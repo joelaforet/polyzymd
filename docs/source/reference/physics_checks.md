@@ -31,6 +31,7 @@ This page is generated from PolyzyMD's check registry
 | `composition.polymer_mass_fraction` | the system (polymer) | INFO | the polymer weight fraction of polymer plus solvent the build reached |
 | `composition.polymer_sequences` | the system (polymer) | INFO | the polymer sequences used, and the monomer fractions they reach |
 | `constraints.hbonds` | the system | FAIL | a bond to hydrogen left flexible at a time step that needs it constrained, or a step above 2 fs without hydrogen mass repartitioning |
+| `engine.realized` | the system | FAIL | GROMACS run parameters (.mdp) other than the config's: integrator, thermostat, time step, length, temperature or annealing, pressure coupling, bond constraints, velocity generation or position-restraint switches |
 | `geometry.buried_water` | the system (protein) | WARN | water buried inside the protein (may be deliberate, as a crystal water) |
 | `geometry.image_bridging` | the system (polymer) | FAIL | a polymer chain touching both the protein and the protein's periodic image |
 | `geometry.interchain_overlap` | the system | WARN | polymer chains clashing with each other (usually resolved by minimization; a sign of a forced Packmol result) |
