@@ -12,7 +12,11 @@ also extend a run yourself with `gmx convert-tpr -extend` and
 
 ## Change the config
 
-1. Open the replicate's `config.yaml`.
+The config belongs to the condition, not to one replicate. Raising its
+length makes every replicate of the condition, and every replicate you run
+later, run to the new length.
+
+1. Open the condition's `config.yaml`.
 2. Look at `output.naming_template`. The default,
    `{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}`,
    puts the production length in the replicate's folder name. A new
@@ -41,16 +45,30 @@ pixi run -e sim-cuda-12-6 polyzymd run -c config.yaml -r 1
 runs a new segment from the end of the last one to the new total. Any other
 change to the config is refused.
 
+To preview what the run would do, add `--dry-run`. It says, per replicate,
+whether it would continue from step N to M, is complete, or would be refused
+and why. `polyzymd status` shows a replicate that finished its old length as
+`EXTENDABLE`.
+
 ## Continue on a SLURM cluster
 
 Submit the replicate again:
 
 ```bash
-polyzymd submit -c config.yaml -r 1 --preset <preset>
+polyzymd submit -c config.yaml -r 1 --preset <preset> --pixi-env sim-cuda-12-4
 ```
 
 Each job continues from the last segment and resubmits itself until the new
-total is reached.
+total is reached. `submit` skips complete replicates, and refuses one whose
+next segment would change the frame spacing. `submit --dry-run` says what
+each replicate's chain would do.
+
+A replicate started on a workstation can continue on a cluster, and the other
+way round. Copy its whole folder to the place the config's
+`scratch_directory` names there. Each segment continues from the last
+segment's portable state file (`production_N_state.xml`, or
+`interrupted_state.xml`), which any OpenMM version reads. Only a segment that
+left nothing but a binary checkpoint needs the same OpenMM build.
 
 On a cluster, `submit` does not compare a started replicate with its build.
 Each new segment takes its thermostat, friction and barostat from the
@@ -81,3 +99,9 @@ study file.
 
 - Changing the temperature, the ensemble or another setting part-way is not
   supported. To study such a change, run it as a new condition.
+- Starting a new condition from the final state of a finished replicate is
+  not supported yet. Build and equilibrate the new condition from its own
+  config instead (`polyzymd study add-condition NAME --from <condition>`).
+  To start from that state anyway, run your own protocol outside PolyzyMD
+  on the finished replicate's `production_N_state.xml`, and analyse the
+  result as {doc}`own_protocol` describes.

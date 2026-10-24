@@ -630,3 +630,59 @@ class TestSubmitNeedsABuild:
         submitter = DaisyChainSubmitter(sim_config=sim_config, dc_config=dc_config)
         with pytest.raises(RuntimeError, match="ml slurm/blanca"):
             submitter._submit_job(script_path=script_path, replicate=1)
+
+
+class TestReplicateChainState:
+    """`submit` says per replicate what its chain would do, and skips complete ones."""
+
+    @staticmethod
+    def _config(tmp_path, duration=0.004, samples=4):
+        from types import SimpleNamespace
+
+        production = SimpleNamespace(duration=duration, samples=samples, time_step=2.0)
+        return SimpleNamespace(
+            simulation_phases=SimpleNamespace(production=production),
+            get_working_directory=lambda replicate: tmp_path / f"run_{replicate}",
+        )
+
+    @staticmethod
+    def _write(tmp_path, steps, total=2000):
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            save_progress,
+        )
+
+        run_dir = tmp_path / "run_1"
+        save_progress(
+            run_dir,
+            SimulationProgress(
+                total_steps_requested=total,
+                total_samples_requested=4,
+                segments=[
+                    SegmentRecord(
+                        index=0,
+                        status=SegmentStatus.COMPLETED,
+                        steps_completed=steps,
+                        report_interval=500,
+                    )
+                ],
+            ),
+        )
+        (run_dir / "production_0").mkdir()
+        (run_dir / "production_0" / "production_0_state.xml").write_text("<State/>")
+
+    def test_states(self, tmp_path):
+        from polyzymd.workflow.daisy_chain import replicate_chain_state
+
+        assert replicate_chain_state(self._config(tmp_path), 1)[0] == "start"
+        self._write(tmp_path, 2000)
+        assert replicate_chain_state(self._config(tmp_path), 1) == (
+            "complete",
+            "complete (0.004 ns); skipped",
+        )
+        state, text = replicate_chain_state(self._config(tmp_path, 0.008, 8), 1)
+        assert (state, text) == ("continue", "continue from step 2000 to 4000")
+        state, text = replicate_chain_state(self._config(tmp_path, 0.008, 4), 1)
+        assert state == "refused" and "samples: 8" in text

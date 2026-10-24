@@ -183,6 +183,16 @@ in `gromacs/`) out of the replicate folder. It is then a built replicate that
 has not started, and `polyzymd run` or `submit` runs it with PolyzyMD's
 protocol.
 
+## Start from the end of a finished replicate
+
+PolyzyMD cannot yet start a new condition from the final state of a finished
+replicate, for example to heat it after 1 µs at 300 K. To do it anyway, build
+the new condition's replicate as above, put your protocol in its `protocol/`
+folder, and start that protocol from the finished replicate's last
+`production_N_state.xml`. Analysis then reads it as a run with your own
+protocol. To keep PolyzyMD's own runs, build and equilibrate the new
+condition from its own config instead.
+
 ## Related pages
 
 - {doc}`../explanation/physics_audit` — what the build audit checks

@@ -2404,6 +2404,14 @@ def submit(
                 Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
             )
             colored_echo(f"  Script dir:  {script_dir}", phase="workflow")
+            from polyzymd.workflow.daisy_chain import replicate_chain_state
+
+            for rep in replicate_list:
+                try:
+                    _, text = replicate_chain_state(sim_config, rep)
+                except Exception as exc:  # noqa: BLE001 - a preview line, never fatal
+                    text = f"state unknown ({exc})"
+                colored_echo(f"  Rep {rep}:       {' '.join(text.split())}", phase="workflow")
             slurm = SlurmConfig.from_preset(preset)
             for key, value in (
                 ("time_limit", time_limit),
