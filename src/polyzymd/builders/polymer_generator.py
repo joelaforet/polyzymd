@@ -3,7 +3,10 @@
 A monomer is given as its repeat unit, with ``*`` on the two atoms that bond to
 the neighbouring repeat units (``[*]CC([*])(C)C(=O)OC`` for methyl
 methacrylate). The first ``*`` points to the head of the chain and the second
-to its tail. A cap (end group) has one ``*`` (``[*][H]``, ``[*]C``).
+to its tail. A cap (end group) has one ``*`` (``[*][H]``, ``[*]C``, or a whole
+monomer that kept its double bond, ``[*]C=C(C)C(=O)OC``). Each end draws its
+cap from its own options, so a chain's sequence is its head cap's label, the
+labels of its repeat units, and its tail cap's label (``HAABH``).
 
 For each sequence the generator:
 
@@ -187,18 +190,36 @@ class MonomerUnit:
     unit: StarSitedUnit
 
 
+@dataclass(frozen=True)
+class CapUnit:
+    """A configured cap: its label, optional name and residue name, and its unit.
+
+    A cap with a ``residue_name`` is a residue of its own; without one, its
+    atoms join the residue of the repeat unit it caps.
+    """
+
+    label: str
+    name: str | None
+    residue_name: str | None
+    unit: StarSitedUnit
+
+
 def assemble_chain(
     sequence: str,
     monomers: dict[str, MonomerUnit],
     head: StarSitedUnit,
     tail: StarSitedUnit,
+    head_residue: bool = False,
+    tail_residue: bool = False,
 ) -> tuple[Any, list[int]]:
     """Return the RDKit molecule of a capped chain and each atom's residue number.
 
-    Atoms are ordered residue by residue: the head cap and the first repeat
-    unit form residue 1, each further repeat unit its own residue, and the tail
-    cap joins the last one. Bond orders and formal charges are those of the
-    SMILES; each bond between units replaces the two site hydrogens.
+    ``sequence`` holds the labels of the repeat units only. Atoms are ordered
+    residue by residue. Each repeat unit is one residue. The head cap is
+    residue 1 when ``head_residue`` is true, otherwise its atoms join the first
+    repeat unit's residue; likewise the tail cap and the last repeat unit.
+    Bond orders and formal charges are those of the SMILES; each bond between
+    units replaces the two site hydrogens.
     """
     from rdkit import Chem
 
@@ -222,14 +243,15 @@ def assemble_chain(
                 chain.AddBond(index[a], index[b], bond.GetBondType())
         return index
 
+    offset = 1 if head_residue else 0
     head_index = add_unit(head, 1)
     previous_tail = head_index[head.anchors[0]]
     for position, label in enumerate(sequence, start=1):
         unit = monomers[label].unit
-        index = add_unit(unit, position)
+        index = add_unit(unit, position + offset)
         chain.AddBond(previous_tail, index[unit.anchors[0]], Chem.BondType.SINGLE)
         previous_tail = index[unit.anchors[1]]
-    tail_index = add_unit(tail, len(sequence))
+    tail_index = add_unit(tail, len(sequence) + offset + (1 if tail_residue else 0))
     chain.AddBond(previous_tail, tail_index[tail.anchors[0]], Chem.BondType.SINGLE)
 
     mol = chain.GetMol()
@@ -556,8 +578,8 @@ class PolymerGenerator:
     ----------
     monomers : dict[str, MonomerUnit]
         The configured monomers by sequence label.
-    end_groups : dict[str, StarSitedUnit]
-        The ``head`` and ``tail`` caps.
+    end_groups : dict[str, dict[str, CapUnit]]
+        The cap options of the ``head`` and of the ``tail``, by label.
     cache_directory : Path
         Directory of the charged SDFs and their metadata sidecars.
     force_field : sequence of str
@@ -576,7 +598,7 @@ class PolymerGenerator:
     def __init__(
         self,
         monomers: dict[str, MonomerUnit],
-        end_groups: dict[str, StarSitedUnit],
+        end_groups: dict[str, dict[str, CapUnit]],
         cache_directory: Path,
         force_field: Sequence[str],
         max_retries: int = 10,
@@ -601,11 +623,16 @@ class PolymerGenerator:
     def from_smiles(
         cls,
         monomers: Sequence[tuple[str, str, str, str]],
-        head: str,
-        tail: str,
+        head: Sequence[dict[str, Any]],
+        tail: Sequence[dict[str, Any]],
         **kwargs: Any,
     ) -> "PolymerGenerator":
-        """Create a generator from (label, name, residue_name, smiles) and cap SMILES."""
+        """Create a generator from monomers and the cap options of each end.
+
+        ``monomers`` holds (label, name, residue_name, smiles) tuples; ``head``
+        and ``tail`` hold cap options as mappings with ``label``, ``smiles``
+        and optionally ``name`` and ``residue_name`` (as in the config).
+        """
         units = {
             label: MonomerUnit(
                 label, name, residue_name, parse_star_smiles(smiles, 2, f"monomer {label!r}")
@@ -613,10 +640,48 @@ class PolymerGenerator:
             for label, name, residue_name, smiles in monomers
         }
         caps = {
-            "head": parse_star_smiles(head, 1, "end_groups.head"),
-            "tail": parse_star_smiles(tail, 1, "end_groups.tail"),
+            end: {
+                option["label"]: CapUnit(
+                    option["label"],
+                    option.get("name"),
+                    option.get("residue_name"),
+                    parse_star_smiles(option["smiles"], 1, f"end_groups.{end} {option['label']!r}"),
+                )
+                for option in options
+            }
+            for end, options in (("head", head), ("tail", tail))
         }
         return cls(units, caps, **kwargs)
+
+    def split(self, sequence: str) -> tuple[CapUnit, str, CapUnit]:
+        """Return the head cap, the repeat-unit labels and the tail cap of ``sequence``.
+
+        Raises
+        ------
+        PolymerGenerationError
+            If the sequence is too short or names a cap or monomer label that
+            the config does not have.
+        """
+        if len(sequence) < 3:
+            raise PolymerGenerationError(
+                f"sequence {sequence!r} needs a head cap, at least one repeat unit and a tail cap."
+            )
+        head, middle, tail = sequence[0], sequence[1:-1], sequence[-1]
+        problems = []
+        if head not in self.end_groups["head"]:
+            problems.append(f"head cap {head!r}")
+        if tail not in self.end_groups["tail"]:
+            problems.append(f"tail cap {tail!r}")
+        unknown = sorted(set(middle) - set(self.monomers))
+        if unknown:
+            problems.append(f"monomers {unknown}")
+        if problems:
+            raise PolymerGenerationError(
+                f"sequence {sequence!r} uses labels the config does not have: "
+                + ", ".join(problems)
+                + "."
+            )
+        return self.end_groups["head"][head], middle, self.end_groups["tail"][tail]
 
     # -- files ---------------------------------------------------------------
 
@@ -633,6 +698,7 @@ class PolymerGenerator:
     def cache_metadata(self, sequence: str) -> dict[str, Any]:
         """Return what a cached chain of ``sequence`` must have been built from."""
         builder = mbuild_provenance()
+        head, middle, tail = self.split(sequence)
         return {
             "schema_version": DYNAMIC_CACHE_SCHEMA_VERSION,
             "sequence": sequence,
@@ -643,9 +709,17 @@ class PolymerGenerator:
                     "smiles": monomer.unit.smiles,
                 }
                 for label, monomer in sorted(self.monomers.items())
-                if label in sequence
+                if label in middle
             },
-            "end_groups": {end: cap.smiles for end, cap in sorted(self.end_groups.items())},
+            "end_groups": {
+                end: {
+                    "label": cap.label,
+                    "name": cap.name,
+                    "residue_name": cap.residue_name,
+                    "smiles": cap.unit.smiles,
+                }
+                for end, cap in (("head", head), ("tail", tail))
+            },
             "charger_type": self.charger_type,
             "nagl_model": self.nagl_model,
             "relaxation_force_field": self.force_field,
@@ -698,14 +772,18 @@ class PolymerGenerator:
         from openff.toolkit import Molecule
         from openff.units import unit
 
-        unknown = sorted(set(sequence) - set(self.monomers))
-        if unknown:
-            raise PolymerGenerationError(
-                f"sequence {sequence!r} uses labels {unknown} that no monomer has."
-            )
+        head_cap, middle, tail_cap = self.split(sequence)
         require_mbuild_polymer()
-        head, tail = self.end_groups["head"], self.end_groups["tail"]
-        chain, residues = assemble_chain(sequence, self.monomers, head, tail)
+        head, tail = head_cap.unit, tail_cap.unit
+        chain, residues = assemble_chain(
+            middle,
+            self.monomers,
+            head,
+            tail,
+            head_residue=bool(head_cap.residue_name),
+            tail_residue=bool(tail_cap.residue_name),
+        )
+        names = self._residue_labels(head_cap, middle, tail_cap)
 
         problems = []
         base_seed = zlib.crc32(sequence.encode("utf-8")) % (2**31 - 1)
@@ -714,7 +792,7 @@ class PolymerGenerator:
             state = np.random.get_state()
             np.random.seed(seed)
             try:
-                elements, bonds, xyz = _mbuild_chain(sequence, self.monomers, head, tail, seed)
+                elements, bonds, xyz = _mbuild_chain(middle, self.monomers, head, tail, seed)
             finally:
                 np.random.set_state(state)
             coordinates = _map_coordinates(chain, elements, bonds, xyz)
@@ -723,7 +801,7 @@ class PolymerGenerator:
                 chain, allow_undefined_stereo=True, hydrogens_are_explicit=True
             )
             molecule._conformers = [unit.Quantity(coordinates, unit.angstrom)]
-            self._label_residues(molecule, sequence, residues)
+            self._label_residues(molecule, names, residues)
             molecule = self._charger().charge_molecule(molecule)
             relax_in_vacuum(molecule, self.force_field)
 
@@ -744,17 +822,31 @@ class PolymerGenerator:
             "SMILES in the notebook."
         )
 
-    def _label_residues(self, molecule: "OFFMolecule", sequence: str, residues: list[int]) -> None:
+    def _residue_labels(self, head: CapUnit, middle: str, tail: CapUnit) -> list[tuple[str, str]]:
+        """Return the (residue_name, name) of each residue of a chain, in order."""
+        names = []
+        if head.residue_name:
+            names.append((head.residue_name, head.name or head.label))
+        names += [
+            (self.monomers[label].residue_name, self.monomers[label].name) for label in middle
+        ]
+        if tail.residue_name:
+            names.append((tail.residue_name, tail.name or tail.label))
+        return names
+
+    def _label_residues(
+        self, molecule: "OFFMolecule", names: list[tuple[str, str]], residues: list[int]
+    ) -> None:
         """Give each atom the residue metadata the rest of PolyzyMD reads from SDFs."""
         for atom, residue in zip(molecule.atoms, residues):
-            monomer = self.monomers[sequence[residue - 1]]
+            residue_name, name = names[residue - 1]
             atom.metadata.update(
                 {
-                    "residue_name": monomer.residue_name,
+                    "residue_name": residue_name,
                     "residue_number": residue,
                     "insertion_code": " ",
                     "chain_id": "1",
-                    "extended_name": monomer.name,
+                    "extended_name": name,
                 }
             )
 

@@ -155,13 +155,15 @@ The entry is one item of `solutes:`; all its keys are indented under the `-`.
 ### Dynamic Generation Configuration
 
 To build chains from monomer SMILES (without pre-built SDF files), give each
-monomer as its repeat unit with `*` on the two linking atoms, and the two caps
-with one `*` each:
+monomer as its repeat unit with `*` on the two linking atoms, and the caps
+each chain end can get, with one `*` each and their probabilities. This
+example builds the chemistry of the Paper 1 chains: each end is a whole monomer
+that kept its C=C double bond:
 
 ```yaml
   - type: polymer
     generation_mode: "dynamic"               # Enable dynamic generation
-    type_prefix: "SBMA-EGPMA"
+    type_prefix: "SBMA-EGMA"
     monomers:
       - label: "A"
         probability: 0.7
@@ -170,13 +172,17 @@ with one `*` each:
         residue_name: "SBM"                  # Optional 3-letter residue name
       - label: "B"
         probability: 0.3
-        name: "EGPMA"
-        smiles: "[*]CC([*])(C)C(=O)OCCOc1ccccc1"
-        residue_name: "EGP"
-    end_groups:                              # Required: caps, one '*' each
-      head: "[*][H]"
-      tail: "[*][H]"
-    length: 5
+        name: "EGMA"
+        smiles: "[*]CC([*])(C)C(=O)OCCOCCOCCOCCOC"
+        residue_name: "EGM"
+    end_groups:                              # Required: caps of each end, drawn per chain
+      head:                                  # (each end's probabilities sum to 1)
+        - {label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 0.7}
+        - {label: "B", name: "EGMA", residue_name: "EGM", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", probability: 0.3}
+      tail:
+        - {label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 0.7}
+        - {label: "B", name: "EGMA", residue_name: "EGM", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", probability: 0.3}
+    length: 5                                # Monomers per chain, the two ends included
     count: 2
     force_field: ["openff-2.3.0.offxml"]
     charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}   # or am1bcc, espaloma
@@ -191,11 +197,11 @@ with one `*` each:
 | `generation_mode` | string | No | "cached" | `cached` or `dynamic` |
 | `type_prefix` | string | Yes | - | Identifier for polymer type |
 | `monomers` | list | Yes | - | Monomer specifications |
-| `length` | int | Yes | - | Chain length (number of monomers) |
+| `length` | int | Yes | - | Chain length (number of monomers; in dynamic mode the two ends included, at least 3) |
 | `count` | int | Yes | - | Number of chains to add |
 | `sdf_directory` | path | In cached mode | null | Directory with pre-built polymer SDFs |
 | `cache_directory` | path | No | ".polymer_cache" | Cache directory |
-| `end_groups` | object | In dynamic mode | - | `head` and `tail` caps, each SMILES with one `*` |
+| `end_groups` | object | In dynamic mode | - | `head` and `tail`: lists of caps (`label`, `smiles` with one `*`, `probability`, optional `name` and `residue_name`); each end's probabilities sum to 1 |
 | `force_field` | list | Yes | - | Force field files; the same file as `solvent.force_field` |
 | `charges` | object | Yes | - | `preset` in cached mode (the charges in the SDFs); `nagl` (with `model`), `am1bcc` or `espaloma` in dynamic mode |
 | `max_retries` | int | No | 10 | Builds tried before a chain with a pierced ring or overlapping atoms is refused (dynamic mode) |

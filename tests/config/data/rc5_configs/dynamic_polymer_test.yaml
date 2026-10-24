@@ -41,13 +41,15 @@ solutes:
   # ============================================================================
   - type: polymer
     generation_mode: "dynamic"  # Key setting: build chains with mBuild from SMILES
-    type_prefix: "SBMA-EGPMA"
+    type_prefix: "SBMA-EGMA"
   
-    # Each monomer is its repeat unit as it is in the chain, with '*' on the
-    # two atoms that bond to the neighbouring units (the C=C of the
-    # methacrylate becomes a single bond). The first '*' bonds toward the head
-    # of the chain, the second toward the tail. The notebook
-    # docs/source/tutorials/star_sited_monomers.ipynb helps you place them.
+    # The chemistry of the Paper 1 chains: SBMA and EGMA (methoxy
+    # tetra(ethylene glycol) methacrylate). Each monomer is its repeat unit as
+    # it is in the chain, with '*' on the two atoms that bond to the
+    # neighbouring units (the C=C of the methacrylate becomes a single bond).
+    # The first '*' bonds toward the head of the chain, the second toward the
+    # tail. The notebook docs/source/tutorials/star_sited_monomers.ipynb helps
+    # you place them.
     monomers:
       - label: "A"
         probability: 0.7
@@ -57,22 +59,28 @@ solutes:
         residue_name: "SBM"
       - label: "B"
         probability: 0.3
-        name: "EGPMA"
-        # Ethylene glycol phenyl ether methacrylate
-        smiles: "[*]CC([*])(C)C(=O)OCCOc1ccccc1"
-        residue_name: "EGP"
+        name: "EGMA"
+        smiles: "[*]CC([*])(C)C(=O)OCCOCCOCCOCCOC"
+        residue_name: "EGM"
   
-    # The caps on the two chain ends, each with one '*' (required, no default).
-    # [*][H] caps with a hydrogen and [*]C with a methyl group; give the end
-    # groups of your own chains.
+    # The cap of each chain end, drawn per chain from its options (the
+    # probabilities of each end sum to 1; a fixed cap is one option with
+    # probability 1.0). Here each end is a whole monomer that kept its C=C
+    # double bond, bonded through its CH2 carbon: the chain ends of the Paper 1
+    # chains (2 ends + 3 repeat units = a 5-mer). With residue_name a cap is
+    # its own residue. The length counts both ends. A hydrogen cap is {label: "H", smiles: "[*][H]", probability: 1.0}.
     end_groups:
-      head: "[*][H]"
-      tail: "[*][H]"
+      head:
+        - {label: "A", name: "SBMA", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", residue_name: "SBM", probability: 0.7}
+        - {label: "B", name: "EGMA", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", residue_name: "EGM", probability: 0.3}
+      tail:
+        - {label: "A", name: "SBMA", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", residue_name: "SBM", probability: 0.7}
+        - {label: "B", name: "EGMA", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", residue_name: "EGM", probability: 0.3}
   
     max_retries: 10  # Builds tried if a ring is pierced or atoms overlap
   
     # Short polymers for faster testing
-    length: 5   # 5-mer chains
+    length: 5   # 5-mer chains: 2 ends + 3 repeat units
     count: 2    # Only 2 polymer chains
   
     # Cache directory for generated polymers

@@ -27,7 +27,12 @@ solutes:
     monomers:
       - {label: "A", probability: 0.7, name: "SBMA", smiles: "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", residue_name: "SBM"}
       - {label: "B", probability: 0.3, name: "EGPMA", smiles: "[*]CC([*])(C)C(=O)OCCOc1ccccc1", residue_name: "EGM"}
-    end_groups: {head: "[*][H]", tail: "[*]C"}
+    end_groups:
+      head:
+        - {label: "H", smiles: "[*][H]", probability: 0.4}
+        - {label: "A", name: "SBMA", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", residue_name: "SBM", probability: 0.6}
+      tail:
+        - {label: "M", name: "methyl", smiles: "[*]C", probability: 1.0}
     length: 6
     count: 3
     force_field: ["openff-2.3.0.offxml"]

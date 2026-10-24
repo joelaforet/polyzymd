@@ -158,7 +158,10 @@ def test_collect_reference_warnings_has_nothing_to_check_for_dynamic_polymers(
             "generation_mode": "dynamic",
             "type_prefix": "PEG",
             "monomers": [{"label": "A", "probability": 1.0, "smiles": "[*]CC([*])(C)C(=O)OC"}],
-            "end_groups": {"head": "[*][H]", "tail": "[*][H]"},
+            "end_groups": {
+                "head": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+                "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+            },
             "length": 4,
             "count": 1,
         }
@@ -266,7 +269,10 @@ def _dynamic_polymer(smiles: str, head: str = "[*][H]", tail: str = "[*][H]") ->
         "length": 5,
         "count": 1,
         "monomers": [{"label": "A", "probability": 1.0, "smiles": smiles}],
-        "end_groups": {"head": head, "tail": tail},
+        "end_groups": {
+            "head": [{"label": "H", "smiles": head, "probability": 1.0}],
+            "tail": [{"label": "H", "smiles": tail, "probability": 1.0}],
+        },
         "charges": NAGL,
     }
 
@@ -283,7 +289,7 @@ def test_star_sited_monomers_and_caps_are_accepted(tmp_path: Path) -> None:
         (_dynamic_polymer("[*]CC([*])(C)C(=O"), "cannot read the SMILES"),
         (_dynamic_polymer("[*]=CC([*])C"), "bonded to one atom by a single bond"),
         (_dynamic_polymer("[*]C([*])C(=O)OC"), "both '\\*' .* are on one atom"),
-        (_dynamic_polymer("[*]CC([*])(C)C(=O)OC", tail="[*]=C"), "end_groups.tail"),
+        (_dynamic_polymer("[*]CC([*])(C)C(=O)OC", tail="[*]=C"), "end_groups.tail 'H'"),
         (_dynamic_polymer("[*]CC([*])[Si](C)(C)C"), "Si, which the NAGL charge model"),
     ],
     ids=["unreadable", "double_bond", "one_atom", "cap", "element"],
@@ -308,6 +314,34 @@ def test_a_monomer_residue_name_the_selections_take_is_refused(
     config.require_buildable(inputs=False)
     with pytest.raises(ValueError, match=f"residue_name '{residue_name}'") as error:
         require_inputs(config)
+    assert "fix:" in str(error.value)
+
+
+def test_every_cap_option_is_parsed(tmp_path: Path) -> None:
+    """The second option of an end is checked like the first."""
+    polymer = _dynamic_polymer("[*]CC([*])(C)C(=O)OC")
+    polymer["end_groups"]["head"] = [
+        {"label": "H", "smiles": "[*][H]", "probability": 0.5},
+        {"label": "S", "smiles": "[*][Si](C)(C)C", "probability": 0.5},
+    ]
+    with pytest.raises(ValueError, match="end_groups.head 'S'") as error:
+        require_inputs(_buildable(tmp_path, polymer=polymer))
+    assert "Si" in str(error.value)
+
+
+@pytest.mark.parametrize("residue_name", ["ALA", "HOH"])
+def test_a_cap_residue_name_the_selections_take_is_refused(
+    tmp_path: Path, residue_name: str
+) -> None:
+    """A cap that is its own residue may not take a protein or water residue name."""
+    polymer = _dynamic_polymer("[*]CC([*])(C)C(=O)OC")
+    polymer["end_groups"]["tail"] = [
+        {"label": "V", "smiles": "[*]C=C(C)C(=O)OC", "probability": 1.0, "residue_name": "MMV"}
+    ]
+    require_inputs(_buildable(tmp_path, polymer=polymer))
+    polymer["end_groups"]["tail"][0]["residue_name"] = residue_name
+    with pytest.raises(ValueError, match="end_groups.tail 'V' has residue_name") as error:
+        require_inputs(_buildable(tmp_path, polymer=polymer))
     assert "fix:" in str(error.value)
 
 

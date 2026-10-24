@@ -871,10 +871,110 @@
   },
   "default": null,
   "required": true,
+  "type": "list[polyzymd.config.schema.EndGroupOption]",
+  "values": null
+ },
+ "solutes[polymer].end_groups.head.label": {
+  "alias": null,
+  "bounds": {
+   "max_length": 1,
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[polymer].end_groups.head.name": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[polymer].end_groups.head.probability": {
+  "alias": null,
+  "bounds": {
+   "ge": 0.0,
+   "le": 1.0
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solutes[polymer].end_groups.head.residue_name": {
+  "alias": null,
+  "bounds": {
+   "max_length": 3
+  },
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[polymer].end_groups.head.smiles": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
   "type": "<class 'str'>",
   "values": null
  },
  "solutes[polymer].end_groups.tail": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "list[polyzymd.config.schema.EndGroupOption]",
+  "values": null
+ },
+ "solutes[polymer].end_groups.tail.label": {
+  "alias": null,
+  "bounds": {
+   "max_length": 1,
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[polymer].end_groups.tail.name": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[polymer].end_groups.tail.probability": {
+  "alias": null,
+  "bounds": {
+   "ge": 0.0,
+   "le": 1.0
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'float'>",
+  "values": null
+ },
+ "solutes[polymer].end_groups.tail.residue_name": {
+  "alias": null,
+  "bounds": {
+   "max_length": 3
+  },
+  "default": null,
+  "required": false,
+  "type": "str | None",
+  "values": null
+ },
+ "solutes[polymer].end_groups.tail.smiles": {
   "alias": null,
   "bounds": {
    "min_length": 1

@@ -194,25 +194,26 @@ def require_inputs(config: Any) -> None:
             (f"monomer {m.label!r}", parse_star_smiles(m.smiles, 2, f"monomer {m.label!r}"))
             for m in polymers.monomers
         ]
-        units += [
-            (f"end_groups.{end}", parse_star_smiles(smiles, 1, f"end_groups.{end}"))
-            for end, smiles in (
-                ("head", polymers.end_groups.head),
-                ("tail", polymers.end_groups.tail),
-            )
+        caps = [
+            (f"end_groups.{end} {option.label!r}", option)
+            for end in ("head", "tail")
+            for option in getattr(polymers.end_groups, end)
         ]
+        units += [(what, parse_star_smiles(option.smiles, 1, what)) for what, option in caps]
         for what, unit in units:
             _require_chargeable(unit.mol, polymers.charger, what)
         from polyzymd.config.schema import reserved_residue_names
 
-        for monomer in polymers.monomers:
-            if monomer.residue_name and monomer.residue_name.upper() in reserved_residue_names():
+        named = [(f"monomer {m.label!r}", m.residue_name) for m in polymers.monomers]
+        named += [(what, option.residue_name) for what, option in caps]
+        for what, residue_name in named:
+            if residue_name and residue_name.upper() in reserved_residue_names():
                 raise ValueError(
-                    f"monomer {monomer.label!r} has residue_name '{monomer.residue_name}', an "
-                    "amino-acid, nucleic-acid, water or ion name, so selections such as "
-                    "'protein' would include the polymer.\n"
-                    f"fix: set {_key(config, polymers, 'monomers')} residue_name to another "
-                    "3-letter name."
+                    f"{what} has residue_name '{residue_name}', an amino-acid, nucleic-acid, "
+                    "water or ion name, so selections such as 'protein' would include the "
+                    "polymer.\n"
+                    f"fix: set the residue_name of {what} in {_key(config, polymers, 'monomers')} "
+                    "or end_groups to another 3-letter name."
                 )
         try:
             require_mbuild_polymer()

@@ -95,8 +95,38 @@
     },
     "count": 2,
     "end_groups": {
-     "head": "[*][H]",
-     "tail": "[*][H]"
+     "head": [
+      {
+       "label": "A",
+       "name": "SBMA",
+       "probability": 0.7,
+       "residue_name": "SBM",
+       "smiles": "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+      },
+      {
+       "label": "B",
+       "name": "EGMA",
+       "probability": 0.3,
+       "residue_name": "EGM",
+       "smiles": "[*]C=C(C)C(=O)OCCOCCOCCOCCOC"
+      }
+     ],
+     "tail": [
+      {
+       "label": "A",
+       "name": "SBMA",
+       "probability": 0.7,
+       "residue_name": "SBM",
+       "smiles": "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+      },
+      {
+       "label": "B",
+       "name": "EGMA",
+       "probability": 0.3,
+       "residue_name": "EGM",
+       "smiles": "[*]C=C(C)C(=O)OCCOCCOCCOCCOC"
+      }
+     ]
     },
     "force_field": [
      "openff-2.3.0.offxml"
@@ -114,10 +144,10 @@
      },
      {
       "label": "B",
-      "name": "EGPMA",
+      "name": "EGMA",
       "probability": 0.3,
-      "residue_name": "EGP",
-      "smiles": "[*]CC([*])(C)C(=O)OCCOc1ccccc1"
+      "residue_name": "EGM",
+      "smiles": "[*]CC([*])(C)C(=O)OCCOCCOCCOCCOC"
      }
     ],
     "name": "polymer",
@@ -132,7 +162,7 @@
     "sdf_directory": null,
     "segid": "POLY",
     "type": "polymer",
-    "type_prefix": "SBMA-EGPMA"
+    "type_prefix": "SBMA-EGMA"
    }
   ],
   "solvent": {
@@ -938,8 +968,31 @@
     },
     "count": 3,
     "end_groups": {
-     "head": "[*][H]",
-     "tail": "[*]C"
+     "head": [
+      {
+       "label": "H",
+       "name": null,
+       "probability": 0.4,
+       "residue_name": null,
+       "smiles": "[*][H]"
+      },
+      {
+       "label": "A",
+       "name": "SBMA",
+       "probability": 0.6,
+       "residue_name": "SBM",
+       "smiles": "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+      }
+     ],
+     "tail": [
+      {
+       "label": "M",
+       "name": "methyl",
+       "probability": 1.0,
+       "residue_name": null,
+       "smiles": "[*]C"
+      }
+     ]
     },
     "force_field": [
      "openff-2.3.0.offxml"

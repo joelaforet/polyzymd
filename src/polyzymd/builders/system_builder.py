@@ -1093,20 +1093,25 @@ class SystemBuilder:
             end_groups = None
             force_field = None
 
-            if generation_mode == "dynamic":
-                # A monomer without a name is named by its label.
-                monomers = config.polymers.monomers
-                monomer_smiles = {(m.name or m.label): m.smiles for m in monomers}
+            # A monomer without a name is named by its label. The SMILES and caps
+            # build dynamic chains; in cached mode they are checked against the
+            # build metadata of cached chains that dynamic generation made.
+            monomers = config.polymers.monomers
+            if any(m.smiles for m in monomers) or config.polymers.end_groups is not None:
+                monomer_smiles = {(m.name or m.label): m.smiles for m in monomers if m.smiles}
                 monomer_names = {m.label: (m.name or m.label) for m in monomers}
                 residue_names = {
                     (m.name or m.label): m.residue_name for m in monomers if m.residue_name
                 }
+            if config.polymers.end_groups is not None:
                 end_groups = {
-                    "head": config.polymers.end_groups.head,
-                    "tail": config.polymers.end_groups.tail,
+                    end: [
+                        option.model_dump() for option in getattr(config.polymers.end_groups, end)
+                    ]
+                    for end in ("head", "tail")
                 }
+            if generation_mode == "dynamic":
                 force_field = [str(name) for name in config.polymers.force_field]
-
                 LOGGER.info(
                     f"Dynamic mode: monomers={list(monomer_smiles.keys())}, "
                     f"charger={config.polymers.charger.value}"

@@ -48,16 +48,35 @@ atom indices and puts the `*` on the atoms you name.
 
 ## Choose the caps
 
-Each chain has two ends. `end_groups` gives the cap of each end as SMILES with
-one `*` on the atom that bonds to the chain. There is no default: the caps are
-part of the molecule you simulate.
+Each chain has two ends. `end_groups` lists the caps each end can get, as
+SMILES with one `*` on the atom that bonds to the chain, and the probability
+of each. Every chain draws its head cap and its tail cap from these lists. The
+probabilities of each end sum to 1. A fixed cap is one option with probability
+1.0. There is no default: the caps are part of the molecule you simulate.
 
-| Cap | SMILES |
+| Cap | Option |
 |---|---|
-| hydrogen | `[*][H]` |
-| methyl | `[*]C` |
+| hydrogen | `{label: H, smiles: "[*][H]", probability: 1.0}` |
+| methyl | `{label: M, smiles: "[*]C", probability: 1.0}` |
+| an SBMA unit that kept its C=C | `{label: A, smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", residue_name: SBM, probability: 0.7}` |
 
-`head` caps the first repeat unit of a sequence, `tail` the last.
+`label` is the one character the chain's sequence shows for that cap. A cap
+with a `residue_name` is its own residue; a cap without one joins the residue
+of the repeat unit it caps.
+
+`length` counts the two ends: `length: 5` is a head cap, three repeat units and
+a tail cap. This holds for every cap, a hydrogen included, so `length` is at
+least 3.
+
+### The chain ends of the Paper 1 chains
+
+The SBMA-EGMA chains of Paper 1 were made in two steps: an ATRP polymerization
+grew three repeat units, and a termination step restored the C=C double bond
+of the monomer at each end. Each end is a whole monomer that kept its double
+bond, bonded to the chain through its CH2 carbon (now `=CH-`), and each end's
+monomer was drawn with the monomer probabilities. In star-sited SMILES, the end
+form of a methacrylate is `[*]C=C(C)C(=O)OR`, and the entry below builds the
+same 5-mers.
 
 ## Write the polymer entry
 
@@ -66,7 +85,7 @@ solutes:
   # ... the protein entry ...
   - type: polymer
     generation_mode: "dynamic"
-    type_prefix: "SBMA-EGPMA"
+    type_prefix: "SBMA-EGMA"
     monomers:
       - label: "A"
         probability: 0.7
@@ -75,12 +94,16 @@ solutes:
         smiles: "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
       - label: "B"
         probability: 0.3
-        name: "EGPMA"
-        residue_name: "EGP"
-        smiles: "[*]CC([*])(C)C(=O)OCCOc1ccccc1"
+        name: "EGMA"
+        residue_name: "EGM"
+        smiles: "[*]CC([*])(C)C(=O)OCCOCCOCCOCCOC"
     end_groups:
-      head: "[*][H]"
-      tail: "[*][H]"
+      head:
+        - {label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 0.7}
+        - {label: "B", name: "EGMA", residue_name: "EGM", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", probability: 0.3}
+      tail:
+        - {label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 0.7}
+        - {label: "B", name: "EGMA", residue_name: "EGM", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", probability: 0.3}
     length: 5
     count: 2
     force_field: ["openff-2.3.0.offxml"]
@@ -89,14 +112,27 @@ solutes:
     cache_directory: ".polymer_cache"
 ```
 
+A chain drawn as `AABAB` has an SBMA head end, the repeat units SBMA, EGMA,
+SBMA, and an EGMA tail end: five residues, SBM SBM EGM SBM EGM. Its file is
+`SBMA-EGMA_seq=AABAB_5-mer_charged.sdf`.
+
+For hydrogen caps on both ends, write:
+
+```yaml
+    end_groups:
+      head: [{label: "H", smiles: "[*][H]", probability: 1.0}]
+      tail: [{label: "H", smiles: "[*][H]", probability: 1.0}]
+```
+
 `dynamic` mode adds these keys and rules:
 
 | Key | Meaning |
 |---|---|
 | `smiles` | The repeat unit of the monomer, with exactly two `*`. Every monomer needs one. |
-| `end_groups` | `head` and `tail`, each a cap with exactly one `*`. Required. |
-| `name` | The monomer name, used in log messages and the cache metadata. Optional; the `label` is used without it. |
-| `residue_name` | The 3-character residue name of the monomer in the topology. Optional. If you leave it out, PolyzyMD makes one from `name`. It must differ between monomers and must not be an amino-acid, nucleic-acid, water or ion name. |
+| `end_groups` | `head` and `tail`, each a list of caps with `label`, `smiles` (exactly one `*`), `probability`, and optionally `name` and `residue_name`. Each end's probabilities sum to 1. Required. |
+| `length` | Monomers per chain, the two ends included; at least 3. |
+| `name` | The monomer name, used in log messages and the cache metadata. Optional; the `label` is used without it. Names must differ between monomers. |
+| `residue_name` | The 3-character residue name of the monomer in the topology. Optional. If you leave it out, PolyzyMD makes one from `name`. It must not be an amino-acid, nucleic-acid, water or ion name, and it must differ between monomers, except between stereoisomers of one monomer (see {ref}`tacticity`). |
 | `charges` | The partial-charge method for the chains: `{method: nagl, model: ...}`, `{method: am1bcc}` or `{method: espaloma}`. `preset` is for `cached` mode only. |
 | `max_retries` | The number of builds tried, each with new monomer conformers, before a chain with a pierced ring or overlapping atoms is refused (default 10). |
 | `cache_directory` | The folder of the generated chains (default `.polymer_cache`, relative to the config). |
@@ -107,6 +143,28 @@ Sage 2.3.0 names. The `am1bcc` method needs AmberTools, and `espaloma` needs
 espaloma-charge. The PolyzyMD environments include neither.
 
 For every other key of the config, see {doc}`../reference/configuration`.
+
+(tacticity)=
+## Set the tacticity
+
+A stereocentre in the repeat unit's SMILES is kept in the chain. To control
+tacticity, give each configuration of the backbone stereocentre its own label,
+with `@` or `@@` in the SMILES, and the same `residue_name`:
+
+```yaml
+    monomers:
+      - {label: "R", probability: 0.5, name: "MMA-1", residue_name: "MMA", smiles: "[*]C[C@@]([*])(C)C(=O)OC"}
+      - {label: "S", probability: 0.5, name: "MMA-2", residue_name: "MMA", smiles: "[*]C[C@]([*])(C)C(=O)OC"}
+```
+
+Each repeat unit then draws its configuration: equal probabilities give an
+atactic chain, one label with probability 1 an isotactic chain. A repeat unit
+written without a stereocentre gets one configuration from the builder, the
+same for every unit of that monomer, so such a chain is isotactic.
+
+Each chain is drawn monomer by monomer, so the build makes random (statistical)
+copolymers. To simulate block copolymers, build the chains yourself and give
+them in `cached` mode, or open an issue on GitHub so we can add them.
 
 ## Build and run the system
 
@@ -139,12 +197,15 @@ For every other key of the config, see {doc}`../reference/configuration`.
 
 For each chain, the build does these steps:
 
-1. It draws a sequence from the monomer probabilities. The replicate number
-   seeds the draw, unless you set `random_seed`. The sequence is read from
-   head to tail, so `AAB` and `BAA` are different chains.
-2. It joins the repeat units of the sequence and the two caps: each bond
-   between two units replaces the `*` of both. The bond orders and formal
-   charges are those of your SMILES.
+1. It draws the chain's head cap, `length - 2` repeat units and its tail cap
+   from their probabilities. The replicate number seeds the draw, unless you
+   set `random_seed`. The sequence is the head cap's label, the repeat units'
+   labels and the tail cap's label, read from head to tail, so `AAB...` and
+   `BAA...` are different chains.
+2. It joins the units: each bond between two units replaces the `*` of both.
+   Repeat units join head to tail: the second `*` of one unit bonds to the
+   first `*` of the next. The bond orders and formal charges are those of your
+   SMILES.
 3. It builds the 3D structure with mBuild's `Polymer`. The sequence seeds the
    structure, so the same sequence always gives the same coordinates.
 4. It assigns partial charges with the method in `charges`, then relaxes the
@@ -157,16 +218,11 @@ For each chain, the build does these steps:
    `cache_directory`, with a `.metadata.json` file beside it. This is the name
    that `cached` mode reads, so a later config can set
    `generation_mode: cached`, `sdf_directory` to this folder and
-   `charges: {method: preset}`.
+   `charges: {method: preset}`; cached mode then checks the config's monomer
+   SMILES and caps, if it gives them, against that metadata.
 
-Each repeat unit is one residue named by its `residue_name`. The head cap
-belongs to the first residue and the tail cap to the last. Repeat units join
-head to tail: the second `*` of one unit bonds to the first `*` of the next.
-
-Tacticity is not controlled. Every repeat unit of one monomer is built from
-the same 3D structure, so its backbone stereocentres all get the same
-configuration: a chain of one methacrylate comes out isotactic, with the
-handedness set by the sequence's seed. The chain SDF records the
+Each repeat unit is one residue named by its `residue_name`; a cap is its own
+residue when it has a `residue_name`. The chain SDF records the
 stereochemistry of every atom.
 
 The next build with the same monomers loads the chains from
@@ -178,6 +234,11 @@ The build record (`build_provenance.json` and `.md`) names the mBuild version
 and commit that built the chains, and lists mBuild under "Methods to cite".
 
 ## Fix common problems
+
+### "end_groups.head probabilities must sum to 1.0"
+
+Each end's caps are drawn from their probabilities. Make them sum to 1; a
+single cap needs `probability: 1.0`.
 
 ### "has 0 '*' sites; a repeat unit needs exactly 2"
 

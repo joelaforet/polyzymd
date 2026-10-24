@@ -72,8 +72,8 @@ Add this entry to the `solutes:` list, after the protein entry:
         residue_name: SBM
         smiles: "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
     end_groups:
-      head: "[*][H]"
-      tail: "[*][H]"
+      head: [{label: A, name: SBMA, residue_name: SBM, smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 1.0}]
+      tail: [{label: A, name: SBMA, residue_name: SBM, smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 1.0}]
     length: 3
     count: 2
     force_field: ["openff-2.3.0.offxml"]
@@ -84,9 +84,10 @@ Add this entry to the `solutes:` list, after the protein entry:
 
 The entry asks for two chains of three SBMA monomers. `dynamic` builds each
 chain with mBuild from the repeat unit of the monomer: its SMILES has `*` on
-the two carbons that bond to the neighbouring units. `end_groups` caps both
-chain ends with a hydrogen. `residue_name: SBM` names the monomers in the
-topology.
+the two carbons that bond to the neighbouring units. `end_groups` puts an
+SBMA unit that kept its C=C double bond at each end, as in the Paper 1 chains,
+so a 3-mer is an end, one repeat unit and an end. `residue_name: SBM` names the
+monomers in the topology.
 `force_field` is the same file as `solvent.force_field`. `charges` charges
 each new chain with {term}`NAGL` and the model you name.
 `packing.padding: 0.5` places the chains within 0.5 nm of the protein

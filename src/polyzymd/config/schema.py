@@ -552,16 +552,58 @@ class PolymerGenerationMode(str, Enum):
     DYNAMIC = "dynamic"  # Build chains with mBuild from star-sited SMILES
 
 
-class PolymerEndGroups(_ConfigModel):
-    """The caps of a dynamically generated chain, as SMILES with one ``*``.
+class EndGroupOption(_ConfigModel):
+    """One cap a chain end can get, drawn with ``probability``.
 
-    The ``*`` marks the atom that bonds to the chain: ``[*][H]`` caps with a
-    hydrogen, ``[*]C`` with a methyl group. There is no default; the caps are
-    part of the molecule the study simulates.
+    ``smiles`` has one ``*`` on the atom that bonds to the chain: ``[*][H]``
+    caps with a hydrogen, ``[*]C`` with a methyl group, and
+    ``[*]C=C(C)C(=O)OC`` with a whole methyl methacrylate unit that kept its
+    double bond. ``label`` is the one character the chain's sequence shows for
+    this cap. With ``residue_name`` the cap is a residue of its own; without
+    it, its atoms join the residue of the repeat unit it caps.
     """
 
-    head: str = Field(..., min_length=1, description="Cap on the first repeat unit, one '*'")
-    tail: str = Field(..., min_length=1, description="Cap on the last repeat unit, one '*'")
+    label: str = Field(..., min_length=1, max_length=1, description="Cap label in the sequence")
+    smiles: str = Field(..., min_length=1, description="Cap SMILES with one '*'")
+    probability: float = Field(..., ge=0.0, le=1.0, description="Probability of this cap")
+    name: str | None = Field(None, description="Cap name")
+    residue_name: str | None = Field(
+        None,
+        max_length=3,
+        description="3-char residue name; the cap is then its own residue",
+    )
+
+
+class PolymerEndGroups(_ConfigModel):
+    """The caps of a dynamically generated chain: the options of each end.
+
+    Each end draws one of its options per chain; the probabilities of each
+    end sum to 1. A fixed cap is one option with probability 1. There is no
+    default; the caps are part of the molecule the study simulates.
+    """
+
+    head: list[EndGroupOption] = Field(
+        ..., min_length=1, description="Caps of the first repeat unit's head '*'"
+    )
+    tail: list[EndGroupOption] = Field(
+        ..., min_length=1, description="Caps of the last repeat unit's tail '*'"
+    )
+
+    @field_validator("head", "tail", mode="before")
+    @classmethod
+    def _refuse_bare_smiles(cls, value: Any, info: Any) -> Any:
+        """Refuse a cap given as a plain SMILES; each end is a list of options."""
+        if isinstance(value, str):
+            raise ValueError(
+                f"end_groups.{info.field_name} is a list of caps with probabilities, for "
+                f"example {info.field_name}: [{{label: H, smiles: '{value}', probability: 1.0}}]"
+            )
+        return value
+
+
+def _without_stereo(smiles: str) -> str:
+    """Return ``smiles`` without its stereo marks (``@``, ``/``, ``\\``)."""
+    return re.sub(r"[@/\\]", "", smiles)
 
 
 def _count_stars(smiles: str) -> int:
@@ -578,7 +620,8 @@ class PolymerSolute(_Solute):
 
     For dynamic mode, you must provide:
     - the star-sited repeat unit of each monomer in monomers[].smiles
-    - the star-sited caps in end_groups (head and tail)
+    - the star-sited caps of each end in end_groups (head and tail), each a
+      list of options with probabilities
 
     Attributes:
         generation_mode: "cached" for pre-built SDFs, "dynamic" for on-the-fly generation
@@ -648,7 +691,8 @@ class PolymerSolute(_Solute):
                 "polymer key 'reactions' was removed in PolyzyMD 1.3.0rc5: dynamic chains are "
                 "built from star-sited SMILES. Give each monomer's repeat unit with '*' on its "
                 "two linking atoms ([*]CC([*])(C)C(=O)OC for methyl methacrylate) and the caps "
-                f"in end_groups: {{head: '[*][H]', tail: '[*][H]'}}. See {REWRITE_GUIDE}"
+                "in end_groups, for example end_groups: {head: [{label: H, smiles: '[*][H]', "
+                f"probability: 1.0}}], tail: [...]}}. See {REWRITE_GUIDE}"
             )
         return data
 
@@ -674,19 +718,45 @@ class PolymerSolute(_Solute):
                         "https://polyzymd.readthedocs.io/en/latest/tutorials/"
                         "star_sited_monomers.html helps you place them."
                     )
+            if self.length < 3:
+                raise ValueError(
+                    f"length {self.length}: a dynamic chain's length counts its two ends (head "
+                    "and tail caps) and its repeat units, so it is at least 3; length 5 is "
+                    "2 ends + 3 repeat units."
+                )
             if self.end_groups is None:
                 raise ValueError(
-                    "Dynamic generation mode requires 'end_groups' with the head and tail caps "
-                    "as SMILES with one '*', for example end_groups: {head: '[*][H]', "
-                    "tail: '[*][H]'}. There is no default cap."
+                    "Dynamic generation mode requires 'end_groups' with the caps of the head and "
+                    "tail, each a list of SMILES with one '*' and probabilities, for example "
+                    "end_groups: {head: [{label: H, smiles: '[*][H]', probability: 1.0}], "
+                    "tail: [{label: H, smiles: '[*][H]', probability: 1.0}]}. There is no "
+                    "default cap."
                 )
             for end in ("head", "tail"):
-                smiles = getattr(self.end_groups, end)
-                stars = _count_stars(smiles)
-                if stars != 1:
+                options = getattr(self.end_groups, end)
+                for option in options:
+                    stars = _count_stars(option.smiles)
+                    if stars != 1:
+                        raise ValueError(
+                            f"end_groups.{end} {option.label!r}: {option.smiles!r} has {stars} "
+                            "'*' sites; a cap needs exactly 1, on the atom that bonds to the "
+                            "chain ([*][H], [*]C)."
+                        )
+                labels = [option.label for option in options]
+                repeated = sorted({label for label in labels if labels.count(label) > 1})
+                if repeated:
                     raise ValueError(
-                        f"end_groups.{end}: {smiles!r} has {stars} '*' sites; a cap needs "
-                        "exactly 1, on the atom that bonds to the chain ([*][H], [*]C)."
+                        f"end_groups.{end} options share label {repeated}; give each its own."
+                    )
+                total = sum(option.probability for option in options)
+                if abs(total - 1.0) > 1e-6:
+                    hint = (
+                        "a single cap needs probability 1.0"
+                        if len(options) == 1
+                        else "the caps of one end are drawn from these probabilities"
+                    )
+                    raise ValueError(
+                        f"end_groups.{end} probabilities must sum to 1.0, got {total:g}; {hint}."
                     )
             for key in ("label", "name"):
                 values = [getattr(m, key) for m in self.monomers if getattr(m, key)]
@@ -695,15 +765,34 @@ class PolymerSolute(_Solute):
                     raise ValueError(
                         f"monomers share {key} {repeated}; give each monomer its own {key}."
                     )
-            residue_names = [m.residue_name for m in self.monomers]
-            repeated = sorted({r for r in residue_names if r and residue_names.count(r) > 1})
+            # Stereoisomers of one monomer (the letters that set tacticity) may share
+            # a residue name; other monomers may not.
+            constitution: dict[str, list[str]] = {}
+            for m in self.monomers:
+                if m.residue_name:
+                    constitution.setdefault(m.residue_name, []).append(m.smiles)
+            repeated = sorted(
+                name
+                for name, forms in constitution.items()
+                if len(forms) > 1
+                and (
+                    len({_without_stereo(f) for f in forms}) > 1  # different monomers
+                    or len(set(forms)) < len(forms)  # the same SMILES twice
+                )
+            )
             if repeated:
                 raise ValueError(
                     f"monomers share residue_name {repeated}, so analyses could not tell them "
-                    "apart. Give each monomer its own residue_name."
+                    "apart. Give each monomer its own residue_name (only stereoisomers of one "
+                    "monomer, which set the tacticity, may share one)."
                 )
 
         elif self.generation_mode == PolymerGenerationMode.CACHED:
+            if self.end_groups is not None and self.length < 3:
+                raise ValueError(
+                    f"length {self.length}: with end_groups the length counts the two ends "
+                    "and the repeat units, so it is at least 3."
+                )
             # Cached mode requires sdf_directory
             if self.sdf_directory is None:
                 raise ValueError(

@@ -105,7 +105,10 @@ class PolymerBuilder:
         ...     generation_mode="dynamic",
         ...     monomer_smiles={"SBMA": "[*]CC([*])(C)C(=O)O...", "EGPMA": "..."},
         ...     monomer_names={"A": "SBMA", "B": "EGPMA"},
-        ...     end_groups={"head": "[*][H]", "tail": "[*][H]"},
+        ...     end_groups={
+        ...         "head": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+        ...         "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+        ...     },
         ...     force_field=["openff-2.3.0.offxml"],
         ... )
         >>> molecules, counts = builder.build(count=10)
@@ -124,7 +127,7 @@ class PolymerBuilder:
         monomer_smiles: Optional[Dict[str, str]] = None,
         monomer_names: Optional[Dict[str, str]] = None,
         residue_names: Optional[Dict[str, str]] = None,
-        end_groups: Optional[Dict[str, str]] = None,
+        end_groups: Optional[Dict[str, List[dict]]] = None,
         force_field: Optional[List[str]] = None,
         charger_type: str = "nagl",
         max_retries: int = 10,
@@ -144,7 +147,9 @@ class PolymerBuilder:
                 (dynamic mode).
             monomer_names: Dictionary of label -> monomer name (dynamic mode).
             residue_names: Dictionary of monomer name -> 3-char PDB residue name.
-            end_groups: {"head": smiles, "tail": smiles}, the star-sited caps (dynamic mode).
+            end_groups: {"head": [...], "tail": [...]}, the cap options of each end
+                (mappings with label, smiles, probability and optionally name and
+                residue_name), drawn per chain (dynamic mode).
             force_field: Force field files the chains are relaxed with (dynamic mode).
             charger_type: Charge method ("nagl", "espaloma", "am1bcc") for dynamic mode.
             max_retries: Builds tried before a chain with a pierced ring or
@@ -186,6 +191,11 @@ class PolymerBuilder:
                 raise ValueError("Dynamic generation mode requires monomer_names")
             if not self._end_groups:
                 raise ValueError("Dynamic generation mode requires end_groups (head and tail)")
+            if self._length < 3:
+                raise ValueError(
+                    "Dynamic generation mode requires length >= 3: the length counts the two "
+                    "ends and at least one repeat unit"
+                )
             if not self._force_field:
                 raise ValueError("Dynamic generation mode requires the polymer force_field")
 
@@ -272,11 +282,9 @@ class PolymerBuilder:
             f"monomers: {dict(zip(self._characters, self._probabilities))}"
         )
 
-        # Generate random sequences
-        raw_sequences = [
-            generate_random_sequence(self._length, self._characters, self._probabilities)
-            for _ in range(count)
-        ]
+        # Generate random sequences; in dynamic mode each chain also draws the
+        # cap of each end, and its sequence is head cap + repeat units + tail cap.
+        raw_sequences = [self._draw_sequence() for _ in range(count)]
 
         # A chain built from star-sited SMILES has a direction: its first repeat
         # unit carries the head cap, so "AAB" and "BAA" are different molecules
@@ -363,7 +371,10 @@ class PolymerBuilder:
                 m.name: m.residue_name for m in config.monomers if m.residue_name is not None
             }
 
-            self._end_groups = {"head": config.end_groups.head, "tail": config.end_groups.tail}
+            self._end_groups = {
+                end: [option.model_dump() for option in getattr(config.end_groups, end)]
+                for end in ("head", "tail")
+            }
             self._force_field = [str(name) for name in config.force_field]
 
             # Reset the generator to force re-initialization with new config
@@ -375,6 +386,25 @@ class PolymerBuilder:
 
         LOGGER.info(f"Building polymers: {config.type_prefix} (mode: {self._generation_mode})")
         return self.build(config.count, seed=seed)
+
+    def _draw_sequence(self) -> str:
+        """Draw one chain's sequence, with its two cap labels when the config gives caps."""
+        if not self._end_groups:
+            return generate_random_sequence(self._length, self._characters, self._probabilities)
+        # With caps the length counts the two ends: a 5-mer is a head cap,
+        # three repeat units and a tail cap.
+        head = self._draw_cap("head")
+        middle = generate_random_sequence(self._length - 2, self._characters, self._probabilities)
+        return head + middle + self._draw_cap("tail")
+
+    def _draw_cap(self, end: str) -> str:
+        """Draw the label of one end's cap from its options' probabilities."""
+        options = self._end_groups[end]
+        return random.choices(
+            [option["label"] for option in options],
+            weights=[option["probability"] for option in options],
+            k=1,
+        )[0]
 
     def _get_or_create_molecule(self, sequence: str) -> Molecule:
         """Get a molecule for a sequence, loading from SDF or generating.
@@ -439,13 +469,13 @@ class PolymerBuilder:
             Path to the expected SDF file.
         """
         # Format: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
-        filename = f"{self._type_prefix}_seq={sequence}_{self._length}-mer_charged.sdf"
+        filename = f"{self._type_prefix}_seq={sequence}_{len(sequence)}-mer_charged.sdf"
         path = directory / filename
         if self._generation_mode != "dynamic" and not path.exists():
             # A chain dynamic mode built is named in its drawn direction.
             reverse = sequence[::-1]
             reversed_path = directory / (
-                f"{self._type_prefix}_seq={reverse}_{self._length}-mer_charged.sdf"
+                f"{self._type_prefix}_seq={reverse}_{len(reverse)}-mer_charged.sdf"
             )
             if reversed_path.exists():
                 LOGGER.info(
@@ -544,7 +574,7 @@ class PolymerBuilder:
         bool
             True when the filename has PolyzyMD's generated dynamic cache shape.
         """
-        suffix = f"_seq={sequence}_{self._length}-mer_charged.sdf"
+        suffix = f"_seq={sequence}_{len(sequence)}-mer_charged.sdf"
         return sdf_path.name.endswith(suffix) and len(sdf_path.name) > len(suffix)
 
     def _load_from_sdf(self, sdf_path: Path) -> Molecule:
@@ -629,10 +659,22 @@ class PolymerBuilder:
             built = (metadata.get("monomers") or {}).get(label, {}).get("smiles")
             if built and not same(built, smiles):
                 problems.append(f"monomer {label!r}: config {smiles!r}, chain built from {built!r}")
-        for end, smiles in sorted(self._end_groups.items()):
+        for end, options in sorted(self._end_groups.items()):
             built = (metadata.get("end_groups") or {}).get(end)
-            if built and not same(built, smiles):
-                problems.append(f"end_groups.{end}: config {smiles!r}, chain built from {built!r}")
+            if not isinstance(built, dict):
+                continue
+            given = {option["label"]: option["smiles"] for option in options}
+            smiles = given.get(built.get("label"))
+            if smiles is None:
+                problems.append(
+                    f"end_groups.{end}: the chain's cap {built.get('label')!r} "
+                    f"({built.get('smiles')!r}) is not one of the config's caps"
+                )
+            elif built.get("smiles") and not same(built["smiles"], smiles):
+                problems.append(
+                    f"end_groups.{end} {built['label']!r}: config {smiles!r}, chain built from "
+                    f"{built['smiles']!r}"
+                )
         if problems:
             raise ValueError(
                 f"the cached chain {sdf_path} was built from other chemistry than the config "
@@ -676,7 +718,13 @@ class PolymerBuilder:
                     }
                     for label, name in sorted(self._monomer_names.items())
                 },
-                "end_groups": dict(self._end_groups),
+                "end_groups": {
+                    end: [
+                        {key: value for key, value in option.items() if value is not None}
+                        for option in options
+                    ]
+                    for end, options in self._end_groups.items()
+                },
             }
         for metadata in self._cached_sidecars.values():
             return {"monomers": metadata.get("monomers"), "end_groups": metadata.get("end_groups")}

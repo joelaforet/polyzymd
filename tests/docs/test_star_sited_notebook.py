@@ -40,23 +40,27 @@ def test_notebook_has_no_stored_outputs() -> None:
 
 @pytest.mark.skipif(shutil.which("packmol") is None, reason="needs the build environment")
 def test_notebook_runs_top_to_bottom(capsys: pytest.CaptureFixture[str]) -> None:
-    """Every cell runs, and the result is the star-sited MMA and a built 3-mer."""
+    """Every cell runs, and the result is the star-sited SBMA, its end form and a built 3-mer."""
     pytest.importorskip("mbuild")
     namespace: dict[str, object] = {"__name__": "__notebook__"}
     for source in _code_cells():
         exec(compile(source, str(NOTEBOOK), "exec"), namespace)  # noqa: S102
     printed = capsys.readouterr().out
 
-    assert namespace["repeat_unit"] == "*CC(*)(C)C(=O)OC"
-    assert 'smiles: "*CC(*)(C)C(=O)OC"' in printed
-    assert "47 atoms, total charge" in printed
+    sbma = "C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+    assert namespace["repeat_unit"] == f"*CC(*)(C){sbma}"
+    assert namespace["end_cap"] == f"*C=C(C){sbma}"
+    assert f'smiles: "*CC(*)(C){sbma}"' in printed
+    assert "length: 5" in printed
+    # An SBMA end, one SBMA repeat unit and an SBMA end: 38 + 39 + 38 atoms.
+    assert "115 atoms, total charge +0.000 e" in printed
 
 
 def _run_first_cells(smiles: str) -> dict[str, object]:
     """Run cells 1-3 of the notebook with ``smiles`` as the pasted monomer."""
     namespace: dict[str, object] = {"__name__": "__notebook__"}
     first, second, third = _code_cells()[:3]
-    first = first.replace('"C=C(C)C(=O)OC"', repr(smiles))
+    first = first.replace('"CC(=C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"', repr(smiles))
     for source in (first, second, third):
         exec(compile(source, str(NOTEBOOK), "exec"), namespace)  # noqa: S102
     return namespace

@@ -14,8 +14,9 @@ from polyzymd.builders.polymer_generator import PolymerGenerator
 SBMA = "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
 EGPMA = "[*]CC([*])(C)C(=O)OCCOc1ccccc1"
 
-#: Hydrogen caps on both ends.
-H_CAPS = {"head": "[*][H]", "tail": "[*][H]"}
+#: One fixed hydrogen cap (label H) on each end.
+H_CAP_OPTION = {"label": "H", "smiles": "[*][H]", "probability": 1.0}
+H_CAPS = {"head": [H_CAP_OPTION], "tail": [H_CAP_OPTION]}
 
 SAGE = ["openff-2.3.0.offxml"]
 
@@ -84,9 +85,14 @@ def test_dynamic_builder_requires_its_inputs(tmp_path: Path, missing, message) -
 
 
 @pytest.mark.parametrize("length", [1, 2])
-def test_dynamic_builder_accepts_short_chains(tmp_path: Path, length: int) -> None:
-    """mBuild builds chains of any length, so 1- and 2-mers are accepted."""
-    assert _dynamic_builder(tmp_path, length=length).length == length
+def test_dynamic_builder_refuses_chains_without_a_repeat_unit(tmp_path: Path, length: int) -> None:
+    """The length counts the two caps, so a dynamic chain is at least 3 long."""
+    with pytest.raises(ValueError, match="requires length >= 3"):
+        _dynamic_builder(tmp_path, length=length)
+
+
+def test_dynamic_builder_accepts_one_repeat_unit(tmp_path: Path) -> None:
+    assert _dynamic_builder(tmp_path, length=3).length == 3
 
 
 def test_dynamic_builder_creates_the_generator_from_its_settings(tmp_path: Path) -> None:
@@ -100,7 +106,10 @@ def test_dynamic_builder_creates_the_generator_from_its_settings(tmp_path: Path)
         "B": "EGP",
     }
     assert generator.monomers["A"].unit.smiles == SBMA
-    assert {end: cap.smiles for end, cap in generator.end_groups.items()} == H_CAPS
+    assert {
+        end: [(label, cap.unit.smiles) for label, cap in caps.items()]
+        for end, caps in generator.end_groups.items()
+    } == {"head": [("H", "[*][H]")], "tail": [("H", "[*][H]")]}
     assert generator.force_field == SAGE
     assert generator.max_retries == 3
     assert generator.nagl_model == "openff-gnn-am1bcc-1.0.0.pt"
@@ -112,7 +121,7 @@ def test_dynamic_builder_routes_cache_directory_hits_through_generator(
     tmp_path: Path,
 ) -> None:
     """Dynamic mode should not load cache-directory SDFs without metadata validation."""
-    cache_path = tmp_path / "PEGMA_seq=BBBBB_5-mer_charged.sdf"
+    cache_path = tmp_path / "PEGMA_seq=HBBBH_5-mer_charged.sdf"
     cache_path.write_text("stale cache", encoding="utf-8")
     sentinel = object()
     builder = _dynamic_builder(tmp_path, cache_directory=tmp_path)
@@ -135,7 +144,7 @@ def test_dynamic_builder_routes_cache_directory_hits_through_generator(
     monkeypatch.setattr(builder, "_load_from_sdf", fail_load_cache)
     monkeypatch.setattr(builder, "_generate_polymer", lambda sequence: sentinel)
 
-    assert builder._get_or_create_molecule("BBBBB") is sentinel
+    assert builder._get_or_create_molecule("HBBBH") is sentinel
 
 
 def test_dynamic_builder_hands_cache_hits_to_the_generator(
@@ -154,8 +163,8 @@ def test_dynamic_builder_hands_cache_hits_to_the_generator(
 
     monkeypatch.setattr(builder._polymer_generator, "generate_polymer", fake_generate)
 
-    assert builder._get_or_create_molecule("BBBBB") is sentinel
-    assert calls == ["BBBBB"]
+    assert builder._get_or_create_molecule("HBBBH") is sentinel
+    assert calls == ["HBBBH"]
 
 
 def test_dynamic_builder_routes_sdf_directory_generated_artifact_through_generator(
@@ -163,7 +172,7 @@ def test_dynamic_builder_routes_sdf_directory_generated_artifact_through_generat
     tmp_path: Path,
 ) -> None:
     """Dynamic mode should not directly load generated-style SDF directory hits."""
-    sdf_path = tmp_path / "PEGMA_seq=BBBBB_5-mer_charged.sdf"
+    sdf_path = tmp_path / "PEGMA_seq=HBBBH_5-mer_charged.sdf"
     sdf_path.write_text("stale generated artifact", encoding="utf-8")
     sentinel = object()
     builder = _dynamic_builder(tmp_path, sdf_directory=tmp_path)
@@ -186,7 +195,7 @@ def test_dynamic_builder_routes_sdf_directory_generated_artifact_through_generat
     monkeypatch.setattr(builder, "_load_from_sdf", fail_load_cache)
     monkeypatch.setattr(builder, "_generate_polymer", lambda sequence: sentinel)
 
-    assert builder._get_or_create_molecule("BBBBB") is sentinel
+    assert builder._get_or_create_molecule("HBBBH") is sentinel
 
 
 def test_dynamic_builder_loads_generated_sdf_directory_hit_when_metadata_matches(
@@ -194,12 +203,12 @@ def test_dynamic_builder_loads_generated_sdf_directory_hit_when_metadata_matches
     tmp_path: Path,
 ) -> None:
     """Dynamic mode should load generated-style SDF hits with matching metadata."""
-    sdf_path = tmp_path / "PEGMA_seq=BBBBB_5-mer_charged.sdf"
+    sdf_path = tmp_path / "PEGMA_seq=HBBBH_5-mer_charged.sdf"
     sdf_path.write_text("validated generated artifact", encoding="utf-8")
     sentinel = object()
     builder = _dynamic_builder(tmp_path, sdf_directory=tmp_path)
     builder._ensure_generators_initialized()
-    _write_metadata(builder._polymer_generator, sdf_path, "BBBBB")
+    _write_metadata(builder._polymer_generator, sdf_path, "HBBBH")
 
     monkeypatch.setattr(builder, "_load_from_sdf", lambda path: sentinel)
     monkeypatch.setattr(
@@ -208,14 +217,14 @@ def test_dynamic_builder_loads_generated_sdf_directory_hit_when_metadata_matches
         lambda sequence: pytest.fail("Validated generated SDF was not loaded"),
     )
 
-    assert builder._get_or_create_molecule("BBBBB") is sentinel
+    assert builder._get_or_create_molecule("HBBBH") is sentinel
 
 
 @pytest.mark.parametrize(
     "stale",
     [
         {"monomer_smiles": {"SBMA": SBMA, "EGPMA": "[*]CC([*])(C)C(=O)OCCO"}},
-        {"end_groups": {"head": "[*]C", "tail": "[*][H]"}},
+        {"end_groups": {"head": [{**H_CAP_OPTION, "smiles": "[*]C"}], "tail": [H_CAP_OPTION]}},
         {"residue_names": {"SBMA": "SBM", "EGPMA": "EGM"}},
         {"charger_type": "am1bcc"},
         {"force_field": ["openff-2.2.0.offxml"]},
@@ -228,11 +237,11 @@ def test_dynamic_builder_regenerates_generated_sdf_directory_hit_with_stale_meta
     stale: dict[str, object],
 ) -> None:
     """Dynamic mode should regenerate generated-style SDF hits with stale metadata."""
-    sdf_path = tmp_path / "PEGMA_seq=BBBBB_5-mer_charged.sdf"
+    sdf_path = tmp_path / "PEGMA_seq=HBBBH_5-mer_charged.sdf"
     sdf_path.write_text("stale generated artifact", encoding="utf-8")
     old = _dynamic_builder(tmp_path, cache_directory=tmp_path / "stale", **stale)
     old._ensure_generators_initialized()
-    _write_metadata(old._polymer_generator, sdf_path, "BBBBB")
+    _write_metadata(old._polymer_generator, sdf_path, "HBBBH")
     sentinel = object()
     builder = _dynamic_builder(tmp_path, sdf_directory=tmp_path)
 
@@ -243,20 +252,20 @@ def test_dynamic_builder_regenerates_generated_sdf_directory_hit_with_stale_meta
     )
     monkeypatch.setattr(builder, "_generate_polymer", lambda sequence: sentinel)
 
-    assert builder._get_or_create_molecule("BBBBB") is sentinel
+    assert builder._get_or_create_molecule("HBBBH") is sentinel
 
 
 def test_metadata_of_unused_monomers_does_not_invalidate_the_cache(tmp_path: Path) -> None:
     """A chain's sidecar records only the monomers its sequence uses."""
-    sdf_path = tmp_path / "PEGMA_seq=BBBBB_5-mer_charged.sdf"
+    sdf_path = tmp_path / "PEGMA_seq=HBBBH_5-mer_charged.sdf"
     sdf_path.write_text("generated artifact", encoding="utf-8")
     old = _dynamic_builder(tmp_path, monomer_smiles={"SBMA": "[*]CC([*])C", "EGPMA": EGPMA})
     old._ensure_generators_initialized()
-    _write_metadata(old._polymer_generator, sdf_path, "BBBBB")
+    _write_metadata(old._polymer_generator, sdf_path, "HBBBH")
     builder = _dynamic_builder(tmp_path, sdf_directory=tmp_path)
 
-    assert builder._dynamic_sdf_metadata_matches(sdf_path, "BBBBB")
-    assert set(builder._polymer_generator.cache_metadata("BBBBB")["monomers"]) == {"B"}
+    assert builder._dynamic_sdf_metadata_matches(sdf_path, "HBBBH")
+    assert set(builder._polymer_generator.cache_metadata("HBBBH")["monomers"]) == {"B"}
 
 
 @pytest.mark.parametrize("sidecar", [None, "not json", "[1, 2]"])
@@ -265,13 +274,13 @@ def test_a_missing_or_unreadable_sidecar_does_not_match(tmp_path: Path, sidecar)
     builder = _dynamic_builder(tmp_path)
     builder._ensure_generators_initialized()
     generator = builder._polymer_generator
-    sdf_path = generator.sdf_path("BBBBB")
+    sdf_path = generator.sdf_path("HBBBH")
     sdf_path.parent.mkdir(parents=True)
     sdf_path.write_text("generated artifact", encoding="utf-8")
     if sidecar is not None:
         generator.metadata_path(sdf_path).write_text(sidecar, encoding="utf-8")
 
-    assert not generator.cache_metadata_matches(sdf_path, "BBBBB")
+    assert not generator.cache_metadata_matches(sdf_path, "HBBBH")
 
 
 def test_dynamic_builder_loads_a_user_sdf_as_given(
@@ -282,7 +291,7 @@ def test_dynamic_builder_loads_a_user_sdf_as_given(
     sdf_directory = tmp_path / "user"
     sdf_directory.mkdir()
     builder = _dynamic_builder(tmp_path, sdf_directory=sdf_directory)
-    user_sdf = builder._get_sdf_path("BBBBB", sdf_directory)
+    user_sdf = builder._get_sdf_path("HBBBH", sdf_directory)
     user_sdf.write_text("user molecule", encoding="utf-8")
     sentinel = object()
     monkeypatch.setattr(builder, "_is_dynamic_cache_like_sdf", lambda path, sequence: False)
@@ -293,7 +302,7 @@ def test_dynamic_builder_loads_a_user_sdf_as_given(
         lambda sequence: pytest.fail("A user SDF was rebuilt"),
     )
 
-    assert builder._get_or_create_molecule("BBBBB") is sentinel
+    assert builder._get_or_create_molecule("HBBBH") is sentinel
 
 
 def test_cached_builder_loads_sdf_directory_hit_without_dynamic_metadata(
@@ -323,7 +332,7 @@ def test_cached_mode_finds_the_file_dynamic_mode_writes(tmp_path: Path) -> None:
     """Both modes name a chain's SDF after type_prefix, so cached mode reuses a dynamic cache."""
     dynamic = _dynamic_builder(tmp_path, cache_directory=tmp_path, type_prefix="SE")
     dynamic._ensure_generators_initialized()
-    written = dynamic._polymer_generator.sdf_path("AABBA")
+    written = dynamic._polymer_generator.sdf_path("HABAH")
     cached = PolymerBuilder(
         characters=["A", "B"],
         probabilities=[0.5, 0.5],
@@ -332,7 +341,7 @@ def test_cached_mode_finds_the_file_dynamic_mode_writes(tmp_path: Path) -> None:
         sdf_directory=tmp_path,
         generation_mode="cached",
     )
-    assert cached._get_sdf_path("AABBA", tmp_path) == written
+    assert cached._get_sdf_path("HABAH", tmp_path) == written
 
 
 def test_missing_cached_sdf_error_names_real_config_keys(tmp_path: Path) -> None:
@@ -359,18 +368,18 @@ def test_molecule_source_reports_preset_for_a_user_sdf_in_dynamic_mode(
     sdf_directory = tmp_path / "user"
     sdf_directory.mkdir()
     builder = _dynamic_builder(tmp_path, sdf_directory=sdf_directory)
-    user_sdf = builder._get_sdf_path("BBBBB", sdf_directory)
+    user_sdf = builder._get_sdf_path("HBBBH", sdf_directory)
     user_sdf.write_text("user molecule", encoding="utf-8")
     monkeypatch.setattr(builder, "_is_dynamic_cache_like_sdf", lambda path, sequence: False)
 
-    assert builder.molecule_source("BBBBB") == {
+    assert builder.molecule_source("HBBBH") == {
         "sdf_path": user_sdf,
         "charge_method": "preset",
         "nagl_model": None,
     }
 
     monkeypatch.setattr(builder, "_is_dynamic_cache_like_sdf", lambda path, sequence: True)
-    assert builder.molecule_source("BBBBB")["charge_method"] == builder._charger_type
+    assert builder.molecule_source("HBBBH")["charge_method"] == builder._charger_type
 
 
 # ---------------------------------------------------------------------------
@@ -381,34 +390,51 @@ STAR_MMA = "[*]CC([*])(C)C(=O)OC"
 STAR_HEMA = "[*]CC([*])(C)C(=O)OCCO"
 
 
+#: Cap options: a hydrogen or a methyl head, and a hydrogen tail.
+CACHED_CAPS = {
+    "head": [
+        {"label": "H", "smiles": "[*][H]", "probability": 0.5},
+        {"label": "M", "smiles": "[*]C", "probability": 0.5, "name": "methyl"},
+    ],
+    "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+}
+
+
 def _cached_builder(
     tmp_path: Path, mma: str = STAR_MMA, caps: dict | None = None
 ) -> PolymerBuilder:
     return PolymerBuilder(
         characters=["A", "B"],
         probabilities=[0.5, 0.5],
-        length=2,
+        length=4,
         type_prefix="MH",
         sdf_directory=tmp_path,
         monomer_smiles={"MMA": mma, "HEMA": STAR_HEMA},
         monomer_names={"A": "MMA", "B": "HEMA"},
-        end_groups=caps if caps is not None else {"head": "[*][H]", "tail": "[*][H]"},
+        end_groups=caps if caps is not None else CACHED_CAPS,
     )
 
 
-def _write_sidecar(tmp_path: Path, sequence: str = "AB") -> Path:
-    sdf = tmp_path / f"MH_seq={sequence}_2-mer_charged.sdf"
+def _cap_record(label: str, smiles: str, name: str | None = None) -> dict:
+    """The per-chain cap record dynamic generation writes in a sidecar."""
+    return {"label": label, "name": name, "residue_name": None, "smiles": smiles}
+
+
+def _write_sidecar(tmp_path: Path, sequence: str = "MABH") -> Path:
+    sdf = tmp_path / f"MH_seq={sequence}_{len(sequence)}-mer_charged.sdf"
     sdf.write_text("chain", encoding="utf-8")
     sidecar = sdf.with_name(f"{sdf.name}.metadata.json")
+    head = _cap_record("M", "[*]C", "methyl") if sequence[0] == "M" else _cap_record("H", "[*][H]")
     sidecar.write_text(
         json.dumps(
             {
                 "schema_version": 5,
+                "sequence": sequence,
                 "monomers": {
                     "A": {"name": "MMA", "residue_name": "MMA", "smiles": STAR_MMA},
                     "B": {"name": "HEMA", "residue_name": "HEM", "smiles": STAR_HEMA},
                 },
-                "end_groups": {"head": "[*][H]", "tail": "[*][H]"},
+                "end_groups": {"head": head, "tail": _cap_record("H", "[*][H]")},
                 "builder": {"package": "mbuild", "version": "1.4.0", "commit": "abc"},
             }
         ),
@@ -427,10 +453,29 @@ def test_cached_mode_refuses_a_chain_built_from_other_smiles(tmp_path: Path) -> 
 
 
 def test_cached_mode_refuses_a_chain_with_other_caps(tmp_path: Path) -> None:
-    sdf = _write_sidecar(tmp_path)
-    builder = _cached_builder(tmp_path, caps={"head": "[*]C", "tail": "[*][H]"})
-    with pytest.raises(ValueError, match="end_groups.head"):
+    """The chain's own cap (by label) is compared with the config's option of that label."""
+    sdf = _write_sidecar(tmp_path, "MABH")
+    caps = {
+        "head": [
+            {"label": "H", "smiles": "[*][H]", "probability": 0.5},
+            {"label": "M", "smiles": "[*]CC", "probability": 0.5},
+        ],
+        "tail": CACHED_CAPS["tail"],
+    }
+    builder = _cached_builder(tmp_path, caps=caps)
+    with pytest.raises(ValueError, match="end_groups.head 'M'") as error:
         builder._check_cached_chemistry(sdf)
+    assert "'[*]CC'" in str(error.value) and "'[*]C'" in str(error.value)
+
+    # A chain whose head is the unchanged hydrogen option still matches.
+    builder._check_cached_chemistry(_write_sidecar(tmp_path, "HABH"))
+
+
+def test_cached_mode_accepts_the_chain_caps_of_its_config(tmp_path: Path) -> None:
+    """Each chain records the caps it drew; both draws of the config match."""
+    builder = _cached_builder(tmp_path, caps={**CACHED_CAPS})
+    builder._check_cached_chemistry(_write_sidecar(tmp_path, "MABH"))
+    builder._check_cached_chemistry(_write_sidecar(tmp_path, "HBAH"))
 
 
 def test_cached_mode_accepts_equivalent_smiles_and_records_the_builder(tmp_path: Path) -> None:
@@ -439,15 +484,65 @@ def test_cached_mode_accepts_equivalent_smiles_and_records_the_builder(tmp_path:
     builder = _cached_builder(tmp_path, mma="COC(=O)C([*])(C)C[*]")
     builder._check_cached_chemistry(sdf)
     assert builder.chain_builders() == [{"package": "mbuild", "version": "1.4.0", "commit": "abc"}]
-    assert builder.chain_chemistry()["end_groups"] == {"head": "[*][H]", "tail": "[*][H]"}
+    assert builder.chain_chemistry()["end_groups"] == {
+        "head": _cap_record("M", "[*]C", "methyl"),
+        "tail": _cap_record("H", "[*][H]"),
+    }
 
 
 def test_cached_mode_warns_when_it_cannot_check_the_chemistry(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    sdf = tmp_path / "MH_seq=AB_2-mer_charged.sdf"
+    sdf = tmp_path / "MH_seq=MABH_4-mer_charged.sdf"
     sdf.write_text("chain", encoding="utf-8")
     builder = _cached_builder(tmp_path)
     builder._check_cached_chemistry(sdf)
     assert "not checked" in caplog.text
     assert builder.chain_builders() == []
+
+
+def test_cached_mode_draws_caps_when_the_config_gives_them(tmp_path: Path) -> None:
+    """A cached config with end_groups finds chains named with their cap labels."""
+    builder = PolymerBuilder(
+        characters=["A"],
+        probabilities=[1.0],
+        length=4,
+        type_prefix="MH",
+        sdf_directory=tmp_path,
+        end_groups={
+            "head": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+            "tail": [{"label": "M", "smiles": "[*]C", "probability": 1.0}],
+        },
+    )
+    assert builder._draw_sequence() == "HAAM"
+
+
+def test_cached_mode_refuses_a_chain_whose_cap_the_config_lacks(tmp_path: Path) -> None:
+    sdf = tmp_path / "MH_seq=HABH_4-mer_charged.sdf"
+    sdf.write_text("chain", encoding="utf-8")
+    sdf.with_name(f"{sdf.name}.metadata.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "monomers": {},
+                "end_groups": {
+                    "head": {"label": "H", "smiles": "[*][H]"},
+                    "tail": {"label": "H", "smiles": "[*][H]"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    builder = PolymerBuilder(
+        characters=["A", "B"],
+        probabilities=[0.5, 0.5],
+        length=4,
+        type_prefix="MH",
+        sdf_directory=tmp_path,
+        end_groups={
+            "head": [{"label": "M", "smiles": "[*]C", "probability": 1.0}],
+            "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+        },
+    )
+    with pytest.raises(ValueError, match="is not one of the config's caps"):
+        builder._check_cached_chemistry(sdf)

@@ -90,8 +90,8 @@ def test_dynamic_polymers_use_the_configured_model(tmp_path) -> None:
 
     generator = PolymerGenerator.from_smiles(
         [("A", "MMA", "MMA", "[*]CC([*])(C)C(=O)OC")],
-        head="[*][H]",
-        tail="[*][H]",
+        head=[{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+        tail=[{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
         cache_directory=tmp_path,
         force_field=["openff-2.3.0.offxml"],
         nagl_model=OLD,
@@ -100,7 +100,7 @@ def test_dynamic_polymers_use_the_configured_model(tmp_path) -> None:
     charger = generator._charger()
     assert isinstance(charger, NAGLCharger)
     assert charger.model_name == OLD
-    assert generator.cache_metadata("AAA")["nagl_model"] == OLD
+    assert generator.cache_metadata("HAAAH")["nagl_model"] == OLD
 
 
 def test_system_builder_takes_the_model_from_the_config() -> None:
