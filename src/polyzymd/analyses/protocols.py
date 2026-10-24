@@ -130,7 +130,7 @@ class PairwiseReport(BaseModel):
     ``delta`` is ``mean(b) - mean(a)`` and ``cohens_d`` is oriented to match it.
     ``p_adjusted`` of ``None`` means no corrected p value was computed, so
     the row describes a difference rather than deciding it; ``testable`` of
-    ``False`` means a condition has fewer than two replicates, both have one
+    ``False`` means a condition has fewer than three replicates, both have one
     value in every replicate, or, with the ``reason``, a condition has no
     partner (see ``ConditionReport.no_partner``). ``family_size``
     is the number of tests in the Benjamini-Hochberg family this row was

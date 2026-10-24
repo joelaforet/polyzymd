@@ -1594,15 +1594,21 @@ BUILD_MODULES = ("rdkit", "openff.toolkit", "openff.interchange")
 def _recorded_production_lengths(working_dir: Path) -> list[tuple[float, int]]:
     """Return the (duration in ns, samples) a started chain may have been built with.
 
-    The first is what ``production_0_parameters.json`` recorded when the
-    chain's first segment started, the config the build was made with; the
-    second is the totals in ``progress.json``.
+    In order: the length ``progress.json`` recorded when production started
+    (``started_total_steps``), what ``production_0_parameters.json`` recorded
+    when the first segment started, and the current totals in
+    ``progress.json`` (for files written before the first existed).
     """
     import json
 
     from polyzymd.simulation.progress import load_progress
 
     found: list[tuple[float, int]] = []
+    prior = load_progress(working_dir)
+    if prior is not None and prior.started_total_steps and prior.timestep_fs:
+        duration = prior.started_total_steps * prior.timestep_fs / 1e6
+        samples = prior.started_total_samples or 0
+        found += [(duration, samples), (round(duration, 9), samples)]
     params = working_dir / "production_0" / "production_0_parameters.json"
     try:
         values = json.loads(params.read_text())["__values__"]["integ_params"]["__values__"]
@@ -1611,7 +1617,6 @@ def _recorded_production_lengths(working_dir: Path) -> list[tuple[float, int]]:
         )
     except (OSError, ValueError, KeyError, TypeError):
         pass
-    prior = load_progress(working_dir)
     if prior is not None and prior.total_steps_requested and prior.timestep_fs:
         duration = prior.total_steps_requested * prior.timestep_fs / 1e6
         found.append((duration, prior.total_samples_requested or 0))

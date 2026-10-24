@@ -806,3 +806,19 @@ def test_the_scripts_give_the_report_of_one_analyze_run(configs, tmp_path, monke
     one = json.loads(direct.stdout)
     assert one["provenance"]["output_paths"]["results"].startswith(str(tmp_path / "one"))
     assert _comparable(submitted, tmp_path / "out") == _comparable(one, tmp_path / "one")
+
+
+def test_the_report_job_treats_a_partial_report_as_success(tmp_path) -> None:
+    """The report job exits 0 when analyze exits 3 (partial), and keeps any other code."""
+    import subprocess
+
+    for code, expected in ((3, 0), (2, 2), (0, 0)):
+        command = tmp_path / f"fake{code}"
+        command.write_text(f"#!/bin/bash\nexit {code}\n")
+        command.chmod(0o755)
+        submission = _write(tmp_path / f"case{code}", command=str(command))
+        result = subprocess.run(
+            ["bash", str(submission.report)], capture_output=True, text=True, cwd=tmp_path
+        )
+        assert result.returncode == expected, (code, result.stdout, result.stderr)
+        assert ("the report is partial" in result.stdout) == (code == 3)

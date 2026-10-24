@@ -40,6 +40,12 @@ Each job runs `polyzymd run-segment`, which continues from the last segment.
 `polyzymd check-progress` reads the new total from the config, so the chain
 resubmits itself until it reaches it.
 
+On a cluster, `submit` does not compare a started replicate with its build.
+Each new segment takes its thermostat, friction and barostat from the
+parameters file of the segment before it, not from the config. So a change to
+another setting is not refused there: it is ignored, or it makes the chain
+inconsistent. Edit only `duration` and `samples`.
+
 ## Check the result
 
 ```bash

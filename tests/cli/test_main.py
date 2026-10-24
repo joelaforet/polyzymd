@@ -2928,6 +2928,61 @@ class TestBuildMatchesRecordedLength:
         )
         assert _build_matches_recorded_length(tmp_path, longer, "", 1)
 
+    def test_an_extension_interrupted_without_segment_parameters_still_matches(
+        self, tmp_path: Path, passing_audit
+    ) -> None:
+        """progress.json keeps the length production started with, whatever the totals say now."""
+        from polyzymd.cli.main import _build_matches_recorded_length
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            load_or_scan_progress,
+            load_progress,
+            save_progress,
+        )
+
+        config = self._built(tmp_path)
+        production = config.simulation_phases.production
+        steps = int(production.duration * 1e6 / production.time_step)
+        # The first run records the length production starts with.
+        progress = load_or_scan_progress(
+            tmp_path,
+            total_steps=steps,
+            total_samples=production.samples,
+            timestep_fs=production.time_step,
+        )
+        progress.segments = [
+            SegmentRecord(index=0, status=SegmentStatus.COMPLETED, steps_completed=steps),
+            SegmentRecord(index=1, status=SegmentStatus.INTERRUPTED, steps_completed=10),
+        ]
+        save_progress(tmp_path, progress)
+        # The extended run syncs the new totals, then is interrupted.
+        extended = load_or_scan_progress(
+            tmp_path,
+            total_steps=steps * 2,
+            total_samples=production.samples * 2,
+            timestep_fs=production.time_step,
+        )
+        save_progress(tmp_path, extended)
+        assert load_progress(tmp_path).started_total_steps == steps
+        assert not (tmp_path / "production_0" / "production_0_parameters.json").exists()
+
+        longer = config.model_copy(
+            update={
+                "simulation_phases": config.simulation_phases.model_copy(
+                    update={
+                        "production": production.model_copy(
+                            update={
+                                "duration": production.duration * 2,
+                                "samples": production.samples * 2,
+                            }
+                        )
+                    }
+                )
+            }
+        )
+        assert _build_matches_recorded_length(tmp_path, longer, "", 1)
+
     def test_another_temperature_does_not(self, tmp_path: Path, passing_audit) -> None:
         from polyzymd.cli.main import _build_matches_recorded_length
 

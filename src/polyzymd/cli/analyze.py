@@ -29,6 +29,28 @@ _JSON_REPORTS = "polyzymd.analyze.json_reports"
 _JSON_STUDY = "polyzymd.analyze.json_study"
 
 
+def _comparable(value: Any, folder: Path) -> Any:
+    """Return settings with each string that names an existing file made absolute.
+
+    The study file's settings name their files relative to the study and are
+    read as absolute paths; ``--set`` names them relative to the current
+    folder or to the study. Both forms of one file then compare equal.
+    """
+    if isinstance(value, dict):
+        return {key: _comparable(item, folder) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_comparable(item, folder) for item in value]
+    if isinstance(value, str) and value and "\n" not in value and len(value) < 1024:
+        for base in (Path.cwd(), Path(folder)):
+            candidate = Path(value) if Path(value).is_absolute() else base / value
+            try:
+                if candidate.exists():
+                    return str(candidate.resolve())
+            except OSError:
+                continue
+    return value
+
+
 def _set_value(value: Any) -> str:
     """Return ``value`` written for ``--set key=VALUE``, so :func:`_settings` reads it back unchanged.
 
@@ -603,10 +625,25 @@ def analyze_command(
         # A run the study file does not list has no stored settings to protect.
         if command_line_settings and run_name in _load_study(study_path).analyses:
             given = len(setting_overrides) - len(command_line_settings)
+            folder = _load_study(study_path).root
             try:
-                one_off = _settings(setting_overrides) != _settings(setting_overrides[:given])
+                one_off = _comparable(_settings(setting_overrides), folder) != _comparable(
+                    _settings(setting_overrides[:given]), folder
+                )
             except AnalysisError:
                 one_off = False  # the run itself reports the bad setting
+        if one_off and requested_output is None and (submit or dry_run) and not is_task:
+            click.echo(
+                f"error: --set changes the settings of {run_name} in the study file, and a "
+                "submitted run of such settings would replace its stored results.",
+                err=True,
+            )
+            click.echo(
+                "fix: Give --output-dir for these results, or add a named analysis under "
+                "analyses: and submit that.",
+                err=True,
+            )
+            sys.exit(EXIT_ANALYSIS_ERROR)
         if one_off and requested_output is None and not is_task:
             import atexit
             import shutil
@@ -856,12 +893,13 @@ def analyze_command(
     rendered = _render(report, output_format)
     collected = ctx.meta.get(_JSON_REPORTS)
     if collected is not None and output_format == "json":
-        # --project and --study print one JSON document for every run, at the end.
+        # --project and --study print (and write with -o) one JSON document for
+        # every run, at the end.
         study_label = ctx.meta.get(_JSON_STUDY, "")
         collected.setdefault(study_label, {})[run_name] = report.model_dump(mode="json")
     else:
         click.echo(rendered)
-    if output_path is not None:
+    if output_path is not None and not (collected is not None and output_format == "json"):
         try:
             Path(output_path).write_text(rendered.rstrip("\n") + "\n")
         except OSError as exc:
@@ -957,12 +995,18 @@ def _analyze_project(
                 partial.append(label)
             elif exit_.code:
                 failed.append(label)
-                if json_output and name is not None:
-                    ctx.meta[_JSON_REPORTS].setdefault(label, {}).setdefault(
-                        name, {"status": "failed"}
-                    )
+                if json_output:
+                    runs = ctx.meta[_JSON_REPORTS].setdefault(label, {})
+                    if name is not None:
+                        runs.setdefault(name, {"status": "failed"})
+                    elif not runs:
+                        # The study failed before any of its runs: say so for the study.
+                        ctx.meta[_JSON_REPORTS][label] = {
+                            "status": "failed",
+                            "error": "the study could not be analysed; the error is on stderr",
+                        }
     if json_output:
-        _echo_json_document(ctx.meta.pop(_JSON_REPORTS))
+        _echo_json_document(ctx.meta.pop(_JSON_REPORTS), ctx.params.get("output_path"))
     if failed:
         click.echo(
             f"error: {len(failed)} of {len(labels)} studies failed: {', '.join(failed)}", err=True
@@ -977,23 +1021,36 @@ def _analyze_project(
         sys.exit(EXIT_PARTIAL)
 
 
-def _echo_json_document(studies: dict[str, dict[str, Any]]) -> None:
-    """Print the reports of every study and run as one JSON document.
+def _echo_json_document(
+    studies: dict[str, dict[str, Any]], output_path: str | Path | None = None
+) -> None:
+    """Print, and write to ``output_path``, the reports of every study and run as one JSON document.
 
     ``{"status": ..., "studies": {study: {analysis: report}}}``; ``status``
-    is ``failed`` when a run failed (its entry is ``{"status": "failed"}``),
-    ``partial`` when a report left something out, else ``complete``.
+    is ``failed`` when a run failed (its entry is ``{"status": "failed"}``) or
+    a study failed before its runs (the study's entry is then
+    ``{"status": "failed", "error": ...}``), ``partial`` when a report left
+    something out, else ``complete``.
     """
     import json
 
-    statuses = {
-        report.get("status", "complete") for runs in studies.values() for report in runs.values()
-    }
+    statuses = set()
+    for runs in studies.values():
+        if isinstance(runs.get("status"), str):
+            statuses.add(runs["status"])
+            continue
+        statuses |= {report.get("status", "complete") for report in runs.values()}
     status = next(
         (word for word in ("failed", "partial") if word in statuses),
         "complete",
     )
-    click.echo(json.dumps({"status": status, "studies": studies}, indent=2))
+    text = json.dumps({"status": status, "studies": studies}, indent=2)
+    click.echo(text)
+    if output_path is not None:
+        try:
+            Path(output_path).write_text(text + "\n")
+        except OSError as exc:
+            raise click.ClickException(f"Could not write output file: {exc}") from exc
 
 
 def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
@@ -1047,7 +1104,7 @@ def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
                     study_label = ctx.meta.get(_JSON_STUDY, "")
                     ctx.meta[_JSON_REPORTS].setdefault(study_label, {})[run] = {"status": "failed"}
     if owner:
-        _echo_json_document(ctx.meta.pop(_JSON_REPORTS))
+        _echo_json_document(ctx.meta.pop(_JSON_REPORTS), ctx.params.get("output_path"))
     if failed:
         click.echo(
             f"error: {len(failed)} of {len(runs)} runs failed: {', '.join(failed)}", err=True

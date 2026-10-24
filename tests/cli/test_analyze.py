@@ -829,3 +829,91 @@ def test_every_run_of_a_study_is_one_json_document_and_partial_exits_3(tmp_path:
     assert study["rg"]["excluded_replicates"] == {
         "Polymer": {"4": "no production output (never built or never run)"}
     }
+
+
+def test_a_set_file_equal_to_the_study_files_is_not_a_change(tmp_path: Path, monkeypatch) -> None:
+    """--set pairs=pairs.yaml names the same file the study file lists as an absolute path."""
+    from polyzymd.cli.analyze import _comparable
+
+    (tmp_path / "pairs.yaml").write_text("[]\n")
+    monkeypatch.chdir(tmp_path)
+    given = _comparable({"pairs": "pairs.yaml", "cutoff": 3.0}, tmp_path)
+    listed = _comparable({"pairs": str(tmp_path / "pairs.yaml"), "cutoff": 3.0}, tmp_path)
+    assert given == listed
+    assert _comparable({"selection": "name CA"}, tmp_path) == {"selection": "name CA"}
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_a_one_off_set_cannot_be_submitted_into_the_study_results(tmp_path: Path) -> None:
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    refused = _analyze_cli("rg", "--study", str(root), "--set", "selection=name C1", "--dry-run")
+    assert refused.exit_code == EXIT_ANALYSIS_ERROR
+    assert "Give --output-dir" in refused.output
+    elsewhere = tmp_path / "elsewhere"
+    written = _analyze_cli(
+        "rg",
+        "--study",
+        str(root),
+        "--set",
+        "selection=name C1",
+        "--dry-run",
+        "--output-dir",
+        str(elsewhere),
+    )
+    assert written.exit_code == 0, written.output
+    assert list((elsewhere / "slurm").glob("rg_*/report.sbatch"))
+
+
+def test_the_json_document_of_a_failed_study_is_failed_and_written_once(tmp_path: Path) -> None:
+    import json
+
+    from click.testing import CliRunner as Runner
+
+    from polyzymd.cli.analyze import _echo_json_document
+
+    out = tmp_path / "all.json"
+    studies = {
+        "good": {"rg": {"analysis": "rg", "status": "complete"}},
+        "bad": {"status": "failed", "error": "the study could not be analysed"},
+    }
+    import click
+
+    @click.command()
+    def emit() -> None:
+        _echo_json_document(studies, out)
+
+    result = Runner().invoke(emit)
+    document = json.loads(result.output)
+    assert document["status"] == "failed"
+    assert json.loads(out.read_text()) == document
+
+
+@pytest.mark.usefixtures("git_identity")
+def test_study_check_reads_a_file_setting_as_the_report_records_it(tmp_path: Path) -> None:
+    """The entry's reference_file resolves to an absolute path; the report keeps it relative."""
+    import json
+
+    root = write_committed_study(
+        tmp_path, "  rmsd: {reference_mode: external, reference_file: ref.pdb}\n"
+    )
+    (root / "ref.pdb").write_text("END\n")
+    stored = root / "results" / "rmsd" / "report.json"
+    record = stored.parent / "polyzymd_results" / "rmsd" / "A" / "replicate_1" / "record.json"
+    record.parent.mkdir(parents=True)
+    record.write_text("{}")
+    settings = {"reference_mode": "external", "reference_file": "ref.pdb"}
+    stored.write_text(
+        json.dumps({"status": "complete", "provenance": {"study": {"settings": settings}}})
+    )
+    check = CliRunner().invoke(cli, ["study", "check", str(root)])
+    assert "rmsd: " in check.output and "with its report" in check.output, check.output
+    assert "other settings" not in check.output
+
+    settings["reference_file"] = "other.pdb"
+    stored.write_text(
+        json.dumps({"status": "complete", "provenance": {"study": {"settings": settings}}})
+    )
+    check = CliRunner().invoke(cli, ["study", "check", str(root)])
+    assert "made with other settings" in check.output

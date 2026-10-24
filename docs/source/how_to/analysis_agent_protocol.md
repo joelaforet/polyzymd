@@ -158,8 +158,10 @@ and the frames. To measure it again, add `--recompute`.
 | `error: No analysis named 'catalytic_triad'.` | The catalytic triad is a routine on the study API: follow {doc}`analysis_triad_quickstart`, or run `polyzymd analyze distances --set pairs=<pairs.yaml>` for the distances. |
 | `polyzymd: command not found` | Run through `pixi run -e analysis`. |
 
-The command exits with 0 on success. On each error above, it exits with 2 and
-prints the message and the fix, one line each.
+The command exits with 0 when every report is complete. A report that left a
+condition or a replicate out is `partial`: it is printed with a `problem:`
+line for each, and the command exits with 3. On each error above, it exits
+with 2 and prints the message and the fix, one line each.
 
 ## See also
 

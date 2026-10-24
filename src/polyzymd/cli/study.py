@@ -15,6 +15,29 @@ EXIT_STUDY_ERROR = 2
 PROJECT_CHECK = "polyzymd.project_check"
 
 
+def _tested_below_three(report: dict) -> bool:
+    """Whether a stored report has a p value for conditions of fewer than three replicates.
+
+    Reports made since comparisons need three replicates per condition have
+    none, so such a report was made before that rule.
+    """
+    counts: dict[str, int] = {}
+    for item in report.get("conditions") or []:
+        if isinstance(item, dict) and "label" in item:
+            counts[item["label"]] = max(counts.get(item["label"], 0), item.get("n_replicates") or 0)
+    for row in report.get("pairwise") or []:
+        if not isinstance(row, dict) or row.get("p") is None:
+            continue
+        if min(counts.get(row.get("a"), 0), counts.get(row.get("b"), 0)) < 3:
+            return True
+    for trend in report.get("trends") or []:
+        if not isinstance(trend, dict) or trend.get("p") is None:
+            continue
+        if any(counts.get(label, 0) < 3 for label in trend.get("conditions") or []):
+            return True
+    return False
+
+
 def _report_status(path: Path, settings: dict | None = None) -> str:
     """Return how ``study check`` describes a run's ``report.json``: absent, complete or partial.
 
@@ -39,6 +62,12 @@ def _report_status(path: Path, settings: dict | None = None) -> str:
                 f", but that report was made with other settings ({shown}); "
                 "polyzymd analyze with --study remakes it"
             )
+    if _tested_below_three(report):
+        other += (
+            ", but that report was made before the three-replicate rule and tests "
+            "conditions of fewer than three replicates; polyzymd analyze with --study "
+            "remakes it"
+        )
     problems = report.get("problems") or []
     if report.get("status", "complete") == "complete":
         return " with its report" + other
@@ -76,7 +105,7 @@ def check_command(path: Path, production: bool = False) -> None:
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.results import REPORT_FILE
     from polyzymd.analyses.study import with_data_dir
-    from polyzymd.analyses.study_file import load_study_file
+    from polyzymd.analyses.study_file import load_study_file, portable
     from polyzymd.citation import citation_line
     from polyzymd.config.schema import SimulationConfig
 
@@ -200,7 +229,16 @@ def check_command(path: Path, production: bool = False) -> None:
                 f"stored results in {folder}"
                 + _report_status(
                     folder / REPORT_FILE,
-                    dict(entry.settings) if entry.function is None else None,
+                    (
+                        # Stored reports record settings fit to publish: files relative.
+                        portable(
+                            dict(entry.settings),
+                            protocol.root,
+                            protocol.project.root if protocol.project is not None else None,
+                        )
+                        if entry.function is None
+                        else None
+                    ),
                 )
                 if stored
                 else "no stored results"

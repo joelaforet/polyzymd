@@ -23,7 +23,7 @@ import time
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -309,6 +309,11 @@ class SimulationProgress(BaseModel):
         ISO-format timestamp of the last update.
     replicate : int
         Replicate index (1-based).
+    started_total_steps, started_total_samples : int or None
+        ``total_steps_requested`` and ``total_samples_requested`` when the
+        first production segment started: the production length of the
+        config the replicate was built with. Later runs that raise the length
+        do not change them. ``None`` in files written before they existed.
     """
 
     config_path: str = ""
@@ -320,6 +325,8 @@ class SimulationProgress(BaseModel):
     status: SimulationStatus = SimulationStatus.NOT_STARTED
     last_updated: str = Field(default_factory=lambda: _now_iso())
     replicate: int = 1
+    started_total_steps: Optional[int] = None
+    started_total_samples: Optional[int] = None
 
     @property
     def equilibration_complete(self) -> bool:
@@ -531,7 +538,11 @@ def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path
     # interleave their writes into it and rename a half-written file over the
     # progress file.  ``_atomic_write`` uses a unique temporary name, fsyncs
     # it, and renames it into place.
-    _atomic_write(target, (json.dumps(progress.model_dump(mode="json"), indent=2) + "\n").encode())
+    data = progress.model_dump(mode="json")
+    for key in ("started_total_steps", "started_total_samples"):
+        if data.get(key) is None:
+            data.pop(key, None)
+    _atomic_write(target, (json.dumps(data, indent=2) + "\n").encode())
     LOGGER.debug(f"Saved progress to {target}")
     return target
 
@@ -1503,6 +1514,11 @@ def load_or_scan_progress(
         # Ensure metadata is set (may be missing from old progress files)
         if not progress.config_path and config_path:
             progress.config_path = config_path
+        # Until production starts, the length of the config is the one the
+        # replicate is built with; afterwards it is kept as it was.
+        if not progress.segments and total_steps > 0:
+            progress.started_total_steps = total_steps
+            progress.started_total_samples = total_samples or None
         # Always sync total_steps/samples from config — the user may have
         # changed the production duration since the progress file was written.
         if total_steps > 0:
@@ -1519,6 +1535,9 @@ def load_or_scan_progress(
     progress.total_samples_requested = total_samples
     progress.timestep_fs = timestep_fs
     progress.replicate = replicate
+    if not progress.segments and total_steps > 0:
+        progress.started_total_steps = total_steps
+        progress.started_total_samples = total_samples or None
 
     # Check completion
     if progress.is_complete:
