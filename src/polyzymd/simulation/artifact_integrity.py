@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shlex
 import tempfile
 import uuid
 import warnings
@@ -624,16 +625,22 @@ def assert_rebuild_allowed(working_dir: Path) -> None:
     from polyzymd.simulation.own_protocol import protocol_dir
 
     own = protocol_dir(working_dir)
+    elsewhere = (
+        "To keep it and build into another folder, pass --scratch-dir <new folder> "
+        "(or set output.scratch_directory in the config)."
+    )
     if own is not None:
         raise ArtifactIntegrityError(
             f"Refusing to rebuild {working_dir}: it is being run with your own protocol "
-            f"({own}), which uses this build. Use a new output directory."
+            f"({own}), which uses this build. {elsewhere}"
         )
     active = _run_outputs(Path(working_dir))
     if active:
         raise ArtifactIntegrityError(
             f"Refusing to rebuild started campaign {working_dir}; found {active[0]}. "
-            "Use a new output directory."
+            "A rebuild would replace the system that run started from. "
+            f"To discard that run and build again, remove the folder {working_dir} "
+            f"(rm -r {shlex.quote(str(working_dir))}). {elsewhere}"
         )
 
 
