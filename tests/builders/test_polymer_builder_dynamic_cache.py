@@ -484,7 +484,7 @@ def test_cached_mode_accepts_equivalent_smiles_and_records_the_builder(tmp_path:
     builder = _cached_builder(tmp_path, mma="COC(=O)C([*])(C)C[*]")
     builder._check_cached_chemistry(sdf)
     assert builder.chain_builders() == [{"package": "mbuild", "version": "1.4.0", "commit": "abc"}]
-    assert builder.chain_chemistry()["end_groups"] == {
+    assert builder.chain_chemistry()["chains"][sdf.name]["end_groups"] == {
         "head": _cap_record("M", "[*]C", "methyl"),
         "tail": _cap_record("H", "[*][H]"),
     }
