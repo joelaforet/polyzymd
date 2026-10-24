@@ -192,7 +192,9 @@ def ignore_runs(folder: Path) -> None:
             gitignore.write_text("\n".join([*lines, "runs/", ""]))
 
 
-def copy_condition(config: Path, folder: Path, runs: Path) -> tuple[list[str], list[str]]:
+def copy_condition(
+    config: Path, folder: Path, runs: Path, *, name: str | None = None
+) -> tuple[list[str], list[str]]:
     """Copy ``config`` to ``folder/config.yaml`` with the input files it names.
 
     Every path key of the config (``config.loader.PATH_KEYS``) that names an
@@ -206,6 +208,8 @@ def copy_condition(config: Path, folder: Path, runs: Path) -> tuple[list[str], l
     stored results still match. When nothing but the output directories
     changes, as in a copy of another condition of the study, the text is
     kept with its comments; otherwise the config is written without them.
+    With ``name``, the top-level ``name:`` of the copy is set to it, as
+    :func:`new_condition` sets the template's name from the folder.
 
     Returns
     -------
@@ -267,12 +271,16 @@ def copy_condition(config: Path, folder: Path, runs: Path) -> tuple[list[str], l
     if isinstance(output, dict):
         output["projects_directory"] = os.path.relpath(runs, folder.resolve())
         output["scratch_directory"] = None
+    if name is not None:
+        rewritten["name"] = name
     target = folder / "config.yaml"
     # Keep the original text, comments included, when only the output lines change.
     lines = config.read_text().splitlines(keepends=True)
     while lines and lines[0].startswith(("# Copied by polyzymd", "#   ")):
         lines.pop(0)  # the header of an earlier copy
     kept = _with_output_lines("".join(lines), rewritten.get("output"))
+    if name is not None:
+        kept = _with_name_line(kept, name)
     if yaml.safe_load(kept) != rewritten:
         kept = yaml.safe_dump(rewritten, sort_keys=False)
     where = f"{os.path.relpath(runs, folder.resolve())} (relative to this file)"
@@ -290,6 +298,19 @@ def copy_condition(config: Path, folder: Path, runs: Path) -> tuple[list[str], l
             hint="Check that the original config loads with polyzymd validate.",
         ) from exc
     return copied, missing
+
+
+def _with_name_line(text: str, name: str) -> str:
+    """Return ``text`` with its top-level ``name:`` set to ``name``, keeping the line's comment."""
+    import json
+
+    return re.sub(
+        r"^name:[^#\n]*?(\s+#.*)?$",
+        lambda match: f"name: {json.dumps(name)}{match.group(1) or ''}",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
 
 
 def _with_output_lines(text: str, output: Any) -> str:
@@ -561,7 +582,8 @@ def add_condition(
 
     With ``config``, the config and its input files are copied as
     :func:`copy_condition` does; with ``source``, the config of that
-    condition of the study is copied the same way; with ``new``,
+    condition of the study is copied the same way, with ``name:`` set to the
+    new condition's folder name; with ``new``,
     ``conditions/<name>/`` gets a template config to fill in
     (:func:`new_condition`). The new config writes its runs into
     :func:`runs_folder`. The condition is added as one line under
@@ -609,7 +631,10 @@ def add_condition(
     text = file.read_text()
     try:
         if config is not None:
-            copy_condition(Path(config), folder, runs_folder(root, label))
+            # A copy of another condition of the study is renamed as --new names
+            # a template; a config from outside keeps its name.
+            renamed = condition_folder(label) if source is not None else None
+            copy_condition(Path(config), folder, runs_folder(root, label), name=renamed)
         else:
             new_condition(folder, runs_folder(root, label))
         _list_entry(file, "conditions", label, str((folder / "config.yaml").relative_to(root)))

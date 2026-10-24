@@ -46,6 +46,20 @@ The `build` environment includes the analysis tools, so `polyzymd analyze`
 also runs there. To activate an environment once, instead of a prefix on each
 command, use `pixi shell -e <env>`.
 
+The example commands work inside the clone of the repository. `pixi run` and `pixi shell` look for `pixi.toml` in the current folder and
+its parent folders. In a project folder outside the clone, they stop with
+`could not find pixi.toml`. Give them the clone's `pixi.toml` with
+`--manifest-path`:
+
+```bash
+pixi run --manifest-path ~/polyzymd/pixi.toml -e build polyzymd validate -c config.yaml
+```
+
+Or start `pixi shell -e build` once in the clone and then `cd` to your
+project. The shell keeps its environment in every folder. To build in `build`
+and run in a `sim-cuda-*` environment on the same machine, open one shell for
+each environment, or use `--manifest-path`.
+
 The SLURM job scripts for OpenMM need an NVIDIA GPU. For a local NVIDIA GPU,
 a CPU, an AMD GPU, another cluster or a new driver, see
 {doc}`../how_to/hardware_platforms`.

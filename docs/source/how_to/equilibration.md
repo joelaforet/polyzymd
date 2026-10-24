@@ -19,6 +19,7 @@ PolyzyMD requires `simulation_phases.equilibration_stages`. Equilibration
 cannot be skipped: list at least one stage, with a duration above 0 ns. Any
 duration above 0 is accepted. The quickstart uses one stage of 0.002 ns.
 
+(minimization-constraints)=
 ## What happens before stage 1: minimization
 
 Energy minimization always runs before the first equilibration stage. By
@@ -46,6 +47,17 @@ were off their force-field bond lengths) in `minimization/phase.json`. It also
 verifies that the minimized state satisfies every constraint of the real System
 before heating starts. See {doc}`../explanation/simulation_safeguards` for the
 rationale.
+
+The log may then say
+`Minimized state violates a constraint by 0.22849 A (> 0.010 A); projecting the coordinates back onto the constraint manifold`.
+The minimizer does not hold constrained distances exactly, so after it a
+constrained distance can be off by more than 0.01 Å. PolyzyMD then moves the
+atoms back onto the exact constraint lengths with OpenMM `applyConstraints`
+and logs the residual as `Constraint violation after applyConstraints`. A
+value near zero there means the correction worked, and the run goes on. With
+`freeze_solute: true`, PolyzyMD also checks that the correction moved no
+solute heavy atom by more than 0.02 Å. If it did, the run stops with an error
+instead of a warning.
 
 ## Simple three-stage example
 

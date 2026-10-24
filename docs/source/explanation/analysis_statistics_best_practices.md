@@ -186,6 +186,14 @@ This is preferred when the replicates are:
 - analyzed after appropriate equilibration removal;
 - long enough to sample the relevant states for each observable.
 
+In PolyzyMD, the replicates of a condition differ in what their seeds set:
+Packmol's placement of the solvent, ions and polymer chains, the drawn polymer
+sequences (unless `random_seed` fixes them) and the thermostat noise. They
+share the rest of their start: every replicate begins from the same protein
+structure, and a polymer sequence drawn in two replicates starts from the same
+chain conformation. Their spread therefore measures sampling from those
+starts, not from independently prepared structures.
+
 Replicate SEM is not magically robust to bad sampling. If all replicates are
 trapped in the same metastable basin, or if different replicates have not
 reached comparable stationary behavior, the between-replicate spread may still

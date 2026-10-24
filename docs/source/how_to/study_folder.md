@@ -82,7 +82,8 @@ polyzymd study add-condition "SBMA 100%" --config sims/SBMA100/config.yaml --stu
 ```
 
 `add-condition --from` copies the config of another condition of the study,
-with the input files it names. Then change what differs. `--config` copies
+with the input files it names. It sets `name:` in the copy to the new
+condition's folder name. Then change what differs. `--config` copies
 the config and its inputs as `study init` does. All three forms add one line
 under `conditions:` in `study.yaml`. The rest of the file, with its comments,
 does not change. Each prints where the new runs go.

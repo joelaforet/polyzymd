@@ -24,13 +24,31 @@
 
 ## Overview
 
-PolyzyMD provides a streamlined workflow for setting up and running MD simulations of enzymes with co-polymer chains. It handles:
+PolyzyMD builds, runs and analyzes molecular dynamics of a protein alone or
+with a ligand, co-polymer chains and co-solvents. You describe each condition
+in one `config.yaml`.
 
-- **System Building**: Combine enzyme structures, docked substrates, and random co-polymers
-- **Solvation**: Add water, ions, and optional co-solvents with PACKMOL
-- **Simulation**: Run equilibration and production with OpenMM
-- **HPC Integration**: Self-resubmitting job submission for SLURM clusters
-- **Configuration**: YAML-based configuration with validation
+- **System building**: places the protein, a docked or crystal ligand and
+  random co-polymer chains, and packs water, ions and co-solvents with
+  PACKMOL. Each solute and the solvent name their own force-field files and
+  charge source.
+- **Physics audit and build record**: every build rebuilds each component
+  alone with OpenFF and compares it term by term with the built system, and
+  checks the system against the config (counts, ions, cutoffs, clashes,
+  restraints, GROMACS `.mdp` files). The result goes into
+  `build_provenance.json` and `build_provenance.md`, with the versions, seeds,
+  file hashes and the methods to cite. `run` and `submit` start a replicate
+  only from a build whose audit passed and whose config and files are
+  unchanged. See
+  [the physics audit](https://polyzymd.readthedocs.io/en/latest/explanation/physics_audit.html).
+- **Simulation**: equilibration and production with OpenMM or GROMACS, on
+  this machine or as self-resubmitting SLURM jobs.
+- **Projects and studies**: a project holds the studies of one paper; a study
+  holds conditions that share one analysis frame and one control. `study
+  freeze` and `project freeze` prepare a deposit with hashes and citation
+  files.
+- **Analysis**: `polyzymd analyze` compares conditions across replicates and
+  stores each result with the hashes of its inputs.
 
 ## Analysis Status
 
@@ -84,6 +102,20 @@ pixi shell -e sim-cuda-12-6
 ```
 
 After `pixi shell`, the `polyzymd` command is on PATH and works normally.
+
+`pixi run` and `pixi shell` look for `pixi.toml` in the current folder and
+its parent folders. In a project folder outside the clone, they stop with
+`could not find pixi.toml`. Give them the clone's `pixi.toml` with
+`--manifest-path`:
+
+```bash
+pixi run --manifest-path ~/polyzymd/pixi.toml -e build polyzymd validate -c config.yaml
+```
+
+Or start `pixi shell -e build` once in the clone and then `cd` to your
+project. The shell keeps its environment in every folder. To build in `build`
+and run in a `sim-cuda-*` environment on the same machine, open one shell for
+each environment, or use `--manifest-path`.
 
 PolyzyMD v1.3 intentionally splits environments by workflow. Use `build` to
 prepare systems, use `sim-cuda-*` only to run simulations on an NVIDIA GPU (a
@@ -147,7 +179,16 @@ polyzymd build -c config.yaml -r 1 --dry-run
 To add more conditions, go back to the project folder (`my_paper`) and run
 `polyzymd study add-condition LABEL --from "No polymer" --study my_protein`.
 
-Run `polyzymd submit` from the `build` environment. The job script activates
+`submit` does not build. Build each replicate first, in the `build`
+environment. For a large system, run the build in a compute job, as the
+[SLURM guide](https://polyzymd.readthedocs.io/en/latest/how_to/hpc_slurm.html)
+shows:
+
+```bash
+polyzymd build -c config.yaml -r 1-5
+```
+
+Then run `polyzymd submit` from the `build` environment. The job script activates
 the CUDA simulation environment on the compute node:
 
 ```bash
@@ -158,7 +199,11 @@ polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2
 
 The `--preset` flag selects the SLURM settings and the pixi environment of
 the job script (`sim-cuda-12-4` for Blanca, `sim-cuda-12-6` for Bridges2).
-You can override the environment with `--pixi-env`:
+The default preset is `aa100` (CU Boulder Alpine). Other presets are `al40`,
+`blanca-chbe-rdi` and `testing`; the
+[SLURM guide](https://polyzymd.readthedocs.io/en/latest/how_to/hpc_slurm.html)
+lists them all. You can override the environment with `--pixi-env`
+(`auto`, `build`, `sim-cuda-12-0`, `sim-cuda-12-4` or `sim-cuda-12-6`):
 
 ```bash
 polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2 --pixi-env sim-cuda-12-6
@@ -168,17 +213,26 @@ See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/get_starte
 
 ## CLI Commands
 
+`polyzymd --help` lists every command, and `polyzymd COMMAND --help` its
+options.
+
 | Command | Description |
 |---------|-------------|
 | `polyzymd project init my_paper --study my_protein` | Make a project folder with one study |
+| `polyzymd project add-study`, `check`, `freeze` | Add a study, check a project, freeze it for a deposit |
 | `polyzymd study add-condition LABEL --new` | Add a condition with a template config |
-| `polyzymd validate -c config.yaml` | Validate configuration file |
-| `polyzymd build -c config.yaml` | Build simulation system |
-| `polyzymd run -c config.yaml --engine gromacs` | Build and run GROMACS simulation |
-| `polyzymd submit -c config.yaml` | Submit self-resubmitting jobs to SLURM |
-| `polyzymd run-segment -c config.yaml` | Run a single production segment |
-| `polyzymd check-progress -c config.yaml` | Check simulation completion status |
-| `polyzymd recover -c config.yaml` | Resume a stalled simulation |
+| `polyzymd study init`, `check`, `locate`, `freeze` | Make, check, locate the runs of, and freeze a study |
+| `polyzymd validate -c config.yaml` | Check a config and its input files |
+| `polyzymd build -c config.yaml -r 1` | Build and audit a replicate; writes `build_provenance.md` |
+| `polyzymd run -c config.yaml -r 1` | Build if needed and run on this machine (OpenMM or GROMACS) |
+| `polyzymd submit -c config.yaml --replicates 1-5` | Submit self-resubmitting SLURM jobs |
+| `polyzymd status -c config.yaml` | Show progress and job state of each replicate |
+| `polyzymd recover -c config.yaml` | Resume a stalled or interrupted simulation |
+| `polyzymd cancel -c config.yaml` | Stop self-resubmitting job chains |
+| `polyzymd analyze NAME -c config.yaml` | Run one analysis and print a validated result |
+| `polyzymd analyze --project my_paper` | Run every analysis of `project.yaml` in each study, or only `NAME` |
+| `polyzymd clean-pdb -i protein.pdb` | Replace nonstandard residues and add hydrogens |
+| `polyzymd analysis-topology`, `hash-trajectories` | Add `system.prmtop` or trajectory hashes to existing runs |
 | `polyzymd info` | Show installation information |
 
 ## Pixi Environments
@@ -195,6 +249,7 @@ PolyzyMD uses [pixi](https://pixi.sh) instead of conda/mamba. Key differences:
 | `build` | System building, PDB prep, validation, package work | Python 3.12 + NumPy 2 | No |
 | `analysis` | Trajectory analysis, comparison, and plotting | Python 3.12 + NumPy 2 | No |
 | `test` | CI/local tests and lint/docs tooling | Python 3.12 + NumPy 2 | No |
+| `sim-cuda-12-0` | Simulation execution on CUDA 12.0 drivers (older Blanca nodes) | Python 3.12 + NumPy 1.x + OpenMM 8.1.x | Yes |
 | `sim-cuda-12-4` | Simulation execution on CUDA 12.4 clusters (Blanca) | Python 3.12 + NumPy 1.x + OpenMM 8.1.x | Yes |
 | `sim-cuda-12-6` | Simulation execution on CUDA 12.6 clusters (Bridges2) | Python 3.12 + current OpenMM | Yes |
 

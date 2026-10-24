@@ -243,6 +243,12 @@ too large, or a system that is not stable.
 3. Add a stage that holds the protein while the solvent and polymer relax.
    See {doc}`equilibration`.
 
+### `Minimized state violates a constraint by ... A (> 0.010 A)`
+
+This is a warning, and PolyzyMD corrects it before heating. The next log line,
+`Constraint violation after applyConstraints`, should be near zero. See
+{ref}`minimization-constraints`.
+
 ### `CUDA out of memory`
 
 The GPU has no more memory. Make the system smaller:

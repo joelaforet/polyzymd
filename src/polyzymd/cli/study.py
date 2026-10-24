@@ -749,6 +749,12 @@ def add_condition_command(
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_STUDY_ERROR)
     click.echo(f"condition {label}: {path}, listed in study.yaml")
+    if source is not None:
+        name = (yaml.safe_load(path.read_text()) or {}).get("name")
+        click.echo(
+            f"name: set to {name!r} in the copy; change description: and the settings "
+            f"in which {label} differs from {source}"
+        )
     root = find_study_file(study_path).parent
     data = root / DATA_FILE
     where = (yaml.safe_load(data.read_text()) or {}).get(label) if data.is_file() else None
