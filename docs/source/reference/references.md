@@ -13,9 +13,14 @@ To cite PolyzyMD itself, see `CITATION.cff` in the repository root.
 
 ## Building the system
 
-PolyzyMD uses these methods only when the config asks for them; cite each
-one that your build used. The build log names it when it is used.
+Cite each of these methods that your build used. The build log names each one
+when it runs, and `build_provenance.md` lists them under "Methods to cite".
 
+- Martínez, L., Andrade, R., Birgin, E. G. and Martínez, J. M. (2009).
+  PACKMOL: a package for building initial configurations for molecular
+  dynamics simulations. *Journal of Computational Chemistry*, 30(13),
+  2157-2164. doi:10.1002/jcc.21224. Used by every build: Packmol places the
+  water, co-solvents and polymer chains.
 - Machado, M. R. and Pantano, S. (2020). Split the charge difference in two!
   A rule of thumb for adding proper amounts of ions in MD simulations.
   *Journal of Chemical Theory and Computation*, 16(3), 1367-1372.

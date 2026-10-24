@@ -213,20 +213,28 @@ def _manifest(
         },
         "components": [c.to_dict() for c in components or []],
         "audit": audit.to_dict() if audit is not None else None,
-        "cite": methods_to_cite(config),
+        "cite": methods_to_cite(config, provenance),
     }
 
 
-def methods_to_cite(config: Any) -> list[str]:
-    """Return the references of the methods this build used that its config chose.
+def methods_to_cite(config: Any, provenance: dict[str, Any] | None = None) -> list[str]:
+    """Return the references of the methods this build used.
 
     The force fields and charge models are named in the component records;
-    this lists the other methods, such as how ``ionic_strength`` set the ions.
+    this lists the other methods: Packmol when the build packed solvent or
+    polymer chains with it (its seeds in ``provenance`` say so), and how
+    ``ionic_strength`` set the ions.
     """
     from polyzymd.builders.solvent import MACHADO_PANTANO
+    from polyzymd.utils.packmol import PACKMOL
 
+    cited = []
+    if any(key in (provenance or {}) for key in ("solvent_packmol_seed", "polymer_packmol_seed")):
+        cited.append(PACKMOL)
     ions = getattr(getattr(config, "solvent", None), "ions", None)
-    return [MACHADO_PANTANO] if getattr(ions, "ionic_strength", None) is not None else []
+    if getattr(ions, "ionic_strength", None) is not None:
+        cited.append(MACHADO_PANTANO)
+    return cited
 
 
 def _audit(realize: Any, components: Sequence[Any] | None, config: Any) -> Any:
