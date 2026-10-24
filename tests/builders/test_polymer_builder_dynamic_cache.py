@@ -371,3 +371,83 @@ def test_molecule_source_reports_preset_for_a_user_sdf_in_dynamic_mode(
 
     monkeypatch.setattr(builder, "_is_dynamic_cache_like_sdf", lambda path, sequence: True)
     assert builder.molecule_source("BBBBB")["charge_method"] == builder._charger_type
+
+
+# ---------------------------------------------------------------------------
+# Cached chains that dynamic generation made
+# ---------------------------------------------------------------------------
+
+STAR_MMA = "[*]CC([*])(C)C(=O)OC"
+STAR_HEMA = "[*]CC([*])(C)C(=O)OCCO"
+
+
+def _cached_builder(
+    tmp_path: Path, mma: str = STAR_MMA, caps: dict | None = None
+) -> PolymerBuilder:
+    return PolymerBuilder(
+        characters=["A", "B"],
+        probabilities=[0.5, 0.5],
+        length=2,
+        type_prefix="MH",
+        sdf_directory=tmp_path,
+        monomer_smiles={"MMA": mma, "HEMA": STAR_HEMA},
+        monomer_names={"A": "MMA", "B": "HEMA"},
+        end_groups=caps if caps is not None else {"head": "[*][H]", "tail": "[*][H]"},
+    )
+
+
+def _write_sidecar(tmp_path: Path, sequence: str = "AB") -> Path:
+    sdf = tmp_path / f"MH_seq={sequence}_2-mer_charged.sdf"
+    sdf.write_text("chain", encoding="utf-8")
+    sidecar = sdf.with_name(f"{sdf.name}.metadata.json")
+    sidecar.write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "monomers": {
+                    "A": {"name": "MMA", "residue_name": "MMA", "smiles": STAR_MMA},
+                    "B": {"name": "HEMA", "residue_name": "HEM", "smiles": STAR_HEMA},
+                },
+                "end_groups": {"head": "[*][H]", "tail": "[*][H]"},
+                "builder": {"package": "mbuild", "version": "1.4.0", "commit": "abc"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return sdf
+
+
+def test_cached_mode_refuses_a_chain_built_from_other_smiles(tmp_path: Path) -> None:
+    """A config naming chemistry its cached chains were not built from is refused."""
+    sdf = _write_sidecar(tmp_path)
+    builder = _cached_builder(tmp_path, mma="[*]CC([*])(C)C(=O)OCC")
+    with pytest.raises(ValueError, match="built from other chemistry") as error:
+        builder._check_cached_chemistry(sdf)
+    assert "monomer 'A'" in str(error.value)
+
+
+def test_cached_mode_refuses_a_chain_with_other_caps(tmp_path: Path) -> None:
+    sdf = _write_sidecar(tmp_path)
+    builder = _cached_builder(tmp_path, caps={"head": "[*]C", "tail": "[*][H]"})
+    with pytest.raises(ValueError, match="end_groups.head"):
+        builder._check_cached_chemistry(sdf)
+
+
+def test_cached_mode_accepts_equivalent_smiles_and_records_the_builder(tmp_path: Path) -> None:
+    """The same molecule written differently matches; the chain's builder is recorded."""
+    sdf = _write_sidecar(tmp_path)
+    builder = _cached_builder(tmp_path, mma="COC(=O)C([*])(C)C[*]")
+    builder._check_cached_chemistry(sdf)
+    assert builder.chain_builders() == [{"package": "mbuild", "version": "1.4.0", "commit": "abc"}]
+    assert builder.chain_chemistry()["end_groups"] == {"head": "[*][H]", "tail": "[*][H]"}
+
+
+def test_cached_mode_warns_when_it_cannot_check_the_chemistry(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    sdf = tmp_path / "MH_seq=AB_2-mer_charged.sdf"
+    sdf.write_text("chain", encoding="utf-8")
+    builder = _cached_builder(tmp_path)
+    builder._check_cached_chemistry(sdf)
+    assert "not checked" in caplog.text
+    assert builder.chain_builders() == []

@@ -52,12 +52,25 @@ def test_notebook_runs_top_to_bottom(capsys: pytest.CaptureFixture[str]) -> None
     assert "47 atoms, total charge" in printed
 
 
-def test_the_star_helper_keeps_aromatic_hydrogens_on_other_atoms() -> None:
-    """Placing stars on a vinyl group leaves an imidazole [nH] as it is."""
+def _run_first_cells(smiles: str) -> dict[str, object]:
+    """Run cells 1-3 of the notebook with ``smiles`` as the pasted monomer."""
     namespace: dict[str, object] = {"__name__": "__notebook__"}
-    first, _, third = _code_cells()[:3]
-    exec(
-        compile(first.replace("C=C(C)C(=O)OC", "C=Cc1c[nH]cn1"), str(NOTEBOOK), "exec"), namespace
-    )  # noqa: S102
-    exec(compile(third, str(NOTEBOOK), "exec"), namespace)  # noqa: S102
-    assert namespace["repeat_unit"] == "*CC(*)c1c[nH]cn1"
+    first, second, third = _code_cells()[:3]
+    first = first.replace('"C=C(C)C(=O)OC"', repr(smiles))
+    for source in (first, second, third):
+        exec(compile(source, str(NOTEBOOK), "exec"), namespace)  # noqa: S102
+    return namespace
+
+
+@pytest.mark.parametrize(
+    ("smiles", "repeat_unit"),
+    [
+        ("C=Cc1c[nH]cn1", "*CC(*)c1c[nH]cn1"),
+        ("CC(=C)C(=O)OC", "*CC(*)(C)C(=O)OC"),
+        ("CC(C)NC(=O)C=C", "*CC(*)C(=O)NC(C)C"),
+    ],
+    ids=["aromatic_nH", "pubchem_order", "acrylamide"],
+)
+def test_the_default_linking_atoms_give_the_repeat_unit(smiles: str, repeat_unit: str) -> None:
+    """The listed C=C, CH2 first, gives the repeat unit whatever the atom order."""
+    assert _run_first_cells(smiles)["repeat_unit"] == repeat_unit

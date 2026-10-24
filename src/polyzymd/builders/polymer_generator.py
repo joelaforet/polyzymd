@@ -276,18 +276,20 @@ def mbuild_provenance() -> dict[str, Any]:
 
 def mbuild_summary() -> str:
     """Return one line naming the installed mBuild, its source and commit."""
-    record = mbuild_provenance()
+    return builder_summary(mbuild_provenance())
+
+
+def builder_summary(record: dict[str, Any]) -> str:
+    """Return one line naming the mBuild of a builder record, its source and commit."""
     source = ", ".join(
-        str(value)
-        for value in (record["url"], record["requested_revision"], record["commit"])
-        if value
+        str(record[key]) for key in ("url", "requested_revision", "commit") if record.get(key)
     )
-    return f"mbuild {record['version']}" + (f" ({source})" if source else "")
+    return f"mbuild {record.get('version')}" + (f" ({source})" if source else "")
 
 
 #: The reference of mBuild, cited when a build generated polymer chains with it.
 MBUILD = (
-    "Klein, C., Sallai, J., Jones, T. J., Iacovella, C. R., McCabe, C. and Cummings, P. T. "
+    "mBuild: Klein, C., Sallai, J., Jones, T. J., Iacovella, C. R., McCabe, C. and Cummings, P. T. "
     "(2016). A hierarchical, component based approach to screening properties of soft "
     "matter. In Foundations of Molecular Modeling and Simulation (Molecular Modeling and "
     "Simulation), 79-92. Springer Singapore. doi:10.1007/978-981-10-1128-3_5"

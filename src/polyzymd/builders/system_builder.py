@@ -297,19 +297,10 @@ class SystemBuilder:
 
         return molecules, counts
 
-    def _polymer_built_chains(self) -> bool:
-        """Return whether dynamic generation built (or reused from its cache) any chain.
-
-        A dynamic config may also load a user's own SDF for a sequence; those
-        chains were not built with mBuild.
-        """
+    def _polymer_chain_builders(self) -> List[Dict[str, Any]]:
+        """Return the builder records of the polymer chains (mBuild), if any built them."""
         builder = self._polymer_builder
-        if builder is None or getattr(builder, "_generation_mode", None) != "dynamic":
-            return False
-        return any(
-            builder.molecule_source(sequence).get("charge_method") != "preset"
-            for sequence in builder.sequence_counts or {}
-        )
+        return builder.chain_builders() if builder is not None else []
 
     def combine_solutes(self) -> Topology:
         """Combine enzyme, substrate, and polymers into a single topology.
@@ -1140,10 +1131,13 @@ class SystemBuilder:
                 cache_directory=config.polymers.cache_directory,
             )
             self._build_provenance["polymer_sequence_seed"] = effective_seed
-            if self._polymer_built_chains():
-                from polyzymd.builders.polymer_generator import mbuild_summary
+            builders = self._polymer_chain_builders()
+            if builders:
+                from polyzymd.builders.polymer_generator import builder_summary
 
-                self._build_provenance["polymer_builder"] = mbuild_summary()
+                self._build_provenance["polymer_builder"] = "; ".join(
+                    builder_summary(record) for record in builders
+                )
 
             # Get packing config (uses defaults if not specified)
             packing = config.polymers.packing
@@ -1430,10 +1424,12 @@ class SystemBuilder:
                 )
                 sources[sequence] = {"chains": count, "sdf": file_record(sdf)}
             provenance = {"sequences": sources}
-            if self._polymer_built_chains():
-                from polyzymd.builders.polymer_generator import mbuild_provenance
-
-                provenance["builder"] = mbuild_provenance()
+            builders = self._polymer_chain_builders()
+            if builders:
+                provenance["builder"] = builders[0] if len(builders) == 1 else builders
+            chemistry = self._polymer_builder.chain_chemistry() if self._polymer_builder else {}
+            if chemistry:
+                provenance.update(chemistry)
             records.append(
                 ComponentRecord(
                     name=handle("polymer")[0],

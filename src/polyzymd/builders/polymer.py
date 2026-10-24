@@ -194,6 +194,9 @@ class PolymerBuilder:
 
         # State
         self._loaded_molecules: Dict[str, Molecule] = {}
+        # Build metadata of each cached chain that dynamic generation made.
+        self._cached_sidecars: Dict[str, dict] = {}
+        self._warned_unchecked_chemistry = False
         self._sequence_counts: Optional[Counter] = None
         self._generated_sequences: Optional[List[str]] = None
 
@@ -445,6 +448,11 @@ class PolymerBuilder:
                 f"{self._type_prefix}_seq={reverse}_{self._length}-mer_charged.sdf"
             )
             if reversed_path.exists():
+                LOGGER.info(
+                    "Sequence %s: loading the chain of the reversed sequence, %s",
+                    sequence,
+                    reversed_path.name,
+                )
                 return reversed_path
         return path
 
@@ -542,11 +550,18 @@ class PolymerBuilder:
     def _load_from_sdf(self, sdf_path: Path) -> Molecule:
         """Load a polymer molecule from an SDF file.
 
+        In cached mode, a file that dynamic generation wrote has a metadata
+        sidecar; the monomer SMILES and caps the config gives must match it.
+
         Args:
             sdf_path: Path to the SDF file.
 
         Returns:
             OpenFF Molecule loaded from the SDF.
+
+        Raises:
+            ValueError: If the config's monomer SMILES or caps differ from the
+                ones the cached chain was built from.
         """
         from polyzymd.utils import (
             get_largest_offmol,
@@ -554,11 +569,118 @@ class PolymerBuilder:
         )
 
         LOGGER.info(f"Loading polymer from {sdf_path}")
+        if self._generation_mode != "dynamic":
+            self._check_cached_chemistry(Path(sdf_path))
 
         topology = topology_from_sdf(str(sdf_path))
         molecule = get_largest_offmol(topology)
 
         return molecule
+
+    def _check_cached_chemistry(self, sdf_path: Path) -> None:
+        """Compare the config's monomer SMILES and caps with a cached chain's build metadata.
+
+        Cached mode takes the chemistry from the SDF. When the config also
+        names the SMILES or caps, a chain built from other ones would be
+        simulated while the config says otherwise, so a mismatch is refused.
+        A file without metadata from this builder cannot be checked; a
+        warning says so once.
+        """
+        given_smiles = {
+            label: self._monomer_smiles.get(name)
+            for label, name in self._monomer_names.items()
+            if self._monomer_smiles.get(name)
+        }
+        given = bool(given_smiles or self._end_groups)
+        metadata = None
+        sidecar = sdf_path.with_name(f"{sdf_path.name}.metadata.json")
+        if sidecar.exists():
+            import json
+
+            try:
+                metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                metadata = None
+        if not isinstance(metadata, dict) or "monomers" not in metadata:
+            if given and not self._warned_unchecked_chemistry:
+                self._warned_unchecked_chemistry = True
+                LOGGER.warning(
+                    "Cached mode reads each chain's chemistry from its SDF; the monomer smiles "
+                    "and end_groups in the config are not checked against %s, which has no "
+                    "build metadata.",
+                    sdf_path,
+                )
+            return
+        self._cached_sidecars[sdf_path.name] = metadata
+
+        def same(a: str, b: str) -> bool:
+            from rdkit import Chem, RDLogger
+
+            RDLogger.DisableLog("rdApp.*")
+            try:
+                return Chem.CanonSmiles(a) == Chem.CanonSmiles(b)
+            except Exception:  # unreadable SMILES: compare as written
+                return a == b
+            finally:
+                RDLogger.EnableLog("rdApp.*")
+
+        problems = []
+        for label, smiles in sorted(given_smiles.items()):
+            built = (metadata.get("monomers") or {}).get(label, {}).get("smiles")
+            if built and not same(built, smiles):
+                problems.append(f"monomer {label!r}: config {smiles!r}, chain built from {built!r}")
+        for end, smiles in sorted(self._end_groups.items()):
+            built = (metadata.get("end_groups") or {}).get(end)
+            if built and not same(built, smiles):
+                problems.append(f"end_groups.{end}: config {smiles!r}, chain built from {built!r}")
+        if problems:
+            raise ValueError(
+                f"the cached chain {sdf_path} was built from other chemistry than the config "
+                "names:\n  "
+                + "\n  ".join(problems)
+                + "\nfix: correct the config's smiles and end_groups, or point sdf_directory "
+                "to chains built from them."
+            )
+
+    def chain_builders(self) -> List[dict]:
+        """Return the builder record of each chain source this build used.
+
+        Chains built now in dynamic mode give the installed mBuild; cached
+        chains that dynamic generation made give the builder named in their
+        metadata. Other cached chains give nothing.
+        """
+        records = []
+        if self._generation_mode == "dynamic":
+            if any(
+                self.molecule_source(sequence).get("charge_method") != "preset"
+                for sequence in self._sequence_counts or {}
+            ):
+                from polyzymd.builders.polymer_generator import mbuild_provenance
+
+                records.append(mbuild_provenance())
+        for metadata in self._cached_sidecars.values():
+            builder = metadata.get("builder")
+            if isinstance(builder, dict) and builder not in records:
+                records.append(builder)
+        return records
+
+    def chain_chemistry(self) -> Dict[str, object]:
+        """Return the monomer SMILES and caps the chains were built from, when known."""
+        if self._generation_mode == "dynamic":
+            return {
+                "monomers": {
+                    label: {
+                        "name": name,
+                        "residue_name": self._residue_names.get(name),
+                        "smiles": self._monomer_smiles.get(name),
+                    }
+                    for label, name in sorted(self._monomer_names.items())
+                },
+                "end_groups": dict(self._end_groups),
+            }
+        for metadata in self._cached_sidecars.values():
+            return {"monomers": metadata.get("monomers"), "end_groups": metadata.get("end_groups")}
+        return {}
 
     def _generate_polymer(self, sequence: str) -> Molecule:
         """Build the chain of ``sequence`` with mBuild (dynamic mode).
