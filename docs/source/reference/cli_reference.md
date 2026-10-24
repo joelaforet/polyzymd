@@ -103,7 +103,7 @@ polyzymd validate -c <path>
 - Equilibration temperatures (warning): a constant-temperature stage, or a
   ramp's `temperature_end` in the last stage, that differs from
   `thermodynamics.temperature`. Production runs at
-  `thermodynamics.temperature`. The summary marks each such stage
+  `thermodynamics.temperature`. The summary marks each such stage.
 
 ### Example
 
@@ -1199,7 +1199,8 @@ Adds a condition to an existing study, in `conditions/<label>/`:
 - `--new` writes a template `config.yaml` to fill in, and `structures/` with
   placeholder files.
 - `--from OTHER_LABEL` copies the config of that condition of the study, with
-  the input files it names.
+  the input files it names. The copy's `name:` is set to the new condition's
+  folder name, as `--new` sets it, and the command prints it.
 - `--config CONFIG` copies `CONFIG`, with the input files it names, as
   `study init --condition` does. When the config's `scratch_directory` holds
   runs of the config, that folder is written to `data.local.yaml` and printed

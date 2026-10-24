@@ -83,6 +83,9 @@ def test_from_copies_a_sibling_condition_with_its_inputs(tmp_path: Path) -> None
     assert _output(second) == ((created.root / "runs" / "water_350_k").resolve(), None)
     assert list(load_study_file(created.root).conditions) == ["Water", "Water 350 K"]
     assert "# Solutes (REQUIRED)" in second.read_text()  # comments are kept
+    # The copy is named after its own folder, as --new names a template.
+    assert yaml.safe_load(first.read_text())["name"] == "water"
+    assert copied["name"] == "water_350_k"
 
 
 def test_from_refuses_a_condition_the_study_does_not_have(tmp_path: Path) -> None:

@@ -158,6 +158,7 @@ polyzymd study add-condition "Urea 2 M" --from Water --study trpcage
 
 ```
 condition Urea 2 M: /home/me/my_paper/trpcage/conditions/urea_2_m/config.yaml, listed in study.yaml
+name: set to 'urea_2_m' in the copy; change description: and the settings in which Urea 2 M differs from Water
 warning: the runs go into runs/trpcage/urea_2_m unless you set scratch_directory in config.yaml; trajectories can use a lot of disk space, so on a cluster set scratch_directory to scratch storage
 next: commit, and run polyzymd study check
 ```
@@ -167,8 +168,8 @@ next: commit, and run polyzymd study check
 `runs/trpcage/urea_2_m/`. If you set `scratch_directory` in the first
 config, set it again in the copy.
 
-In the copy, set `name: "urea_2_m"` and replace `co_solvents: []` with the
-urea:
+The copy's `name:` is `urea_2_m`, the folder name, as for `--new`. In the
+copy, change `description:` and replace `co_solvents: []` with the urea:
 
 ```yaml
   co_solvents:
