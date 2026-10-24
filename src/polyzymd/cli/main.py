@@ -1642,9 +1642,12 @@ def _build_matches_recorded_length(
         validate_build_bundle,
     )
 
+    recorded = _recorded_production_lengths(working_dir)
+    if not recorded:
+        return False
     phases = sim_config.simulation_phases
     template = sim_config.output.naming_template
-    for duration, samples in _recorded_production_lengths(working_dir):
+    for duration, samples in recorded:
         production = phases.production.model_copy(
             update={"duration": duration, "samples": samples or phases.production.samples}
         )
