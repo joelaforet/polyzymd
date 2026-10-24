@@ -100,15 +100,13 @@ restraints:
       selection: "resid 105 and name OG"
     atom2:
       component: "Resorufin-Butyrate"
-      selection: "name C1"
+      selection: "name C13x"  # ester carbonyl carbon of the docked RBY
     distance: 3.3
 ```
 
-The selection `name C1` is kept here as the old config wrote it. It matches
-only when the SDF names its atoms in an `atom.prop._Name` field. Otherwise the
-built atoms are named `C1x`, `C2x`, ..., and `polyzymd validate` refuses
-`name C1` and lists the names. `C1x` need not be the atom you meant: see
-{ref}`restraint-ligand-atom-names`.
+The atom name changes too. This SDF carries no atom names, so the built atoms
+are named by element, count in SDF order and `x`. The ester carbonyl carbon is
+`C13x`. See {ref}`restraint-ligand-atom-names`.
 
 ## New keys
 
