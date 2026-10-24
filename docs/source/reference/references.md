@@ -27,6 +27,14 @@ when it runs, and `build_provenance.md` lists them under "Methods to cite".
   doi:10.1021/acs.jctc.9b00953. Used by `solvent.ions.ionic_strength`: the
   neutralizing charge is split between Na+ and Cl-, so the counter-ions count
   toward the ionic strength.
+- Klein, C., Sallai, J., Jones, T. J., Iacovella, C. R., McCabe, C. and
+  Cummings, P. T. (2016). A hierarchical, component based approach to
+  screening properties of soft matter. In *Foundations of Molecular Modeling
+  and Simulation* (Molecular Modeling and Simulation), 79-92. Springer
+  Singapore. doi:10.1007/978-981-10-1128-3_5. Used by dynamic polymers:
+  mBuild builds the coordinates of each chain. PolyzyMD installs mBuild from
+  github.com/joelaforet/mbuild (tag `biopolymers-v0.1.0`); the build record
+  names its commit.
 
 ## Libraries we build on
 

@@ -74,7 +74,10 @@ For each chain, the builder draws a sequence such as `AABAA`. In `cached`
 mode it reads a sequence and its reverse as the same chain. It uses the form
 that comes first in alphabetical order. For example, `ABAAA` becomes `AAABA`.
 If that file is missing, it loads the file of the reversed sequence, which is
-how `dynamic` mode names a chain it built in that direction.
+how `dynamic` mode names a chain it built in that direction. Each file holds
+one chain with one direction, so in `cached` mode the files you provide set
+the direction of every chain. `dynamic` mode reads each sequence from head to
+tail and builds it as drawn; see {doc}`dynamic_polymers`.
 
 The builder then loads this file from `sdf_directory`:
 

@@ -160,7 +160,14 @@ For each chain, the build does these steps:
    `charges: {method: preset}`.
 
 Each repeat unit is one residue named by its `residue_name`. The head cap
-belongs to the first residue and the tail cap to the last.
+belongs to the first residue and the tail cap to the last. Repeat units join
+head to tail: the second `*` of one unit bonds to the first `*` of the next.
+
+Tacticity is not controlled. Every repeat unit of one monomer is built from
+the same 3D structure, so its backbone stereocentres all get the same
+configuration: a chain of one methacrylate comes out isotactic, with the
+handedness set by the sequence's seed. The chain SDF records the
+stereochemistry of every atom.
 
 The next build with the same monomers loads the chains from
 `cache_directory`. It builds a chain again if the metadata does not match the
