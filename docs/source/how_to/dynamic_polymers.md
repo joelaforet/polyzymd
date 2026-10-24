@@ -171,10 +171,17 @@ isotactic chain. A syndiotactic chain (strictly alternating) cannot be drawn
 this way; build those chains yourself and give them in `cached` mode.
 
 :::{warning}
-A repeat unit written without a stereocentre gets one configuration from the
-builder, the same for every unit of that monomer, so such a chain is
-isotactic.
+A repeat unit written without its stereocentre gets one configuration from the
+builder: within one chain every unit of that monomer has the same
+configuration, but two monomers, or the same monomer in two chains, can differ.
+The tacticity of such chains is not controlled; give stereo letters to control
+it.
 :::
+
+The same holds for a double bond: written with `/` and `\` (for example
+`[*]/C=C(/C)C(=O)OC`, the Z end), its configuration is kept; written without
+them (`[*]C=C(C)C(=O)OC`), the builder picks one. Each chain's SDF records the
+configuration of every stereocentre and double bond as built.
 
 Each chain is drawn monomer by monomer, so the build makes random (statistical)
 copolymers. To simulate block copolymers, build the chains yourself and give
@@ -236,8 +243,9 @@ For each chain, the build does these steps:
    SMILES and caps, if it gives them, against that metadata.
 
 Each repeat unit is one residue named by its `residue_name`; a cap is its own
-residue when it has a `residue_name`. The chain SDF records the
-stereochemistry of every atom.
+residue when it has a `residue_name`. The chain SDF records the configuration
+of every stereocentre and double bond as built; a build whose relaxation would
+change one is refused and built again.
 
 The next build with the same monomers loads the chains from
 `cache_directory`. It builds a chain again if the metadata does not match the

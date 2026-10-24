@@ -204,7 +204,20 @@ def polymer_sequences(context: AuditContext) -> list[Finding]:
         )
     caps = ""
     if capped:
-        caps = "; caps " + "; ".join(
+        # Caps that are a monomer's end form carry that monomer's label; with
+        # them counted, the fractions are those of every monomer of the chains.
+        labels = {m.label for m in config_polymers.monomers}
+        units = Counter(monomers)
+        for counter in ends.values():
+            for label, count in counter.items():
+                if label in labels:
+                    units[label] += count
+        if units != monomers:
+            whole = sum(units.values()) or 1
+            caps += "; with end units " + ", ".join(
+                f"{label} {units[label] / whole:.3f}" for label in sorted(units)
+            )
+        caps += "; caps " + "; ".join(
             f"{end} " + ", ".join(f"{label} {count}" for label, count in sorted(counter.items()))
             for end, counter in ends.items()
         )

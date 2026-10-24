@@ -898,3 +898,34 @@ def test_stereo_letters_set_the_backbone_handedness() -> None:
     assert len(set(isotactic)) == 1 and 0 not in isotactic
     assert syndiotactic == [syndiotactic[0], -syndiotactic[0]] * 2 + [syndiotactic[0]]
     assert syndiotactic[0] == isotactic[0]
+
+
+@pytest.mark.parametrize(
+    ("cap", "expected"), [("[*]/C=C(/C)C(=O)OCCO", "Z"), ("[*]/C=C(\\C)C(=O)OCCO", "E")]
+)
+def test_a_double_bond_written_in_a_cap_keeps_its_configuration(
+    tmp_path: Path, cap, expected
+) -> None:
+    """E/Z written next to a '*' survives the build and is recorded in the SDF."""
+    pytest.importorskip("mbuild")
+    from rdkit.Chem import rdCIPLabeler
+
+    option = {"label": "A", "name": "HEMA", "residue_name": "HMA", "smiles": cap}
+    generator = PolymerGenerator.from_smiles(
+        [("A", "HEMA", "HMA", HEMA)],
+        head=[option],
+        tail=[option],
+        cache_directory=tmp_path,
+        force_field=SAGE,
+        type_prefix="T",
+    )
+    rdmol = generator.generate_polymer("AAAAA").to_rdkit()
+    rdCIPLabeler.AssignCIPLabels(rdmol)
+    codes = [
+        bond.GetPropsAsDict().get("_CIPCode")
+        for bond in rdmol.GetBonds()
+        if bond.GetBondType() == Chem.BondType.DOUBLE
+        and bond.GetBeginAtom().GetSymbol() == "C"
+        and bond.GetEndAtom().GetSymbol() == "C"
+    ]
+    assert codes == [expected, expected]

@@ -79,12 +79,18 @@ class StarSitedUnit:
         Atom index of the atom that carried each ``*``, in SMILES order.
     site_hydrogens : tuple[int, ...]
         Atom index of the site hydrogen of each ``*``, in the same order.
+    embed_mol : rdkit.Chem.Mol
+        ``mol`` with a chlorine in place of each site hydrogen, used to make
+        the unit's 3D structure: a ``=CH-[*]`` atom keeps its E/Z
+        configuration only while its two substituents differ. Atom indices
+        are those of ``mol``.
     """
 
     smiles: str
     mol: Any
     anchors: tuple[int, ...]
     site_hydrogens: tuple[int, ...]
+    embed_mol: Any = None
 
 
 def parse_star_smiles(smiles: str, n_sites: int, what: str) -> StarSitedUnit:
@@ -172,7 +178,30 @@ def parse_star_smiles(smiles: str, n_sites: int, what: str) -> StarSitedUnit:
             f"hydrogen ({exc}).\nfix: check valences and charges."
         ) from exc
     with_h = Chem.AddHs(editable.GetMol())
-    return StarSitedUnit(smiles, with_h, tuple(anchors), site_hydrogens)
+    return StarSitedUnit(
+        smiles, with_h, tuple(anchors), site_hydrogens, _placeholder_mol(smiles, with_h)
+    )
+
+
+def _placeholder_mol(smiles: str, with_h: Any) -> Any:
+    """Return the unit with a chlorine on each ``*``, atom for atom like ``with_h``.
+
+    The SMILES is read again with ``[Cl]`` for each ``*`` so that its stereo
+    marks (``/``, ``\\``, ``@``) keep their meaning; the atoms come out in the
+    same order as in ``with_h``.
+    """
+    import re
+
+    from rdkit import Chem
+
+    placeholder = Chem.AddHs(Chem.MolFromSmiles(re.sub(r"\[\*[^\]]*\]|\*", "[Cl]", smiles)))
+    same = placeholder.GetNumAtoms() == with_h.GetNumAtoms() and all(
+        a.GetAtomicNum() == b.GetAtomicNum() or (a.GetAtomicNum() == 17 and b.GetAtomicNum() == 1)
+        for a, b in zip(placeholder.GetAtoms(), with_h.GetAtoms())
+    )
+    if not same:
+        raise PolymerGenerationError(f"cannot place the '*' sites of {smiles!r} for building.")
+    return placeholder
 
 
 # ---------------------------------------------------------------------------
@@ -339,20 +368,30 @@ def require_mbuild_polymer() -> None:
         )
 
 
-def _tagged_compound(unit: StarSitedUnit, tags: Sequence[str], seed: int) -> Any:
+def _tagged_compound(unit: StarSitedUnit, tags: Sequence[str], seed: int) -> tuple[Any, list[Any]]:
     """Return an mBuild compound of ``unit`` with its anchors tagged ``tags``.
 
-    The site hydrogens stay in the compound: ``Polymer.add_monomer`` and
-    ``add_end_groups`` remove one hydrogen of each tagged atom and put a port
-    in its place.
+    The compound is built from ``unit.embed_mol``, so the stereochemistry of
+    the SMILES holds, including the E/Z configuration of a double bond at a
+    ``*`` site. The placeholder atom of each site is removed here, and the
+    direction from its anchor to it is returned for the port that
+    ``Polymer`` puts there (``add_monomer``/``add_end_groups`` are then told
+    not to remove a hydrogen of their own choosing).
     """
+    import numpy as np
     from mbuild.conversion import from_rdkit
 
-    compound = from_rdkit(unit.mol, smiles_seed=seed)
+    compound = from_rdkit(unit.embed_mol, smiles_seed=seed)
     particles = list(compound.particles())
-    for anchor, tag in zip(unit.anchors, tags):
+    orientations = []
+    for anchor, site, tag in zip(unit.anchors, unit.site_hydrogens, tags):
         particles[anchor].particle_tag = tag
-    return compound
+        vector = particles[site].pos - particles[anchor].pos
+        orientations.append(vector / np.linalg.norm(vector))
+    compound.remove([particles[site] for site in unit.site_hydrogens])
+    for port in list(compound.all_ports()):
+        compound.remove(port)
+    return compound, orientations
 
 
 def _mbuild_chain(
@@ -374,17 +413,28 @@ def _mbuild_chain(
 
     polymer = Polymer()
     for label in sorted(set(sequence)):
-        compound = _tagged_compound(monomers[label].unit, ("head", "tail"), seed)
+        compound, (head_way, tail_way) = _tagged_compound(
+            monomers[label].unit, ("head", "tail"), seed
+        )
         polymer.add_monomer(
-            compound, head_tag="head", tail_tag="tail", separation=_LINK_SEPARATION_NM
+            compound,
+            head_tag="head",
+            tail_tag="tail",
+            separation=_LINK_SEPARATION_NM,
+            head_orientation=head_way,
+            tail_orientation=tail_way,
+            remove_hydrogens=False,
         )
     for end, cap in (("head", head), ("tail", tail)):
+        compound, (way,) = _tagged_compound(cap, ("cap",), seed)
         polymer.add_end_groups(
-            _tagged_compound(cap, ("cap",), seed),
+            compound,
             bond_tag="cap",
             separation=_LINK_SEPARATION_NM,
+            orientation=way,
             label=end,
             duplicate=False,
+            remove_hydrogens=False,
         )
     polymer.build(n=1, sequence=sequence, add_hydrogens=False)
 
@@ -447,6 +497,42 @@ def _map_coordinates(
 # ---------------------------------------------------------------------------
 # Geometry checks
 # ---------------------------------------------------------------------------
+
+
+def stereo_from_3d(mol: Any, xyz: Any) -> Any:
+    """Return a copy of ``mol`` with the stereochemistry its coordinates have.
+
+    The chain is assembled without stereo marks; its configuration is the one
+    the 3D structure has (the SMILES' where it gives one). Writing it on the
+    molecule makes the SDF record it.
+    """
+    from rdkit import Chem
+
+    stereo = Chem.Mol(mol)
+    conformer = Chem.Conformer(stereo.GetNumAtoms())
+    for index, position in enumerate(xyz):
+        conformer.SetAtomPosition(index, [float(value) for value in position])
+    stereo.AddConformer(conformer, assignId=True)
+    Chem.AssignStereochemistryFrom3D(stereo)
+    stereo.RemoveAllConformers()
+    return stereo
+
+
+def stereo_signature(mol: Any) -> tuple:
+    """Return the tetrahedral and double-bond configurations of ``mol``."""
+    from rdkit import Chem
+
+    centres = tuple(
+        (atom.GetIdx(), str(atom.GetChiralTag()))
+        for atom in mol.GetAtoms()
+        if atom.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED
+    )
+    bonds = tuple(
+        (bond.GetIdx(), str(bond.GetStereo()), tuple(bond.GetStereoAtoms()))
+        for bond in mol.GetBonds()
+        if bond.GetStereo() != Chem.BondStereo.STEREONONE
+    )
+    return centres, bonds
 
 
 def find_pierced_rings(mol: Any, xyz: Any) -> list[tuple[tuple[int, ...], tuple[int, int]]]:
@@ -797,8 +883,9 @@ class PolymerGenerator:
                 np.random.set_state(state)
             coordinates = _map_coordinates(chain, elements, bonds, xyz)
 
+            built = stereo_from_3d(chain, coordinates)
             molecule = Molecule.from_rdkit(
-                chain, allow_undefined_stereo=True, hydrogens_are_explicit=True
+                built, allow_undefined_stereo=True, hydrogens_are_explicit=True
             )
             molecule._conformers = [unit.Quantity(coordinates, unit.angstrom)]
             self._label_residues(molecule, names, residues)
@@ -808,9 +895,12 @@ class PolymerGenerator:
             relaxed = molecule.conformers[0].m_as(unit.angstrom)
             pierced = find_pierced_rings(chain, relaxed)
             contact = closest_contact(chain, relaxed)
-            if not pierced and (contact is None or contact[0] >= MIN_CONTACT_ANGSTROM):
+            kept = stereo_signature(stereo_from_3d(chain, relaxed)) == stereo_signature(built)
+            if kept and not pierced and (contact is None or contact[0] >= MIN_CONTACT_ANGSTROM):
                 return molecule
-            if pierced:
+            if not kept:
+                problems.append("the relaxation changed a stereocentre or double bond")
+            elif pierced:
                 ring, bond = pierced[0]
                 problems.append(f"bond {bond} pierces ring {ring}")
             else:

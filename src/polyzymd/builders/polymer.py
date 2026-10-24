@@ -726,8 +726,17 @@ class PolymerBuilder:
                     for end, options in self._end_groups.items()
                 },
             }
-        for metadata in self._cached_sidecars.values():
-            return {"monomers": metadata.get("monomers"), "end_groups": metadata.get("end_groups")}
+        if self._cached_sidecars:
+            return {
+                "chains": {
+                    name: {
+                        "sequence": metadata.get("sequence"),
+                        "monomers": metadata.get("monomers"),
+                        "end_groups": metadata.get("end_groups"),
+                    }
+                    for name, metadata in sorted(self._cached_sidecars.items())
+                }
+            }
         return {}
 
     def _generate_polymer(self, sequence: str) -> Molecule:

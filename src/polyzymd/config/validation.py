@@ -220,6 +220,9 @@ def require_inputs(config: Any) -> None:
         except ImportError as exc:
             raise ValueError(str(exc)) from exc
 
+    if polymers is not None and polymers.enabled:
+        _require_cached_chemistry(config, polymers)
+
     from openff.toolkit.typing.engines.smirnoff.forcefield import get_available_force_fields
 
     available = set(get_available_force_fields())
@@ -246,6 +249,39 @@ def require_inputs(config: Any) -> None:
             f"fix: in each charges: {{method: nagl, model: ...}}, name one of {installed}, "
             "or give the path of a model file."
         )
+
+
+def _require_cached_chemistry(config: Any, polymers: Any) -> None:
+    """Raise ``ValueError`` when cached chains were built from other SMILES or caps.
+
+    Only chains that dynamic generation made carry the build metadata this
+    compares; the build makes the same check for the chains it loads.
+    """
+    if polymers.generation_mode.value != "cached" or polymers.sdf_directory is None:
+        return
+    if not any(m.smiles for m in polymers.monomers) and polymers.end_groups is None:
+        return
+    from polyzymd.builders.polymer import PolymerBuilder
+
+    end_groups = None
+    if polymers.end_groups is not None:
+        end_groups = {
+            end: [option.model_dump() for option in getattr(polymers.end_groups, end)]
+            for end in ("head", "tail")
+        }
+    builder = PolymerBuilder(
+        characters=[m.label for m in polymers.monomers],
+        probabilities=[m.probability for m in polymers.monomers],
+        length=polymers.length,
+        type_prefix=polymers.type_prefix,
+        sdf_directory=polymers.sdf_directory,
+        monomer_smiles={(m.name or m.label): m.smiles for m in polymers.monomers if m.smiles},
+        monomer_names={m.label: (m.name or m.label) for m in polymers.monomers},
+        end_groups=end_groups,
+    )
+    directory = Path(polymers.sdf_directory)
+    for sdf in sorted(directory.glob(f"{polymers.type_prefix}_seq=*_charged.sdf")):
+        builder._check_cached_chemistry(sdf)
 
 
 def _require_shipped_molecule(cosolvent: Any) -> None:
