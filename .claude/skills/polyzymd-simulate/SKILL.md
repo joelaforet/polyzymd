@@ -139,6 +139,14 @@ and write their reason, not yours. Check IDs are listed in
 Never edit an exported `.top`, `.itp`, `.mdp` or `system.xml` by hand: runs
 refuse files the audit did not vouch for. Change the config and build again.
 
+A protocol PolyzyMD does not run (PLUMED, enhanced sampling, the user's own
+`.mdp` files or OpenMM script) is run outside PolyzyMD on the audited build
+and brought back for analysis: follow
+`docs/source/how_to/own_protocol.md`. Copy the inputs that ran into
+`protocol/` (`gromacs/protocol/` for GROMACS). Do not change the config to
+imitate such a protocol, and tell the user that analyses weight frames
+equally, so a biased run needs reweighting.
+
 ## 4. Run on a cluster
 
 ```bash
@@ -168,9 +176,10 @@ polyzymd analyze --project .
   build is missing, older than 1.3.0rc5, stale for the current config, or a
   file was edited. Do what its `fix:` line says (rebuild, or restore the
   file).
-- `polyzymd status` shows `SYSTEM DIVERGED FROM THE AUDITED BUILD`: the
-  run integrated a system other than the audited one. Tell the user; do not
-  resubmit or rebuild on your own.
+- `polyzymd status` shows `SYSTEM DIVERGED FROM THE AUDITED BUILD`: a
+  production segment would have integrated a System other than the audited
+  build, so it stopped before its first step and the chain ended. Tell the
+  user what the record says differs; do not resubmit or rebuild on your own.
 - `grompp` stops on any warning: read it. A net charge means the system is
   not neutral.
 - A topology MDAnalysis cannot read: `polyzymd analysis-topology --overwrite RUN_DIR`.

@@ -58,6 +58,17 @@ def _shown(path: object) -> str:
     return os.path.normpath(str(path))
 
 
+def _refuse_own_protocol(working_dir: Path, action: str) -> None:
+    """Exit with the refusal when the replicate was run with the user's own protocol."""
+    from polyzymd.simulation.own_protocol import OwnProtocolError, require_polyzymd_run
+
+    try:
+        require_polyzymd_run(working_dir, action)
+    except OwnProtocolError as error:
+        colored_echo(str(error), err=True, level=logging.ERROR)
+        sys.exit(1)
+
+
 def _echo_audit(working_dir: Path, phase: str) -> None:
     """Print the build's physics audit result, each warning or accepted finding,
     and where the readable build record is."""
@@ -1129,7 +1140,10 @@ def run(
         sim_config = load_config_or_exit(config)
         colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
         colored_echo(f"Engine: {engine}", phase="simulation")
-        sim_config.require_buildable(engine)
+        # The input files are checked when a replicate is built (the builder
+        # checks them); a run that reuses a build, as in a sim-cuda-*
+        # environment without RDKit or OpenFF, does not read them.
+        sim_config.require_buildable(engine, inputs=False)
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -1149,6 +1163,9 @@ def run(
 
         resolved_gmx_path = gmx_path or "gmx"
 
+        # Refuse before any replicate runs, so a range never stops half done.
+        for rep in replicate_list:
+            _refuse_own_protocol(sim_config.get_working_directory(rep), "run")
         succeeded = 0
         for rep in replicate_list:
             colored_echo(
@@ -1234,6 +1251,7 @@ def _run_gromacs_impl(
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
 
     working_dir = sim_config.get_working_directory(replicate)
+    _refuse_own_protocol(working_dir, "run")
     # Determine output directory for GROMACS files
     gromacs_dir = working_dir / "gromacs"
 
@@ -1395,6 +1413,7 @@ def _run_openmm_impl(
 
     production = sim_config.simulation_phases.production
     working_dir = sim_config.get_working_directory(replicate)
+    _refuse_own_protocol(working_dir, "run")
     total_steps = int(production.duration * 1e6 / production.time_step)
     report_interval = calculate_report_interval(total_steps, production.samples)
 
@@ -2253,6 +2272,8 @@ def _run_segment_locked(
     )
     from polyzymd.simulation.signals import raise_if_interrupted
 
+    # Never scan, clean up or continue a replicate the user ran themselves.
+    _refuse_own_protocol(working_dir, "run")
     sim_config.require_engine_barostats("openmm")
 
     # Calculate total steps and samples from config
@@ -3410,9 +3431,19 @@ def _status_table(config: str) -> None:
     running_count = 0
     stopped_reps: list[int] = []
     corrupt_count = 0
+    own_count = 0
+    from polyzymd.simulation.own_protocol import protocol_dir
 
     for rep_num, rep_path in sorted(rep_map.items()):
         label = f"run{rep_num}"
+        if rep_path is not None and protocol_dir(rep_path) is not None:
+            # Run outside PolyzyMD: no progress to show, nothing to recover.
+            own_count += 1
+            click.echo(
+                f"  {label:<{label_width}}  run with its own protocol (protocol/): "
+                "analyze it; PolyzyMD does not run it"
+            )
+            continue
         corrupt = None
         if rep_path is not None:
             engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
@@ -3480,8 +3511,13 @@ def _status_table(config: str) -> None:
 
     click.echo()
     total_reps = len(rep_map)
-    if completed_count == total_reps:
-        click.echo(click.style(f"  All {total_reps} replicates completed!", fg="green"))
+    if own_count:
+        click.echo(f"  {own_count}/{total_reps} run with their own protocol")
+    if completed_count + own_count == total_reps:
+        if not own_count:
+            click.echo(click.style(f"  All {total_reps} replicates completed!", fg="green"))
+        elif completed_count:
+            click.echo(click.style(f"  All {completed_count} PolyzyMD runs completed!", fg="green"))
     else:
         if need_attention > 0:
             click.echo(
@@ -3842,6 +3878,7 @@ def recover(
         working_dir = Path(scratch_dir)
     else:
         working_dir = engine_impl.get_engine_working_directory(sim_config, replicate)
+    _refuse_own_protocol(working_dir, "recover")
 
     if not working_dir.exists():
         colored_echo(

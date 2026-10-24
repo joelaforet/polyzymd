@@ -6,42 +6,24 @@ Before 1.3.0rc5, nothing checked that the built system had them. PolyzyMD now
 checks every build against its config, records the result, and refuses to run
 files that no passing check vouches for.
 
-This page explains the failures behind the checks, how the checks work, and
+This page explains the failures the checks catch, how the checks work, and
 what they do not check. {doc}`../reference/physics_checks` lists every check.
 
-## The failures that nothing reported
+## Failures that raise no error
 
-Each of these happened in a real PolyzyMD campaign. Each built, ran and gave
-plausible trajectories, and no step reported an error.
+A build can differ from its config while every step succeeds. For example:
 
-**The protein ran with the wrong force field.** From January 2026 until testing
-of the 1.3.0 release found it, PolyzyMD loaded ff14SB and Sage into one OpenFF
-`ForceField`. In SMIRNOFF the last matching parameter wins, so Sage's generic
-parameters replaced ff14SB's on every protein bond, angle, torsion, improper
-and Lennard-Jones term. Only the ff14SB charges survived. Every protein in one 18-condition study
-was simulated this way. In CALB, for example, the peptide
-C–N bond had the Sage length of 1.382 Å instead of ff14SB's 1.335 Å. The
-config said ff14SB. Energies, densities and RMSDs looked normal.
+- two force fields are loaded together, and the generic parameters of one
+  replace the specific parameters of the other on some of the molecules;
+- a run computes charges again instead of reading the built system;
+- a restraint selects a neighbouring atom, because its selection counts atoms
+  in a different way than its author expected;
+- a setting, such as a salt concentration, changes meaning between versions,
+  and nothing records which meaning a build used.
 
-**A production run recomputed charges.** A LipA production run charged its
-substrate again at run time instead of reading the built system. The
-difference was below 1e-7 e, but the run integrated a system no build record
-described.
-
-**A restraint held the wrong atom.** A restraint selected its atom with
-`pdbindex`, which counts atoms in the file. The documentation said it was the
-PDB serial number, which skips one number at each `TER` record. In two
-enzymes the restraint held the substrate's carbonyl oxygen, not its carbonyl
-carbon.
-
-**The salt changed meaning.** `nacl_concentration` once counted the
-neutralizing ions toward the target, and later did not. Builds from before and
-after the change hold different numbers of ions for the same config, and no
-build record said which meaning it used.
-
-These failures share one property. Each step did what its code said, and the
-result was a valid system. Only an independent comparison of the built system
-with the config could find them.
+Each of these gives a valid system and plausible trajectories, and no step
+reports an error. Only an independent comparison of the built system with the
+config finds them.
 
 ## The config states every scientific choice
 
@@ -83,8 +65,9 @@ Lennard-Jones and 1-4 parameter, every constraint, every library, NAGL or
 preset charge and every mass. A water box has thousands of copies of one molecule; the audit compares
 each copy, so one wrong copy fails the check.
 
-The force-field order bug fails `parameters.bonded` on the protein. The test
-suite reproduces that bug and checks that it fails.
+A protein that received another force field's bonded terms fails
+`parameters.bonded`; the test suite builds such a protein and checks that it
+fails.
 
 A coverage check makes sure that every atom belongs to exactly one component,
 and that no bonded term joins two molecules.
@@ -163,9 +146,11 @@ The checks continue after the build:
 - Each OpenMM production segment compares the System it is about to integrate
   with the audited `system.xml`: every force-field term, the restraints and the
   nonbonded settings. The result is written beside the segment and into
-  `progress.json`. A difference is logged as an error and shown by
-  `polyzymd status` as `SYSTEM DIVERGED FROM THE AUDITED BUILD`. The run goes
-  on, so that a person can decide.
+  `progress.json`. A segment whose System differs stops before its first step,
+  the chain is not resubmitted, and `polyzymd status` shows
+  `SYSTEM DIVERGED FROM THE AUDITED BUILD` with the action `inspect`. A run
+  that started before 1.3.0rc5 has no audited build to compare with; its
+  record says so, and it goes on.
 
 ## What the audit does not check
 
@@ -200,3 +185,4 @@ the config with a reason, where a reviewer sees it. `polyzymd status
 - {doc}`../reference/configuration` — solutes, charges and `modeling_exceptions`
 - {doc}`../how_to/rewrite_config_rc5` — rewrite a config for 1.3.0rc5
 - {doc}`simulation_safeguards` — the build and run safeguards that came before
+- {doc}`../how_to/own_protocol` — run an audited build with your own protocol

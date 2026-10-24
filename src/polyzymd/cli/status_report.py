@@ -150,7 +150,7 @@ class SystemReport:
         return out
 
     def to_dict(self, unfinished: bool = False) -> dict:
-        reps = [r for r in self.replicates if not (unfinished and r.verdict == VERDICT_COMPLETED)]
+        reps = [r for r in self.replicates if not (unfinished and r.verdict in VERDICTS_FINISHED)]
         return {
             "name": self.name,
             "config_path": self.config_path,
@@ -170,8 +170,13 @@ VERDICT_STOPPED = "stopped"
 VERDICT_NOT_STARTED = "not_started"
 VERDICT_NOT_FOUND = "not_found"
 VERDICT_CORRUPT = "corrupt"
+#: Run outside PolyzyMD with the user's own protocol (``protocol/``); never resubmitted.
+VERDICT_OWN_PROTOCOL = "own_protocol"
+#: Verdicts with nothing left for PolyzyMD to do (``--unfinished`` hides them).
+VERDICTS_FINISHED = (VERDICT_COMPLETED, VERDICT_OWN_PROTOCOL)
 VERDICT_ORDER = (
     VERDICT_COMPLETED,
+    VERDICT_OWN_PROTOCOL,
     VERDICT_RUNNING,
     VERDICT_QUEUED,
     VERDICT_DEAD,
@@ -654,6 +659,26 @@ def build_system_report(
                 )
             )
             continue
+        from polyzymd.simulation.own_protocol import protocol_dir
+
+        if protocol_dir(rep_path) is not None:
+            replicates.append(
+                ReplicateReport(
+                    replicate=rep_num,
+                    directory=str(rep_path),
+                    progress_status=VERDICT_OWN_PROTOCOL,
+                    completed_ns=0.0,
+                    total_ns=total_ns,
+                    fraction=0.0,
+                    verdict=VERDICT_OWN_PROTOCOL,
+                    jobs=rep_jobs,
+                    note=(
+                        "run with its own protocol (protocol/): PolyzyMD vouches for the "
+                        "build, not the run, and does not run or resubmit it"
+                    ),
+                )
+            )
+            continue
         progress = engine_inst.load_or_scan_progress(engine_dir, rep_num)
 
         status_val = progress.status
@@ -787,7 +812,14 @@ def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
     verdict = rep.verdict.upper()
     fields = [f"{label:<{label_width}}", ns, pct, f"{verdict:<11}"]
 
-    if rep.verdict == VERDICT_COMPLETED:
+    if rep.verdict == VERDICT_OWN_PROTOCOL:
+        fields = [f"{label:<{label_width}}", f"{verdict:<11}", rep.note or ""]
+        if rep.jobs:
+            # A chain queued before the run was brought back stops on its own;
+            # say so, so nobody waits for it.
+            fields.extend(_fmt_job(j) for j in rep.jobs)
+            fields.append("this PolyzyMD job will stop without running; cancel it with scancel")
+    elif rep.verdict == VERDICT_COMPLETED:
         pass
     elif rep.verdict in (VERDICT_RUNNING, VERDICT_QUEUED):
         fields.extend(_fmt_job(j) for j in rep.jobs)
@@ -874,7 +906,7 @@ def render_agent(
     for report in reports:
         reps = report.replicates
         done = sum(r.verdict == VERDICT_COMPLETED for r in reps)
-        shown = [r for r in reps if r.verdict != VERDICT_COMPLETED] if unfinished else reps
+        shown = [r for r in reps if r.verdict not in VERDICTS_FINISHED] if unfinished else reps
         if unfinished and reps and not shown and not report.error:
             lines.append(f"## {report.name}  {done}/{len(reps)} completed")
             continue

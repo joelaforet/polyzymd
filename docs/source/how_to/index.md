@@ -60,6 +60,7 @@ hpc_slurm
 monitor_simulations
 hardware_platforms
 run_gromacs
+own_protocol
 site_cu_boulder
 ```
 
