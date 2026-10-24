@@ -2983,6 +2983,56 @@ class TestBuildMatchesRecordedLength:
         )
         assert _build_matches_recorded_length(tmp_path, longer, "", 1)
 
+    def test_the_old_length_written_into_the_folder_template_matches(
+        self, tmp_path: Path, passing_audit
+    ) -> None:
+        """With {duration} in the folder name, the replicate keeps its folder this way."""
+        from polyzymd.cli.main import _build_matches_recorded_length
+        from polyzymd.config.loader import load_config
+        from polyzymd.simulation.artifact_integrity import publish_build_bundle
+        from polyzymd.simulation.progress import SimulationProgress, save_progress
+        from tests.simulation.test_artifact_integrity import _tiny_openmm_bundle
+
+        base = load_config(Path(__file__).parents[2] / "examples/quickstart/config.yaml")
+        config = base.model_copy(
+            update={
+                "output": base.output.model_copy(
+                    update={
+                        "naming_template": "{enzyme}_{duration}ns_run{replicate}",
+                        "scratch_directory": tmp_path,
+                    }
+                )
+            }
+        )
+        working_dir = config.get_working_directory(1)
+        publish_build_bundle(working_dir, *_tiny_openmm_bundle(), config)
+        production = config.simulation_phases.production
+        save_progress(
+            working_dir,
+            SimulationProgress(
+                total_steps_requested=int(production.duration * 1e6 / production.time_step),
+                total_samples_requested=production.samples,
+                timestep_fs=production.time_step,
+            ),
+        )
+        old = f"{production.duration:g}ns"
+        longer = config.model_copy(
+            update={
+                "simulation_phases": config.simulation_phases.model_copy(
+                    update={
+                        "production": production.model_copy(
+                            update={"duration": production.duration * 2}
+                        )
+                    }
+                ),
+                "output": config.output.model_copy(
+                    update={"naming_template": "{enzyme}_" + old + "_run{replicate}"}
+                ),
+            }
+        )
+        assert longer.get_working_directory(1) == working_dir
+        assert _build_matches_recorded_length(working_dir, longer, "", 1)
+
     def test_another_temperature_does_not(self, tmp_path: Path, passing_audit) -> None:
         from polyzymd.cli.main import _build_matches_recorded_length
 

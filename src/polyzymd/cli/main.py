@@ -1632,7 +1632,10 @@ def _build_matches_recorded_length(
     Each production duration and samples the chain recorded
     (:func:`_recorded_production_lengths`) is put back into a copy of the
     config; True when the build record then validates. Those are the only
-    settings a started chain may change.
+    settings a started chain may change. When ``output.naming_template``
+    names the replicate folder with ``{duration}``, the old length written
+    into the template in its place (so the replicate keeps its folder) is
+    accepted too.
     """
     from polyzymd.simulation.artifact_integrity import (
         ArtifactIntegrityError,
@@ -1640,6 +1643,7 @@ def _build_matches_recorded_length(
     )
 
     phases = sim_config.simulation_phases
+    template = sim_config.output.naming_template
     for duration, samples in _recorded_production_lengths(working_dir):
         production = phases.production.model_copy(
             update={"duration": duration, "samples": samples or phases.production.samples}
@@ -1647,13 +1651,25 @@ def _build_matches_recorded_length(
         adjusted = sim_config.model_copy(
             update={"simulation_phases": phases.model_copy(update={"production": production})}
         )
-        try:
-            validate_build_bundle(
-                working_dir, adjusted, config_path=config_path, replicate=replicate
+        # With {duration} in the folder name, the user keeps the folder by
+        # writing the old length into the template; put {duration} back.
+        token = f"{int(duration) if duration >= 1 else f'{duration:g}'}ns"
+        templates = [template]
+        if "{duration}" not in template and token in template:
+            templates.append(template.replace(token, "{duration}ns", 1))
+        for candidate in templates:
+            config = adjusted.model_copy(
+                update={"output": adjusted.output.model_copy(update={"naming_template": candidate})}
             )
-        except ArtifactIntegrityError:
-            continue
-        return True
+            if candidate != template and config.get_working_directory(replicate) != working_dir:
+                continue
+            try:
+                validate_build_bundle(
+                    working_dir, config, config_path=config_path, replicate=replicate
+                )
+            except ArtifactIntegrityError:
+                continue
+            return True
     return False
 
 

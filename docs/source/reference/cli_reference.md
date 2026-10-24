@@ -1376,13 +1376,20 @@ output:
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Error (validation failure, build failure, etc.) |
-| 2 | Typed analysis error from {ref}`polyzymd analyze <cli-analyze>`, whose message and fix are printed on stderr, one line each |
-| 3 | `polyzymd check-progress`: error; the SLURM job does not resubmit |
-| 99 | Graceful shutdown — simulation was interrupted but interrupted state was saved (see {doc}`../how_to/hpc_slurm`) |
+A code means different things for different commands. Read it with the
+command that returned it.
+
+| Command | 0 | 1 | 2 | 3 | 99 |
+|---------|---|---|---|---|----|
+| Most commands (`validate`, `build`, `submit`, `status`, ...) | Success | Error (validation failure, build failure, etc.) | | | |
+| `run` | Every replicate complete | Error, or a refusal by a check | | | A signal stopped the run after it saved its state; run the same command again to continue |
+| `run-segment` | Segment completed | Error | Another job holds the replicate | | Graceful shutdown: the state was saved, and the job resubmits (see {doc}`../how_to/hpc_slurm`) |
+| `check-progress` | Simulation complete; do not resubmit | Work remains; resubmit | | **Error**: the SLURM job does not resubmit | |
+| {ref}`analyze <cli-analyze>` | Every report complete | | Typed analysis error; message and fix on stderr, one line each | **Partial** report: a condition or replicate was left out; the report is printed | |
+
+`3` means an error for `check-progress` and a partial report for `analyze`.
+The job scripts depend on the `check-progress` codes, so they stay as they
+are.
 
 ---
 
