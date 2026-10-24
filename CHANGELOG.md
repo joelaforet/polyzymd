@@ -5,7 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.0] - 2026-10-21
+## [1.3.0rc5] - 2026-10-23
+
+### rc.5 in brief (read this first)
+
+1.3.0rc5 changes the config layout once and checks every build against its
+config. Configs written for 1.3.0rc4 or earlier stop with an error that links to
+the rewrite guide (`docs/source/how_to/rewrite_config_rc5.md`); later 1.3
+releases only add keys, and a test holds them to that.
+
+- **Breaking: the config layout.** `enzyme:`, `substrate:` and `polymers:` become
+  entries of a `solutes:` list (each with `type`, optional `name` and `segid`),
+  and `solvent:` holds the water, co-solvents, ions and box. There are no
+  scientific defaults: every solute and the solvent name their `force_field`
+  files and `charges` (`library`, `preset`, `nagl` with its `model`, `am1bcc`,
+  `espaloma`), and `solvent.water.model` is required. Restraint atoms name the
+  solute they belong to (`component:`) and are selected inside it.
+- **The physics audit.** Every build is compared, term by term, with references
+  rebuilt from the force fields and charges the config names, and checked for
+  composition, ions and salt, constraints, nonbonded settings, clashes, periodic
+  images, restraints and, on GROMACS, every `.mdp` setting. The check catalog is
+  `docs/source/reference/physics_checks.md`. A deliberate departure is accepted
+  under `modeling_exceptions` with a reason.
+- **The build record.** `build_provenance.json` and `build_provenance.md`
+  replace `build_manifest.json`: versions, seeds, file hashes, every component
+  with its force field and charges, the audit, and the methods to cite
+  (Packmol, and Machado and Pantano when `ionic_strength` sets the ions).
+- **Gates.** A failed audit stops the build. `run` and `submit` refuse a
+  replicate that has not started unless a passing audit vouches for its files;
+  GROMACS jobs check `audited_files.sha256` before `grompp`. Each OpenMM
+  production segment compares its System with the audited build and stops
+  before its first step if they differ (`polyzymd status` shows the diverged
+  terms). Runs started before rc.5 continue from their own files.
+- **Your own protocol.** A build can be run outside PolyzyMD (PLUMED, your own
+  `.mdp` or OpenMM script) and brought back for analysis: put the inputs that
+  ran in `protocol/` (`docs/source/how_to/own_protocol.md`).
+- **Preemption.** Job scripts allow SLURM to requeue a preempted job, which
+  resumes from the restart state saved every minute.
+- **Analysis identity.** The config hash of an analysis now includes the force
+  fields, charges, water model, ions, box and restraints, so stored results are
+  recomputed once after upgrading.
+
+The entries below describe changes made before rc.5 and use the key names of
+1.3.0rc4; the rewrite guide maps each to its rc.5 name.
+
 
 ### Added
 
