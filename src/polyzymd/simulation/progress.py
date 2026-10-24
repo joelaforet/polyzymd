@@ -1544,3 +1544,32 @@ def load_or_scan_progress(
         progress.status = SimulationStatus.COMPLETED
 
     return progress
+
+
+def recorded_production_lengths(working_dir: Path) -> list[tuple[float, int]]:
+    """Return the (duration in ns, samples) a started replicate may have been built with.
+
+    In order: the length ``progress.json`` recorded when production started
+    (``started_total_steps``), what ``production_0_parameters.json`` recorded
+    when the first segment started, and the current totals in
+    ``progress.json`` (for files written before the first existed).
+    """
+    found: list[tuple[float, int]] = []
+    prior = load_progress(working_dir)
+    if prior is not None and prior.started_total_steps and prior.timestep_fs:
+        duration = prior.started_total_steps * prior.timestep_fs / 1e6
+        samples = prior.started_total_samples or 0
+        found += [(duration, samples), (round(duration, 9), samples)]
+    params = Path(working_dir) / "production_0" / "production_0_parameters.json"
+    try:
+        values = json.loads(params.read_text())["__values__"]["integ_params"]["__values__"]
+        found.append(
+            (float(values["total_time"]["__values__"]["value"]), int(values["num_samples"]))
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    if prior is not None and prior.total_steps_requested and prior.timestep_fs:
+        duration = prior.total_steps_requested * prior.timestep_fs / 1e6
+        found.append((duration, prior.total_samples_requested or 0))
+        found.append((round(duration, 9), prior.total_samples_requested or 0))
+    return list(dict.fromkeys(found))

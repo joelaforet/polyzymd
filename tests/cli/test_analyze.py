@@ -917,3 +917,20 @@ def test_study_check_reads_a_file_setting_as_the_report_records_it(tmp_path: Pat
     )
     check = CliRunner().invoke(cli, ["study", "check", str(root)])
     assert "made with other settings" in check.output
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_run_shows_a_result_without_replacing_the_stored_report(tmp_path: Path) -> None:
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rmsf: {selection: all, alignment_selection: all}\n")
+    first = _analyze_cli("rmsf", "--study", str(root), "--no-plots", "--no-eq-check")
+    assert first.exit_code in (0, 3), first.output
+    stored = root / "results" / "rmsf" / "report.json"
+    before = stored.read_text()
+    view = _analyze_cli(
+        "rmsf", "--study", str(root), "--run", "rmsf", "--no-plots", "--no-eq-check"
+    )
+    assert view.exit_code in (0, 3), view.output
+    assert "printed and not saved" in view.stderr
+    assert stored.read_text() == before

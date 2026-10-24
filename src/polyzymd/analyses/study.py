@@ -472,6 +472,25 @@ class Condition:
             )
         self._provider = UniverseProvider.from_config(self.config)
         self.replicates = [Replicate(self, index) for index in chosen]
+        #: Replicates whose build record names another config than this one.
+        self.built_from_other_config: list[int] = []
+        from polyzymd.simulation.artifact_integrity import build_matches_config
+
+        for index in chosen:
+            folder = folders.get(index)
+            try:
+                matches = build_matches_config(folder, self.config, index) if folder else None
+            except Exception:  # noqa: BLE001 - a warning must never stop the analysis
+                matches = None
+            if matches is False:
+                self.built_from_other_config.append(index)
+        if self.built_from_other_config:
+            LOGGER.warning(
+                "Condition %r: replicate %s was built from another config than %s.",
+                label,
+                ", ".join(map(str, self.built_from_other_config)),
+                config_path,
+            )
 
     def __repr__(self) -> str:
         return f"Condition(label={self.label!r}, replicates={[r.index for r in self.replicates]})"

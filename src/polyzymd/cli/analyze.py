@@ -855,7 +855,17 @@ def analyze_command(
                 f"as {run_name}'s report.json; run without --label to update it.",
                 err=True,
             )
-        if not is_task and not subset and not (one_off and requested_output is None):
+        # --run shows one more result of the run; the stored report stays the
+        # one a plain run writes, so which result it holds is never accidental.
+        view = run is not None and not is_task
+        if view and not subset:
+            click.echo(
+                f"note: --run shows the {run} result of {run_name}, so this report is printed "
+                f"and not saved; {run_name}'s report.json keeps the result a run without "
+                "--run reports.",
+                err=True,
+            )
+        if not is_task and not subset and not view and not (one_off and requested_output is None):
             saved = Path(output_dir) / REPORT_FILE
             saved.parent.mkdir(parents=True, exist_ok=True)
             text = report.model_dump_json(indent=2) + "\n"

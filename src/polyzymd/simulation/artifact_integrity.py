@@ -704,3 +704,64 @@ def replicate_lock_held_elsewhere(working_dir: Path) -> bool | None:
             return False
     except OSError:
         return None
+
+
+def length_variants(working_dir: Path, config: Any, replicate: int) -> list[Any]:
+    """Return copies of ``config`` with the production length a started replicate began with.
+
+    A chain run longer has a config whose ``production.duration`` and
+    ``samples`` (and, with ``{duration}`` in ``output.naming_template``, the
+    template, written with the old length to keep the folder) differ from
+    the config it was built with. Each copy puts back one length the replicate
+    recorded (:func:`polyzymd.simulation.progress.recorded_production_lengths`).
+    Empty when nothing is recorded.
+    """
+    from polyzymd.simulation.progress import recorded_production_lengths
+
+    recorded = recorded_production_lengths(Path(working_dir))
+    if not recorded:
+        return []
+    phases = config.simulation_phases
+    template = config.output.naming_template
+    variants: list[Any] = []
+    for duration, samples in recorded:
+        production = phases.production.model_copy(
+            update={"duration": duration, "samples": samples or phases.production.samples}
+        )
+        adjusted = config.model_copy(
+            update={"simulation_phases": phases.model_copy(update={"production": production})}
+        )
+        token = f"{int(duration) if duration >= 1 else f'{duration:g}'}ns"
+        templates = [template]
+        if "{duration}" not in template and token in template:
+            templates.append(template.replace(token, "{duration}ns", 1))
+        for candidate in templates:
+            variant = adjusted.model_copy(
+                update={"output": adjusted.output.model_copy(update={"naming_template": candidate})}
+            )
+            if candidate != template and variant.get_working_directory(replicate) != Path(
+                working_dir
+            ):
+                continue
+            variants.append(variant)
+    return variants
+
+
+def build_matches_config(working_dir: Path, config: Any, replicate: int) -> bool | None:
+    """Whether the build record's config hash fits ``config``, without hashing build files.
+
+    A changed production length of a started replicate fits (see
+    :func:`length_variants`). ``None`` when the folder has no readable build
+    record.
+    """
+    path = build_record_path(Path(working_dir))
+    try:
+        expected = json.loads(path.read_text()).get("config_hash")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if expected is None:
+        return None
+    for candidate in [config, *length_variants(working_dir, config, replicate)]:
+        if expected in (config_hash(candidate), _absolute_path_config_hash(candidate)):
+            return True
+    return False

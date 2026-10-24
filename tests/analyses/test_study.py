@@ -189,3 +189,37 @@ def test_a_replicate_short_of_its_production_makes_the_report_partial(tmp_path: 
     assert report.status == "partial"
     assert report.conditions[0].n_replicates == 3
     assert any("replicate 3 has run 63% of production" in p for p in report.problems)
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_a_replicate_built_from_another_config_is_named_in_a_warning(tmp_path: Path) -> None:
+    """Its build record's config hash differs: the analysis warns and still reads it."""
+    import json
+
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.protocols import analyze
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.artifact_integrity import MANIFEST_NAME, config_hash
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+
+    config = write_simulation_config(tmp_path / "cond", scratch=tmp_path / "scratch")
+    for replicate in (1, 2, 3):
+        write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(10)])
+    sim = SimulationConfig.from_yaml(config)
+    for replicate, digest in ((1, "0" * 64), (2, config_hash(sim))):
+        (sim.get_working_directory(replicate) / MANIFEST_NAME).write_text(
+            json.dumps({"config_hash": digest})
+        )
+    report = analyze(
+        "rg",
+        [config],
+        labels=["A"],
+        equilibration="0ns",
+        settings={"selection": "all"},
+        output_dir=tmp_path / "out",
+        plots=False,
+        eq_check=False,
+    )
+    warnings = [text for text in report.warnings if "built from another config" in text]
+    assert len(warnings) == 1 and "replicate 1 was built" in warnings[0]
+    assert report.conditions[0].n_replicates == 3

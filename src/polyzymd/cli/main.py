@@ -1743,88 +1743,30 @@ def _run_openmm_impl(
 BUILD_MODULES = ("rdkit", "openff.toolkit", "openff.interchange")
 
 
-def _recorded_production_lengths(working_dir: Path) -> list[tuple[float, int]]:
-    """Return the (duration in ns, samples) a started chain may have been built with.
-
-    In order: the length ``progress.json`` recorded when production started
-    (``started_total_steps``), what ``production_0_parameters.json`` recorded
-    when the first segment started, and the current totals in
-    ``progress.json`` (for files written before the first existed).
-    """
-    import json
-
-    from polyzymd.simulation.progress import load_progress
-
-    found: list[tuple[float, int]] = []
-    prior = load_progress(working_dir)
-    if prior is not None and prior.started_total_steps and prior.timestep_fs:
-        duration = prior.started_total_steps * prior.timestep_fs / 1e6
-        samples = prior.started_total_samples or 0
-        found += [(duration, samples), (round(duration, 9), samples)]
-    params = working_dir / "production_0" / "production_0_parameters.json"
-    try:
-        values = json.loads(params.read_text())["__values__"]["integ_params"]["__values__"]
-        found.append(
-            (float(values["total_time"]["__values__"]["value"]), int(values["num_samples"]))
-        )
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
-    if prior is not None and prior.total_steps_requested and prior.timestep_fs:
-        duration = prior.total_steps_requested * prior.timestep_fs / 1e6
-        found.append((duration, prior.total_samples_requested or 0))
-        found.append((round(duration, 9), prior.total_samples_requested or 0))
-    return list(dict.fromkeys(found))
-
-
 def _build_matches_recorded_length(
     working_dir: Path, sim_config: "SimulationConfig", config_path: str, replicate: int
 ) -> bool:
     """Whether the build matches the config once production length is set back.
 
-    Each production duration and samples the chain recorded
-    (:func:`_recorded_production_lengths`) is put back into a copy of the
-    config; True when the build record then validates. Those are the only
-    settings a started chain may change. When ``output.naming_template``
-    names the replicate folder with ``{duration}``, the old length written
-    into the template in its place (so the replicate keeps its folder) is
-    accepted too.
+    Each production duration and samples the chain recorded is put back into a
+    copy of the config (:func:`~polyzymd.simulation.artifact_integrity.length_variants`);
+    True when the build record then validates. Those are the only settings a
+    started chain may change. When ``output.naming_template`` names the
+    replicate folder with ``{duration}``, the old length written into the
+    template in its place (so the replicate keeps its folder) is accepted too.
     """
     from polyzymd.simulation.artifact_integrity import (
         ArtifactIntegrityError,
+        length_variants,
         validate_build_bundle,
     )
 
-    recorded = _recorded_production_lengths(working_dir)
-    if not recorded:
-        return False
-    phases = sim_config.simulation_phases
-    template = sim_config.output.naming_template
-    for duration, samples in recorded:
-        production = phases.production.model_copy(
-            update={"duration": duration, "samples": samples or phases.production.samples}
-        )
-        adjusted = sim_config.model_copy(
-            update={"simulation_phases": phases.model_copy(update={"production": production})}
-        )
-        # With {duration} in the folder name, the user keeps the folder by
-        # writing the old length into the template; put {duration} back.
-        token = f"{int(duration) if duration >= 1 else f'{duration:g}'}ns"
-        templates = [template]
-        if "{duration}" not in template and token in template:
-            templates.append(template.replace(token, "{duration}ns", 1))
-        for candidate in templates:
-            config = adjusted.model_copy(
-                update={"output": adjusted.output.model_copy(update={"naming_template": candidate})}
-            )
-            if candidate != template and config.get_working_directory(replicate) != working_dir:
-                continue
-            try:
-                validate_build_bundle(
-                    working_dir, config, config_path=config_path, replicate=replicate
-                )
-            except ArtifactIntegrityError:
-                continue
-            return True
+    for config in length_variants(working_dir, sim_config, replicate):
+        try:
+            validate_build_bundle(working_dir, config, config_path=config_path, replicate=replicate)
+        except ArtifactIntegrityError:
+            continue
+        return True
     return False
 
 

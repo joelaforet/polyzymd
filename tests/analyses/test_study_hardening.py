@@ -531,7 +531,9 @@ class TestTimeseriesParts:
             cli, ["analyze", "shape", "--study", str(root), "--run", "double", "--no-plots"]
         )
         assert chosen.exit_code == 0, chosen.output
-        assert pz.Study(root).results("shape").report.run == "double"
+        # A --run view is printed; the stored report keeps the default result.
+        assert "printed and not saved" in chosen.output
+        assert pz.Study(root).results("shape").report.run == "x"
         wrong = CliRunner().invoke(
             cli, ["analyze", "shape", "--study", str(root), "--run", "nope", "--no-plots"]
         )

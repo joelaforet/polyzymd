@@ -447,6 +447,15 @@ def _record_not_run(report: ProtocolReport, study: Any) -> None:
     silent.
     """
     for condition in study:
+        other = getattr(condition, "built_from_other_config", None) or []
+        if other:
+            report.warnings.append(
+                f"condition {condition.label}: replicate {', '.join(map(str, other))} "
+                f"{'was' if len(other) == 1 else 'were'} built from another config than "
+                f"{Path(condition.config_path).name} (the build record's config hash differs): a "
+                "setting such as the salt concentration may differ from what the trajectories "
+                "hold. They are analysed as they are; check the config or rebuild."
+            )
         not_run = getattr(condition, "not_run", None) or []
         unfinished = getattr(condition, "unfinished", None) or {}
         incomplete = getattr(condition, "incomplete", None) or {}
