@@ -19,6 +19,7 @@ PolyzyMD requires `simulation_phases.equilibration_stages`. Equilibration
 cannot be skipped: list at least one stage, with a duration above 0 ns. Any
 duration above 0 is accepted. The quickstart uses one stage of 0.002 ns.
 
+(minimization-constraints)=
 ## What happens before stage 1: minimization
 
 Energy minimization always runs before the first equilibration stage. By
@@ -47,7 +48,6 @@ verifies that the minimized state satisfies every constraint of the real System
 before heating starts. See {doc}`../explanation/simulation_safeguards` for the
 rationale.
 
-(minimization-constraints)=
 The log may then say
 `Minimized state violates a constraint by 0.22849 A (> 0.010 A); projecting the coordinates back onto the constraint manifold`.
 The minimizer does not hold constrained distances exactly, so after it a

@@ -104,6 +104,12 @@ restraints:
     distance: 3.3
 ```
 
+The selection `name C1` is kept here as the old config wrote it. It matches
+only when the SDF names its atoms in an `atom.prop._Name` field. Otherwise the
+built atoms are named `C1x`, `C2x`, ..., and `polyzymd validate` refuses
+`name C1` and lists the names. `C1x` need not be the atom you meant: see
+{ref}`restraint-ligand-atom-names`.
+
 ## New keys
 
 - **`type`** (required) picks the component class: which keys the entry
