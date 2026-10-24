@@ -158,3 +158,24 @@ def test_a_copy_drops_the_machine_path_comment_of_a_deposited_config(tmp_path: P
     assert "machine path removed" not in copy.read_text()
     assert "# Solutes (REQUIRED)" in copy.read_text()  # comments are kept
     assert _output(copy) == ((created.root / "runs" / "water_350_k").resolve(), None)
+
+
+def test_the_structure_placeholders_name_the_solutes_keys(tmp_path: Path) -> None:
+    """add-condition --new explains structures/ with the keys the config really has."""
+    from polyzymd.config.schema import ProteinSolute, SmallMoleculeSolute
+
+    created = create_study(tmp_path / "st", new_conditions=["Water"], git=False)
+    structures = created.conditions["Water"].parent / "structures"
+    protein = (structures / "place_protein_here.placeholder.txt").read_text()
+    ligand = (structures / "place_ligand_here.placeholder.txt").read_text()
+
+    for text in (protein, ligand):
+        assert "enzyme." not in text and "substrate." not in text
+        assert "MOL2" not in text and "solutes:" in text
+    assert "type: protein" in protein and 'pdb_path: "structures/' in protein
+    assert "type: small_molecule" in ligand and 'sdf_path: "structures/' in ligand
+    assert "C1x" in ligand
+    for key in ("pdb_path", "name"):
+        assert key in ProteinSolute.model_fields
+    for key in ("sdf_path", "conformer_index", "name"):
+        assert key in SmallMoleculeSolute.model_fields
