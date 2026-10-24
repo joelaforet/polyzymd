@@ -517,3 +517,16 @@ def test_two_monomers_with_the_same_smiles_cannot_share_a_residue_name(data) -> 
     data["solutes"].append(_dynamic(monomers=monomers))
     with pytest.raises(ValidationError, match="share residue_name"):
         load(data)
+
+
+@pytest.mark.parametrize(
+    ("given", "suggested"), [("hydrogen", "[*][H]"), ("[*]C", "[*]C")], ids=["no_star", "star"]
+)
+def test_a_bare_cap_is_refused_with_a_cap_that_works(data, given, suggested) -> None:
+    """The refusal of the old string form suggests a cap with one '*'."""
+    data["solutes"].append(
+        _dynamic(end_groups={"head": given, "tail": [_option("H", "[*][H]", 1.0)]})
+    )
+    with pytest.raises(ValidationError, match="is a list of caps") as error:
+        load(data)
+    assert f"smiles: '{suggested}'" in str(error.value)

@@ -157,7 +157,7 @@ The entry is one item of `solutes:`; all its keys are indented under the `-`.
 To build chains from monomer SMILES (without pre-built SDF files), give each
 monomer as its repeat unit with `*` on the two linking atoms, and the caps
 each chain end can get, with one `*` each and their probabilities. This
-example builds the chemistry of the Paper 1 chains: each end is a whole monomer
+example builds the SBMA-EGMA chains PolyzyMD built with its ATRP templates before 1.3.0rc5: each end is a whole monomer
 that kept its C=C double bond:
 
 ```yaml
@@ -197,11 +197,11 @@ that kept its C=C double bond:
 | `generation_mode` | string | No | "cached" | `cached` or `dynamic` |
 | `type_prefix` | string | Yes | - | Identifier for polymer type |
 | `monomers` | list | Yes | - | Monomer specifications |
-| `length` | int | Yes | - | Chain length (number of monomers; in dynamic mode the two ends included, at least 3) |
+| `length` | int | Yes | - | Monomers per chain. With `end_groups` (always in dynamic mode, optional in cached mode) the two ends are included, so it is at least 3 |
 | `count` | int | Yes | - | Number of chains to add |
 | `sdf_directory` | path | In cached mode | null | Directory with pre-built polymer SDFs |
 | `cache_directory` | path | No | ".polymer_cache" | Cache directory |
-| `end_groups` | object | In dynamic mode | - | `head` and `tail`: lists of caps (`label`, `smiles` with one `*`, `probability`, optional `name` and `residue_name`); each end's probabilities sum to 1 |
+| `end_groups` | object | In dynamic mode; optional in cached mode | - | `head` and `tail`: lists of caps (`label`, `smiles` with one `*`, `probability`, optional `name` and `residue_name`); each end's probabilities sum to 1. In cached mode the chains then draw their caps too, and the caps are checked against the build metadata of cached chains that dynamic mode made |
 | `force_field` | list | Yes | - | Force field files; the same file as `solvent.force_field` |
 | `charges` | object | Yes | - | `preset` in cached mode (the charges in the SDFs); `nagl` (with `model`), `am1bcc` or `espaloma` in dynamic mode |
 | `max_retries` | int | No | 10 | Builds tried before a chain with a pierced ring or overlapping atoms is refused (dynamic mode) |
@@ -257,7 +257,7 @@ each brick face.
 | `label` | string | Yes | Single character (A, B, C...) |
 | `probability` | float | Yes | Selection probability (must sum to 1.0) |
 | `name` | string | No | Full monomer name |
-| `smiles` | string | Dynamic only | Repeat-unit SMILES with `*` on the two linking atoms; the first `*` bonds toward the head |
+| `smiles` | string | Dynamic mode; optional in cached mode | Repeat-unit SMILES with `*` on the two linking atoms; the first `*` bonds toward the head. In cached mode it is checked against the build metadata of cached chains that dynamic mode made |
 | `residue_name` | string | No | 3-letter residue code for topology; one per monomer, not an amino-acid, nucleic-acid, water or ion name |
 
 ### Charges

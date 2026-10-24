@@ -594,9 +594,11 @@ class PolymerEndGroups(_ConfigModel):
     def _refuse_bare_smiles(cls, value: Any, info: Any) -> Any:
         """Refuse a cap given as a plain SMILES; each end is a list of options."""
         if isinstance(value, str):
+            smiles = value if "*" in value else "[*][H]"
             raise ValueError(
-                f"end_groups.{info.field_name} is a list of caps with probabilities, for "
-                f"example {info.field_name}: [{{label: H, smiles: '{value}', probability: 1.0}}]"
+                f"end_groups.{info.field_name} is a list of caps with probabilities, each "
+                "SMILES with one '*', for example "
+                f"{info.field_name}: [{{label: H, smiles: '{smiles}', probability: 1.0}}]"
             )
         return value
 

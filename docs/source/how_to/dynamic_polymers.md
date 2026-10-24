@@ -68,15 +68,18 @@ of the repeat unit it caps.
 a tail cap. This holds for every cap, a hydrogen included, so `length` is at
 least 3.
 
-### The chain ends of the Paper 1 chains
+### Chain ends that keep the monomer's double bond
 
-The SBMA-EGMA chains of Paper 1 were made in two steps: an ATRP polymerization
-grew three repeat units, and a termination step restored the C=C double bond
-of the monomer at each end. Each end is a whole monomer that kept its double
-bond, bonded to the chain through its CH2 carbon (now `=CH-`), and each end's
-monomer was drawn with the monomer probabilities. In star-sited SMILES, the end
-form of a methacrylate is `[*]C=C(C)C(=O)OR`, and the entry below builds the
-same 5-mers.
+Before 1.3.0rc5, PolyzyMD built dynamic chains with ATRP reaction templates.
+Those chains, such as the SBMA-EGMA 5-mers of studies made with those
+releases, are three polymerized repeat units with a whole monomer at each end
+that kept its C=C double bond, bonded to the chain through its CH2 carbon (now
+`=CH-`), and each end's monomer was drawn with the monomer probabilities. This
+is a modelling choice: it stands for a termination step that restores the
+double bond. A real ATRP chain ends in an initiator fragment and a halide. In
+star-sited SMILES the end form of a methacrylate is `[*]C=C(C)C(=O)OR`, and
+the entry below builds those 5-mers. EGMA is methoxy tetra(ethylene glycol)
+methacrylate.
 
 ## Write the polymer entry
 
@@ -147,20 +150,31 @@ For every other key of the config, see {doc}`../reference/configuration`.
 (tacticity)=
 ## Set the tacticity
 
-A stereocentre in the repeat unit's SMILES is kept in the chain. To control
-tacticity, give each configuration of the backbone stereocentre its own label,
-with `@` or `@@` in the SMILES, and the same `residue_name`:
+A stereocentre written in the repeat unit's SMILES is kept in the chain. `@`
+and `@@` fix the configuration of the backbone carbon relative to its
+neighbours as written, so two units with the same SMILES have the same
+relative configuration (a meso dyad) and two with opposite marks the opposite
+(a racemo dyad). The CIP label (R or S) of a carbon in the chain can differ
+from that of the unit, because it depends on the chain around it; tacticity is
+about relative configuration only. To control it, give each configuration of
+the backbone stereocentre its own label, with the same `residue_name`:
 
 ```yaml
     monomers:
-      - {label: "R", probability: 0.5, name: "MMA-1", residue_name: "MMA", smiles: "[*]C[C@@]([*])(C)C(=O)OC"}
-      - {label: "S", probability: 0.5, name: "MMA-2", residue_name: "MMA", smiles: "[*]C[C@]([*])(C)C(=O)OC"}
+      - {label: "X", probability: 0.5, name: "MMA-x", residue_name: "MMA", smiles: "[*]C[C@@]([*])(C)C(=O)OC"}
+      - {label: "Y", probability: 0.5, name: "MMA-y", residue_name: "MMA", smiles: "[*]C[C@]([*])(C)C(=O)OC"}
 ```
 
-Each repeat unit then draws its configuration: equal probabilities give an
-atactic chain, one label with probability 1 an isotactic chain. A repeat unit
-written without a stereocentre gets one configuration from the builder, the
-same for every unit of that monomer, so such a chain is isotactic.
+Each repeat unit then draws its configuration independently: equal
+probabilities give an atactic chain, and one label with probability 1 an
+isotactic chain. A syndiotactic chain (strictly alternating) cannot be drawn
+this way; build those chains yourself and give them in `cached` mode.
+
+:::{warning}
+A repeat unit written without a stereocentre gets one configuration from the
+builder, the same for every unit of that monomer, so such a chain is
+isotactic.
+:::
 
 Each chain is drawn monomer by monomer, so the build makes random (statistical)
 copolymers. To simulate block copolymers, build the chains yourself and give
