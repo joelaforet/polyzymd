@@ -2136,9 +2136,13 @@ def _verdict(
         return [
             f"{item.label} {metric} {_num(item.mean)}{unit_text} "
             + (
-                f"(95% CI {_interval(item.ci95)}, n {item.n_replicates})"
-                if item.ci95
-                else f"(no interval, n {item.n_replicates})"
+                f"(n {item.n_replicates}; no interval below {MIN_REPLICATES_TO_TEST} replicates)"
+                if item.n_replicates < MIN_REPLICATES_TO_TEST
+                else (
+                    f"(95% CI {_interval(item.ci95)}, n {item.n_replicates})"
+                    if item.ci95
+                    else f"(no interval, n {item.n_replicates})"
+                )
             )
             for item in conditions
         ]

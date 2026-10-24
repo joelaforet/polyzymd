@@ -495,3 +495,12 @@ def test_a_null_group_not_named_after_a_role_is_refused(tmp_path: Path) -> None:
     settings = {"groups": {"sds": None}, "summaries": {"s": {"within": "sds"}}}
     with pytest.raises(ProtocolError, match="groups.sds is null.*role 'sds'.*protein, ligand"):
         analyze("hydrogen_bonds", [config], equilibration="0ns", settings=settings, plots=False)
+
+
+def test_a_two_replicate_summary_gives_no_interval() -> None:
+    from polyzymd.analyses.protocols import _verdict
+
+    two = ConditionReport(label="A", n_replicates=2, mean=1.0, replicate_values=[0.9, 1.1])
+    two.ci95 = (-3.0, 5.0)
+    (text,) = _verdict("rmsd", "A", [two], [])
+    assert text == "A rmsd 1 A (n 2; no interval below 3 replicates)"
