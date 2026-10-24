@@ -1604,3 +1604,40 @@ def test_the_protein_restraint_groups_restrain_different_atoms(tmp_path):
     assert selected("protein_backbone") == ["N", "CA", "C", "O", "OXT"]
     assert selected("protein_calpha") == ["CA"]
     assert PositionRestraintGenerator.GROUP_MAPPING["protein_backbone"][1] == "POSRES_PROTEIN"
+
+
+def test_a_local_gromacs_run_uses_the_configured_mdrun_flags(tmp_path, monkeypatch):
+    """polyzymd run on GROMACS passes the config's threads, ranks and flags to each mdrun,
+    as a SLURM job does, instead of letting GROMACS take every core."""
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.engines import create_engine
+    from polyzymd.exporters.gromacs import GromacsRunner
+
+    root = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+    data = yaml.safe_load((root / "config_gromacs.yaml").read_text())
+    data["gromacs"].update(ntomp=3, ntmpi=1, mdrun_flags="-pin on")
+    (tmp_path / "trpcage.pdb").write_text((root / "trpcage.pdb").read_text())
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(data))
+    config = SimulationConfig.from_yaml(path)
+    engine = create_engine(config, override="gromacs", defer_binary=True)
+
+    flags = engine.local_mdrun_flags("gmx")
+    assert flags["prod"].split() == ["-pin", "on", "-ntmpi", "1", "-ntomp", "3"]
+    assert "-ntmpi" not in engine.local_mdrun_flags("gmx_mpi")["prod"]  # real MPI: no -ntmpi
+    data["gromacs"]["gpu"] = True
+    path.write_text(yaml.safe_dump(data))
+    gpu = create_engine(SimulationConfig.from_yaml(path), override="gromacs", defer_binary=True)
+    assert "-nb gpu" in gpu.local_mdrun_flags("gmx")["eq"]
+
+    commands = []
+    runner = GromacsRunner(tmp_path, "trpcage", [], "gmx", mdrun_flags=flags)
+    monkeypatch.setattr(runner, "_run_command", lambda cmd, *a, **k: commands.append(cmd))
+    try:
+        runner._run_energy_minimization()
+    except Exception:  # em.gro is not produced by the stub
+        pass
+    mdrun = next(cmd for cmd in commands if "mdrun" in cmd)
+    assert mdrun[-6:] == ["-pin", "on", "-ntmpi", "1", "-ntomp", "3"]

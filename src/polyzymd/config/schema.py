@@ -1006,13 +1006,17 @@ class CoSolventSpec(_ConfigModel):
 @functools.cache
 def reserved_residue_names() -> frozenset[str]:
     """Return the residue names that protein, nucleic, water or ion selections match."""
-    from MDAnalysis.core.selection import NucleicSelection, ProteinSelection
-
-    from polyzymd.core.atom_groups import ION_RESIDUE_NAMES, WATER_RESIDUE_NAMES
+    # No MDAnalysis here: the sim-cuda environments that run simulations do not have it.
+    from polyzymd.core.atom_groups import (
+        ION_RESIDUE_NAMES,
+        NUCLEIC_SELECTION_RESIDUE_NAMES,
+        PROTEIN_SELECTION_RESIDUE_NAMES,
+        WATER_RESIDUE_NAMES,
+    )
 
     return frozenset(
-        set(ProteinSelection.prot_res)
-        | set(NucleicSelection.nucl_res)
+        PROTEIN_SELECTION_RESIDUE_NAMES
+        | NUCLEIC_SELECTION_RESIDUE_NAMES
         | {"SOL", "H2O", "OH2", "TIP", "T3P", "T4P", "T5P"}
         | WATER_RESIDUE_NAMES
         | ION_RESIDUE_NAMES

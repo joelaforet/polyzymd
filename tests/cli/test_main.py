@@ -941,6 +941,7 @@ class TestRunReusesBuild:
             prefix="sys",
             equilibration_mdps=["eq_00_nvt.mdp"],
             gmx_command="gmx",
+            mdrun_flags={},  # the stub config has no gromacs section
         )
         assert f"Reusing the GROMACS files in {gromacs_dir}" in capsys.readouterr().out
 
