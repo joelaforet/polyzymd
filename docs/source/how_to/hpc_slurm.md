@@ -230,7 +230,9 @@ replicate folder:
 
 - `solvated_system.pdb`
 - `system.prmtop`, the analysis topology. If ParmEd cannot convert the
-  system, the file is missing and the build log says so.
+  system, the file is missing and the build log says so. A distance
+  restraint always has this effect. The analyses then read
+  `solvated_system.pdb`.
 - `system.xml`
 - `build_provenance.json`, the build record, and `build_provenance.md`
   beside it

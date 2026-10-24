@@ -167,6 +167,9 @@ runs/trpcage/water/trpcage_300K_run1/
     └── ...
 ```
 
+A build with a distance restraint writes no `system.prmtop`. The analyses
+then read `solvated_system.pdb`. See {doc}`../how_to/restraints`.
+
 ## Step 5: Measure the radius of gyration
 
 List the analysis in `project.yaml`. Open the file and replace the line

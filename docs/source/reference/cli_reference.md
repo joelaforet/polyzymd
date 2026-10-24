@@ -187,7 +187,9 @@ polyzymd build -c config.yaml -r 1 --format gromacs
 The build command creates:
 - `solvated_system.pdb` - Complete system with water and ions, for viewers
 - `system.prmtop` - Analysis topology with every atom, element, charge and
-  bond; MDAnalysis reads it directly and it has no atom limit
+  bond; MDAnalysis reads it directly and it has no atom limit. A build with
+  a distance restraint does not write it, and analyses read
+  `solvated_system.pdb`
 - `system.xml` - OpenMM serialized system with restraints
 - `build_provenance.json` - the build record: SHA-256 hashes of the files
   above, the build config hash, OpenMM and PolyzyMD versions, the PACKMOL seeds

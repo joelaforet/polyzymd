@@ -148,6 +148,14 @@ pixi run -e build polyzymd build -c config.yaml --dry-run
 During a real build or run, PolyzyMD should report that the restraint was
 applied.
 
+### A restraint means no `system.prmtop`
+
+A build with a distance restraint writes no `system.prmtop`. ParmEd cannot
+convert the restraint's `CustomBondForce`, so the build log warns
+`Could not write ... system.prmtop` and goes on. The build is still
+complete. The analyses read `solvated_system.pdb` instead. That file is the
+fallback topology. {doc}`../reference/data_requirements` gives its limits.
+
 ## Common patterns
 
 ### Keep a substrate near the catalytic residue
