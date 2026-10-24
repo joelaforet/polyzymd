@@ -3605,7 +3605,7 @@ def validate(config: str) -> None:
     files exist.
     """
     from polyzymd.config.schema import SimulationConfig
-    from polyzymd.config.validation import stage_temperature_mismatch
+    from polyzymd.config.validation import stage_temperature_warning
 
     warn_if_wrong_pixi_env("validate", "build")
 
@@ -3653,10 +3653,15 @@ def validate(config: str) -> None:
         )
         production_kelvin = sim_config.thermodynamics.temperature
         for index, stage in enumerate(eq_stages):
-            differs = stage_temperature_mismatch(
-                stage, production_kelvin, last=index == len(eq_stages) - 1
-            )
-            flag = f"; WARNING: production runs at {production_kelvin:g} K" if differs else ""
+            differs = stage_temperature_warning(eq_stages, index, production_kelvin)
+            ends_before_production = stage.is_temperature_ramping and index < len(eq_stages) - 1
+            flag = ""
+            if differs:
+                flag = (
+                    "; WARNING: the next stage starts at another temperature"
+                    if ends_before_production
+                    else f"; WARNING: production runs at {production_kelvin:g} K"
+                )
             if stage.is_temperature_ramping:
                 colored_echo(
                     f"    - {stage.name}: {stage.temperature_start:g} -> "

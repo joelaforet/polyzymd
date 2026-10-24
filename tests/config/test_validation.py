@@ -444,3 +444,31 @@ def test_collect_protocol_warnings_compares_stages_with_production(tmp_path: Pat
     data["simulation_phases"]["equilibration_stages"][0]["temperature"] = 330.0
     data["simulation_phases"]["equilibration_stages"][1]["temperature_end"] = 330.0
     assert collect_protocol_warnings(SimulationConfig.model_validate(data)) == []
+
+
+def test_collect_protocol_warnings_compares_a_ramp_with_the_stage_after_it(tmp_path: Path) -> None:
+    """A ramp before another stage must end where that stage starts."""
+    data = _minimal_config_data(tmp_path)
+    data["thermodynamics"] = {"temperature": 320.0}
+    ramp = {
+        "name": "heating",
+        "ensemble": "NVT",
+        "temperature_start": 100.0,
+        "temperature_end": 300.0,
+        "temperature_increment": 10.0,
+        "temperature_interval_steps": 100,
+    }
+    hold = {"name": "hold", "duration": 0.1, "temperature": 320.0, "ensemble": "NVT"}
+    data["simulation_phases"]["equilibration_stages"] = [ramp, hold]
+
+    warnings = collect_protocol_warnings(SimulationConfig.model_validate(data))
+
+    assert len(warnings) == 1
+    assert "stage 'heating' ends at 300 K, but the next stage 'hold' starts at 320 K" in (
+        warnings[0]
+    )
+    assert "jump of 20 K" in warnings[0]
+    assert "equilibration_stages.0.temperature_end" in warnings[0]
+
+    ramp["temperature_end"] = 320.0
+    assert collect_protocol_warnings(SimulationConfig.model_validate(data)) == []

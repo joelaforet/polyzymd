@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 
 def collect_reference_warnings(config: Any) -> list[str]:
@@ -70,13 +70,70 @@ def stage_temperature_mismatch(stage: Any, temperature: float, *, last: bool) ->
     return float(value)
 
 
+def _stage_start(stage: Any) -> float | None:
+    """The temperature (K) a stage starts at: a ramp's start, else its temperature."""
+    if getattr(stage, "is_temperature_ramping", False):
+        return stage.temperature_start
+    return getattr(stage, "temperature", None)
+
+
+def stage_temperature_warning(stages: Sequence[Any], index: int, temperature: float) -> str | None:
+    """Return the warning for one equilibration stage's temperature, or ``None``.
+
+    A constant-temperature stage, and a ramp that is the last stage, are
+    compared with ``temperature`` (production's). A ramp before another stage
+    is compared with the temperature that stage starts at, since a mismatch is
+    a sudden jump between the two.
+
+    Parameters
+    ----------
+    stages : Sequence[Any]
+        The equilibration stages, in order.
+    index : int
+        The stage to check.
+    temperature : float
+        The production temperature, ``thermodynamics.temperature`` (K).
+
+    Returns
+    -------
+    str | None
+        The warning, or ``None`` when the temperature matches.
+    """
+    stage = stages[index]
+    last = index == len(stages) - 1
+    ramp = getattr(stage, "is_temperature_ramping", False)
+    if ramp and not last:
+        following = stages[index + 1]
+        start = _stage_start(following)
+        end = stage.temperature_end
+        if start is None or end is None or abs(float(end) - float(start)) < 1e-6:
+            return None
+        return (
+            f"equilibration stage '{stage.name}' ends at {float(end):g} K, but the next stage "
+            f"'{following.name}' starts at {float(start):g} K, a sudden jump of "
+            f"{abs(float(start) - float(end)):g} K. If you changed the temperature of this "
+            f"condition, also set simulation_phases.equilibration_stages.{index}.temperature_end."
+        )
+    value = stage_temperature_mismatch(stage, temperature, last=last)
+    if value is None:
+        return None
+    key = "temperature_end" if ramp else "temperature"
+    where = "ends at" if ramp else "runs at"
+    return (
+        f"equilibration stage '{stage.name}' {where} {value:g} K, but production runs at "
+        f"thermodynamics.temperature = {temperature:g} K. If you changed the temperature "
+        f"of this condition, also set simulation_phases.equilibration_stages.{index}.{key}."
+    )
+
+
 def collect_protocol_warnings(config: Any) -> list[str]:
-    """Return warnings for equilibration temperatures that differ from production.
+    """Return warnings for equilibration temperatures that do not join up.
 
     Production runs at ``thermodynamics.temperature``. An equilibration stage
     at another temperature is allowed, so this is a warning, not an error: a
     condition copied to a new temperature often keeps the old stage
-    temperatures by mistake.
+    temperatures by mistake. A heating ramp is checked against the stage after
+    it, or against production when it is the last stage.
 
     Parameters
     ----------
@@ -86,28 +143,16 @@ def collect_protocol_warnings(config: Any) -> list[str]:
     Returns
     -------
     list[str]
-        One warning for each stage whose temperature differs.
+        One warning for each stage whose temperature does not join up.
     """
-    warnings: list[str] = []
-    thermodynamics = getattr(config, "thermodynamics", None)
     phases = getattr(config, "simulation_phases", None)
+    thermodynamics = getattr(config, "thermodynamics", None)
     if thermodynamics is None or phases is None:
-        return warnings
+        return []
     temperature = float(thermodynamics.temperature)
     stages = list(getattr(phases, "equilibration_stages", None) or [])
-    for index, stage in enumerate(stages):
-        last = index == len(stages) - 1
-        value = stage_temperature_mismatch(stage, temperature, last=last)
-        if value is None:
-            continue
-        key = "temperature_end" if stage.is_temperature_ramping else "temperature"
-        where = "ends at" if stage.is_temperature_ramping else "runs at"
-        warnings.append(
-            f"equilibration stage '{stage.name}' {where} {value:g} K, but production runs at "
-            f"thermodynamics.temperature = {temperature:g} K. If you changed the temperature "
-            f"of this condition, also set simulation_phases.equilibration_stages.{index}.{key}."
-        )
-    return warnings
+    found = (stage_temperature_warning(stages, i, temperature) for i in range(len(stages)))
+    return [warning for warning in found if warning is not None]
 
 
 def _check_am1bcc(warnings: list[str], config: Any) -> None:

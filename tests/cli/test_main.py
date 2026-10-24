@@ -386,6 +386,19 @@ class TestValidateCommandReferenceWarnings:
         assert "stage 'heating'" not in result.output
         assert "- hold: 300 K, 0.002 ns (NVT); WARNING: production runs at 330 K" in (result.output)
 
+        # A copy moved to 330 K with the ramp still ending at 300 K jumps 30 K into 'hold'.
+        data["simulation_phases"]["equilibration_stages"][1]["temperature"] = 330.0
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+        assert (
+            "equilibration stage 'heating' ends at 300 K, but the next stage 'hold' starts "
+            "at 330 K" in result.output
+        )
+        assert "simulation_phases.equilibration_stages.0.temperature_end" in result.output
+        assert "WARNING: the next stage starts at another temperature" in result.output
+
     @pytest.mark.parametrize("where", ["production", "equilibration"])
     def test_validate_refuses_anisotropic_barostat_on_openmm(self, tmp_path: Path, where) -> None:
         """OpenMM runs no anisotropic barostat, so MCA with engine openmm is an error."""
