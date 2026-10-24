@@ -46,6 +46,60 @@ def _new_charges(cosolvent: Any) -> dict[str, Any]:
     return {"charges": {"method": charges.method, "model": charges.model}}
 
 
+def _physics(config: "SimulationConfig") -> dict[str, Any]:
+    """The force fields, charges, solvent, ions, box and restraints of a config."""
+
+    def charges(item: Any) -> dict[str, Any] | None:
+        spec = getattr(item, "charges", None)
+        return None if spec is None else {"method": spec.method, "model": spec.model}
+
+    def part(item: Any, *names: str) -> dict[str, Any]:
+        return {name: getattr(item, name, None) for name in names}
+
+    solvent = getattr(config, "solvent", None)
+    return {
+        "solutes": sorted(
+            (
+                {
+                    "name": solute.name,
+                    "type": solute.type,
+                    "force_field": list(solute.force_field),
+                    "charges": charges(solute),
+                }
+                for solute in getattr(config, "solutes", None) or []
+            ),
+            key=lambda item: item["name"],
+        ),
+        "solvent": {
+            "force_field": list(getattr(solvent, "force_field", None) or []),
+            "water": getattr(getattr(solvent, "water", None), "model", None),
+            "ions": part(
+                getattr(solvent, "ions", None), "neutralize", "nacl_concentration", "ionic_strength"
+            ),
+            "box": part(getattr(solvent, "box", None), "padding", "shape", "target_density"),
+            "co_solvent_charges": sorted(
+                (c.name, str(charges(c))) for c in getattr(solvent, "co_solvents", None) or []
+            ),
+        },
+        "restraints": sorted(
+            (
+                {
+                    "type": restraint.type,
+                    "atoms": [
+                        (atom.component, atom.selection)
+                        for atom in (restraint.atom1, restraint.atom2)
+                    ],
+                    "distance": restraint.distance,
+                    "force_constant": restraint.force_constant,
+                }
+                for restraint in getattr(config, "restraints", None) or []
+                if restraint.enabled
+            ),
+            key=lambda item: json.dumps(item, sort_keys=True, default=str),
+        ),
+    }
+
+
 def compute_config_hash(config: "SimulationConfig") -> str:
     """Hash the simulation config fields that decide which trajectories an analysis reads.
 
@@ -54,15 +108,18 @@ def compute_config_hash(config: "SimulationConfig") -> str:
     temperature and pressure; the naming template of the run directories; the
     substrate name and the content of its SDF file when there is a substrate;
     the polymer type prefix, length, count and monomers (label,
-    probability, name) when polymers are enabled; and each co-solvent's
-    name, SMILES and amount when there are co-solvents.
+    probability, name) when polymers are enabled; each co-solvent's
+    name, SMILES and amount when there are co-solvents; and the physics of the
+    system: each solute's and the solvent's force field files and charge
+    source (method and NAGL model), the water model, the ions, the box, and
+    the enabled restraints.
 
     Locations are left out: input files are identified by their SHA-256, not
     their path, and the projects and scratch directories are not hashed,
     because where the files sit is a pointer that changes when a study is
     moved or downloaded, not part of what was simulated. Simulation phases
-    and force fields are left out too: they do not change which system the
-    trajectories hold.
+    are left out too: they describe how the system was run, and the
+    trajectories themselves are identified by their SHA-256.
 
     Parameters
     ----------
@@ -140,6 +197,10 @@ def compute_config_hash(config: "SimulationConfig") -> str:
             ),
             key=lambda item: str(item["name"]),
         )
+
+    # The physics of the system: a config edited after its trajectories were
+    # made no longer names the system they hold.
+    hash_data["physics"] = _physics(config)
 
     # Serialize and hash
     json_str = json.dumps(hash_data, sort_keys=True, default=str)
