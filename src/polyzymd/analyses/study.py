@@ -10,11 +10,14 @@ found by :func:`~polyzymd.analyses.shared.window.resolve_replicate_trajectory_wi
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from polyzymd.analyses.exceptions import ProtocolError
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -54,8 +57,16 @@ class Replicate:
             segment records again. Use :attr:`frames` to skip both.
         """
         if self._universe is None:
+            from polyzymd.analyses.shared.loader import TrajectoryLineageError
+
             try:
                 self._universe = self.condition._provider.load_universe(self.index)
+            except TrajectoryLineageError as exc:
+                raise ProtocolError(
+                    f"Cannot join the production segments of {self!r}: {exc}",
+                    hint="Compare progress.json with the production_N folders, as the "
+                    "TrajectoryLineageError section of the troubleshooting page describes.",
+                ) from exc
             except (ValueError, IndexError, KeyError, OSError) as exc:
                 # MDAnalysis and ParmEd raise these for a topology they cannot
                 # read; say so, rather than leaving a bare parser error.
@@ -191,9 +202,11 @@ class Replicate:
             # they were copied, so a moved or downloaded study keeps its results.
             path = Path(item.path).resolve()
             return {
-                "path": str(path.relative_to(data_root))
-                if path.is_relative_to(data_root)
-                else path.name,
+                "path": (
+                    str(path.relative_to(data_root))
+                    if path.is_relative_to(data_root)
+                    else path.name
+                ),
                 "format": item.format,
                 "size_bytes": item.size_bytes,
                 "sha256": file_sha256(path, recorded.get(path)),
@@ -392,12 +405,29 @@ class Condition:
         self.config_hash = compute_config_hash(written)
         self.config = with_data_dir(written, self.data_dir)
         try:
-            found = sorted(int(index) for index, _ in self.config.discover_replicate_dirs())
+            folders = dict(self.config.discover_replicate_dirs())
         except (OSError, ValueError) as exc:
             raise ProtocolError(
                 f"Condition {label!r}: cannot read {config_path}: {exc}",
                 hint="Point the condition at a PolyzyMD simulation config.yaml.",
             ) from exc
+        found = sorted(int(index) for index in folders)
+        #: Replicate folders found on disk that hold no production output yet.
+        self.not_run: list[int] = []
+        if replicates is None:
+            self.not_run = [index for index in found if not _has_production(folders[index])]
+            if self.not_run and len(self.not_run) < len(found):
+                LOGGER.warning(
+                    "Condition %r: replicate %s %s no production output yet (never built "
+                    "or never run); left out. Name the replicates to analyse with "
+                    "replicates: in study.yaml to make that explicit.",
+                    label,
+                    ", ".join(str(index) for index in self.not_run),
+                    "has" if len(self.not_run) == 1 else "have",
+                )
+                found = [index for index in found if index not in self.not_run]
+            else:
+                self.not_run = []
         chosen = found if replicates is None else sorted({int(index) for index in replicates})
         missing = sorted(set(chosen) - set(found))
         if not chosen or missing:
@@ -417,6 +447,24 @@ class Condition:
 
     def __repr__(self) -> str:
         return f"Condition(label={self.label!r}, replicates={[r.index for r in self.replicates]})"
+
+
+def _has_production(folder: Path) -> bool:
+    """Whether a replicate folder holds production output a loader can read.
+
+    OpenMM writes ``production_N`` folders and GROMACS ``gromacs/prod*``
+    files; a run with the user's own protocol keeps its files under
+    ``protocol/``. A folder with none of these was never run (for example,
+    a ``polyzymd run`` that stopped before building left only
+    ``progress.json``).
+    """
+    folder = Path(folder)
+    if any(folder.glob("production_*")) or (folder / "protocol").exists():
+        return True
+    gromacs = folder / "gromacs"
+    return (gromacs / "protocol").exists() or any(
+        path.suffix != ".mdp" for path in gromacs.glob("prod*")
+    )
 
 
 class Study:

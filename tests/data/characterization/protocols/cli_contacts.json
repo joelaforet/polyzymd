@@ -1,5 +1,5 @@
 {
- "agent": "# polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same coverage in every replicate, so its interval is not estimable\nwarning: condition B has the same coverage in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: coverage for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n\n",
+ "agent": "# polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same coverage in every replicate, so its interval is not estimable\nwarning: condition B has the same coverage in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: not testable: coverage for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n\n",
  "json": {
   "all_metrics": [],
   "all_runs": ["coverage","mean_contact_fraction","EGM_contact_fraction","SBM_contact_fraction","polar_contact_fraction","occluded_area","occlusion_fraction","contact_fraction_residues","EGM_contact_fraction_residues","SBM_contact_fraction_residues","occluded_area_residues","mean_lifetime","EGM_mean_lifetime","SBM_mean_lifetime","lifetime_events","censored_fraction"],
@@ -29,6 +29,6 @@
   "trends": [],
   "unit": null,
   "verdict": ["not testable: coverage for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)"],
-  "warnings": ["condition A has the same coverage in every replicate, so its interval is not estimable","condition B has the same coverage in every replicate, so its interval is not estimable","A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate"]
+  "warnings": ["condition A has the same coverage in every replicate, so its interval is not estimable","condition B has the same coverage in every replicate, so its interval is not estimable","A vs B is not testable: a condition has fewer than three replicates, or both have one value in every replicate"]
  }
 }

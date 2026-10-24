@@ -90,7 +90,7 @@ pairs changed", put those outcomes in one family. Pass their p values to
 report that family.
 
 **Untestable rows.** A row is not testable when a condition has fewer than
-two replicates, or when both conditions have the same value in every
+three replicates, or when both conditions have the same value in every
 replicate, such as a residue that is never in contact. Such a row takes no
 part in the correction. You can also leave out a label whose value the other
 labels fix, such as the last of a set of fractions that sum to 1.

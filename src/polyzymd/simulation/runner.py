@@ -128,6 +128,52 @@ def production_dynamics(production: Any) -> Dict[str, Any]:
     }
 
 
+#: Files an interrupted segment leaves for the next one to resume from.
+STALE_RESUME_FILES = (
+    "INTERRUPTED",
+    "interrupted_state.xml",
+    "interrupted_system.xml",
+    "interrupted_checkpoint.chk",
+    "restart_state.xml",
+    "restart_system.xml",
+)
+
+
+def _remove_stale_resume_files(phase_dir: Path, phase_name: str) -> Path | None:
+    """Move the resume files of an earlier attempt at a segment that starts over.
+
+    A segment that runs from its first step replaces the trajectory of any
+    earlier attempt. That attempt's ``INTERRUPTED`` marker and saved states
+    would otherwise stay beside the new files and make the segment look
+    interrupted. They are moved into ``earlier-attempt-<UTC time>/`` in the
+    segment folder, never deleted.
+
+    Returns
+    -------
+    Path or None
+        The folder they were moved to, or ``None`` when there were none.
+    """
+    from datetime import datetime, timezone
+
+    stale = [phase_dir / name for name in STALE_RESUME_FILES if (phase_dir / name).exists()]
+    if not stale:
+        return None
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = phase_dir / f"earlier-attempt-{stamp}"
+    suffix = 1
+    while target.exists():
+        target = phase_dir / f"earlier-attempt-{stamp}-{suffix}"
+        suffix += 1
+    target.mkdir()
+    for path in stale:
+        path.rename(target / path.name)
+    LOGGER.warning(
+        f"{phase_name} starts from its first step; moved "
+        f"{', '.join(path.name for path in stale)} left by an earlier attempt to {target}"
+    )
+    return target
+
+
 class SimulationRunner:
     """Runner for executing OpenMM molecular dynamics simulations.
 
@@ -1542,6 +1588,7 @@ class SimulationRunner:
         phase_name = f"{output_prefix}_{segment_index}"
         phase_dir = self._working_dir / phase_name
         phase_dir.mkdir(exist_ok=True)
+        _remove_stale_resume_files(phase_dir, phase_name)
 
         # Calculate steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
@@ -1607,7 +1654,9 @@ class SimulationRunner:
         state_path = phase_dir / f"{phase_name}_state_data.csv"
         pdb_path = phase_dir / f"{phase_name}_topology.pdb"
 
-        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
+        from polyzymd.simulation.report_state import production_dcd_reporter
+
+        self._simulation.reporters.append(production_dcd_reporter(traj_path, report_interval))
         self._simulation.reporters.append(
             StateDataReporter(
                 str(state_path),

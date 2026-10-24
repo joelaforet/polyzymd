@@ -399,6 +399,28 @@ def test_a_project_logs_once_in_its_own_folder(tmp_path: Path) -> None:
 
 @pytest.mark.filterwarnings("ignore")
 @pytest.mark.usefixtures("git_identity")
+def test_a_project_report_in_json_is_one_document_on_stdout(tmp_path: Path) -> None:
+    """With --format json the study headers go to stderr, so stdout parses as JSON."""
+    import json
+
+    pytest.importorskip("MDAnalysis")
+    from tests.analyses.test_project import _study as project_study
+
+    paper = tmp_path / "Paper"
+    project_study(paper, tmp_path / "data", "lipa", "{core: name C1 C2}")
+    (paper / "project.yaml").write_text("studies: {lipa: lipa}\nanalyses: {rg: {selection: all}}\n")
+    result = CliRunner().invoke(
+        cli, ["analyze", "--project", str(paper), "rg", "--format", "json", "--no-plots"]
+    )
+    assert result.exit_code == 0, result.output
+    document = json.loads(result.stdout)
+    assert document["status"] == "complete"
+    assert document["studies"]["lipa"]["rg"]["analysis"] == "rg"
+    assert "== study lipa" in result.stderr
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
 def test_a_partial_report_names_no_machine_path(tmp_path: Path) -> None:
     """A partial report keeps each error's message, with no absolute path; the log has the traceback."""
     import json
@@ -443,7 +465,7 @@ def test_a_condition_not_yet_simulated_is_named_in_a_partial_report(
     result = _analyze_cli(
         name, "--study", str(root), "--no-plots", "--no-eq-check", "--format", "json"
     )
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 3, result.output  # partial: a condition is left out
     report = json.loads((root / "results" / name / "report.json").read_text())
     assert report["status"] == "partial"
     assert [c["label"] for c in report["conditions"]] == ["No polymer", "Polymer"]
@@ -737,3 +759,161 @@ def test_a_run_that_changes_the_stored_report_names_it(tmp_path: Path) -> None:
     assert (
         "note: replaced the stored results/rg/report.json, which reported mean_rg" in changed.output
     )
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_a_one_off_set_is_printed_and_never_replaces_the_stored_report(tmp_path: Path) -> None:
+    """--set that changes the study's settings gives an answer but leaves results/ alone."""
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    first = _analyze_cli("rg", "--study", str(root), "--no-plots", "--no-eq-check")
+    assert first.exit_code == 0, first.output
+    stored = root / "results" / "rg" / "report.json"
+    before = stored.read_text()
+    records = sorted(p.name for p in (root / "results" / "rg").rglob("record.json"))
+
+    look = _analyze_cli(
+        "rg", "--study", str(root), "--set", "selection=name C1 C2", "--no-plots", "--no-eq-check"
+    )
+    assert look.exit_code == 0, look.output
+    assert "printed and not saved" in look.stderr
+    assert "# polyzymd analyze rg" in look.stdout
+    assert stored.read_text() == before
+    assert sorted(p.name for p in (root / "results" / "rg").rglob("record.json")) == records
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_study_check_names_a_report_made_with_other_settings(tmp_path: Path) -> None:
+    import json
+
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    assert _analyze_cli("rg", "--study", str(root), "--no-plots", "--no-eq-check").exit_code == 0
+    check = CliRunner().invoke(cli, ["study", "check", str(root)])
+    assert "rg: selection=all" in check.output and "other settings" not in check.output
+
+    stored = root / "results" / "rg" / "report.json"
+    report = json.loads(stored.read_text())
+    report["provenance"]["study"]["settings"] = {"selection": "name C1"}
+    stored.write_text(json.dumps(report))
+    check = CliRunner().invoke(cli, ["study", "check", str(root)])
+    assert "made with other settings (selection=name C1)" in check.output
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_every_run_of_a_study_is_one_json_document_and_partial_exits_3(tmp_path: Path) -> None:
+    """--study without NAME prints {status, studies: {study: {run: report}}} and exits 3 when partial."""
+    import json
+
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.config.schema import SimulationConfig
+
+    root = write_committed_study(
+        tmp_path, "  rg: {selection: all}\n  rg_ca: {analysis: rg, selection: name C1}\n"
+    )
+    # The runs of the study's conditions are in tmp_path/scratch, written from these configs.
+    config = tmp_path / "runs" / "polymer" / "config.yaml"
+    SimulationConfig.from_yaml(config).get_working_directory(4).mkdir(parents=True)
+
+    result = CliRunner().invoke(
+        cli, ["analyze", "--study", str(root), "--format", "json", "--no-plots", "--no-eq-check"]
+    )
+    assert result.exit_code == 3, result.output
+    document = json.loads(result.stdout)
+    assert document["status"] == "partial"
+    (study,) = document["studies"].values()
+    assert sorted(study) == ["rg", "rg_ca"]
+    assert study["rg"]["excluded_replicates"] == {
+        "Polymer": {"4": "no production output (never built or never run)"}
+    }
+
+
+def test_a_set_file_equal_to_the_study_files_is_not_a_change(tmp_path: Path, monkeypatch) -> None:
+    """--set pairs=pairs.yaml names the same file the study file lists as an absolute path."""
+    from polyzymd.cli.analyze import _comparable
+
+    (tmp_path / "pairs.yaml").write_text("[]\n")
+    monkeypatch.chdir(tmp_path)
+    given = _comparable({"pairs": "pairs.yaml", "cutoff": 3.0}, tmp_path)
+    listed = _comparable({"pairs": str(tmp_path / "pairs.yaml"), "cutoff": 3.0}, tmp_path)
+    assert given == listed
+    assert _comparable({"selection": "name CA"}, tmp_path) == {"selection": "name CA"}
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_a_one_off_set_cannot_be_submitted_into_the_study_results(tmp_path: Path) -> None:
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    refused = _analyze_cli("rg", "--study", str(root), "--set", "selection=name C1", "--dry-run")
+    assert refused.exit_code == EXIT_ANALYSIS_ERROR
+    assert "Give --output-dir" in refused.output
+    elsewhere = tmp_path / "elsewhere"
+    written = _analyze_cli(
+        "rg",
+        "--study",
+        str(root),
+        "--set",
+        "selection=name C1",
+        "--dry-run",
+        "--output-dir",
+        str(elsewhere),
+    )
+    assert written.exit_code == 0, written.output
+    assert list((elsewhere / "slurm").glob("rg_*/report.sbatch"))
+
+
+def test_the_json_document_of_a_failed_study_is_failed_and_written_once(tmp_path: Path) -> None:
+    import json
+
+    from click.testing import CliRunner as Runner
+
+    from polyzymd.cli.analyze import _echo_json_document
+
+    out = tmp_path / "all.json"
+    studies = {
+        "good": {"rg": {"analysis": "rg", "status": "complete"}},
+        "bad": {"status": "failed", "error": "the study could not be analysed"},
+    }
+    import click
+
+    @click.command()
+    def emit() -> None:
+        _echo_json_document(studies, out)
+
+    result = Runner().invoke(emit)
+    document = json.loads(result.output)
+    assert document["status"] == "failed"
+    assert json.loads(out.read_text()) == document
+
+
+@pytest.mark.usefixtures("git_identity")
+def test_study_check_reads_a_file_setting_as_the_report_records_it(tmp_path: Path) -> None:
+    """The entry's reference_file resolves to an absolute path; the report keeps it relative."""
+    import json
+
+    root = write_committed_study(
+        tmp_path, "  rmsd: {reference_mode: external, reference_file: ref.pdb}\n"
+    )
+    (root / "ref.pdb").write_text("END\n")
+    stored = root / "results" / "rmsd" / "report.json"
+    record = stored.parent / "polyzymd_results" / "rmsd" / "A" / "replicate_1" / "record.json"
+    record.parent.mkdir(parents=True)
+    record.write_text("{}")
+    settings = {"reference_mode": "external", "reference_file": "ref.pdb"}
+    stored.write_text(
+        json.dumps({"status": "complete", "provenance": {"study": {"settings": settings}}})
+    )
+    check = CliRunner().invoke(cli, ["study", "check", str(root)])
+    assert "rmsd: " in check.output and "with its report" in check.output, check.output
+    assert "other settings" not in check.output
+
+    settings["reference_file"] = "other.pdb"
+    stored.write_text(
+        json.dumps({"status": "complete", "provenance": {"study": {"settings": settings}}})
+    )
+    check = CliRunner().invoke(cli, ["study", "check", str(root)])
+    assert "made with other settings" in check.output

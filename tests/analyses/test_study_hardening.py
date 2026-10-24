@@ -386,7 +386,7 @@ class TestPartialReport:
 
         root = self._study(tmp_path)
         result = CliRunner().invoke(cli, ["analyze", "first", "--study", str(root), "--no-plots"])
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 3, result.output
         assert "status partial" in result.output
         report = json.loads((root / "results" / "first" / "report.json").read_text())
         assert report["status"] == "partial"

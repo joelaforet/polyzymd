@@ -678,11 +678,12 @@ class ContinuationManager:
         if self._simulation is None:
             raise RuntimeError("Simulation not created")
 
-        CheckpointReporter, DCDReporter, _, _, StateDataReporter = _get_openmm_app_classes()
+        CheckpointReporter, _, _, _, StateDataReporter = _get_openmm_app_classes()
+        from polyzymd.simulation.report_state import production_dcd_reporter
 
         # Trajectory reporter
         traj_path = output_dir / f"production_{self._segment_index}_trajectory.dcd"
-        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
+        self._simulation.reporters.append(production_dcd_reporter(traj_path, report_interval))
 
         # State data reporter
         state_path = output_dir / f"production_{self._segment_index}_state_data.csv"

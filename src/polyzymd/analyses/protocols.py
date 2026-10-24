@@ -50,6 +50,8 @@ VERDICT_CHANGED = "changed"
 VERDICT_NO_DIFFERENCE = "no significant difference"
 VERDICT_NO_TEST = "no test recorded"
 VERDICT_NOT_TESTABLE = "not testable"
+#: Fewest replicates per condition for a comparison or a trend to be tested.
+MIN_REPLICATES_TO_TEST = 3
 #: The reason of a trend whose condition means are equal, printed as "no trend".
 FLAT_TREND = "every condition mean is the same"
 VERDICT_VOCABULARY = (
@@ -128,7 +130,7 @@ class PairwiseReport(BaseModel):
     ``delta`` is ``mean(b) - mean(a)`` and ``cohens_d`` is oriented to match it.
     ``p_adjusted`` of ``None`` means no corrected p value was computed, so
     the row describes a difference rather than deciding it; ``testable`` of
-    ``False`` means a condition has fewer than two replicates, both have one
+    ``False`` means a condition has fewer than three replicates, both have one
     value in every replicate, or, with the ``reason``, a condition has no
     partner (see ``ConditionReport.no_partner``). ``family_size``
     is the number of tests in the Benjamini-Hochberg family this row was
@@ -231,7 +233,9 @@ class ProtocolReport(BaseModel):
     list the rest, the selected one first. ``status`` is ``"complete"``, or
     ``"partial"`` when a condition could not be measured or compared;
     ``problems`` then names each condition left out of the report, or the
-    comparison that failed, with its error.
+    comparison that failed, with its error. ``excluded_replicates`` maps a
+    condition label to the replicate folders found on disk but left out, each
+    with the reason; any makes the report partial.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -239,6 +243,7 @@ class ProtocolReport(BaseModel):
     analysis: str
     status: str = "complete"
     problems: list[str] = Field(default_factory=list)
+    excluded_replicates: dict[str, dict[str, str]] = Field(default_factory=dict)
     trends: list[TrendReport] = Field(default_factory=list)
     protocol_version: str
     metric: str
@@ -254,6 +259,17 @@ class ProtocolReport(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     provenance: ProtocolProvenance
     verdict: list[str] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _leave_out_no_exclusions(self, handler: Any) -> dict[str, Any]:
+        """Write ``excluded_replicates`` only when a replicate was left out.
+
+        Reports with none stay byte for byte as before the field existed.
+        """
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("excluded_replicates"):
+            data.pop("excluded_replicates", None)
+        return data
 
     def to_agent_text(self) -> str:
         """Render the report as fixed-vocabulary text, one line per item.
@@ -405,6 +421,7 @@ def analyze(
     else:
         report = _report_skipping(measured.values, study, measured.skipped, name)
     report.warnings += measured.warnings
+    _record_not_run(report, study)
     if measured.settings is not None:
         report.provenance.settings = measured.settings
     if plots:
@@ -416,6 +433,31 @@ def analyze(
     return report.model_copy(
         update={"analysis": name, "run": measured.run, "all_runs": measured.runs}
     )
+
+
+#: Why a replicate folder found on disk was left out of a report.
+NOT_RUN_REASON = "no production output (never built or never run)"
+
+
+def _record_not_run(report: ProtocolReport, study: Any) -> None:
+    """List the replicate folders the study left out because they were never run.
+
+    Each goes into ``excluded_replicates`` and ``problems``, and the report
+    becomes partial, so a smaller sample than the folders on disk is never
+    silent.
+    """
+    for condition in study:
+        not_run = getattr(condition, "not_run", None) or []
+        if not not_run:
+            continue
+        report.excluded_replicates[condition.label] = {
+            str(index): NOT_RUN_REASON for index in not_run
+        }
+        report.problems.append(
+            f"condition {condition.label}: replicate {', '.join(str(i) for i in not_run)} "
+            f"left out: {NOT_RUN_REASON}"
+        )
+        report.status = "partial"
 
 
 def _require_known(name: str) -> None:
@@ -2050,6 +2092,11 @@ def _trend_line(trend: TrendReport) -> str:
     )
 
 
+def _mean_of(conditions: Sequence[ConditionReport], label: str) -> float:
+    """Return the mean of condition ``label`` (NaN when it is not among ``conditions``)."""
+    return next((item.mean for item in conditions if item.label == label), float("nan"))
+
+
 def _verdict(
     metric: str,
     unit: str | None,
@@ -2078,25 +2125,27 @@ def _verdict(
             f"delta {_signed(pair.delta)}{unit_text}, 95% CI {_interval(pair.delta_ci95)}, "
             f"p_adj {_num(pair.p_adjusted)}, p {_num(pair.p)}, {n_text}"
         )
-        # Fewer than 3 replicates or no variance leave a test with about one degree of freedom.
-        few = [label for label in (pair.a, pair.b) if counts.get(label, 0) < 3]
+        # No variance leaves a test with little power.
         weak = [
             f"{label} has the same value in every replicate"
             for label in (pair.a, pair.b)
             if counts.get(label, 0) >= 2 and len(set(values.get(label, []))) == 1
         ]
-        if few:
-            verb = "has" if len(few) == 1 else "have"
-            weak.insert(0, f"{' and '.join(few)} {verb} fewer than 3 replicates")
         if weak:
             evidence += f"; little power: {', '.join(weak)}"
-        if not pair.testable:
-            few = min(counts.get(pair.a, 0), counts.get(pair.b, 0)) < 2
+        few = min(counts.get(pair.a, 0), counts.get(pair.b, 0)) < MIN_REPLICATES_TO_TEST
+        if few and not pair.reason:
+            # No comparison verdict below three replicates per condition.
+            sentences.append(
+                f"{VERDICT_NOT_TESTABLE} (n < {MIN_REPLICATES_TO_TEST}): {metric} for {pair.a} "
+                f"vs {pair.b} needs at least {MIN_REPLICATES_TO_TEST} replicates per condition; "
+                f"means {_num(_mean_of(conditions, pair.a))} vs "
+                f"{_num(_mean_of(conditions, pair.b))}{unit_text} ({n_text})"
+            )
+        elif not pair.testable:
             why = (
                 f", as {pair.reason}"
                 if pair.reason
-                else " needs at least two replicates per condition"
-                if few
                 else " has the same value in every replicate of both conditions, so no "
                 "variance to test"
             )

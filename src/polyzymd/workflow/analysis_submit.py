@@ -205,6 +205,10 @@ def write_submission(
                 "# Every condition: reads the stored results, measures any replicate a",
                 "# task left unmeasured, and writes the report and figures.",
                 *setup,
+                "# Exit 3 is a partial report (a condition or replicate left out): it is",
+                "# written, so the job succeeds and the log says so.",
+                'trap \'status=$?; if [ "$status" -eq 3 ]; then echo "note: the report is '
+                "partial; its problem: lines say what was left out\"; exit 0; fi' EXIT",
                 f"{command} analyze {shlex.quote(name)} "
                 + " ".join(shlex.quote(argument) for argument in report_arguments),
                 "",

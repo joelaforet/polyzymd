@@ -274,3 +274,22 @@ def test_a_failed_add_condition_leaves_nothing_behind(tmp_path: Path) -> None:
     assert result.exit_code == 2, result.output
     assert not (created.root / "conditions" / "bad").exists()
     assert (created.root / "study.yaml").read_text() == before
+
+
+def test_a_stored_report_tested_below_three_replicates_is_named() -> None:
+    from polyzymd.cli.study import _tested_below_three
+
+    conditions = [
+        {"label": "A", "n_replicates": 2},
+        {"label": "B", "n_replicates": 2},
+    ]
+    old = {"conditions": conditions, "pairwise": [{"a": "A", "b": "B", "p": 0.01}]}
+    new = {"conditions": conditions, "pairwise": [{"a": "A", "b": "B", "p": None}]}
+    three = {
+        "conditions": [{"label": "A", "n_replicates": 3}, {"label": "B", "n_replicates": 3}],
+        "pairwise": [{"a": "A", "b": "B", "p": 0.01}],
+    }
+    assert _tested_below_three(old)
+    assert not _tested_below_three(new) and not _tested_below_three(three)
+    trend = {"conditions": conditions, "trends": [{"p": 0.2, "conditions": ["A", "B"]}]}
+    assert _tested_below_three(trend)

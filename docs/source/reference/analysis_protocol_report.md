@@ -65,17 +65,17 @@ rows the JSON form holds; every one of them is kept there.
 | `b` | `str` | Compared condition label. |
 | `entry` | `str \| None` | Label compared in a labelled result, such as a residue ID. `None` for a result with one value per replicate. |
 | `delta` | `float` | `mean(b) - mean(a)`, in the metric's unit. |
-| `delta_ci95` | `tuple[float, float] \| None` | 95 percent Student t interval on `delta`, uncorrected for multiplicity. Pooled variance with `n_a + n_b - 2` degrees of freedom for `student_t`, separate variances with Welch-Satterthwaite degrees of freedom (passed to the quantile unrounded) for `welch_t`. `None` when a condition has fewer than two replicate values, or when both conditions have zero variance. |
+| `delta_ci95` | `tuple[float, float] \| None` | 95 percent Student t interval on `delta`, uncorrected for multiplicity. Pooled variance with `n_a + n_b - 2` degrees of freedom for `student_t`, separate variances with Welch-Satterthwaite degrees of freedom (passed to the quantile unrounded) for `welch_t`. `None` when a condition has fewer than three replicate values, or when both conditions have zero variance. |
 | `p` | `float \| None` | Unadjusted p value of the two-sample test. |
 | `p_adjusted` | `float \| None` | Benjamini-Hochberg adjusted p value. `None` for a row that was not tested. |
 | `test` | `str` | `welch_t` (the default of `polyzymd analyze` and `compare()`) or `student_t`. |
 | `correction` | `str` | `BH` (Benjamini-Hochberg). |
 | `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with their control for this one outcome, over every stratum, or for a labelled result every tested label of every compared condition. `None` for a row that was not tested. Printed as `family <m>` on the comparison line. |
-| `cohens_d` | `float \| None` | Standardised mean difference, the difference of the means over the pooled standard deviation, oriented like `delta`: positive means `b` is larger. |
-| `hedges_g` | `float \| None` | `cohens_d` with the Hedges small-sample correction, oriented like `cohens_d`. |
+| `cohens_d` | `float \| None` | Standardised mean difference, the difference of the means over the pooled standard deviation, oriented like `delta`: positive means `b` is larger. `None` when a condition has fewer than three replicate values. |
+| `hedges_g` | `float \| None` | `cohens_d` with the Hedges small-sample correction, oriented like `cohens_d`. `None` when a condition has fewer than three replicate values. |
 | `direction` | `str` | `increased` or `decreased` for a significant row, otherwise `no significant change`. |
 | `significant` | `bool` | Whether `p_adjusted` is at most 0.05. Always `False` when `testable` is `False`. |
-| `testable` | `bool` | `False` when a condition has fewer than two replicates, or both conditions have the same value in every replicate, which makes the test undefined rather than non-significant, or when a condition has no partner (see `no_partner`). |
+| `testable` | `bool` | `False` when a condition has fewer than three replicates, or both conditions have the same value in every replicate, which makes the test undefined rather than non-significant, or when a condition has no partner (see `no_partner`). |
 | `reason` | `str \| None` | Why the row is not testable when a condition has no partner. Left out of the JSON otherwise. |
 
 ## TrendReport
@@ -91,7 +91,7 @@ rows the JSON form holds; every one of them is kept there.
 | `family_size` | `int \| None` | Number of factors in that family. |
 | `r_squared` | `float \| None` | Coefficient of determination of the fit. |
 | `significant` | `bool` | Whether `p_adjusted` is at most 0.05. |
-| `testable` | `bool` | `False` when a level is a number written as text (YAML reads `1e-3` as text), a replicate value is not finite, there are fewer than three factor levels, or the condition means all agree. |
+| `testable` | `bool` | `False` when a level is a number written as text (YAML reads `1e-3` as text), a replicate value is not finite, there are fewer than three factor levels, a condition has fewer than three replicate values, or the condition means all agree. |
 | `reason` | `str \| None` | Why the trend is not testable, and the conditions without partner (`no_partner`) left out of the fit, which a testable trend also names. |
 
 ## ProtocolProvenance
@@ -118,7 +118,7 @@ branch on them without parsing the rest.
 | `no significant difference` | the test ran and `p_adjusted` did not clear alpha |
 | `no test recorded` | the row has no multiplicity-corrected p value, so it describes a difference without deciding it |
 | `changed` | the difference is significant but the two means are equal at the stored precision |
-| `not testable` | a condition has fewer than two replicates, has no variance in either condition, or has no partner, so no test exists |
+| `not testable` | a condition has fewer than three replicates (the sentence then starts `not testable (n < 3)` and gives both means), has no variance in either condition, or has no partner, so no test exists. A trend needs three replicates in every condition too |
 
 A single-condition report has no comparison, and its one sentence states the
 label, the metric, the mean with its unit, the interval and the replicate
