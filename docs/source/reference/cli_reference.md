@@ -100,6 +100,10 @@ polyzymd validate -c <path>
 - Monomer probabilities sum to 1.0
 - Valid enum values (water model, ensemble, etc.)
 - Co-solvent specification (mole_fraction XOR concentration)
+- Equilibration temperatures (warning): a constant-temperature stage, or a
+  ramp's `temperature_end` in the last stage, that differs from
+  `thermodynamics.temperature`. Production runs at
+  `thermodynamics.temperature`. The summary marks each such stage
 
 ### Example
 
@@ -126,7 +130,7 @@ Summary:
 
 Simulation phases:
   Equilibration: 0.002000 ns across 1 stage(s)
-    - equil: 0.002 ns (NVT)
+    - equil: 300 K, 0.002 ns (NVT)
   Production: 0.004 ns (NPT)
 ```
 

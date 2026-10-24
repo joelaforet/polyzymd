@@ -40,6 +40,76 @@ def collect_reference_warnings(config: Any) -> list[str]:
     return warnings
 
 
+def stage_temperature_mismatch(stage: Any, temperature: float, *, last: bool) -> float | None:
+    """Return the stage temperature that differs from the production temperature.
+
+    A constant-temperature stage is compared by its ``temperature``. A ramp is
+    compared by its ``temperature_end``, and only when it is the last stage,
+    because production starts where that ramp ends.
+
+    Parameters
+    ----------
+    stage : Any
+        An equilibration stage.
+    temperature : float
+        The production temperature, ``thermodynamics.temperature`` (K).
+    last : bool
+        Whether the stage is the last one before production.
+
+    Returns
+    -------
+    float | None
+        The stage temperature (K) when it differs, else ``None``.
+    """
+    if getattr(stage, "is_temperature_ramping", False):
+        value = stage.temperature_end if last else None
+    else:
+        value = getattr(stage, "temperature", None)
+    if value is None or abs(float(value) - float(temperature)) < 1e-6:
+        return None
+    return float(value)
+
+
+def collect_protocol_warnings(config: Any) -> list[str]:
+    """Return warnings for equilibration temperatures that differ from production.
+
+    Production runs at ``thermodynamics.temperature``. An equilibration stage
+    at another temperature is allowed, so this is a warning, not an error: a
+    condition copied to a new temperature often keeps the old stage
+    temperatures by mistake.
+
+    Parameters
+    ----------
+    config : Any
+        Simulation configuration.
+
+    Returns
+    -------
+    list[str]
+        One warning for each stage whose temperature differs.
+    """
+    warnings: list[str] = []
+    thermodynamics = getattr(config, "thermodynamics", None)
+    phases = getattr(config, "simulation_phases", None)
+    if thermodynamics is None or phases is None:
+        return warnings
+    temperature = float(thermodynamics.temperature)
+    stages = list(getattr(phases, "equilibration_stages", None) or [])
+    for index, stage in enumerate(stages):
+        last = index == len(stages) - 1
+        value = stage_temperature_mismatch(stage, temperature, last=last)
+        if value is None:
+            continue
+        key = "temperature_end" if stage.is_temperature_ramping else "temperature"
+        where = "ends at" if stage.is_temperature_ramping else "runs at"
+        warnings.append(
+            f"equilibration stage '{stage.name}' {where} {value:g} K, but production runs at "
+            f"thermodynamics.temperature = {temperature:g} K. If you changed the temperature "
+            f"of this condition, also set simulation_phases.equilibration_stages.{index}.{key}."
+        )
+    return warnings
+
+
 def _check_am1bcc(warnings: list[str], config: Any) -> None:
     """Warn when the config asks for AM1-BCC charges and no toolkit here computes them."""
     from polyzymd.utils import charging

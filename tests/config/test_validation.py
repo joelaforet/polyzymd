@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from polyzymd.config.schema import SimulationConfig
-from polyzymd.config.validation import collect_reference_warnings, require_inputs
+from polyzymd.config.validation import (
+    collect_protocol_warnings,
+    collect_reference_warnings,
+    require_inputs,
+)
 
 SAGE = ["openff-2.3.0.offxml"]
 
@@ -410,3 +414,33 @@ def test_an_sdf_that_names_every_atom_keeps_its_names(tmp_path: Path) -> None:
     small_molecule = {"name": "benzene", "sdf_path": path, "charges": NAGL}
     restraint = _ligand_restraint("name C1")
     require_inputs(_buildable(tmp_path, small_molecule=small_molecule, restraints=[restraint]))
+
+
+def test_collect_protocol_warnings_compares_stages_with_production(tmp_path: Path) -> None:
+    """Constant stages and a final ramp's end are compared with thermodynamics.temperature."""
+    data = _minimal_config_data(tmp_path)
+    assert collect_protocol_warnings(SimulationConfig.model_validate(data)) == []
+
+    data["thermodynamics"] = {"temperature": 330.0}
+    data["simulation_phases"]["equilibration_stages"] = [
+        {"name": "hold", "duration": 0.1, "temperature": 300.0, "ensemble": "NVT"},
+        {
+            "name": "heating",
+            "ensemble": "NVT",
+            "temperature_start": 100.0,
+            "temperature_end": 300.0,
+            "temperature_increment": 10.0,
+            "temperature_interval_steps": 100,
+        },
+    ]
+    warnings = collect_protocol_warnings(SimulationConfig.model_validate(data))
+
+    assert len(warnings) == 2
+    assert "stage 'hold' runs at 300 K" in warnings[0]
+    assert "equilibration_stages.0.temperature" in warnings[0]
+    assert "stage 'heating' ends at 300 K" in warnings[1]
+    assert "equilibration_stages.1.temperature_end" in warnings[1]
+
+    data["simulation_phases"]["equilibration_stages"][0]["temperature"] = 330.0
+    data["simulation_phases"]["equilibration_stages"][1]["temperature_end"] = 330.0
+    assert collect_protocol_warnings(SimulationConfig.model_validate(data)) == []
