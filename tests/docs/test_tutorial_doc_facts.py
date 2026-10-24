@@ -80,3 +80,12 @@ def test_unit_examples_use_the_report_spelling() -> None:
 def test_contributor_material_is_in_the_contributor_guide() -> None:
     assert not (DOCS / "explanation" / "architecture.md").exists()
     assert (DOCS / "contributor_guide" / "architecture.md").exists()
+
+
+def test_ion_selections_use_the_built_residue_names() -> None:
+    # Built systems name the ion residues Na+ and Cl- (atoms NA and CL).
+    for name, text in _all_pages().items():
+        assert re.search(r"""["']NA["'],\s*["']CL["']""", text) is None, name
+    page = _read("how_to/own_analysis.md")
+    assert "resname Na+ Cl-" in page
+    assert "`Na+`, `Cl-` | `NA`, `CL`" in page
