@@ -3802,7 +3802,7 @@ def _status_report(
 def _status_table(config: str) -> None:
     """Single-config progress-bar view (``--format table``, the default)."""
     from polyzymd.cli.colors import render_progress_bar
-    from polyzymd.cli.status_report import _run_started, _stop_file_present
+    from polyzymd.cli.status_report import _run_started, _stop_file_present, _stopped_gracefully
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine
     from polyzymd.simulation.progress import SimulationStatus, unreadable_progress_reason
@@ -3856,6 +3856,7 @@ def _status_table(config: str) -> None:
     completed_count = 0
     running_count = 0
     stopped_reps: list[int] = []
+    saved_reps: list[int] = []
     corrupt_count = 0
     own_count = 0
     from polyzymd.simulation.own_protocol import protocol_dir
@@ -3913,6 +3914,9 @@ def _status_table(config: str) -> None:
             elif status_str == "not_started" and _run_started(rep_path):
                 status_str = "interrupted"
                 status_display = "interrupted before production"
+            elif status_str == "interrupted" and _stopped_gracefully(engine_dir, progress):
+                status_display = "interrupted (state saved)"
+                saved_reps.append(rep_num)
 
         bar = render_progress_bar(frac, status_str)
         pct = frac * 100
@@ -3948,7 +3952,13 @@ def _status_table(config: str) -> None:
         if need_attention > 0:
             click.echo(
                 f"  {need_attention}/{total_reps} need attention "
-                f"(recover with: polyzymd recover -c {config} -r <N> --submit)"
+                f"(recover with: polyzymd recover -c {config} -r <N> --submit on a cluster)"
+            )
+        if saved_reps:
+            click.echo(
+                "  Interrupted with their state saved: continue each where it ran, with "
+                + "; ".join(f"polyzymd run -c {config} -r {n}" for n in saved_reps)
+                + " on a workstation"
             )
         if stopped_reps:
             reps = ",".join(map(str, stopped_reps))

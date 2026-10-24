@@ -543,6 +543,31 @@ class TestStatusCli:
         assert "interrupted" in result.output
         assert "need attention" in result.output
 
+    def test_status_gives_the_run_command_for_an_interruption_with_saved_state(self, tmp_path):
+        """A local run stopped by a signal is continued with polyzymd run, not only recover."""
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        rep_dir = scratch / "fnIII_apo_none_100ns_310K_run1"
+        _write_progress_json(
+            rep_dir,
+            completed_steps=25000000,
+            seg_status=SegmentStatus.INTERRUPTED,
+            sim_status=SimulationStatus.INTERRUPTED,
+            duration_ns=50.0,
+        )
+        (rep_dir / "production_0").mkdir(exist_ok=True)
+        (rep_dir / "production_0" / "INTERRUPTED").write_text("steps_completed=25000000\n")
+
+        mock_cfg = _mock_sim_config(scratch)
+        mock_cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+        config_path = self._make_dummy_config(tmp_path)
+        with patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=mock_cfg):
+            result = CliRunner().invoke(cli, ["status", "-c", str(config_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "interrupted (state saved)" in result.output
+        assert f"polyzymd run -c {config_path} -r 1" in result.output
+
     def test_status_shows_a_chain_stopped_by_cancel(self, tmp_path):
         scratch = tmp_path / "scratch"
         rep_dir = scratch / "fnIII_apo_none_100ns_310K_run1"
