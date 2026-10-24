@@ -18,7 +18,26 @@ starts with PolyzyMD at the version that made the build.
 
 Cite each of these methods that your build used. `build_provenance.md` lists
 the ones a build used under "Methods to cite", together with the force fields,
-the water model and the charge models below.
+the water model, the ion parameters and the charge models below.
+
+- Eastman, P., Galvelis, R., Peláez, R. P., Abreu, C. R. A., Farr, S. E.,
+  Gallicchio, E., Gorenko, A., Henry, M. M., Hu, F., Huang, J., Krämer, A.,
+  Michel, J., Mitchell, J. A., Pande, V. S., Rodrigues, J. P. G. L. M.,
+  Rodriguez-Guerra, J., Simmonett, A. C., Singh, S., Swails, J., Turner, P.,
+  Wang, Y., Zhang, I., Chodera, J. D., De Fabritiis, G. and Markland, T. E.
+  (2024). OpenMM 8: molecular dynamics simulation with machine learning
+  potentials. *Journal of Physical Chemistry B*, 128(1), 109-116.
+  doi:10.1021/acs.jpcb.3c06662. For a build for OpenMM (the default engine).
+- Abraham, M. J., Murtola, T., Schulz, R., Páll, S., Smith, J. C., Hess, B.
+  and Lindahl, E. (2015). GROMACS: high performance molecular simulations
+  through multi-level parallelism from laptops to supercomputers. *SoftwareX*,
+  1-2, 19-25. doi:10.1016/j.softx.2015.06.001. For a build for GROMACS.
+- OpenFF Toolkit, <https://github.com/openforcefield/openff-toolkit>, and
+  OpenFF Interchange, <https://github.com/openforcefield/openff-interchange>.
+  Every build uses both to assign parameters. They have no journal article;
+  cite the release. `build_provenance.json` records their versions
+  (`openff_toolkit_version`, `openff_interchange_version`), and "Methods to
+  cite" names them.
 
 - Martínez, L., Andrade, R., Birgin, E. G. and Martínez, J. M. (2009).
   PACKMOL: a package for building initial configurations for molecular
@@ -32,12 +51,13 @@ the water model and the charge models below.
   neutralizing charge is split between Na+ and Cl-, so the counter-ions count
   toward the ionic strength.
 
-## Force fields, water and charge models
+## Force fields, water, ions and charge models
 
 The build cites each force-field file by its name: ff14SB for
 `ff14sb_off_impropers_*.offxml` (the OpenFF port of Amber ff14SB), the Sage
 paper for `openff-2.*.offxml`, and the Parsley paper for `openff-1.*.offxml`.
 The Sage paper describes 2.0.0; PolyzyMD cites it for every Sage 2 release.
+For Sage 2.3.0 (`openff-2.3.0*.offxml`) it also cites the Sage 2.3.0 paper.
 For any other file, cite its source.
 
 - Maier, J. A., Martinez, C., Kasavajhala, K., Wickstrom, L., Hauser, K. E.
@@ -51,6 +71,14 @@ For any other file, cite its source.
   benchmarking of Open Force Field 2.0.0: the Sage small molecule force field.
   *Journal of Chemical Theory and Computation*, 19(11), 3251-3275.
   doi:10.1021/acs.jctc.3c00039
+- Wang, L., Alibay, I., Behara, P. K., Boothroyd, S., Cavender, C. E.,
+  Horton, J. T., McIsaac, A. R., Mitchell, A., Morales, B., Thompson, M. W.,
+  Wagner, J. R., Westbrook, B. R., Bayly, C. I., Chodera, J. D., Cole, D. J.,
+  Eastwood, J. R. B., Shirts, M. R. and Mobley, D. L. (2026). Developing and
+  benchmarking Sage 2.3.0 with the AshGC neural network charge model.
+  *Journal of Chemical Theory and Computation*, 22(9), 4507-4531.
+  doi:10.1021/acs.jctc.6c00169. For `openff-2.3.0*.offxml`, and for the
+  AshGC charge model (see below).
 - Qiu, Y., Smith, D. G. A., Boothroyd, S., Jang, H., Hahn, D. F., Wagner, J.,
   Bannan, C. C., Gokey, T., Lim, V. T., Stern, C. D., Rizzi, A., Tjanaka, B.,
   Tresadern, G., Lucas, X., Shirts, M. R., Gilson, M. K., Chodera, J. D.,
@@ -62,6 +90,13 @@ For any other file, cite its source.
   Klein, M. L. (1983). Comparison of simple potential functions for simulating
   liquid water. *Journal of Chemical Physics*, 79(2), 926-935.
   doi:10.1063/1.445869. TIP3P, the only water model PolyzyMD builds.
+- Joung, I. S. and Cheatham, T. E. (2008). Determination of alkali and halide
+  monovalent ion parameters for use in explicitly solvated biomolecular
+  simulations. *Journal of Physical Chemistry B*, 112(30), 9020-9041.
+  doi:10.1021/jp8001614. The Na+ and Cl- Lennard-Jones parameters of
+  `openff-1.*` and `openff-2.*` are the TIP3P set of its Table 5. The
+  openff-forcefields package keeps that table as `data/jc.csv`. The build
+  cites it when it added Na+ or Cl- with one of these files.
 - Jakalian, A., Bush, B. L., Jack, D. B. and Bayly, C. I. (2000). Fast,
   efficient generation of high-quality atomic charges. AM1-BCC model: I.
   Method. *Journal of Computational Chemistry*, 21(2), 132-146.
@@ -71,9 +106,14 @@ For any other file, cite its source.
   Parameterization and validation. *Journal of Computational Chemistry*,
   23(16), 1623-1641. doi:10.1002/jcc.10128. Cite both AM1-BCC papers for
   `charges: {method: am1bcc}` and for a NAGL model of AM1-BCC charges.
-- OpenFF NAGL models, <https://github.com/openforcefield/openff-nagl-models>.
-  The NAGL models have no journal article; cite the model file the build
-  names (for example `openff-gnn-am1bcc-1.0.0.pt`) and its release.
+- AshGC, the OpenFF NAGL model `openff-gnn-am1bcc-1.*.pt` (for example
+  `openff-gnn-am1bcc-1.0.0.pt`). Cite the Sage 2.3.0 paper above, which
+  describes it, and both AM1-BCC papers. "Methods to cite" names it
+  `AshGC (OpenFF NAGL model <file>)`.
+- Other OpenFF NAGL models,
+  <https://github.com/openforcefield/openff-nagl-models>. Models before 1.0
+  have no journal article; cite the model file the build names and its
+  release.
 - Wang, Y., Pulido, I., Takaba, K., Kaminow, B., Scheen, J., Wang, L. and
   Chodera, J. D. (2024). EspalomaCharge: machine learning-enabled ultrafast
   partial charge assignment. *Journal of Physical Chemistry A*, 128(20),

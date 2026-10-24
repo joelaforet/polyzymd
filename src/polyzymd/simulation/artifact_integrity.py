@@ -198,7 +198,7 @@ def _manifest(
     """
     from polyzymd.utils.version import build_versions, get_polyzymd_version
 
-    return {
+    record = {
         "schema_version": 2,
         "engine": engine,
         "build_uuid": str(uuid.uuid4()),
@@ -214,24 +214,35 @@ def _manifest(
         },
         "components": [c.to_dict() for c in components or []],
         "audit": audit.to_dict() if audit is not None else None,
-        "cite": methods_to_cite(config, provenance),
     }
+    record["cite"] = methods_to_cite(config, provenance, record=record)
+    return record
 
 
-def methods_to_cite(config: Any, provenance: dict[str, Any] | None = None) -> list[str]:
+def methods_to_cite(
+    config: Any,
+    provenance: dict[str, Any] | None = None,
+    *,
+    record: dict[str, Any] | None = None,
+) -> list[str]:
     """Return the references of what this build used, for "Methods to cite".
 
-    PolyzyMD itself, each force-field file, the water model, the charge
-    models (NAGL, AM1-BCC, espaloma), Packmol when the build packed solvent or
-    polymer chains with it (its seeds in ``provenance`` say so), and Machado
-    and Pantano when ``ionic_strength`` set the ions. Each part comes from one
-    function in :data:`polyzymd.simulation.build_citations.CITATION_SOURCES`.
+    PolyzyMD itself, the engine (OpenMM or GROMACS, from ``record``), the
+    OpenFF Toolkit and Interchange, each force-field file, the water model, the
+    Na+ and Cl- parameters, the charge models (AshGC or another NAGL model,
+    AM1-BCC, espaloma), Packmol when the build packed solvent or polymer chains
+    with it (its seeds in ``provenance`` say so), and Machado and Pantano when
+    ``ionic_strength`` set the ions. ``record`` is the build record without
+    ``cite``. Each part comes from one function in
+    :data:`polyzymd.simulation.build_citations.CITATION_SOURCES`.
     """
     from polyzymd.simulation.build_citations import CITATION_SOURCES
 
+    context = dict(record or {})
+    context["provenance"] = dict(provenance or context.get("provenance") or {})
     cited: list[str] = []
     for source in CITATION_SOURCES:
-        cited.extend(source(config, provenance or {}))
+        cited.extend(source(config, context))
     return cited
 
 

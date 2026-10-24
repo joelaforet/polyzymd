@@ -144,7 +144,7 @@ def test_the_build_record_lists_the_methods_to_cite() -> None:
         )
 
     def others(cited):
-        return [c for c in cited if not c.startswith("Laforet")]
+        return [c for c in cited if c.startswith(("Martínez", "Machado"))]
 
     assert others(methods_to_cite(config(None))) == []
     packed = {"packmol_seed": 1, "solvent_packmol_seed": 1}
@@ -194,15 +194,123 @@ def test_methods_to_cite_name_polyzymd_the_force_fields_water_and_charge_models(
         {"solvent_packmol_seed": 1},
     )
     assert cited[0].startswith("Laforet, Joseph R., Jr. PolyzyMD") and __version__ in cited[0]
-    assert cited[1].startswith("ff14sb_off_impropers_0.0.4.offxml (the OpenFF SMIRNOFF port")
-    assert "doi:10.1021/acs.jctc.5b00255" in cited[1]
-    assert cited[2].startswith("openff-2.3.0.offxml (a release of OpenFF Sage 2)")
-    assert "doi:10.1021/acs.jctc.3c00039" in cited[2]
-    assert cited[3].startswith("TIP3P water") and "doi:10.1063/1.445869" in cited[3]
-    assert "openff-gnn-am1bcc-1.0.0.pt" in cited[4]
-    assert "doi:10.1002/(SICI)1096-987X(20000130)21:2<132::AID-JCC5>3.0.CO;2-P" in cited[5]
-    assert "doi:10.1002/jcc.10128" in cited[6]
-    assert "doi:10.1002/jcc.21224" in cited[7] and len(cited) == 8
+    assert cited[1].startswith("OpenFF Toolkit") and OPENFF_TOOLKIT in cited[1]
+    assert cited[2].startswith("OpenFF Interchange") and OPENFF_INTERCHANGE in cited[2]
+    assert cited[3].startswith("ff14sb_off_impropers_0.0.4.offxml (the OpenFF SMIRNOFF port")
+    assert "doi:10.1021/acs.jctc.5b00255" in cited[3]
+    assert cited[4].startswith("openff-2.3.0.offxml (a release of OpenFF Sage 2)")
+    assert "doi:10.1021/acs.jctc.3c00039" in cited[4]
+    assert cited[5].startswith("openff-2.3.0.offxml (OpenFF Sage 2.3.0)")
+    assert "doi:10.1021/acs.jctc.6c00169" in cited[5]
+    assert cited[6].startswith("TIP3P water") and "doi:10.1063/1.445869" in cited[6]
+    assert cited[7].startswith("AshGC (OpenFF NAGL model openff-gnn-am1bcc-1.0.0.pt)")
+    assert "doi:10.1021/acs.jctc.6c00169" in cited[7]
+    assert "doi:10.1002/(SICI)1096-987X(20000130)21:2<132::AID-JCC5>3.0.CO;2-P" in cited[8]
+    assert "doi:10.1002/jcc.10128" in cited[9]
+    assert "doi:10.1002/jcc.21224" in cited[10] and len(cited) == 11
+
+
+OPENFF_TOOLKIT = "https://github.com/openforcefield/openff-toolkit"
+OPENFF_INTERCHANGE = "https://github.com/openforcefield/openff-interchange"
+
+
+def test_methods_to_cite_name_the_engine_and_the_openff_versions() -> None:
+    from polyzymd.simulation.artifact_integrity import methods_to_cite
+
+    record = {
+        "engine": "openmm",
+        "openmm_version": "8.2.0",
+        "openff_toolkit_version": "0.16.9",
+        "openff_interchange_version": "0.4.2",
+    }
+    openmm = methods_to_cite(_build_config(), record=record)
+    assert openmm[1].startswith("OpenMM 8.2.0: Eastman, P.")
+    assert "doi:10.1021/acs.jpcb.3c06662" in openmm[1]
+    assert not any("doi:10.1016/j.softx.2015.06.001" in c for c in openmm)
+    assert openmm[2] == (
+        f"OpenFF Toolkit 0.16.9: no journal article; cite the release ({OPENFF_TOOLKIT})."
+    )
+    assert openmm[3].startswith("OpenFF Interchange 0.4.2:") and OPENFF_INTERCHANGE in openmm[3]
+    gromacs = methods_to_cite(_build_config(), record={**record, "engine": "gromacs"})
+    assert gromacs[1].startswith("GROMACS: Abraham, M. J.")
+    assert "doi:10.1016/j.softx.2015.06.001" in gromacs[1]
+    assert not any("doi:10.1021/acs.jpcb.3c06662" in c for c in gromacs)
+    # Without a record (no engine known) neither engine is cited.
+    assert not any(c.startswith(("OpenMM", "GROMACS")) for c in methods_to_cite(_build_config()))
+
+
+def test_sage_2_3_and_ashgc_cite_their_paper_and_older_files_do_not() -> None:
+    from polyzymd.simulation.artifact_integrity import methods_to_cite
+
+    def cites_2026(cited):
+        return [c for c in cited if "doi:10.1021/acs.jctc.6c00169" in c]
+
+    for name in ("openff-2.3.0.offxml", "openff_unconstrained-2.3.0-rc2.offxml"):
+        assert len(cites_2026(methods_to_cite(_build_config(force_field=name)))) == 1
+    sage_2_2 = methods_to_cite(_build_config(force_field="openff-2.2.1.offxml"))
+    assert cites_2026(sage_2_2) == []
+    assert any("doi:10.1021/acs.jctc.3c00039" in c for c in sage_2_2)
+    ashgc = cites_2026(
+        methods_to_cite(
+            _build_config(
+                ligand_charges=("nagl", "openff-gnn-am1bcc-1.0.0.pt"),
+                force_field="openff-2.2.1.offxml",
+            )
+        )
+    )
+    assert len(ashgc) == 1 and ashgc[0].startswith("AshGC (OpenFF NAGL model ")
+    older = methods_to_cite(
+        _build_config(ligand_charges=("nagl", "openff-gnn-am1bcc-0.1.0-rc.3.pt"))
+    )
+    assert not any(c.startswith("AshGC") for c in older)
+    assert any(
+        c.startswith("OpenFF NAGL charge model openff-gnn-am1bcc-0.1.0-rc.3.pt") for c in older
+    )
+
+
+def _ions_record(*force_field):
+    return {
+        "components": [
+            {"type": "ions", "domains": [{"name": "Na+", "force_field": list(force_field)}]}
+        ]
+    }
+
+
+def test_ion_parameters_cite_joung_and_cheatham_when_the_build_has_ions() -> None:
+    from polyzymd.simulation.artifact_integrity import methods_to_cite
+
+    def ions(cited):
+        return [c for c in cited if "doi:10.1021/jp8001614" in c]
+
+    cited = ions(methods_to_cite(_build_config(), record=_ions_record("openff-2.3.0.offxml")))
+    assert cited == [
+        "Na+ and Cl- parameters of openff-2.3.0.offxml (TIP3P set): Joung, I. S. and "
+        "Cheatham, T. E. (2008). Determination of alkali and halide monovalent ion parameters "
+        "for use in explicitly solvated biomolecular simulations. J. Phys. Chem. B 112(30), "
+        "9020-9041. doi:10.1021/jp8001614"
+    ]
+    assert ions(methods_to_cite(_build_config())) == []
+    assert ions(methods_to_cite(_build_config(), record=_ions_record("/data/my_ff.offxml"))) == []
+
+
+def test_openff_ion_parameters_are_the_joung_cheatham_tip3p_set() -> None:
+    """The values Joung and Cheatham (2008) give in Table 5 for TIP3P."""
+    import xml.etree.ElementTree as ElementTree
+
+    openforcefields = pytest.importorskip("openforcefields")
+    offxml = Path(openforcefields.__file__).parent / "offxml"
+    table_5 = {"[#11+1:1]": ("1.369", "0.0874393"), "[#17X0-1:1]": ("2.513", "0.035591")}
+    for name in ("openff-1.3.0.offxml", "openff-2.0.0.offxml", "openff-2.3.0.offxml"):
+        atoms = ElementTree.parse(offxml / name).getroot().find("vdW")
+        found = {
+            atom.get("smirks"): (
+                atom.get("rmin_half").split(" ")[0],
+                atom.get("epsilon").split(" ")[0],
+            )
+            for atom in atoms
+            if atom.get("smirks") in table_5
+        }
+        assert found == table_5, name
 
 
 def test_methods_to_cite_follow_what_the_build_used() -> None:
@@ -211,7 +319,7 @@ def test_methods_to_cite_follow_what_the_build_used() -> None:
     apo = methods_to_cite(_build_config())
     assert not any("AM1-BCC" in c or "NAGL" in c or "Espaloma" in c for c in apo)
     # One file named by several components is cited once.
-    assert sum(c.startswith("openff-2.3.0.offxml") for c in apo) == 1
+    assert sum(c.startswith("openff-2.3.0.offxml (a release of OpenFF Sage 2)") for c in apo) == 1
     espaloma = methods_to_cite(_build_config(ligand_charges=("espaloma",)))
     assert any("doi:10.1021/acs.jpca.4c01287" in c for c in espaloma)
     assert not any("AM1-BCC model" in c for c in espaloma)
