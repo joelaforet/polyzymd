@@ -239,7 +239,8 @@ class SystemBuilder:
         monomer_smiles: Optional[Dict[str, str]] = None,
         monomer_names: Optional[Dict[str, str]] = None,
         residue_names: Optional[Dict[str, str]] = None,
-        reactions: Optional[Any] = None,
+        end_groups: Optional[Dict[str, str]] = None,
+        force_field: Optional[List[str]] = None,
         charger_type: str = "nagl",
         max_retries: int = 10,
         cache_directory: Optional[Union[str, Path]] = None,
@@ -248,7 +249,7 @@ class SystemBuilder:
 
         Supports two generation modes:
         - "cached": Load pre-built polymer SDFs from sdf_directory
-        - "dynamic": Generate polymers on-the-fly from monomer SMILES
+        - "dynamic": Build chains with mBuild from star-sited monomer SMILES
 
         Args:
             characters: Monomer labels.
@@ -259,10 +260,11 @@ class SystemBuilder:
             sdf_directory: Directory with pre-built polymer SDFs (cached mode).
             seed: Random seed for reproducibility.
             generation_mode: "cached" or "dynamic".
-            monomer_smiles: Dict of monomer name -> SMILES (dynamic mode).
+            monomer_smiles: Dict of monomer name -> star-sited repeat-unit SMILES (dynamic mode).
             monomer_names: Dict of label -> monomer name (dynamic mode).
             residue_names: Dict of monomer name -> 3-char residue name.
-            reactions: ReactionConfig with ATRP reaction paths (dynamic mode).
+            end_groups: {"head": smiles, "tail": smiles}, the star-sited caps (dynamic mode).
+            force_field: Force field files the chains are relaxed with (dynamic mode).
             charger_type: Charge method ("nagl", "espaloma", "am1bcc").
             max_retries: Max retries for polymer generation.
             cache_directory: Directory for caching generated polymers.
@@ -281,7 +283,8 @@ class SystemBuilder:
             monomer_smiles=monomer_smiles,
             monomer_names=monomer_names,
             residue_names=residue_names,
-            reactions=reactions,
+            end_groups=end_groups,
+            force_field=force_field,
             charger_type=charger_type,
             max_retries=max_retries,
             nagl_model=self._nagl_model,
@@ -293,6 +296,20 @@ class SystemBuilder:
         self._n_polymer_chains = sum(counts)
 
         return molecules, counts
+
+    def _polymer_built_chains(self) -> bool:
+        """Return whether dynamic generation built (or reused from its cache) any chain.
+
+        A dynamic config may also load a user's own SDF for a sequence; those
+        chains were not built with mBuild.
+        """
+        builder = self._polymer_builder
+        if builder is None or getattr(builder, "_generation_mode", None) != "dynamic":
+            return False
+        return any(
+            builder.molecule_source(sequence).get("charge_method") != "preset"
+            for sequence in builder.sequence_counts or {}
+        )
 
     def combine_solutes(self) -> Topology:
         """Combine enzyme, substrate, and polymers into a single topology.
@@ -1082,23 +1099,22 @@ class SystemBuilder:
             monomer_smiles = None
             monomer_names = None
             residue_names = None
-            reactions = None
+            end_groups = None
+            force_field = None
 
             if generation_mode == "dynamic":
-                # Build monomer_smiles: name -> SMILES
-                monomer_smiles = {
-                    m.name: m.smiles for m in config.polymers.monomers if m.smiles is not None
-                }
-                # Build monomer_names: label -> name
-                monomer_names = {m.label: m.name for m in config.polymers.monomers}
-                # Build residue_names: name -> 3-char residue name
+                # A monomer without a name is named by its label.
+                monomers = config.polymers.monomers
+                monomer_smiles = {(m.name or m.label): m.smiles for m in monomers}
+                monomer_names = {m.label: (m.name or m.label) for m in monomers}
                 residue_names = {
-                    m.name: m.residue_name
-                    for m in config.polymers.monomers
-                    if m.residue_name is not None
+                    (m.name or m.label): m.residue_name for m in monomers if m.residue_name
                 }
-                # Get reaction config
-                reactions = config.polymers.reactions
+                end_groups = {
+                    "head": config.polymers.end_groups.head,
+                    "tail": config.polymers.end_groups.tail,
+                }
+                force_field = [str(name) for name in config.polymers.force_field]
 
                 LOGGER.info(
                     f"Dynamic mode: monomers={list(monomer_smiles.keys())}, "
@@ -1117,11 +1133,17 @@ class SystemBuilder:
                 monomer_smiles=monomer_smiles,
                 monomer_names=monomer_names,
                 residue_names=residue_names,
-                reactions=reactions,
+                end_groups=end_groups,
+                force_field=force_field,
                 charger_type=config.polymers.charger.value,
                 max_retries=config.polymers.max_retries,
                 cache_directory=config.polymers.cache_directory,
             )
+            self._build_provenance["polymer_sequence_seed"] = effective_seed
+            if self._polymer_built_chains():
+                from polyzymd.builders.polymer_generator import mbuild_summary
+
+                self._build_provenance["polymer_builder"] = mbuild_summary()
 
             # Get packing config (uses defaults if not specified)
             packing = config.polymers.packing
@@ -1407,6 +1429,11 @@ class SystemBuilder:
                     )
                 )
                 sources[sequence] = {"chains": count, "sdf": file_record(sdf)}
+            provenance = {"sequences": sources}
+            if self._polymer_built_chains():
+                from polyzymd.builders.polymer_generator import mbuild_provenance
+
+                provenance["builder"] = mbuild_provenance()
             records.append(
                 ComponentRecord(
                     name=handle("polymer")[0],
@@ -1415,7 +1442,7 @@ class SystemBuilder:
                     placement="packed",
                     molecules=molecules,
                     domains=domains,
-                    provenance={"sequences": sources},
+                    provenance=provenance,
                 )
             )
         counts = self._solvent_builder._solvation_counts

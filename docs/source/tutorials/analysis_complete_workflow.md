@@ -65,16 +65,15 @@ Add this entry to the `solutes:` list, after the protein entry:
   - type: polymer
     generation_mode: dynamic
     type_prefix: SBMA
-    reactions:
-      initiation: default
-      polymerization: default
-      termination: default
     monomers:
       - label: A
         probability: 1.0
         name: SBMA
         residue_name: SBM
-        smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
+        smiles: "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+    end_groups:
+      head: "[*][H]"
+      tail: "[*][H]"
     length: 3
     count: 2
     force_field: ["openff-2.3.0.offxml"]
@@ -84,8 +83,10 @@ Add this entry to the `solutes:` list, after the protein entry:
 ```
 
 The entry asks for two chains of three SBMA monomers. `dynamic` builds each
-chain from the SMILES of the monomer, with the ATRP reaction templates that
-ship with PolyzyMD. `residue_name: SBM` names the monomers in the topology.
+chain with mBuild from the repeat unit of the monomer: its SMILES has `*` on
+the two carbons that bond to the neighbouring units. `end_groups` caps both
+chain ends with a hydrogen. `residue_name: SBM` names the monomers in the
+topology.
 `force_field` is the same file as `solvent.force_field`. `charges` charges
 each new chain with {term}`NAGL` and the model you name.
 `packing.padding: 0.5` places the chains within 0.5 nm of the protein

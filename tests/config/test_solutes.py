@@ -148,8 +148,8 @@ def test_polymer_charges_follow_how_the_chains_are_made(data) -> None:
         load(data)
     data["solutes"][-1] = _polymer(
         generation_mode="dynamic",
-        monomers=[{"label": "A", "probability": 1.0, "smiles": "C=C(C)C(=O)OC"}],
-        reactions={"initiation": "default", "polymerization": "default", "termination": "default"},
+        monomers=[{"label": "A", "probability": 1.0, "smiles": "[*]CC([*])(C)C(=O)OC"}],
+        end_groups={"head": "[*][H]", "tail": "[*][H]"},
     )
     with pytest.raises(ValidationError, match="nagl, am1bcc or espaloma"):
         load(data)
@@ -253,3 +253,135 @@ def test_preset_charges_need_the_shipped_molecule() -> None:
     _require_shipped_molecule(CoSolventSpec(name="dmso", count=1, charges=PRESET))
     with pytest.raises(ValueError, match="not the dmso PolyzyMD ships"):
         _require_shipped_molecule(CoSolventSpec(name="dmso", smiles="CCO", count=1, charges=PRESET))
+
+
+#: Star-sited repeat units of methyl methacrylate and HEMA.
+MMA = "[*]CC([*])(C)C(=O)OC"
+HEMA = "[*]CC([*])(C)C(=O)OCCO"
+
+
+def _dynamic(**extra) -> dict:
+    """A dynamic MMA/HEMA polymer solute with hydrogen caps."""
+    return _polymer(
+        **{
+            "generation_mode": "dynamic",
+            "charges": NAGL,
+            "sdf_directory": None,
+            "monomers": [
+                {"label": "A", "probability": 0.5, "name": "MMA", "smiles": MMA},
+                {"label": "B", "probability": 0.5, "name": "HEMA", "smiles": HEMA},
+            ],
+            "end_groups": {"head": "[*][H]", "tail": "[*]C"},
+            **extra,
+        }
+    )
+
+
+def test_a_dynamic_polymer_loads_with_star_sited_smiles(data) -> None:
+    data["solutes"].append(_dynamic())
+    polymers = load(data).polymers
+    assert polymers.end_groups.head == "[*][H]"
+    assert polymers.end_groups.tail == "[*]C"
+    assert [m.residue_name for m in polymers.monomers] == ["MMA", "HEM"]
+
+
+def test_reactions_are_refused_with_the_rewrite_guide(data) -> None:
+    """Configs written for the ATRP reaction templates are told how to rewrite them."""
+    reactions = {"initiation": "default", "polymerization": "default", "termination": "default"}
+    data["solutes"].append(_dynamic(reactions=reactions))
+    with pytest.raises(ValidationError, match="rewrite_config_rc5") as error:
+        load(data)
+    assert "1.3.0rc5" in str(error.value)
+    assert "end_groups" in str(error.value)
+
+
+def test_a_dynamic_polymer_needs_its_end_groups(data) -> None:
+    data["solutes"].append(_dynamic(end_groups=None))
+    with pytest.raises(ValidationError, match="requires 'end_groups'"):
+        load(data)
+
+
+@pytest.mark.parametrize(
+    ("monomer", "head", "message"),
+    [
+        ("CC(C)C(=O)OC", "[*][H]", "has 0 '\\*' sites"),
+        ("[*]CC(C)C(=O)OC", "[*][H]", "has 1 '\\*' sites"),
+        ("[*]CC([*])(C[*])C(=O)OC", "[*][H]", "has 3 '\\*' sites"),
+        (MMA, "[H]", "end_groups.head: '\\[H\\]' has 0"),
+        (MMA, "[*]C[*]", "end_groups.head: .* has 2"),
+    ],
+)
+def test_star_counts_are_checked_at_load(data, monomer, head, message) -> None:
+    """A repeat unit needs exactly two '*' and a cap exactly one."""
+    data["solutes"].append(
+        _dynamic(
+            monomers=[{"label": "A", "probability": 1.0, "name": "X", "smiles": monomer}],
+            end_groups={"head": head, "tail": "[*][H]"},
+        )
+    )
+    with pytest.raises(ValidationError, match=message):
+        load(data)
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        {"residue_name": "PMA"},
+        {"name": "HEMA2"},
+    ],
+    ids=["explicit", "from_name"],
+)
+def test_monomers_cannot_share_a_residue_name(data, names) -> None:
+    """Analyses tell monomers apart by residue name, given or taken from the name."""
+    monomers = [
+        {"label": "A", "probability": 0.5, "name": "HEMA", "smiles": HEMA, **names},
+        {"label": "B", "probability": 0.5, "name": "HEMA2", "smiles": HEMA, **names},
+    ]
+    data["solutes"].append(_dynamic(monomers=monomers))
+    with pytest.raises(ValidationError, match="share residue_name"):
+        load(data)
+
+
+def test_a_dynamic_polymer_config_checks_without_the_build_packages(data, tmp_path) -> None:
+    """require_buildable(inputs=False) runs where MDAnalysis, RDKit and mBuild are not installed.
+
+    The sim-cuda environments check a config before running it and have none of
+    them; the star-site and residue-name checks that need them run in validate.
+    """
+    import json
+    import subprocess
+    import sys
+
+    data["solutes"].append(
+        _dynamic(
+            monomers=[
+                {
+                    "label": "A",
+                    "probability": 0.5,
+                    "name": "MMA",
+                    "smiles": MMA,
+                    "residue_name": "MMA",
+                },
+                {"label": "B", "probability": 0.5, "name": "HEMA", "smiles": HEMA},
+            ]
+        )
+    )
+    data.pop("_ligand")
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(data))
+    script = (
+        "import json, sys\n"
+        "for name in ('MDAnalysis', 'rdkit', 'mbuild'):\n"
+        "    sys.modules[name] = None\n"
+        "from polyzymd.config.schema import SimulationConfig\n"
+        f"data = json.loads(open({str(config)!r}).read())\n"
+        "SimulationConfig.model_validate(data).require_buildable(inputs=False)\n"
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("length", [1, 2])
+def test_dynamic_chains_of_one_or_two_units_are_accepted(data, length) -> None:
+    data["solutes"].append(_dynamic(length=length))
+    assert load(data).polymers.length == length

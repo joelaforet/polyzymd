@@ -86,27 +86,30 @@ solutes:
 
   # Random co-polymer chains packed around the protein (OPTIONAL), from
   # pre-built SDF files (generation_mode: cached, charges: {method: preset})
-  # or generated from monomer SMILES (dynamic, charged with nagl). For both
-  # modes and every key, see
+  # or built with mBuild from star-sited SMILES (dynamic, charged with nagl).
+  # A monomer is its repeat unit with '*' on the two linking atoms; the
+  # notebook docs/source/tutorials/star_sited_monomers.ipynb helps you write
+  # it from a PubChem SMILES. For both modes and every key, see
   # https://polyzymd.readthedocs.io/en/latest/how_to/polymers.html
   # - type: polymer
-  #   generation_mode: "dynamic"          # Generate chains from monomer SMILES
+  #   generation_mode: "dynamic"          # Build chains from star-sited SMILES
   #   type_prefix: "<monomer1>-<monomer2>"  # Used in output directory names
   #   force_field: ["openff-2.3.0.offxml"]
   #   charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
-  #   reactions:                          # Bundled ATRP methacrylate templates
-  #     initiation: "default"
-  #     polymerization: "default"
-  #     termination: "default"
   #   monomers:                           # Probabilities must sum to 1.0
   #     - label: "A"
   #       probability: 0.75
-  #       name: "<monomer_1_name>"
-  #       smiles: "<monomer_1_SMILES>"
+  #       name: "MMA"                     # methyl methacrylate
+  #       smiles: "[*]CC([*])(C)C(=O)OC"  # repeat unit, '*' on the two linking atoms
+  #       residue_name: "MMA"
   #     - label: "B"
   #       probability: 0.25
-  #       name: "<monomer_2_name>"
-  #       smiles: "<monomer_2_SMILES>"
+  #       name: "HEMA"                    # 2-hydroxyethyl methacrylate
+  #       smiles: "[*]CC([*])(C)C(=O)OCCO"
+  #       residue_name: "HEM"
+  #   end_groups:                         # Caps on the chain ends, one '*' each
+  #     head: "[*][H]"
+  #     tail: "[*][H]"
   #   length: 10                          # Monomers per chain
   #   count: 4                            # Number of chains
 

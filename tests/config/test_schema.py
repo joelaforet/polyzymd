@@ -167,30 +167,25 @@ class TestConfigValidation:
         assert len(config.monomers) == 2
 
     @pytest.mark.parametrize("length", [1, 2])
-    def test_dynamic_polymer_length_requires_non_empty_middle_sequence(self, length: int):
-        """Dynamic polymer configuration should reject lengths below three."""
-        from polyzymd.config.schema import MonomerSpec, PolymerSolute, ReactionConfig
+    def test_dynamic_polymer_length_one_and_two_are_accepted(self, length: int):
+        """mBuild builds chains of any length, so dynamic 1- and 2-mers load."""
+        from polyzymd.config.schema import MonomerSpec, PolymerSolute
 
-        reactions = ReactionConfig(
-            initiation=Path("initiation.rxn"),
-            polymerization=Path("polymerization.rxn"),
-            termination=Path("termination.rxn"),
+        config = PolymerSolute(
+            type="polymer",
+            force_field=[SAGE],
+            charges=NAGL,
+            type_prefix="TEST",
+            generation_mode="dynamic",
+            monomers=[
+                MonomerSpec(label="A", probability=1.0, name="MMA", smiles="[*]CC([*])(C)C(=O)OC"),
+            ],
+            end_groups={"head": "[*][H]", "tail": "[*][H]"},
+            length=length,
+            count=1,
         )
 
-        with pytest.raises(ValidationError, match="length.*>= 3"):
-            PolymerSolute(
-                type="polymer",
-                force_field=[SAGE],
-                charges=NAGL,
-                type_prefix="TEST",
-                generation_mode="dynamic",
-                monomers=[
-                    MonomerSpec(label="A", probability=1.0, name="EGMA", smiles="C=C"),
-                ],
-                length=length,
-                count=1,
-                reactions=reactions,
-            )
+        assert config.length == length
 
     def test_cached_polymer_length_one_is_accepted(self):
         """Cached polymer configuration should allow single-monomer SDF inputs."""

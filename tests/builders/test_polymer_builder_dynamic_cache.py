@@ -2,30 +2,109 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
-from _polymer_generator_helpers import FakeMonomerGroup, write_metadata
 
 from polyzymd.builders.polymer import PolymerBuilder
 from polyzymd.builders.polymer_generator import PolymerGenerator
 
+#: Star-sited repeat units of the two test monomers.
+SBMA = "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+EGPMA = "[*]CC([*])(C)C(=O)OCCOc1ccccc1"
+
+#: Hydrogen caps on both ends.
+H_CAPS = {"head": "[*][H]", "tail": "[*][H]"}
+
+SAGE = ["openff-2.3.0.offxml"]
+
+
+def _dynamic_builder(tmp_path: Path, **keys: object) -> PolymerBuilder:
+    """A dynamic SBMA/EGPMA builder whose cache is ``tmp_path / 'cache'``.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Test directory.
+    **keys : object
+        PolymerBuilder arguments that replace the defaults.
+
+    Returns
+    -------
+    PolymerBuilder
+        Builder in dynamic mode.
+    """
+    arguments = {
+        "characters": ["A", "B"],
+        "probabilities": [0.0, 1.0],
+        "length": 5,
+        "type_prefix": "PEGMA",
+        "cache_directory": tmp_path / "cache",
+        "generation_mode": "dynamic",
+        "monomer_smiles": {"SBMA": SBMA, "EGPMA": EGPMA},
+        "monomer_names": {"A": "SBMA", "B": "EGPMA"},
+        "residue_names": {"SBMA": "SBM", "EGPMA": "EGP"},
+        "end_groups": H_CAPS,
+        "force_field": SAGE,
+    }
+    arguments.update(keys)
+    return PolymerBuilder(**arguments)
+
+
+def _write_metadata(generator: PolymerGenerator, sdf_path: Path, sequence: str) -> None:
+    """Write the sidecar ``generator`` expects next to ``sdf_path``.
+
+    Parameters
+    ----------
+    generator : PolymerGenerator
+        Generator whose inputs the sidecar records.
+    sdf_path : Path
+        The charged SDF.
+    sequence : str
+        Canonical sequence of the chain.
+    """
+    generator.metadata_path(sdf_path).write_text(
+        json.dumps(generator.cache_metadata(sequence)), encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    ("missing", "message"),
+    [
+        ({"end_groups": None}, "requires end_groups"),
+        ({"force_field": None}, "requires the polymer force_field"),
+        ({"monomer_smiles": None}, "requires monomer_smiles"),
+    ],
+)
+def test_dynamic_builder_requires_its_inputs(tmp_path: Path, missing, message) -> None:
+    """Dynamic mode needs the repeat units, the caps and the force field."""
+    with pytest.raises(ValueError, match=message):
+        _dynamic_builder(tmp_path, **missing)
+
 
 @pytest.mark.parametrize("length", [1, 2])
-def test_dynamic_builder_rejects_short_lengths(length: int, tmp_path: Path) -> None:
-    """Dynamic builder configuration should reject lengths below three early."""
-    with pytest.raises(ValueError, match="requires length >= 3"):
-        PolymerBuilder(
-            characters=["A"],
-            probabilities=[1.0],
-            length=length,
-            type_prefix="EGMA",
-            cache_directory=tmp_path / "cache",
-            generation_mode="dynamic",
-            monomer_smiles={"EGMA": "CO"},
-            monomer_names={"A": "EGMA"},
-            reactions=object(),
-        )
+def test_dynamic_builder_accepts_short_chains(tmp_path: Path, length: int) -> None:
+    """mBuild builds chains of any length, so 1- and 2-mers are accepted."""
+    assert _dynamic_builder(tmp_path, length=length).length == length
+
+
+def test_dynamic_builder_creates_the_generator_from_its_settings(tmp_path: Path) -> None:
+    """The generator gets the monomers, residue names, caps, force field and charger."""
+    builder = _dynamic_builder(tmp_path, max_retries=3, nagl_model="openff-gnn-am1bcc-1.0.0.pt")
+    builder._ensure_generators_initialized()
+    generator = builder._polymer_generator
+
+    assert {label: m.residue_name for label, m in generator.monomers.items()} == {
+        "A": "SBM",
+        "B": "EGP",
+    }
+    assert generator.monomers["A"].unit.smiles == SBMA
+    assert {end: cap.smiles for end, cap in generator.end_groups.items()} == H_CAPS
+    assert generator.force_field == SAGE
+    assert generator.max_retries == 3
+    assert generator.nagl_model == "openff-gnn-am1bcc-1.0.0.pt"
+    assert generator.cache_directory == tmp_path / "cache"
 
 
 def test_dynamic_builder_routes_cache_directory_hits_through_generator(
@@ -36,17 +115,7 @@ def test_dynamic_builder_routes_cache_directory_hits_through_generator(
     cache_path = tmp_path / "PEGMA_seq=BBBBB_5-mer_charged.sdf"
     cache_path.write_text("stale cache", encoding="utf-8")
     sentinel = object()
-    builder = PolymerBuilder(
-        characters=["A", "B"],
-        probabilities=[0.0, 1.0],
-        length=5,
-        type_prefix="PEGMA",
-        cache_directory=tmp_path,
-        generation_mode="dynamic",
-        monomer_smiles={"SBMA": "C", "PEGMA": "CO"},
-        monomer_names={"A": "SBMA", "B": "PEGMA"},
-        reactions=object(),
-    )
+    builder = _dynamic_builder(tmp_path, cache_directory=tmp_path)
 
     def fail_load_cache(path: Path) -> object:
         """Fail if PolymerBuilder bypasses dynamic cache validation.
@@ -69,6 +138,26 @@ def test_dynamic_builder_routes_cache_directory_hits_through_generator(
     assert builder._get_or_create_molecule("BBBBB") is sentinel
 
 
+def test_dynamic_builder_hands_cache_hits_to_the_generator(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """_generate_polymer asks the generator, which decides whether its cache is valid."""
+    builder = _dynamic_builder(tmp_path)
+    builder._ensure_generators_initialized()
+    sentinel = object()
+    calls = []
+
+    def fake_generate(sequence: str) -> object:
+        calls.append(sequence)
+        return sentinel
+
+    monkeypatch.setattr(builder._polymer_generator, "generate_polymer", fake_generate)
+
+    assert builder._get_or_create_molecule("BBBBB") is sentinel
+    assert calls == ["BBBBB"]
+
+
 def test_dynamic_builder_routes_sdf_directory_generated_artifact_through_generator(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -77,30 +166,7 @@ def test_dynamic_builder_routes_sdf_directory_generated_artifact_through_generat
     sdf_path = tmp_path / "PEGMA_seq=BBBBB_5-mer_charged.sdf"
     sdf_path.write_text("stale generated artifact", encoding="utf-8")
     sentinel = object()
-    builder = PolymerBuilder(
-        characters=["A", "B"],
-        probabilities=[0.0, 1.0],
-        length=5,
-        type_prefix="PEGMA",
-        sdf_directory=tmp_path,
-        cache_directory=tmp_path / "cache",
-        generation_mode="dynamic",
-        monomer_smiles={"SBMA": "C", "PEGMA": "CO"},
-        monomer_names={"A": "SBMA", "B": "PEGMA"},
-        reactions=object(),
-    )
-    builder._fragment_generator = object()
-    builder._polymer_generator = PolymerGenerator(
-        monomer_group=FakeMonomerGroup(
-            {
-                "SBMA_1-site": ["sbma-terminal"],
-                "SBMA_2-site": ["sbma-middle"],
-                "PEGMA_1-site": ["pegma-terminal"],
-                "PEGMA_2-site": ["pegma-middle"],
-            }
-        ),
-        cache_directory=tmp_path / "cache",
-    )
+    builder = _dynamic_builder(tmp_path, sdf_directory=tmp_path)
 
     def fail_load_cache(path: Path) -> object:
         """Fail if generated-style SDF loading bypasses validation.
@@ -131,30 +197,9 @@ def test_dynamic_builder_loads_generated_sdf_directory_hit_when_metadata_matches
     sdf_path = tmp_path / "PEGMA_seq=BBBBB_5-mer_charged.sdf"
     sdf_path.write_text("validated generated artifact", encoding="utf-8")
     sentinel = object()
-    monomer_group = FakeMonomerGroup(
-        {
-            "SBMA_1-site": ["sbma-terminal"],
-            "SBMA_2-site": ["sbma-middle"],
-            "PEGMA_1-site": ["pegma-terminal"],
-            "PEGMA_2-site": ["pegma-middle"],
-        }
-    )
-    generator = PolymerGenerator(monomer_group=monomer_group, cache_directory=tmp_path / "cache")
-    write_metadata(generator, sdf_path, "BBBBB", {"A": "SBMA", "B": "PEGMA"})
-    builder = PolymerBuilder(
-        characters=["A", "B"],
-        probabilities=[0.0, 1.0],
-        length=5,
-        type_prefix="PEGMA",
-        sdf_directory=tmp_path,
-        cache_directory=tmp_path / "cache",
-        generation_mode="dynamic",
-        monomer_smiles={"SBMA": "C", "PEGMA": "CO"},
-        monomer_names={"A": "SBMA", "B": "PEGMA"},
-        reactions=object(),
-    )
-    builder._fragment_generator = object()
-    builder._polymer_generator = generator
+    builder = _dynamic_builder(tmp_path, sdf_directory=tmp_path)
+    builder._ensure_generators_initialized()
+    _write_metadata(builder._polymer_generator, sdf_path, "BBBBB")
 
     monkeypatch.setattr(builder, "_load_from_sdf", lambda path: sentinel)
     monkeypatch.setattr(
@@ -166,53 +211,30 @@ def test_dynamic_builder_loads_generated_sdf_directory_hit_when_metadata_matches
     assert builder._get_or_create_molecule("BBBBB") is sentinel
 
 
+@pytest.mark.parametrize(
+    "stale",
+    [
+        {"monomer_smiles": {"SBMA": SBMA, "EGPMA": "[*]CC([*])(C)C(=O)OCCO"}},
+        {"end_groups": {"head": "[*]C", "tail": "[*][H]"}},
+        {"residue_names": {"SBMA": "SBM", "EGPMA": "EGM"}},
+        {"charger_type": "am1bcc"},
+        {"force_field": ["openff-2.2.0.offxml"]},
+    ],
+    ids=["smiles", "end_groups", "residue_name", "charger", "force_field"],
+)
 def test_dynamic_builder_regenerates_generated_sdf_directory_hit_with_stale_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    stale: dict[str, object],
 ) -> None:
     """Dynamic mode should regenerate generated-style SDF hits with stale metadata."""
     sdf_path = tmp_path / "PEGMA_seq=BBBBB_5-mer_charged.sdf"
     sdf_path.write_text("stale generated artifact", encoding="utf-8")
-    current_group = FakeMonomerGroup(
-        {
-            "SBMA_1-site": ["sbma-terminal"],
-            "SBMA_2-site": ["sbma-middle"],
-            "PEGMA_1-site": ["pegma-terminal"],
-            "PEGMA_2-site": ["pegma-middle"],
-        }
-    )
-    stale_group = FakeMonomerGroup(
-        {
-            "SBMA_1-site": ["sbma-terminal"],
-            "SBMA_2-site": ["sbma-middle"],
-            "PEGMA_1-site": ["pegma-terminal"],
-            "PEGMA_2-site": ["stale-pegma-middle"],
-        }
-    )
-    write_metadata(
-        PolymerGenerator(monomer_group=stale_group, cache_directory=tmp_path / "stale"),
-        sdf_path,
-        "BBBBB",
-        {"A": "SBMA", "B": "PEGMA"},
-    )
+    old = _dynamic_builder(tmp_path, cache_directory=tmp_path / "stale", **stale)
+    old._ensure_generators_initialized()
+    _write_metadata(old._polymer_generator, sdf_path, "BBBBB")
     sentinel = object()
-    builder = PolymerBuilder(
-        characters=["A", "B"],
-        probabilities=[0.0, 1.0],
-        length=5,
-        type_prefix="PEGMA",
-        sdf_directory=tmp_path,
-        cache_directory=tmp_path / "cache",
-        generation_mode="dynamic",
-        monomer_smiles={"SBMA": "C", "PEGMA": "CO"},
-        monomer_names={"A": "SBMA", "B": "PEGMA"},
-        reactions=object(),
-    )
-    builder._fragment_generator = object()
-    builder._polymer_generator = PolymerGenerator(
-        monomer_group=current_group,
-        cache_directory=tmp_path / "cache",
-    )
+    builder = _dynamic_builder(tmp_path, sdf_directory=tmp_path)
 
     monkeypatch.setattr(
         builder,
@@ -220,6 +242,56 @@ def test_dynamic_builder_regenerates_generated_sdf_directory_hit_with_stale_meta
         lambda path: pytest.fail("Stale generated SDF was loaded directly"),
     )
     monkeypatch.setattr(builder, "_generate_polymer", lambda sequence: sentinel)
+
+    assert builder._get_or_create_molecule("BBBBB") is sentinel
+
+
+def test_metadata_of_unused_monomers_does_not_invalidate_the_cache(tmp_path: Path) -> None:
+    """A chain's sidecar records only the monomers its sequence uses."""
+    sdf_path = tmp_path / "PEGMA_seq=BBBBB_5-mer_charged.sdf"
+    sdf_path.write_text("generated artifact", encoding="utf-8")
+    old = _dynamic_builder(tmp_path, monomer_smiles={"SBMA": "[*]CC([*])C", "EGPMA": EGPMA})
+    old._ensure_generators_initialized()
+    _write_metadata(old._polymer_generator, sdf_path, "BBBBB")
+    builder = _dynamic_builder(tmp_path, sdf_directory=tmp_path)
+
+    assert builder._dynamic_sdf_metadata_matches(sdf_path, "BBBBB")
+    assert set(builder._polymer_generator.cache_metadata("BBBBB")["monomers"]) == {"B"}
+
+
+@pytest.mark.parametrize("sidecar", [None, "not json", "[1, 2]"])
+def test_a_missing_or_unreadable_sidecar_does_not_match(tmp_path: Path, sidecar) -> None:
+    """Without a readable sidecar object the generator builds the chain again."""
+    builder = _dynamic_builder(tmp_path)
+    builder._ensure_generators_initialized()
+    generator = builder._polymer_generator
+    sdf_path = generator.sdf_path("BBBBB")
+    sdf_path.parent.mkdir(parents=True)
+    sdf_path.write_text("generated artifact", encoding="utf-8")
+    if sidecar is not None:
+        generator.metadata_path(sdf_path).write_text(sidecar, encoding="utf-8")
+
+    assert not generator.cache_metadata_matches(sdf_path, "BBBBB")
+
+
+def test_dynamic_builder_loads_a_user_sdf_as_given(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A user SDF in sdf_directory that is not a cache entry is loaded without a sidecar."""
+    sdf_directory = tmp_path / "user"
+    sdf_directory.mkdir()
+    builder = _dynamic_builder(tmp_path, sdf_directory=sdf_directory)
+    user_sdf = builder._get_sdf_path("BBBBB", sdf_directory)
+    user_sdf.write_text("user molecule", encoding="utf-8")
+    sentinel = object()
+    monkeypatch.setattr(builder, "_is_dynamic_cache_like_sdf", lambda path, sequence: False)
+    monkeypatch.setattr(builder, "_load_from_sdf", lambda path: sentinel)
+    monkeypatch.setattr(
+        builder,
+        "_generate_polymer",
+        lambda sequence: pytest.fail("A user SDF was rebuilt"),
+    )
 
     assert builder._get_or_create_molecule("BBBBB") is sentinel
 
@@ -247,35 +319,11 @@ def test_cached_builder_loads_sdf_directory_hit_without_dynamic_metadata(
     assert builder._get_or_create_molecule("A") is sentinel
 
 
-def test_cached_mode_finds_the_file_dynamic_mode_writes(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_cached_mode_finds_the_file_dynamic_mode_writes(tmp_path: Path) -> None:
     """Both modes name a chain's SDF after type_prefix, so cached mode reuses a dynamic cache."""
-    import polyzymd.builders.fragment_generator as fragment_generator_module
-
-    class _Fragments:
-        def __init__(self, **kwargs: object) -> None:
-            pass
-
-        def load_or_generate(self, **kwargs: object) -> FakeMonomerGroup:
-            return FakeMonomerGroup({"SBMA_2-site": ["s"], "EGPMA_2-site": ["e"]})
-
-    monkeypatch.setattr(fragment_generator_module, "FragmentGenerator", _Fragments)
-    names = {"A": "SBMA", "B": "EGPMA"}
-    dynamic = PolymerBuilder(
-        characters=["A", "B"],
-        probabilities=[0.5, 0.5],
-        length=5,
-        type_prefix="SE",
-        cache_directory=tmp_path,
-        generation_mode="dynamic",
-        monomer_smiles={"SBMA": "C", "EGPMA": "CO"},
-        monomer_names=names,
-        reactions=type("Reactions", (), dict.fromkeys(_REACTION_FIELDS))(),
-    )
+    dynamic = _dynamic_builder(tmp_path, cache_directory=tmp_path, type_prefix="SE")
     dynamic._ensure_generators_initialized()
-    written = dynamic._polymer_generator._make_polymer_filename("AABBA", names) + ".sdf"
+    written = dynamic._polymer_generator.sdf_path("AABBA")
     cached = PolymerBuilder(
         characters=["A", "B"],
         probabilities=[0.5, 0.5],
@@ -284,10 +332,7 @@ def test_cached_mode_finds_the_file_dynamic_mode_writes(
         sdf_directory=tmp_path,
         generation_mode="cached",
     )
-    assert cached._get_sdf_path("AABBA", tmp_path).name == written
-
-
-_REACTION_FIELDS = ("initiation", "polymerization", "termination")
+    assert cached._get_sdf_path("AABBA", tmp_path) == written
 
 
 def test_missing_cached_sdf_error_names_real_config_keys(tmp_path: Path) -> None:
@@ -313,18 +358,7 @@ def test_molecule_source_reports_preset_for_a_user_sdf_in_dynamic_mode(
     """A user SDF that dynamic mode loads as given keeps its own charges, so they are preset."""
     sdf_directory = tmp_path / "user"
     sdf_directory.mkdir()
-    builder = PolymerBuilder(
-        characters=["A", "B"],
-        probabilities=[0.0, 1.0],
-        length=5,
-        type_prefix="PEGMA",
-        sdf_directory=sdf_directory,
-        cache_directory=tmp_path / "cache",
-        generation_mode="dynamic",
-        monomer_smiles={"SBMA": "C", "PEGMA": "CO"},
-        monomer_names={"A": "SBMA", "B": "PEGMA"},
-        reactions=object(),
-    )
+    builder = _dynamic_builder(tmp_path, sdf_directory=sdf_directory)
     user_sdf = builder._get_sdf_path("BBBBB", sdf_directory)
     user_sdf.write_text("user molecule", encoding="utf-8")
     monkeypatch.setattr(builder, "_is_dynamic_cache_like_sdf", lambda path, sequence: False)

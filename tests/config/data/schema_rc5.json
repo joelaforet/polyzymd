@@ -856,6 +856,34 @@
   "type": "<class 'int'>",
   "values": null
  },
+ "solutes[polymer].end_groups": {
+  "alias": null,
+  "bounds": {},
+  "default": null,
+  "required": false,
+  "type": "polyzymd.config.schema.PolymerEndGroups | None",
+  "values": null
+ },
+ "solutes[polymer].end_groups.head": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
+ "solutes[polymer].end_groups.tail": {
+  "alias": null,
+  "bounds": {
+   "min_length": 1
+  },
+  "default": null,
+  "required": true,
+  "type": "<class 'str'>",
+  "values": null
+ },
  "solutes[polymer].force_field": {
   "alias": null,
   "bounds": {
@@ -1029,38 +1057,6 @@
   "default": null,
   "required": false,
   "type": "int | None",
-  "values": null
- },
- "solutes[polymer].reactions": {
-  "alias": null,
-  "bounds": {},
-  "default": null,
-  "required": false,
-  "type": "polyzymd.config.schema.ReactionConfig | None",
-  "values": null
- },
- "solutes[polymer].reactions.initiation": {
-  "alias": null,
-  "bounds": {},
-  "default": null,
-  "required": true,
-  "type": "<class 'pathlib.Path'>",
-  "values": null
- },
- "solutes[polymer].reactions.polymerization": {
-  "alias": null,
-  "bounds": {},
-  "default": null,
-  "required": true,
-  "type": "<class 'pathlib.Path'>",
-  "values": null
- },
- "solutes[polymer].reactions.termination": {
-  "alias": null,
-  "bounds": {},
-  "default": null,
-  "required": true,
-  "type": "<class 'pathlib.Path'>",
   "values": null
  },
  "solutes[polymer].sdf_directory": {

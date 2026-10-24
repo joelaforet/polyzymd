@@ -23,7 +23,7 @@ PolyzyMD gets the polymer structures in one of two ways. The
 | `generation_mode` | Source of each chain | Guide |
 |---|---|---|
 | `cached` (default) | A pre-built SDF file for each sequence, in `sdf_directory` | This page |
-| `dynamic` | Built from monomer SMILES with ATRP reaction templates | {doc}`dynamic_polymers` |
+| `dynamic` | Built with mBuild from star-sited monomer and cap SMILES | {doc}`dynamic_polymers` |
 
 ## Write the polymer entry
 

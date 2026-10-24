@@ -120,7 +120,16 @@ smirnoff99frosst      = ">=1.1"
 openff-amber-ff-ports = ">=2024.0"
 openff-nagl           = ">=0.4"
 openff-nagl-models    = ">=2025.9.0"  # first release with openff-gnn-am1bcc-1.0.0.pt
-mbuild                = ">=1.2"
+# mBuild itself comes from the fork pinned under pypi-dependencies; these are
+# the packages it imports when loaded (hoomd: mbuild.simulation, CPU build).
+gmso                  = ">=0.12"
+ele                   = ">=0.2"
+treelib               = "*"
+boltons               = "*"
+parmed                = ">=3.4.3"
+hoomd                 = { version = ">=4", build = "cpu*" }
+# Opens docs/source/tutorials/star_sited_monomers.ipynb (pixi run -e build jupyter lab ...).
+jupyterlab            = ">=4"
 openbabel             = ">=3.1"
 rdkit                 = ">=2023.09"
 pdbfixer              = ">=1.9"
@@ -128,13 +137,8 @@ packmol               = ">=20.0"
 pytorch               = "2.6.*"
 
 [feature.builder.pypi-dependencies]
-polymerist = ">=1.1.0"
-# NOTE: espaloma-charge is intentionally excluded. polymerist eagerly imports
-# it at module level (_toolkits.py), which triggers a broken dgl -> graphbolt
-# import chain that crashes when dgl and PyTorch versions are mismatched.
-# PolyzyMD uses NAGL (not espaloma) for charge assignment; NAGL >=0.2 has a
-# pure-PyTorch fallback that works without dgl. Users who need espaloma can
-# install it manually: pip install espaloma-charge
+# Dynamic polymers are built with mBuild's Polymer from this tag of the fork.
+mbuild = { git = "https://github.com/joelaforet/mbuild.git", tag = "biopolymers-v0.1.0" }
 
 
 # =============================================================================

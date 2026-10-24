@@ -2,8 +2,8 @@
 
 Build polymer chains from monomer SMILES with `generation_mode: "dynamic"`.
 In this mode you do not need an SDF file for each sequence. PolyzyMD builds
-each chain with Polymerist and ATRP (atom-transfer radical polymerization)
-reaction templates, and assigns partial charges with the method in `charges`.
+each chain with mBuild from the repeat unit of each monomer and the two caps,
+and assigns partial charges with the method in `charges`.
 
 For the keys that both modes share, such as `monomers`, `length`, `count` and
 `packing`, see {doc}`polymers`.
@@ -27,6 +27,38 @@ Alternatively, prefix each command with `pixi run -e build`.
 | `cached` | You have checked SDF files for each sequence and want to use exactly those structures. |
 | `dynamic` | You have only the monomer SMILES, or you test a new monomer. |
 
+## Write the monomers as star-sited SMILES
+
+Give each monomer as its **repeat unit**, as it is in the chain, with `*` on
+the two atoms that bond to the neighbouring repeat units. For a vinyl,
+acrylate or methacrylate monomer these are the two carbons of the C=C double
+bond, which is a single bond in the chain:
+
+| Monomer | SMILES as sold (PubChem) | Repeat unit |
+|---|---|---|
+| methyl methacrylate (MMA) | `C=C(C)C(=O)OC` | `[*]CC([*])(C)C(=O)OC` |
+| 2-hydroxyethyl methacrylate (HEMA) | `C=C(C)C(=O)OCCO` | `[*]CC([*])(C)C(=O)OCCO` |
+| sulfobetaine methacrylate (SBMA) | `C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]` | `[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]` |
+
+The first `*` bonds toward the head of the chain, the second toward the tail.
+Charges in the SMILES are kept: an SBMA repeat unit keeps its N+ and O-.
+
+The notebook {doc}`../tutorials/star_sited_monomers` draws a monomer with its
+atom indices and puts the `*` on the atoms you name.
+
+## Choose the caps
+
+Each chain has two ends. `end_groups` gives the cap of each end as SMILES with
+one `*` on the atom that bonds to the chain. There is no default: the caps are
+part of the molecule you simulate.
+
+| Cap | SMILES |
+|---|---|
+| hydrogen | `[*][H]` |
+| methyl | `[*]C` |
+
+`head` caps the first repeat unit of a sequence, `tail` the last.
+
 ## Write the polymer entry
 
 ```yaml
@@ -35,21 +67,20 @@ solutes:
   - type: polymer
     generation_mode: "dynamic"
     type_prefix: "SBMA-EGPMA"
-    reactions:
-      initiation: "default"
-      polymerization: "default"
-      termination: "default"
     monomers:
       - label: "A"
         probability: 0.7
         name: "SBMA"
         residue_name: "SBM"
-        smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
+        smiles: "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
       - label: "B"
         probability: 0.3
         name: "EGPMA"
-        residue_name: "EGM"
-        smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
+        residue_name: "EGP"
+        smiles: "[*]CC([*])(C)C(=O)OCCOc1ccccc1"
+    end_groups:
+      head: "[*][H]"
+      tail: "[*][H]"
     length: 5
     count: 2
     force_field: ["openff-2.3.0.offxml"]
@@ -62,14 +93,13 @@ solutes:
 
 | Key | Meaning |
 |---|---|
-| `smiles` | The SMILES of the monomer before polymerization, with its C=C double bond. Every monomer needs one. |
-| `name` | The monomer name. Dynamic mode uses it to name the fragments, such as `SBMA_1-site` and `SBMA_2-site`, so give one for every monomer. `polyzymd validate` does not check this; the build stops instead. |
-| `residue_name` | The 3-character residue name of the monomer in the topology. Optional. If you leave it out, PolyzyMD makes one from `name`. |
-| `reactions` | The three ATRP reaction templates. `"default"` selects the templates that ship with PolyzyMD. You can also give the path of your own `.rxn` file. |
+| `smiles` | The repeat unit of the monomer, with exactly two `*`. Every monomer needs one. |
+| `end_groups` | `head` and `tail`, each a cap with exactly one `*`. Required. |
+| `name` | The monomer name, used in log messages and the cache metadata. Optional; the `label` is used without it. |
+| `residue_name` | The 3-character residue name of the monomer in the topology. Optional. If you leave it out, PolyzyMD makes one from `name`. It must differ between monomers and must not be an amino-acid, nucleic-acid, water or ion name. |
 | `charges` | The partial-charge method for the chains: `{method: nagl, model: ...}`, `{method: am1bcc}` or `{method: espaloma}`. `preset` is for `cached` mode only. |
-| `max_retries` | The number of attempts to build a chain without a ring piercing (default 10). |
-| `cache_directory` | The folder for the generated fragments and chains (default `.polymer_cache`). |
-| `length` | Must be 3 or more. Polymerist needs at least one middle monomer. |
+| `max_retries` | The number of builds tried, each with new monomer conformers, before a chain with a pierced ring or overlapping atoms is refused (default 10). |
+| `cache_directory` | The folder of the generated chains (default `.polymer_cache`, relative to the config). |
 
 {term}`NAGL` predicts {term}`AM1-BCC` charges and needs no extra program.
 Its `model` is required, such as `openff-gnn-am1bcc-1.0.0.pt`, the model
@@ -80,14 +110,15 @@ For every other key of the config, see {doc}`../reference/configuration`.
 
 ## Build and run the system
 
-1. Validate the config:
+1. Validate the config. This reads every monomer and cap SMILES with RDKit,
+   checks the number of `*`, and checks that the charge method covers every
+   element:
 
    ```bash
    polyzymd validate -c config.yaml
    ```
 
-2. Build one replicate. The first build generates the fragments and the chains,
-   and can take several minutes:
+2. Build one replicate. Each new chain takes a few seconds:
 
    ```bash
    polyzymd build -c config.yaml -r 1
@@ -106,28 +137,20 @@ For every other key of the config, see {doc}`../reference/configuration`.
 
 ## What the build does
 
-For the monomers, the build does these steps once:
-
-1. It reads the monomer SMILES.
-2. It applies the initiation template to each monomer. For ATRP, this adds a
-   chlorine at the double bond.
-3. It applies the polymerization template to make the middle fragments, which
-   have two bonding sites.
-4. It applies the termination template to make the end fragments, which have
-   one bonding site and keep the double bond.
-5. It saves the fragments as `<type_prefix>_monomer_group.json` in
-   `cache_directory`.
-
 For each chain, the build does these steps:
 
 1. It draws a sequence from the monomer probabilities. The replicate number
    seeds the draw, unless you set `random_seed`.
-2. It puts end fragments at the two ends and middle fragments between them.
-3. It builds the 3D structure with Polymerist. The sequence seeds the
+2. It joins the repeat units of the sequence and the two caps: each bond
+   between two units replaces the `*` of both. The bond orders and formal
+   charges are those of your SMILES.
+3. It builds the 3D structure with mBuild's `Polymer`. The sequence seeds the
    structure, so the same sequence always gives the same coordinates.
-4. It checks that no bond passes through a ring. If one does, it builds the
-   chain again, up to `max_retries` times.
-5. It assigns partial charges with the method in `charges`.
+4. It assigns partial charges with the method in `charges`, then relaxes the
+   chain in vacuum with its `force_field` (an energy minimization).
+5. It checks that no bond passes through a ring and that no two atoms more
+   than two bonds apart are closer than 1.0 Å. If a check fails, it builds the
+   chain again with new monomer conformers, up to `max_retries` times.
 6. It saves the charged chain as
    `<type_prefix>_seq=<sequence>_<length>-mer_charged.sdf` in
    `cache_directory`, with a `.metadata.json` file beside it. This is the name
@@ -135,59 +158,44 @@ For each chain, the build does these steps:
    `generation_mode: cached`, `sdf_directory` to this folder and
    `charges: {method: preset}`.
 
-The next build with the same monomers loads the fragments and chains from
-`cache_directory`. It generates a chain again if the metadata does not match
-the config.
+Each repeat unit is one residue named by its `residue_name`. The head cap
+belongs to the first residue and the tail cap to the last.
 
-## Use another monomer
+The next build with the same monomers loads the chains from
+`cache_directory`. It builds a chain again if the metadata does not match the
+config, for example after you change a SMILES, a cap, the charges or the
+mBuild version.
 
-The bundled templates are for methacrylates. To add a methacrylate monomer:
-
-1. Write its SMILES with the C=C double bond, and with explicit hydrogens.
-2. Add it to `monomers` with a new `label`:
-
-   ```yaml
-   monomers:
-     - label: "C"
-       probability: 0.1
-       name: "MyMonomer"
-       smiles: "[H]C([H])=C(C(=O)O...)C([H])([H])[H]"
-   ```
-
-3. Adjust the other probabilities so that all of them sum to 1.0.
-
-For another chemistry, such as ring-opening polymerization, write your own
-three `.rxn` templates and give their paths in `reactions`.
+The build record (`build_provenance.json` and `.md`) names the mBuild version
+and commit that built the chains, and lists mBuild under "Methods to cite".
 
 ## Fix common problems
 
-### "No 1-site terminal fragment found for monomer"
+### "has 0 '*' sites; a repeat unit needs exactly 2"
 
-The fragment cache does not match the monomers of the config. Delete the cache
-and build again:
+The monomer SMILES is the monomer as sold, not the repeat unit. Put `*` on the
+two linking atoms; see {doc}`../tutorials/star_sited_monomers`.
 
-```bash
-rm -rf .polymer_cache
-```
+### "both '*' ... are on one atom"
 
-### "No monomer name configured for sequence label"
+Each `*` must be on a different atom. Write a longer repeat unit, such as
+`[*]CC[*]` for polyethylene.
 
-A monomer has no `name`. Give every monomer a `name`. `polyzymd validate`
-passes such a config, so this error first appears at build time.
-
-### "Failed to build polymer after N attempts due to ring-piercing"
+### "no build out of N passed the geometry checks"
 
 1. Raise `max_retries`.
-2. Use shorter chains.
-3. Check that each monomer SMILES is correct.
+2. Check each monomer SMILES in the notebook.
 
-### "Dynamic generation mode requires 'length' >= 3"
+### "dynamic polymers need mBuild from https://github.com/joelaforet/mbuild"
 
-Set `length` to 3 or more.
+The environment has another mBuild. Run PolyzyMD in its `build` pixi
+environment, which installs the right one.
 
 ## See also
 
 - {doc}`polymers`: the keys that both modes share, and how the chains are
   placed.
+- {doc}`../tutorials/star_sited_monomers`: write star-sited SMILES with a
+  notebook.
 - {doc}`../reference/configuration`: every key of the config.
 - {doc}`run_gromacs`: run the system with GROMACS.

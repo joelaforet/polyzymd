@@ -88,10 +88,19 @@ def test_dynamic_polymers_use_the_configured_model(tmp_path) -> None:
     from polyzymd.builders.polymer_generator import PolymerGenerator
     from polyzymd.utils.charging import NAGLCharger
 
-    generator = PolymerGenerator(monomer_group=None, cache_directory=tmp_path, nagl_model=OLD)
+    generator = PolymerGenerator.from_smiles(
+        [("A", "MMA", "MMA", "[*]CC([*])(C)C(=O)OC")],
+        head="[*][H]",
+        tail="[*][H]",
+        cache_directory=tmp_path,
+        force_field=["openff-2.3.0.offxml"],
+        nagl_model=OLD,
+    )
 
-    assert isinstance(generator.charger, NAGLCharger)
-    assert generator.charger.model_name == OLD
+    charger = generator._charger()
+    assert isinstance(charger, NAGLCharger)
+    assert charger.model_name == OLD
+    assert generator.cache_metadata("AAA")["nagl_model"] == OLD
 
 
 def test_system_builder_takes_the_model_from_the_config() -> None:
