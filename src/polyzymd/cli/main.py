@@ -1351,11 +1351,24 @@ def _run_gromacs_impl(
 
     run_start = datetime.now(timezone.utc).replace(microsecond=0)
     try:
+        from polyzymd.engines import create_engine
+
+        # The same mdrun flags a SLURM job gets: threads, ranks, GPU offload.
+        mdrun_flags = (
+            create_engine(sim_config, override="gromacs", defer_binary=True).local_mdrun_flags(
+                gmx_path
+            )
+            if getattr(sim_config, "gromacs", None) is not None
+            else {}
+        )
+        if mdrun_flags:
+            colored_echo(f"mdrun flags: {mdrun_flags['prod']}", phase="export")
         runner = GromacsRunner(
             working_dir=gromacs_dir,
             prefix=prefix,
             equilibration_mdps=eq_mdp_names,
             gmx_command=gmx_path,
+            mdrun_flags=mdrun_flags,
         )
         runner.run_full_workflow()
 

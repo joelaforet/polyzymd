@@ -305,6 +305,25 @@ class GromacsEngine(SimulationEngine):
         parts = [raw] + extras
         return " ".join(part for part in parts if part).strip()
 
+    def local_mdrun_flags(self, gmx_binary: str) -> dict[str, str]:
+        """Return the mdrun flags of a local run, by stage: ``em``, ``eq`` and ``prod``.
+
+        The same flags a SLURM job gets: ``mdrun_flags`` (and the stage
+        ``mdrun_flags_equilibration``/``mdrun_flags_production``), ``-ntmpi``
+        for a thread-MPI ``gmx_binary``, ``-ntomp`` from ``gromacs.ntomp``, and
+        the GPU offload flags when ``gromacs.gpu`` is true.
+        """
+        from types import SimpleNamespace
+
+        local = SimpleNamespace(cpus_per_task=self._config.gromacs.ntomp)
+        saved, self._gmx_binary = self._gmx_binary, gmx_binary
+        try:
+            flags = self._resolve_mdrun_flags(local)  # type: ignore[arg-type]
+            eq, prod = self._resolve_stage_mdrun_flags(local)  # type: ignore[arg-type]
+        finally:
+            self._gmx_binary = saved
+        return {"em": flags, "eq": eq or flags, "prod": prod or flags}
+
     def _resolve_stage_mdrun_flags(
         self, effective_slurm: SlurmConfig
     ) -> tuple[str | None, str | None]:
