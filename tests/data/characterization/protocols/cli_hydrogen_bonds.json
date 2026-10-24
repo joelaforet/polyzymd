@@ -15,7 +15,7 @@
   "problems": [],
   "protocol_version": "2",
   "provenance": {
-   "config_hashes": {"A":"c4429a507b8cea42","B":"c4429a507b8cea42"},
+   "config_hashes": {"A":"d19df94f4f261473","B":"d19df94f4f261473"},
    "mdanalysis_version": "<masked>",
    "output_paths": {"results":"<out>/polyzymd_results/hydrogen_bonds_protein_polymer"},
    "polyzymd_version": "<masked>",
