@@ -38,7 +38,7 @@ autodoc_mock_imports = [
 project = "PolyzyMD"
 copyright = "2026, Joseph R. Laforet Jr."
 author = "Joseph R. Laforet Jr."
-release = "1.3.0"
+release = "1.3.0rc5"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
