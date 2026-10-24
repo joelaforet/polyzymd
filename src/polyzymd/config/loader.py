@@ -33,9 +33,6 @@ PATH_KEYS = frozenset(
         "sdf_path",
         "sdf_directory",
         "cache_directory",
-        "initiation",
-        "polymerization",
-        "termination",
     }
 )
 #: Where runs and job files go. They are resolved against the config's folder,

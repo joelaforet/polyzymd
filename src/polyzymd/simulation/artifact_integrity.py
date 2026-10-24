@@ -222,15 +222,19 @@ def methods_to_cite(config: Any, provenance: dict[str, Any] | None = None) -> li
 
     The force fields and charge models are named in the component records;
     this lists the other methods: Packmol when the build packed solvent or
-    polymer chains with it (its seeds in ``provenance`` say so), and how
-    ``ionic_strength`` set the ions.
+    polymer chains with it (its seeds in ``provenance`` say so), mBuild when it
+    built polymer chains (``polymer_builder``), and how ``ionic_strength`` set
+    the ions.
     """
+    from polyzymd.builders.polymer_generator import MBUILD
     from polyzymd.builders.solvent import MACHADO_PANTANO
     from polyzymd.utils.packmol import PACKMOL
 
     cited = []
     if any(key in (provenance or {}) for key in ("solvent_packmol_seed", "polymer_packmol_seed")):
         cited.append(PACKMOL)
+    if "polymer_builder" in (provenance or {}):
+        cited.append(MBUILD)
     ions = getattr(getattr(config, "solvent", None), "ions", None)
     if getattr(ions, "ionic_strength", None) is not None:
         cited.append(MACHADO_PANTANO)

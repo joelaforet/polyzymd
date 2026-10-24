@@ -122,7 +122,7 @@ an apo simulation.
 
 ## Polymers (`type: polymer`)
 
-PolyzyMD supports two modes for polymer generation: **cached** (load from pre-built SDF files) and **dynamic** (generate on-the-fly from SMILES).
+PolyzyMD supports two modes for polymer generation: **cached** (load from pre-built SDF files) and **dynamic** (built with mBuild from star-sited monomer and cap SMILES).
 
 ```{tip}
 For a complete guide on dynamic polymer generation, see {doc}`../how_to/dynamic_polymers`.
@@ -154,32 +154,39 @@ The entry is one item of `solutes:`; all its keys are indented under the `-`.
 
 ### Dynamic Generation Configuration
 
-To generate polymers on-the-fly from monomer SMILES (without pre-built SDF files):
+To build chains from monomer SMILES (without pre-built SDF files), give each
+monomer as its repeat unit with `*` on the two linking atoms, and the caps
+each chain end can get, with one `*` each and their probabilities. This
+example builds the SBMA-EGMA chains PolyzyMD built with its ATRP templates before 1.3.0rc5: each end is a whole monomer
+that kept its C=C double bond:
 
 ```yaml
   - type: polymer
     generation_mode: "dynamic"               # Enable dynamic generation
-    type_prefix: "SBMA-EGPMA"
-    reactions:                               # ATRP reaction templates
-      initiation: "default"                  # or "/path/to/custom.rxn"
-      polymerization: "default"
-      termination: "default"
+    type_prefix: "SBMA-EGMA"
     monomers:
       - label: "A"
         probability: 0.7
         name: "SBMA"
-        smiles: "[H]C([H])=C(C(=O)OC...)..." # Required for dynamic mode
+        smiles: "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"  # repeat unit, two '*'
         residue_name: "SBM"                  # Optional 3-letter residue name
       - label: "B"
         probability: 0.3
-        name: "EGPMA"
-        smiles: "[H]C([H])=C(C(=O)OC...)..."
+        name: "EGMA"
+        smiles: "[*]CC([*])(C)C(=O)OCCOCCOCCOCCOC"
         residue_name: "EGM"
-    length: 5
+    end_groups:                              # Required: caps of each end, drawn per chain
+      head:                                  # (each end's probabilities sum to 1)
+        - {label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 0.7}
+        - {label: "B", name: "EGMA", residue_name: "EGM", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", probability: 0.3}
+      tail:
+        - {label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 0.7}
+        - {label: "B", name: "EGMA", residue_name: "EGM", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", probability: 0.3}
+    length: 5                                # Monomers per chain, the two ends included
     count: 2
     force_field: ["openff-2.3.0.offxml"]
     charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}   # or am1bcc, espaloma
-    max_retries: 10                          # Retries for ring-piercing detection
+    max_retries: 10                          # Builds tried before a bad chain is refused
     cache_directory: ".polymer_cache"
 ```
 
@@ -190,14 +197,14 @@ To generate polymers on-the-fly from monomer SMILES (without pre-built SDF files
 | `generation_mode` | string | No | "cached" | `cached` or `dynamic` |
 | `type_prefix` | string | Yes | - | Identifier for polymer type |
 | `monomers` | list | Yes | - | Monomer specifications |
-| `length` | int | Yes | - | Chain length (number of monomers) |
+| `length` | int | Yes | - | Monomers per chain. With `end_groups` (always in dynamic mode, optional in cached mode) the two ends are included, so it is at least 3 |
 | `count` | int | Yes | - | Number of chains to add |
 | `sdf_directory` | path | In cached mode | null | Directory with pre-built polymer SDFs |
 | `cache_directory` | path | No | ".polymer_cache" | Cache directory |
-| `reactions` | object | No | all "default" | ATRP reaction templates (dynamic mode) |
+| `end_groups` | object | In dynamic mode; optional in cached mode | - | `head` and `tail`: lists of caps (`label`, `smiles` with one `*`, `probability`, optional `name` and `residue_name`); each end's probabilities sum to 1. In cached mode the chains then draw their caps too, and the caps are checked against the build metadata of cached chains that dynamic mode made |
 | `force_field` | list | Yes | - | Force field files; the same file as `solvent.force_field` |
 | `charges` | object | Yes | - | `preset` in cached mode (the charges in the SDFs); `nagl` (with `model`), `am1bcc` or `espaloma` in dynamic mode |
-| `max_retries` | int | No | 10 | Max attempts for ring-piercing avoidance |
+| `max_retries` | int | No | 10 | Builds tried before a chain with a pierced ring or overlapping atoms is refused (dynamic mode) |
 | `random_seed` | int | No | null | Seed for polymer sequence draws (default: the replicate number) |
 | `packing` | object | No | see below | PACKMOL placement settings |
 
@@ -250,8 +257,8 @@ each brick face.
 | `label` | string | Yes | Single character (A, B, C...) |
 | `probability` | float | Yes | Selection probability (must sum to 1.0) |
 | `name` | string | No | Full monomer name |
-| `smiles` | string | Dynamic only | Raw monomer SMILES (with C=C double bond) |
-| `residue_name` | string | No | 3-letter residue code for topology |
+| `smiles` | string | Dynamic mode; optional in cached mode | Repeat-unit SMILES with `*` on the two linking atoms; the first `*` bonds toward the head. In cached mode it is checked against the build metadata of cached chains that dynamic mode made |
+| `residue_name` | string | No | 3-letter residue code for topology; one per monomer, not an amino-acid, nucleic-acid, water or ion name |
 
 ### Charges
 

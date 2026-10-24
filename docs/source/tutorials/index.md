@@ -14,6 +14,8 @@ Each tutorial is one lesson with a known result. Do them in this order.
    it for OpenFF.
 6. {doc}`own_system`: make a project for your own protein, fill in a config,
    check it, add a second condition, and run and analyze both.
+7. {doc}`star_sited_monomers`: write the star-sited SMILES of your own
+   monomers for dynamic polymers, with a notebook.
 
 Tutorials 2 to 4 continue in the project folder of the quickstart. Their
 simulations run on a laptop CPU in minutes.
@@ -28,4 +30,5 @@ analysis_complete_workflow
 sasa_analysis
 prepare_pdb_for_openff
 own_system
+star_sited_monomers
 ```

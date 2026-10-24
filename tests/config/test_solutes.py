@@ -148,8 +148,8 @@ def test_polymer_charges_follow_how_the_chains_are_made(data) -> None:
         load(data)
     data["solutes"][-1] = _polymer(
         generation_mode="dynamic",
-        monomers=[{"label": "A", "probability": 1.0, "smiles": "C=C(C)C(=O)OC"}],
-        reactions={"initiation": "default", "polymerization": "default", "termination": "default"},
+        monomers=[{"label": "A", "probability": 1.0, "smiles": "[*]CC([*])(C)C(=O)OC"}],
+        end_groups=_caps("[*][H]", "[*][H]"),
     )
     with pytest.raises(ValidationError, match="nagl, am1bcc or espaloma"):
         load(data)
@@ -253,3 +253,280 @@ def test_preset_charges_need_the_shipped_molecule() -> None:
     _require_shipped_molecule(CoSolventSpec(name="dmso", count=1, charges=PRESET))
     with pytest.raises(ValueError, match="not the dmso PolyzyMD ships"):
         _require_shipped_molecule(CoSolventSpec(name="dmso", smiles="CCO", count=1, charges=PRESET))
+
+
+#: Star-sited repeat units of methyl methacrylate and HEMA.
+MMA = "[*]CC([*])(C)C(=O)OC"
+HEMA = "[*]CC([*])(C)C(=O)OCCO"
+
+
+def _caps(head: str, tail: str) -> dict:
+    """End groups with one fixed cap on each end (head label H, tail label T)."""
+    return {
+        "head": [{"label": "H", "smiles": head, "probability": 1.0}],
+        "tail": [{"label": "T", "smiles": tail, "probability": 1.0}],
+    }
+
+
+def _dynamic(**extra) -> dict:
+    """A dynamic MMA/HEMA polymer solute with hydrogen caps."""
+    return _polymer(
+        **{
+            "generation_mode": "dynamic",
+            "charges": NAGL,
+            "sdf_directory": None,
+            "monomers": [
+                {"label": "A", "probability": 0.5, "name": "MMA", "smiles": MMA},
+                {"label": "B", "probability": 0.5, "name": "HEMA", "smiles": HEMA},
+            ],
+            "end_groups": _caps("[*][H]", "[*]C"),
+            **extra,
+        }
+    )
+
+
+def test_a_dynamic_polymer_loads_with_star_sited_smiles(data) -> None:
+    data["solutes"].append(_dynamic())
+    polymers = load(data).polymers
+    [head], [tail] = polymers.end_groups.head, polymers.end_groups.tail
+    assert (head.label, head.smiles, head.probability) == ("H", "[*][H]", 1.0)
+    assert (tail.label, tail.smiles, tail.residue_name) == ("T", "[*]C", None)
+    assert [m.residue_name for m in polymers.monomers] == ["MMA", "HEM"]
+
+
+def test_reactions_are_refused_with_the_rewrite_guide(data) -> None:
+    """Configs written for the ATRP reaction templates are told how to rewrite them."""
+    reactions = {"initiation": "default", "polymerization": "default", "termination": "default"}
+    data["solutes"].append(_dynamic(reactions=reactions))
+    with pytest.raises(ValidationError, match="rewrite_config_rc5") as error:
+        load(data)
+    assert "1.3.0rc5" in str(error.value)
+    assert "end_groups" in str(error.value)
+
+
+def test_a_dynamic_polymer_needs_its_end_groups(data) -> None:
+    data["solutes"].append(_dynamic(end_groups=None))
+    with pytest.raises(ValidationError, match="requires 'end_groups'"):
+        load(data)
+
+
+@pytest.mark.parametrize(
+    ("monomer", "head", "message"),
+    [
+        ("CC(C)C(=O)OC", "[*][H]", "has 0 '\\*' sites"),
+        ("[*]CC(C)C(=O)OC", "[*][H]", "has 1 '\\*' sites"),
+        ("[*]CC([*])(C[*])C(=O)OC", "[*][H]", "has 3 '\\*' sites"),
+        (MMA, "[H]", "end_groups.head 'H': '\\[H\\]' has 0"),
+        (MMA, "[*]C[*]", "end_groups.head 'H': .* has 2"),
+    ],
+)
+def test_star_counts_are_checked_at_load(data, monomer, head, message) -> None:
+    """A repeat unit needs exactly two '*' and a cap exactly one."""
+    data["solutes"].append(
+        _dynamic(
+            monomers=[{"label": "A", "probability": 1.0, "name": "X", "smiles": monomer}],
+            end_groups=_caps(head, "[*][H]"),
+        )
+    )
+    with pytest.raises(ValidationError, match=message):
+        load(data)
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        {"residue_name": "PMA"},
+        {},
+    ],
+    ids=["explicit", "from_name"],
+)
+def test_monomers_cannot_share_a_residue_name(data, names) -> None:
+    """Analyses tell monomers apart by residue name, given or taken from the name."""
+    monomers = [
+        {"label": "A", "probability": 0.5, "name": "HEMA", "smiles": HEMA, **names},
+        {"label": "B", "probability": 0.5, "name": "HEMA2", "smiles": MMA, **names},
+    ]
+    data["solutes"].append(_dynamic(monomers=monomers))
+    with pytest.raises(ValidationError, match="share residue_name"):
+        load(data)
+
+
+@pytest.mark.parametrize(
+    ("second", "message"),
+    [
+        ({"label": "A", "name": "HEMA", "residue_name": "HEM"}, "share label \\['A'\\]"),
+        ({"label": "B", "name": "MMA", "residue_name": "HEM"}, "share name \\['MMA'\\]"),
+    ],
+    ids=["label", "name"],
+)
+def test_monomers_cannot_share_a_label_or_name(data, second, message) -> None:
+    """Each monomer is looked up by label and by name, so neither may repeat."""
+    monomers = [
+        {"label": "A", "probability": 0.5, "name": "MMA", "smiles": MMA, "residue_name": "MMA"},
+        {"probability": 0.5, "smiles": HEMA, **second},
+    ]
+    data["solutes"].append(_dynamic(monomers=monomers))
+    with pytest.raises(ValidationError, match=message):
+        load(data)
+
+
+def test_a_dynamic_polymer_config_checks_without_the_build_packages(data, tmp_path) -> None:
+    """require_buildable(inputs=False) runs where MDAnalysis, RDKit and mBuild are not installed.
+
+    The sim-cuda environments check a config before running it and have none of
+    them; the star-site and residue-name checks that need them run in validate.
+    """
+    import json
+    import subprocess
+    import sys
+
+    data["solutes"].append(
+        _dynamic(
+            monomers=[
+                {
+                    "label": "A",
+                    "probability": 0.5,
+                    "name": "MMA",
+                    "smiles": MMA,
+                    "residue_name": "MMA",
+                },
+                {"label": "B", "probability": 0.5, "name": "HEMA", "smiles": HEMA},
+            ]
+        )
+    )
+    data.pop("_ligand")
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(data))
+    script = (
+        "import json, sys\n"
+        "for name in ('MDAnalysis', 'rdkit', 'mbuild'):\n"
+        "    sys.modules[name] = None\n"
+        "from polyzymd.config.schema import SimulationConfig\n"
+        f"data = json.loads(open({str(config)!r}).read())\n"
+        "SimulationConfig.model_validate(data).require_buildable(inputs=False)\n"
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("length", [1, 2])
+def test_dynamic_chains_without_a_repeat_unit_are_refused(data, length) -> None:
+    """A dynamic chain's length counts its two caps, so it is at least 3."""
+    data["solutes"].append(_dynamic(length=length))
+    with pytest.raises(ValidationError, match="counts its two ends") as error:
+        load(data)
+    assert "at least 3" in str(error.value)
+
+
+def test_a_dynamic_chain_of_one_repeat_unit_loads(data) -> None:
+    data["solutes"].append(_dynamic(length=3))
+    assert load(data).polymers.length == 3
+
+
+def _option(label: str, smiles: str, probability: float, **extra) -> dict:
+    return {"label": label, "smiles": smiles, "probability": probability, **extra}
+
+
+def test_each_end_draws_from_options_with_probabilities(data) -> None:
+    """Two head options and one own-residue tail cap load as given."""
+    end_groups = {
+        "head": [
+            _option("H", "[*][H]", 0.25),
+            _option("V", "[*]C=C(C)C(=O)OC", 0.75, name="MMA vinyl", residue_name="MMV"),
+        ],
+        "tail": [_option("H", "[*][H]", 1.0)],
+    }
+    data["solutes"].append(_dynamic(end_groups=end_groups, length=5))
+    polymers = load(data).polymers
+    assert [(o.label, o.probability) for o in polymers.end_groups.head] == [
+        ("H", 0.25),
+        ("V", 0.75),
+    ]
+    assert polymers.end_groups.head[1].residue_name == "MMV"
+    assert polymers.end_groups.head[1].name == "MMA vinyl"
+
+
+@pytest.mark.parametrize(
+    ("head", "message"),
+    [
+        (
+            [_option("H", "[*][H]", 0.5), _option("M", "[*]C", 0.4)],
+            "end_groups.head probabilities must sum to 1.0, got 0.9",
+        ),
+        ([_option("H", "[*][H]", 0.5)], "a single cap needs probability 1.0"),
+        (
+            [_option("H", "[*][H]", 0.5), _option("H", "[*]C", 0.5)],
+            "end_groups.head options share label \\['H'\\]",
+        ),
+        ([], "at least 1 item"),
+        ([_option("HH", "[*][H]", 1.0)], "at most 1 character"),
+    ],
+    ids=["sum_0.9", "single_0.5", "duplicate_label", "empty", "long_label"],
+)
+def test_cap_options_are_checked(data, head, message) -> None:
+    end_groups = {"head": head, "tail": [_option("H", "[*][H]", 1.0)]}
+    data["solutes"].append(_dynamic(end_groups=end_groups))
+    with pytest.raises(ValidationError, match=message):
+        load(data)
+
+
+def test_a_bare_smiles_cap_is_refused_with_the_list_form(data) -> None:
+    data["solutes"].append(_dynamic(end_groups={"head": "[*][H]", "tail": "[*]C"}))
+    with pytest.raises(ValidationError, match="end_groups.head is a list of caps") as error:
+        load(data)
+    assert "head: [{label: H, smiles: '[*][H]', probability: 1.0}]" in str(error.value)
+
+
+#: Methyl methacrylate with the handedness of its quaternary carbon set.
+MMA_R = "[*]C[C@@]([*])(C)C(=O)OC"
+MMA_S = "[*]C[C@]([*])(C)C(=O)OC"
+
+
+def test_stereo_letters_of_one_monomer_may_share_a_residue_name(data) -> None:
+    """Two stereoisomers of MMA (the letters that set tacticity) are both residue MMA."""
+    monomers = [
+        {"label": "A", "probability": 0.5, "name": "MMA_R", "smiles": MMA_R, "residue_name": "MMA"},
+        {"label": "B", "probability": 0.5, "name": "MMA_S", "smiles": MMA_S, "residue_name": "MMA"},
+    ]
+    data["solutes"].append(_dynamic(monomers=monomers))
+    assert [m.residue_name for m in load(data).polymers.monomers] == ["MMA", "MMA"]
+
+
+def test_monomers_that_are_not_stereoisomers_cannot_share_a_residue_name(data) -> None:
+    monomers = [
+        {"label": "A", "probability": 0.5, "name": "MMA_R", "smiles": MMA_R, "residue_name": "MMA"},
+        {
+            "label": "B",
+            "probability": 0.5,
+            "name": "HEMA_S",
+            "smiles": "[*]C[C@]([*])(C)C(=O)OCCO",
+            "residue_name": "MMA",
+        },
+    ]
+    data["solutes"].append(_dynamic(monomers=monomers))
+    with pytest.raises(ValidationError, match="only stereoisomers of one monomer"):
+        load(data)
+
+
+def test_two_monomers_with_the_same_smiles_cannot_share_a_residue_name(data) -> None:
+    """Only stereoisomers share a residue name; the same SMILES twice is refused."""
+    monomers = [
+        {"label": "A", "probability": 0.5, "name": "MMA_1", "smiles": MMA_R, "residue_name": "MMA"},
+        {"label": "B", "probability": 0.5, "name": "MMA_2", "smiles": MMA_R, "residue_name": "MMA"},
+    ]
+    data["solutes"].append(_dynamic(monomers=monomers))
+    with pytest.raises(ValidationError, match="share residue_name"):
+        load(data)
+
+
+@pytest.mark.parametrize(
+    ("given", "suggested"), [("hydrogen", "[*][H]"), ("[*]C", "[*]C")], ids=["no_star", "star"]
+)
+def test_a_bare_cap_is_refused_with_a_cap_that_works(data, given, suggested) -> None:
+    """The refusal of the old string form suggests a cap with one '*'."""
+    data["solutes"].append(
+        _dynamic(end_groups={"head": given, "tail": [_option("H", "[*][H]", 1.0)]})
+    )
+    with pytest.raises(ValidationError, match="is a list of caps") as error:
+        load(data)
+    assert f"smiles: '{suggested}'" in str(error.value)

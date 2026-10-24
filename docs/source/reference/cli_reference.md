@@ -94,7 +94,7 @@ polyzymd validate -c <path>
 - Required fields are present, numbers are finite and not `true`/`false`
 - The enzyme PDB has atoms, the substrate SDF holds the conformer, SMILES parse
   and the charge method can charge each molecule (errors, exit 1)
-- Cached polymer SDFs and reaction templates are reported as warnings when missing
+- Cached polymer SDFs are reported as warnings when missing; the star-sited SMILES of dynamic polymers are read and checked
 - Settings a new build would not run as written: `NVE`, Nose-Hoover or Andersen
   on OpenMM, `samples` above the MD steps, unset `$VAR` in paths (errors)
 - Monomer probabilities sum to 1.0

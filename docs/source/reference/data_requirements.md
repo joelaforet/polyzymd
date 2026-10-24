@@ -141,13 +141,15 @@ what, and did the built system pass the physics audit. It replaced
 | `components` | One record per component (each solute, `solvent`, `ions`): `name`, `type`, `segid`, `placement` (`fixed` or `packed`), `n_atoms`, `n_molecules`, the atom ranges of each molecule, and its `domains`. A domain is a set of atoms with one `force_field` list and one `charges` source (`method`, `model`, `source_file`), and the inputs it can be rebuilt from (`reference`). `provenance` holds each input file's path and SHA-256 |
 | `provenance` | Seeds and the box: see below |
 | `audit` | The physics audit: `passed`, `counts` per status, every `finding` (`check`, `component`, `status`, `detail`, and `examples` of the first terms that differ) and `accepted_exceptions` |
-| `cite` | References of the methods this build used beyond its force fields and charge models, Packmol when the build packed solvent or polymer chains with it, and Machado and Pantano when `ionic_strength` set the ions. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
+| `cite` | References of the methods this build used beyond its force fields and charge models, Packmol when the build packed solvent or polymer chains with it, mBuild when it built polymer chains, and Machado and Pantano when `ionic_strength` set the ions. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
 
 `provenance` keys:
 
 | Key | Meaning |
 |-----|---------|
 | `polymer_seed`, `packmol_seed` | Replicate seed used for polymer generation and PACKMOL |
+| `polymer_sequence_seed` | Seed of the polymer sequence draw: `random_seed` of the polymer solute, or the replicate seed |
+| `polymer_builder` | The mBuild that built dynamic polymer chains: version, source URL, tag and commit (absent when no chain was built) |
 | `polymer_packmol_seed` | Seed passed to the polymer-packing PACKMOL run |
 | `solvent_packmol_seed` | Seed passed to the solvation PACKMOL run |
 | `box_vectors_nm` | The periodic cell as a 3x3 row-major matrix in nm |
@@ -348,14 +350,7 @@ directory and referenced from `config.yaml`.
 |---|---|---|---|
 | Protein structure | PDB (`.pdb`) | `pdb_path` of the protein solute | Standard residue names, protonated at simulation pH, no missing heavy atoms in regions of interest |
 | Substrate | SDF (`.sdf`) | `sdf_path` of the small-molecule solute | 3D coordinates with docked pose, explicit hydrogens preferred. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
-| Polymer (if pre-built) | SDF (`.sdf`) | `sdf_directory` of the polymer solute | One SDF per chain, or use dynamic generation from SMILES |
-| Reaction templates | RXN or `"default"` | `reactions.*` of the polymer solute | The string `"default"` loads bundled ATRP templates; a file path loads a custom template |
-
-```{note}
-The sentinel value `"default"` for reaction templates is **not** a file path.
-Do not prepend a directory to it. PolyzyMD resolves `"default"` to bundled
-reaction files at runtime.
-```
+| Polymer (if pre-built) | SDF (`.sdf`) | `sdf_directory` of the polymer solute | One SDF per chain, or use dynamic generation from star-sited SMILES (no file) |
 
 ---
 
@@ -418,11 +413,6 @@ are resolved from the current directory.
   `scratch_directory` value but later changed it in `config.yaml`, analysis
   looks in the wrong location. The `scratch_directory` in
   `config.yaml` must match where the trajectory files actually reside.
-
-- **The `"default"` sentinel for reactions.** Setting
-  `reactions.initiation: "default"` on a polymer solute tells PolyzyMD to use a bundled
-  reaction template. Writing `"structures/default"` or any path containing
-  `"default"` will fail because no such file exists.
 
 - **Missing replicate directories.** Each replicate number given with
   `--replicates` must have a run directory on disk. If replicate 3 was never

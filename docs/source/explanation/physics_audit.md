@@ -164,7 +164,11 @@ does not check that the config describes good science:
   audit does not compute them again; `charges.source` reports a warning that
   says so;
 - how closely GROMACS and OpenMM sample the same ensemble where their
-  algorithms differ (see {doc}`../reference/gromacs_openmm`).
+  algorithms differ (see {doc}`../reference/gromacs_openmm`);
+- the chemistry of dynamically built polymer chains against their SMILES
+  (atoms, bonds, stereochemistry, caps): the builder assembles each chain from
+  the SMILES and checks its geometry, and the audit checks the parameters and
+  charges of the chain it is given.
 
 A wrong config is built faithfully, and recorded.
 
