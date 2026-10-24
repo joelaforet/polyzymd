@@ -43,6 +43,10 @@ compared with the control only, not with every other condition.
   and no effect size, and the verdict reads `not testable (n < 3)` with the
   two condition means. Two replicates leave a t test with about one degree of
   freedom, so PolyzyMD does not decide a difference from them.
+- Figures follow the same rule: a condition with fewer than three replicates
+  gets no error bar or band. A drawn interval stops at the bounds of the
+  metric, such as 0 for an RMSD or 0 and 1 for a fraction, because a t
+  interval near a bound extends past values the metric cannot take.
 
 ---
 

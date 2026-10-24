@@ -82,7 +82,9 @@ def test_different_counts_are_given_per_condition(tmp_path, saved) -> None:
 
 def test_a_one_replicate_condition_is_said_to_have_no_interval(tmp_path, saved) -> None:
     replicate_values({"A": [1.0, 1.2, 1.4], "B": [2.0]}).plot(tmp_path, name="one")
-    assert _note(saved["one"]).endswith("a condition with one replicate has no interval.")
+    assert _note(saved["one"]).endswith(
+        "a condition with fewer than three replicates has no interval."
+    )
 
 
 def test_grouped_bars_name_the_t_interval_of_the_mean(tmp_path, saved) -> None:

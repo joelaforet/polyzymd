@@ -899,8 +899,9 @@ def error_bar_half_widths(
     for that bar's own replicate count, so the bar spans the 95 percent
     interval; with ``"sem"`` it is drawn unchanged. ``replicate_values`` gives
     the per-bar counts, or ``n_replicates`` a count shared by every bar. Bars
-    backed by one replicate get no error bar, and the result is ``None`` when
-    no bar has displayable uncertainty.
+    backed by fewer than three replicates get no error bar, as their
+    comparisons are not tested, and the result is ``None`` when no bar has
+    displayable uncertainty.
     """
     from polyzymd.analyses.shared.statistics import student_t_coverage_factor
 
@@ -917,7 +918,7 @@ def error_bar_half_widths(
     half_widths: list[float] = []
     any_uncertainty = False
     for sem, count in zip(sems, counts, strict=False):
-        if sem is None or count < 2:
+        if sem is None or count < MIN_REPLICATES_FOR_INTERVAL:
             half_widths.append(0.0)
             continue
         factor = 1.0
@@ -929,6 +930,30 @@ def error_bar_half_widths(
     return half_widths if any_uncertainty else None
 
 
+#: Fewest replicates behind a drawn interval, as for a tested comparison.
+MIN_REPLICATES_FOR_INTERVAL = 3
+
+
+def clip_to_bounds(
+    low: Any, high: Any, bounds: Sequence[float | None] = (None, None)
+) -> tuple[Any, Any]:
+    """Clip interval ends to the bounds of the metric, such as 0 for an RMSD.
+
+    A t interval is symmetric, so near a bound it extends past values the
+    metric cannot take; the drawn part stops at the bound.
+    """
+    import numpy as np
+
+    lower, upper = (list(bounds) + [None, None])[:2]
+    low = np.asarray(low, dtype=float)
+    high = np.asarray(high, dtype=float)
+    if lower is not None:
+        low, high = np.maximum(low, lower), np.maximum(high, lower)
+    if upper is not None:
+        low, high = np.minimum(low, upper), np.minimum(high, upper)
+    return low, high
+
+
 def band_half_widths(
     matrix: Any,
     *,
@@ -937,8 +962,8 @@ def band_half_widths(
     """Return the half width of a shaded band over per-replicate traces.
 
     ``matrix`` is shaped ``(n_replicates, n_points)``. The band is centred on
-    the mean across replicates and is ``None`` when fewer than two replicates
-    make it inestimable.
+    the mean across replicates and is ``None`` with fewer than three
+    replicates, whose interval is too wide to read.
     """
     import numpy as np
 
@@ -948,7 +973,7 @@ def band_half_widths(
         raise StatisticsError(f"error_bar must be 'ci95' or 'sem', got {error_bar!r}")
 
     array = np.asarray(matrix, dtype=float)
-    if array.ndim != 2 or array.shape[0] < 2:
+    if array.ndim != 2 or array.shape[0] < MIN_REPLICATES_FOR_INTERVAL:
         return None
     n = int(array.shape[0])
     sem = np.std(array, axis=0, ddof=1) / np.sqrt(float(n))

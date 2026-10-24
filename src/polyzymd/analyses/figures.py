@@ -48,16 +48,16 @@ def _footnote(
 
     ``replicates`` holds the replicate counts of the conditions drawn. With one
     count the footnote gives that n, and with several it says that n is per
-    condition. A condition with one replicate has no interval, and the
-    footnote says so.
+    condition. A condition with fewer than three replicates has no interval,
+    and the footnote says so. Intervals are clipped to the metric's bounds.
     """
     from polyzymd.analyses.shared.plotting import add_uncertainty_footnote
 
-    if max(replicates) < 2:
-        _note(fig, f"No interval: every condition has one replicate; {window}.")
+    if max(replicates) < 3:
+        _note(fig, f"No interval: every condition has fewer than three replicates; {window}.")
         return
-    if min(replicates) < 2:
-        wording["points"] += "; a condition with one replicate has no interval"
+    if min(replicates) < 3:
+        wording["points"] += "; a condition with fewer than three replicates has no interval"
     n = next(iter(replicates)) if len(replicates) == 1 else None
     add_uncertainty_footnote(fig, n_replicates=n, equilibration=equilibration, **wording)
 
@@ -116,7 +116,12 @@ def plot_timeseries(
     import numpy as np
 
     from polyzymd.analyses.shared.loader import convert_time, parse_time_string
-    from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend, band_half_widths
+    from polyzymd.analyses.shared.plotting import (
+        apply_axis_style,
+        apply_legend,
+        band_half_widths,
+        clip_to_bounds,
+    )
 
     settings, labels, colors = _setup(source, plot_settings)
     equilibration = source.study[labels[0]].equilibration
@@ -145,7 +150,8 @@ def plot_timeseries(
                 label=f"{label} (n = {len(items)})",
             )
             if band is not None:
-                ax.fill_between(times, mean - band, mean + band, color=color, alpha=0.2, zorder=2)
+                low, high = clip_to_bounds(mean - band, mean + band, source.bounds)
+                ax.fill_between(times, low, high, color=color, alpha=0.2, zorder=2)
         else:
             ax.plot(
                 [],
@@ -382,6 +388,7 @@ def plot_condition_values(
 
     from polyzymd.analyses.shared.plotting import (
         apply_axis_style,
+        clip_to_bounds,
         error_bar_half_widths,
         scatter_replicate_values,
     )
@@ -393,10 +400,17 @@ def plot_condition_values(
     stats = [mean_sem_ci(entry) for entry in data]
     positions, theme = np.arange(len(labels)), settings.theme
     fig, ax = _subplots(figsize=(10, 6))
+    means = np.array([item.mean for item in stats], dtype=float)
+    half = error_bar_half_widths([item.sem for item in stats], data)
+    yerr = None
+    if half is not None:
+        bounds = (0.0, 1.0) if values.is_fraction else getattr(values, "bounds", (None, None))
+        low, high = clip_to_bounds(means - np.asarray(half), means + np.asarray(half), bounds)
+        yerr = np.vstack([means - low, high - means])
     ax.bar(
         positions,
-        [item.mean for item in stats],
-        yerr=error_bar_half_widths([item.sem for item in stats], data),
+        means,
+        yerr=yerr,
         color=[colors[label] for label in labels],
         edgecolor=theme.bar_edgecolor,
         linewidth=theme.bar_linewidth,
@@ -455,7 +469,12 @@ def plot_profile(
     """
     import numpy as np
 
-    from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend, band_half_widths
+    from polyzymd.analyses.shared.plotting import (
+        apply_axis_style,
+        apply_legend,
+        band_half_widths,
+        clip_to_bounds,
+    )
 
     settings, labels, colors = _setup(values.source, plot_settings)
     labels = [label for label in labels if values.values.get(label)]
@@ -474,7 +493,10 @@ def plot_profile(
         mean, band = matrix.mean(axis=0), band_half_widths(matrix)
         ax.plot(x, mean, color=color, linewidth=1.8, zorder=3, label=f"{label} (n = {len(matrix)})")
         if band is not None:
-            ax.fill_between(x, mean - band, mean + band, color=color, alpha=0.2, zorder=2)
+            low, high = clip_to_bounds(
+                mean - band, mean + band, getattr(values, "bounds", (None, None))
+            )
+            ax.fill_between(x, low, high, color=color, alpha=0.2, zorder=2)
     where = {str(k): position for k, position in zip(values.labels, x, strict=True)}
     for key in highlight:
         if str(key) in where:
@@ -533,6 +555,7 @@ def plot_decomposition(
         apply_axis_style,
         apply_legend,
         band_half_widths,
+        clip_to_bounds,
         get_palette_colors,
     )
 
@@ -552,7 +575,10 @@ def plot_decomposition(
             mean, band = matrix.mean(axis=0), band_half_widths(matrix)
             ax.plot(x, mean, color=color, linewidth=1.5, label=part.replace("_", " "))
             if band is not None:
-                ax.fill_between(x, mean - band, mean + band, color=color, alpha=0.2)
+                low, high = clip_to_bounds(
+                    mean - band, mean + band, getattr(values, "bounds", (None, None))
+                )
+                ax.fill_between(x, low, high, color=color, alpha=0.2)
         apply_axis_style(
             ax, settings, title=f"{label} (n = {len(matrix)})", ylabel=_label("value", unit)
         )
