@@ -1631,6 +1631,10 @@ def test_a_local_gromacs_run_uses_the_configured_mdrun_flags(tmp_path, monkeypat
     path.write_text(yaml.safe_dump(data))
     gpu = create_engine(SimulationConfig.from_yaml(path), override="gromacs", defer_binary=True)
     assert "-nb gpu" in gpu.local_mdrun_flags("gmx")["eq"]
+    # Energy minimization cannot offload PME, update or bonded work (as in the job script).
+    em = gpu.local_mdrun_flags("gmx")["em"]
+    assert "-nb gpu" in em
+    assert not any(f"-{work} gpu" in em for work in ("pme", "update", "bonded"))
 
     commands = []
     runner = GromacsRunner(tmp_path, "trpcage", [], "gmx", mdrun_flags=flags)
