@@ -259,7 +259,7 @@ which is what these tests and corrections are built for.
   2nd edition. Lawrence Erlbaum Associates, Hillsdale.
 - Hedges, L. V. (1981). Distribution theory for Glass's estimator of effect
   size and related estimators. Journal of Educational Statistics 6:107-128.
-  doi:10.3102/10769986006002107 (small-sample correction, not implemented)
+  doi:10.3102/10769986006002107 (the small-sample correction behind `hedges_g`)
 - Scott, D. W. (1992). Multivariate density estimation: theory, practice, and
   visualization. Wiley, New York. doi:10.1002/9780470316849
 
