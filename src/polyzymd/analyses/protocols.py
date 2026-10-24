@@ -231,7 +231,9 @@ class ProtocolReport(BaseModel):
     list the rest, the selected one first. ``status`` is ``"complete"``, or
     ``"partial"`` when a condition could not be measured or compared;
     ``problems`` then names each condition left out of the report, or the
-    comparison that failed, with its error.
+    comparison that failed, with its error. ``excluded_replicates`` maps a
+    condition label to the replicate folders found on disk but left out, each
+    with the reason; any makes the report partial.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -239,6 +241,7 @@ class ProtocolReport(BaseModel):
     analysis: str
     status: str = "complete"
     problems: list[str] = Field(default_factory=list)
+    excluded_replicates: dict[str, dict[str, str]] = Field(default_factory=dict)
     trends: list[TrendReport] = Field(default_factory=list)
     protocol_version: str
     metric: str
@@ -254,6 +257,17 @@ class ProtocolReport(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     provenance: ProtocolProvenance
     verdict: list[str] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _leave_out_no_exclusions(self, handler: Any) -> dict[str, Any]:
+        """Write ``excluded_replicates`` only when a replicate was left out.
+
+        Reports with none stay byte for byte as before the field existed.
+        """
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("excluded_replicates"):
+            data.pop("excluded_replicates", None)
+        return data
 
     def to_agent_text(self) -> str:
         """Render the report as fixed-vocabulary text, one line per item.
@@ -405,6 +419,7 @@ def analyze(
     else:
         report = _report_skipping(measured.values, study, measured.skipped, name)
     report.warnings += measured.warnings
+    _record_not_run(report, study)
     if measured.settings is not None:
         report.provenance.settings = measured.settings
     if plots:
@@ -416,6 +431,31 @@ def analyze(
     return report.model_copy(
         update={"analysis": name, "run": measured.run, "all_runs": measured.runs}
     )
+
+
+#: Why a replicate folder found on disk was left out of a report.
+NOT_RUN_REASON = "no production output (never built or never run)"
+
+
+def _record_not_run(report: ProtocolReport, study: Any) -> None:
+    """List the replicate folders the study left out because they were never run.
+
+    Each goes into ``excluded_replicates`` and ``problems``, and the report
+    becomes partial, so a smaller sample than the folders on disk is never
+    silent.
+    """
+    for condition in study:
+        not_run = getattr(condition, "not_run", None) or []
+        if not not_run:
+            continue
+        report.excluded_replicates[condition.label] = {
+            str(index): NOT_RUN_REASON for index in not_run
+        }
+        report.problems.append(
+            f"condition {condition.label}: replicate {', '.join(str(i) for i in not_run)} "
+            f"left out: {NOT_RUN_REASON}"
+        )
+        report.status = "partial"
 
 
 def _require_known(name: str) -> None:
@@ -2095,10 +2135,12 @@ def _verdict(
             why = (
                 f", as {pair.reason}"
                 if pair.reason
-                else " needs at least two replicates per condition"
-                if few
-                else " has the same value in every replicate of both conditions, so no "
-                "variance to test"
+                else (
+                    " needs at least two replicates per condition"
+                    if few
+                    else " has the same value in every replicate of both conditions, so no "
+                    "variance to test"
+                )
             )
             sentences.append(
                 f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b}{why} ({n_text})"

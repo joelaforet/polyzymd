@@ -747,7 +747,10 @@ def build_system_report(
 
         note = None
         action = None
-        if local_run:
+        if local_run and jobs is None:
+            # Without squeue a SLURM job that holds the lock looks the same.
+            note = "lock held (local run or job); slurm unavailable"
+        elif local_run:
             note = "local run (a process holds the replicate lock)"
         elif jobs is None:
             note = "slurm unavailable"

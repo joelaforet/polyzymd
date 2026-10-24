@@ -104,3 +104,36 @@ def test_segments_that_do_not_join_are_not_blamed_on_the_topology() -> None:
     with pytest.raises(ProtocolError, match="Cannot join the production segments") as info:
         Replicate.universe(replicate)
     assert "analysis-topology" not in info.value.hint
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_replicates_left_out_reach_the_report(tmp_path: Path) -> None:
+    """The report names the folder it left out and is partial, in JSON and in text."""
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.protocols import analyze
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+
+    config = write_simulation_config(tmp_path / "cond", scratch=tmp_path / "scratch")
+    for replicate in (1, 2):
+        write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(10)])
+    SimulationConfig.from_yaml(config).get_working_directory(3).mkdir(parents=True)
+
+    report = analyze(
+        "rg",
+        [config],
+        labels=["A"],
+        equilibration="0ns",
+        settings={"selection": "all"},
+        output_dir=tmp_path / "out",
+        plots=False,
+        eq_check=False,
+    )
+    assert report.status == "partial"
+    assert report.excluded_replicates == {
+        "A": {"3": "no production output (never built or never run)"}
+    }
+    assert report.conditions[0].n_replicates == 2
+    text = report.to_agent_text()
+    assert "status partial" in text
+    assert "problem: condition A: replicate 3 left out" in text

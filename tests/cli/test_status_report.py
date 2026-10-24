@@ -842,7 +842,7 @@ def test_a_replicate_run_with_its_own_protocol_is_never_called_dead(tmp_path: Pa
     assert "polyzymd submit" not in text
 
 
-def _local_report(tmp_path: Path, seg_status: SegmentStatus):
+def _local_report(tmp_path: Path, seg_status: SegmentStatus, jobs: list | None = None):
     from polyzymd.cli.status_report import build_system_report
 
     scratch = tmp_path / "scratch"
@@ -855,8 +855,35 @@ def _local_report(tmp_path: Path, seg_status: SegmentStatus):
     engine.resolve_engine_working_directory.side_effect = lambda p: p
     engine.load_or_scan_progress.return_value = progress
     return rep_dir, lambda: build_system_report(
-        cfg, "c.yaml", engine_inst=engine, jobs=[], now=NOW, job_name_fn=lambda c, r: f"SYS_run{r}"
+        cfg,
+        "c.yaml",
+        engine_inst=engine,
+        jobs=[] if jobs is None else jobs,
+        now=NOW,
+        job_name_fn=lambda c, r: f"SYS_run{r}",
     )
+
+
+def test_a_lock_holder_without_squeue_is_not_called_a_local_run(tmp_path: Path):
+    """Without squeue, the lock may be held by a SLURM job as well."""
+    from polyzymd.cli import status_report
+    from tests.simulation.test_progress import _lock_held_by_another_process
+
+    rep_dir, _ = _local_report(tmp_path, SegmentStatus.RUNNING)
+    cfg = _mock_cfg(tmp_path / "scratch", tmp_path / "slurm_logs")
+    cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+    engine = MagicMock()
+    engine.resolve_engine_working_directory.side_effect = lambda p: p
+    engine.load_or_scan_progress.return_value = _write_progress(
+        rep_dir, 13_500, SimulationStatus.INTERRUPTED, SegmentStatus.RUNNING
+    )
+    with _lock_held_by_another_process(rep_dir):
+        report = status_report.build_system_report(
+            cfg, "c.yaml", engine_inst=engine, jobs=None, now=NOW, job_name_fn=lambda c, r: "x"
+        )
+    (rep,) = report.replicates
+    assert rep.verdict == "running"
+    assert rep.note.startswith("lock held (local run or job)")
 
 
 def test_a_local_run_that_holds_the_lock_is_running(tmp_path: Path):

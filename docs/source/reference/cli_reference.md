@@ -321,13 +321,16 @@ A replicate whose production has started is not run from its start again:
 
 - OpenMM: `run` continues production from the saved state, as `run-segment`
   does in a SLURM chain. A complete replicate prints `already complete;
-  nothing to do`.
+  nothing to do`. The build must still match the config, except for the
+  production duration and samples. Otherwise `run` refuses: restore the
+  config, or run the changed config in a new output directory.
 - GROMACS: a complete replicate prints `already complete; nothing to do`. A
   started production that is not complete is refused, since the local
   workflow cannot continue it. The message gives `polyzymd submit` and the
   `gmx mdrun -cpi` command that continue it from its checkpoint. A run that
   stopped before production runs again from minimization, after the same
-  audit checks as a new run.
+  audit checks as a new run. A build made before PolyzyMD 1.3.0rc5 has no
+  audit record, so it must be built again.
 
 A replicate that has no usable build stops before it writes anything when the
 environment cannot build (a `sim-cuda-*` environment has no RDKit or OpenFF).

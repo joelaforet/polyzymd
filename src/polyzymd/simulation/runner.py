@@ -139,23 +139,39 @@ STALE_RESUME_FILES = (
 )
 
 
-def _remove_stale_resume_files(phase_dir: Path, phase_name: str) -> None:
-    """Remove the resume files of an earlier attempt at a segment that starts over.
+def _remove_stale_resume_files(phase_dir: Path, phase_name: str) -> Path | None:
+    """Move the resume files of an earlier attempt at a segment that starts over.
 
     A segment that runs from its first step replaces the trajectory of any
     earlier attempt. That attempt's ``INTERRUPTED`` marker and saved states
     would otherwise stay beside the new files and make the segment look
-    interrupted.
+    interrupted. They are moved into ``earlier-attempt-<UTC time>/`` in the
+    segment folder, never deleted.
+
+    Returns
+    -------
+    Path or None
+        The folder they were moved to, or ``None`` when there were none.
     """
+    from datetime import datetime, timezone
+
     stale = [phase_dir / name for name in STALE_RESUME_FILES if (phase_dir / name).exists()]
     if not stale:
-        return
-    LOGGER.warning(
-        f"{phase_name} starts from its first step; removing "
-        f"{', '.join(path.name for path in stale)} left by an earlier attempt"
-    )
+        return None
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = phase_dir / f"earlier-attempt-{stamp}"
+    suffix = 1
+    while target.exists():
+        target = phase_dir / f"earlier-attempt-{stamp}-{suffix}"
+        suffix += 1
+    target.mkdir()
     for path in stale:
-        path.unlink()
+        path.rename(target / path.name)
+    LOGGER.warning(
+        f"{phase_name} starts from its first step; moved "
+        f"{', '.join(path.name for path in stale)} left by an earlier attempt to {target}"
+    )
+    return target
 
 
 class SimulationRunner:

@@ -107,7 +107,13 @@ def test_larger_overlaps_and_gaps_still_raise(tmp_path, second_start) -> None:
 INTERVAL = 2500
 
 
-def _write_openmm_segment(run_dir: Path, index: int, csv_steps: list[int] | None) -> None:
+def _write_openmm_segment(
+    run_dir: Path,
+    index: int,
+    csv_steps: list[int] | None,
+    n_frames: int | None = None,
+    istart: int = INTERVAL,
+) -> None:
     """Write production_<index> as OpenMM 8.2+ does: the header's first step is the interval.
 
     ``csv_steps`` are the steps the state-data CSV records for its frames;
@@ -121,8 +127,9 @@ def _write_openmm_segment(run_dir: Path, index: int, csv_steps: list[int] | None
     universe.atoms.positions = np.asarray(CROSS, dtype=np.float32)
     universe.atoms.write(str(run_dir / "solvated_system.pdb"))
     path = segment / f"production_{index}_trajectory.dcd"
-    n_frames = len(csv_steps) if csv_steps else 4
-    with mda.Writer(str(path), n_atoms=4, dt=DT_PS, istart=INTERVAL, nsavc=INTERVAL) as writer:
+    if n_frames is None:
+        n_frames = len(csv_steps) if csv_steps else 4
+    with mda.Writer(str(path), n_atoms=4, dt=DT_PS, istart=istart, nsavc=INTERVAL) as writer:
         for k in range(n_frames):
             universe.atoms.positions = np.asarray(CROSS, dtype=np.float32) * (1.0 + 0.01 * k)
             writer.write(universe.atoms)
@@ -165,3 +172,41 @@ def test_csv_that_disagrees_with_the_frame_interval_is_not_used(tmp_path) -> Non
     loader = TrajectoryLoader(SimulationConfig.from_yaml(config))
     with pytest.raises(TrajectoryLineageError):
         loader.load_universe(1, cache=False)
+
+
+def _open(run_dir: Path, indices: list[int]):
+    from polyzymd.analyses.shared.loader import open_universe
+
+    files = [run_dir / f"production_{i}" / f"production_{i}_trajectory.dcd" for i in indices]
+    return open_universe(run_dir / "solvated_system.pdb", files)
+
+
+def test_first_segment_and_absolute_headers_are_not_shifted(tmp_path) -> None:
+    """Segment 0, and a continuation whose header holds its step (OpenMM 8.1), keep their times."""
+    run_dir = tmp_path / "run"
+    _write_openmm_segment(run_dir, 0, [2500, 5000, 7500, 10000])
+    _write_openmm_segment(run_dir, 1, [12500, 15000, 17500, 20000], istart=12500)
+    times = [round(ts.time, 3) for ts in _open(run_dir, [0, 1]).trajectory]
+    assert times == pytest.approx(DT_PS * np.arange(1, 9))
+
+
+def test_a_single_continuation_file_is_shifted(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    _write_openmm_segment(run_dir, 1, [12500, 15000, 17500, 20000])
+    times = [round(ts.time, 3) for ts in _open(run_dir, [1]).trajectory]
+    assert times == pytest.approx(DT_PS * np.arange(5, 9))
+
+
+def test_an_interrupted_segment_with_one_frame_more_than_csv_rows_is_shifted(tmp_path) -> None:
+    """OpenMM writes the frame before its CSV row, so a kill can leave one row missing."""
+    run_dir = tmp_path / "run"
+    _write_openmm_segment(run_dir, 1, [12500, 15000, 17500], n_frames=4)
+    times = [round(ts.time, 3) for ts in _open(run_dir, [1]).trajectory]
+    assert times == pytest.approx(DT_PS * np.arange(5, 9))
+
+
+def test_a_csv_with_one_row_is_not_trusted(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    _write_openmm_segment(run_dir, 1, [12500])
+    times = [round(ts.time, 3) for ts in _open(run_dir, [1]).trajectory]
+    assert times == pytest.approx([DT_PS])

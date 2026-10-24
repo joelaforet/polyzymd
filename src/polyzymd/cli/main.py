@@ -1494,6 +1494,11 @@ def _run_openmm_impl(
         not_reused = reason
     if not_reused is not None and not run_started(working_dir):
         _require_build_environment(working_dir, replicate, config_path, not_reused)
+    # A started production may continue with a new production length, as a
+    # SLURM chain does; any other change to the build or config is refused.
+    length_changed_only = not_reused is not None and _build_matches_recorded_length(
+        working_dir, sim_config, config_path, replicate
+    )
 
     # progress.json records each stage and segment, and the trajectory hash of
     # each finished segment, as a run under SLURM does.
@@ -1521,6 +1526,21 @@ def _run_openmm_impl(
                     phase="simulation",
                 )
                 return
+            if not_reused is not None and not length_changed_only:
+                raise ArtifactIntegrityError(
+                    f"Not continuing replicate {replicate}: its build in {working_dir} does not "
+                    f"match this config: {not_reused}\n"
+                    "Production has started, so it continues only with the config and build "
+                    "it started with. Restore the config (and any changed build file), or "
+                    "build and run the changed config in a new output directory "
+                    "(--scratch-dir)."
+                )
+            if length_changed_only:
+                colored_echo(
+                    "The config changes only the production length; continuing to "
+                    f"{progress.total_steps_requested} steps.",
+                    phase="simulation",
+                )
             _resume_production_locked(config_path, sim_config, working_dir, replicate, progress)
             colored_echo("OpenMM simulation completed successfully.", phase="simulation")
             colored_echo(f"Output directory: {_shown(working_dir)}", phase="simulation")
@@ -1556,6 +1576,46 @@ def _run_openmm_impl(
 
 #: Modules ``polyzymd build`` needs; the sim-cuda-* environments leave them out.
 BUILD_MODULES = ("rdkit", "openff.toolkit", "openff.interchange")
+
+
+def _build_matches_recorded_length(
+    working_dir: Path, sim_config: "SimulationConfig", config_path: str, replicate: int
+) -> bool:
+    """Whether the build matches the config once production length is set back.
+
+    The production duration and samples that ``progress.json`` recorded
+    are put back into a copy of the config; True when the build record then
+    validates. Those are the only settings a started chain may change.
+    """
+    from polyzymd.simulation.artifact_integrity import (
+        ArtifactIntegrityError,
+        validate_build_bundle,
+    )
+    from polyzymd.simulation.progress import load_progress
+
+    prior = load_progress(working_dir)
+    if prior is None or not prior.total_steps_requested or not prior.timestep_fs:
+        return False
+    phases = sim_config.simulation_phases
+    duration = prior.total_steps_requested * prior.timestep_fs / 1e6
+    for candidate in dict.fromkeys((duration, round(duration, 9))):
+        production = phases.production.model_copy(
+            update={
+                "duration": candidate,
+                "samples": prior.total_samples_requested or phases.production.samples,
+            }
+        )
+        adjusted = sim_config.model_copy(
+            update={"simulation_phases": phases.model_copy(update={"production": production})}
+        )
+        try:
+            validate_build_bundle(
+                working_dir, adjusted, config_path=config_path, replicate=replicate
+            )
+        except ArtifactIntegrityError:
+            continue
+        return True
+    return False
 
 
 def _missing_build_modules() -> list[str]:

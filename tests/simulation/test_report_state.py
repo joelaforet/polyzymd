@@ -376,7 +376,7 @@ class TestRestartEndToEnd:
         assert seg1 == (2, 25, REPORT_INTERVAL)
         assert _csv_steps(tmp_path / "production_1" / "production_1_state_data.csv")[0] == 25
 
-    def test_segment_started_again_removes_the_earlier_attempts_resume_files(
+    def test_segment_started_again_moves_the_earlier_attempts_resume_files_aside(
         self, tmp_path, caplog
     ):
         """Its old INTERRUPTED marker would otherwise make the new segment look interrupted."""
@@ -389,7 +389,12 @@ class TestRestartEndToEnd:
 
         assert not (seg_dir / "INTERRUPTED").exists()
         assert not (seg_dir / "interrupted_state.xml").exists()
-        assert not (seg_dir / "interrupted_checkpoint.chk").exists()
+        (moved,) = seg_dir.glob("earlier-attempt-*")
+        assert sorted(p.name for p in moved.iterdir()) == [
+            "INTERRUPTED",
+            "interrupted_checkpoint.chk",
+            "interrupted_state.xml",
+        ]
         assert "left by an earlier attempt" in caplog.text
 
     def test_hard_kill_resumes_after_the_last_frame(self, tmp_path):

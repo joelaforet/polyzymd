@@ -488,7 +488,8 @@ def openmm_dcd_time_shift(trajectory_file: str | Path, frame_interval_ps: float)
     the real step of each frame: OpenMM writes the frame and the CSV row at
     the same step, the frame first. The shift is taken from the CSV only when
     the header has that signature (first step equal to the interval), the
-    CSV rows are one frame interval apart, and the first CSV step is a whole
+    CSV has at least two rows, one frame interval apart, and the first CSV
+    step is a whole
     number of intervals after the header's first step.
 
     Parameters
@@ -517,9 +518,10 @@ def openmm_dcd_time_shift(trajectory_file: str | Path, frame_interval_ps: float)
     if frames <= 0 or interval <= 1 or first_step != interval:
         return None
     steps = _csv_steps(path.with_name(path.name[: -len("_trajectory.dcd")] + "_state_data.csv"))
-    if not steps or steps[0] <= first_step or steps[0] % interval:
+    # Two rows at least, so the CSV itself shows the frame interval.
+    if len(steps) < 2 or steps[1] - steps[0] != interval:
         return None
-    if len(steps) > 1 and steps[1] - steps[0] != interval:
+    if steps[0] <= first_step or steps[0] % interval:
         return None
     shift = (steps[0] - first_step) / interval * frame_interval_ps
     if path not in _WARNED_DCD_TIME_SHIFT_PATHS:

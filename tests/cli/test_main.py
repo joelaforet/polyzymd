@@ -2730,10 +2730,11 @@ class TestRunContinuesStartedProduction:
             segments=[SegmentRecord(index=0, status=status, steps_completed=steps_done)],
         )
 
+    @patch("polyzymd.simulation.artifact_integrity.validate_build_bundle")
     @patch("polyzymd.cli.main._run_initial_segment")
     @patch("polyzymd.cli.main._run_segment_locked")
     def test_interrupted_production_continues_from_its_saved_state(
-        self, run_segment, run_initial_segment, tmp_path: Path, capsys, monkeypatch
+        self, run_segment, run_initial_segment, _validate, tmp_path: Path, capsys, monkeypatch
     ) -> None:
         from polyzymd.simulation import progress as progress_module
 
@@ -2765,9 +2766,10 @@ class TestRunContinuesStartedProduction:
         run_segment.assert_not_called()
         assert "Replicate 1 is already complete" in capsys.readouterr().out
 
+    @patch("polyzymd.simulation.artifact_integrity.validate_build_bundle")
     @patch("polyzymd.cli.main._run_segment_locked")
     def test_segment_without_progress_is_an_error(
-        self, run_segment, tmp_path: Path, monkeypatch
+        self, run_segment, _validate, tmp_path: Path, monkeypatch
     ) -> None:
         from polyzymd.simulation import progress as progress_module
 
@@ -2789,6 +2791,105 @@ class TestRunContinuesStartedProduction:
         assert result.exit_code == EXIT_CODE_INTERRUPTED
         assert "Continue it with: polyzymd run -c" in result.output
         assert "-r 2" in result.output
+
+    @patch("polyzymd.cli.main._run_segment_locked")
+    def test_changed_config_is_refused_with_the_reason(
+        self, run_segment, tmp_path: Path, monkeypatch
+    ) -> None:
+        from polyzymd.simulation import progress as progress_module
+        from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+
+        def mismatch(*args, **kwargs):
+            raise ArtifactIntegrityError("Configuration does not match build_provenance.json")
+
+        monkeypatch.setattr(
+            "polyzymd.simulation.artifact_integrity.validate_build_bundle", mismatch
+        )
+        monkeypatch.setattr("polyzymd.cli.main._build_matches_recorded_length", lambda *a: False)
+        monkeypatch.setattr(
+            progress_module, "load_or_scan_progress", lambda **_: self._progress(540)
+        )
+        (tmp_path / "run_1" / "production_0").mkdir(parents=True)
+
+        with pytest.raises(ArtifactIntegrityError, match="Not continuing replicate 1") as raised:
+            _run_openmm_impl(self._config(tmp_path), replicate=1)
+        assert "Configuration does not match" in str(raised.value)
+        assert "--scratch-dir" in str(raised.value)
+        run_segment.assert_not_called()
+
+    @patch("polyzymd.cli.main._run_segment_locked")
+    def test_changed_production_length_only_continues(
+        self, run_segment, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        from polyzymd.simulation import progress as progress_module
+        from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+
+        def mismatch(*args, **kwargs):
+            raise ArtifactIntegrityError("Configuration does not match")
+
+        monkeypatch.setattr(
+            "polyzymd.simulation.artifact_integrity.validate_build_bundle", mismatch
+        )
+        monkeypatch.setattr("polyzymd.cli.main._build_matches_recorded_length", lambda *a: True)
+        monkeypatch.setattr(
+            progress_module, "load_or_scan_progress", lambda **_: self._progress(540)
+        )
+        monkeypatch.setattr(progress_module, "load_progress", lambda _: self._progress(2000))
+        (tmp_path / "run_1" / "production_0").mkdir(parents=True)
+
+        _run_openmm_impl(self._config(tmp_path), replicate=1)
+        run_segment.assert_called_once()
+        assert "changes only the production length" in capsys.readouterr().out
+
+
+class TestBuildMatchesRecordedLength:
+    """A started chain may change its production length and nothing else."""
+
+    @staticmethod
+    def _built(tmp_path: Path):
+        from polyzymd.config.loader import load_config
+        from polyzymd.simulation.artifact_integrity import publish_build_bundle
+        from polyzymd.simulation.progress import SimulationProgress, save_progress
+        from tests.simulation.test_artifact_integrity import _tiny_openmm_bundle
+
+        config = load_config(Path(__file__).parents[2] / "examples/quickstart/config.yaml")
+        publish_build_bundle(tmp_path, *_tiny_openmm_bundle(), config)
+        production = config.simulation_phases.production
+        save_progress(
+            tmp_path,
+            SimulationProgress(
+                total_steps_requested=int(production.duration * 1e6 / production.time_step),
+                total_samples_requested=production.samples,
+                timestep_fs=production.time_step,
+            ),
+        )
+        return config
+
+    def test_a_longer_production_matches(self, tmp_path: Path, passing_audit) -> None:
+        from polyzymd.cli.main import _build_matches_recorded_length
+
+        config = self._built(tmp_path)
+        production = config.simulation_phases.production.model_copy(
+            update={"duration": config.simulation_phases.production.duration * 2, "samples": 7}
+        )
+        longer = config.model_copy(
+            update={
+                "simulation_phases": config.simulation_phases.model_copy(
+                    update={"production": production}
+                )
+            }
+        )
+        assert _build_matches_recorded_length(tmp_path, longer, "", 1)
+
+    def test_another_temperature_does_not(self, tmp_path: Path, passing_audit) -> None:
+        from polyzymd.cli.main import _build_matches_recorded_length
+
+        config = self._built(tmp_path)
+        thermo = config.thermodynamics.model_copy(
+            update={"temperature": config.thermodynamics.temperature + 10}
+        )
+        warmer = config.model_copy(update={"thermodynamics": thermo})
+        assert not _build_matches_recorded_length(tmp_path, warmer, "", 1)
 
 
 class TestGromacsRunStartedReplicate:
@@ -2851,6 +2952,25 @@ class TestGromacsRunStartedReplicate:
         with pytest.raises(ArtifactIntegrityError, match="-cpi prod.cpt") as raised:
             _run_gromacs_impl(TestRunReusesBuild._config(tmp_path), replicate=1, gmx_path="gmx")
         assert "500/2000 steps" in str(raised.value)
+        gromacs_runner.assert_not_called()
+
+    @patch("polyzymd.exporters.gromacs.GromacsRunner")
+    @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
+    def test_run_stopped_before_production_without_an_audit_record_is_refused(
+        self, _prefix, gromacs_runner, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A build from before 1.3.0rc5 has no record; it used to run again from minimization."""
+        from polyzymd.cli.main import _run_gromacs_impl
+        from polyzymd.simulation.artifact_integrity import AuditGateError
+        from polyzymd.simulation.progress import SimulationProgress
+
+        self._gromacs_dir(tmp_path, "em.log", "em.tpr")
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.progress.load_or_scan_gromacs_progress",
+            lambda **_: SimulationProgress(total_steps_requested=2000),
+        )
+        with pytest.raises(AuditGateError, match="has no build record"):
+            _run_gromacs_impl(TestRunReusesBuild._config(tmp_path), replicate=1, gmx_path="gmx")
         gromacs_runner.assert_not_called()
 
     @patch("polyzymd.exporters.gromacs.GromacsRunner")
