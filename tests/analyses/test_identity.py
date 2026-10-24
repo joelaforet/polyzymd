@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace as NS
 
+import pytest
+
 from polyzymd.analyses.identity import compute_config_hash
 
 
@@ -151,3 +153,37 @@ def test_a_missing_input_file_hashes_the_same_wherever_it_was(tmp_path: Path) ->
     one.enzyme.pdb_path = tmp_path / "gone" / "LipA.pdb"
     two.enzyme.pdb_path = tmp_path / "elsewhere" / "lipa_copy.pdb"
     assert compute_config_hash(one) == compute_config_hash(two)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        ("solvent force field", lambda d: d["solvent"].update(force_field=["openff-2.2.0.offxml"])),
+        ("salt", lambda d: d["solvent"].setdefault("ions", {}).update(nacl_concentration=0.05)),
+        ("box padding", lambda d: d["solvent"].setdefault("box", {}).update(padding=1.7)),
+        (
+            "protein charges model",
+            lambda d: d["solutes"][0].update(force_field=["openff-2.3.0.offxml"]),
+        ),
+    ],
+    ids=lambda c: c[0],
+)
+def test_editing_the_physics_of_a_config_changes_its_hash(tmp_path: Path, change) -> None:
+    """A config edited after its runs no longer names the system its trajectories hold."""
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+
+    root = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+    data = yaml.safe_load((root / "config.yaml").read_text())
+    (tmp_path / "trpcage.pdb").write_text((root / "trpcage.pdb").read_text())
+
+    def hashed(d):
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.safe_dump(d))
+        return compute_config_hash(SimulationConfig.from_yaml(path))
+
+    before = hashed(data)
+    assert hashed(data) == before
+    change[1](data)
+    assert hashed(data) != before

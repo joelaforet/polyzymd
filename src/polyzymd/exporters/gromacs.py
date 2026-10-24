@@ -2447,6 +2447,7 @@ class GromacsRunner:
         prefix: str,
         equilibration_mdps: List[str],
         gmx_command: str = "gmx",
+        mdrun_flags: Optional[Dict[str, str]] = None,
     ):
         """Initialize the GROMACS runner.
 
@@ -2455,14 +2456,23 @@ class GromacsRunner:
             prefix: System prefix for filenames (e.g., "lysozyme_PEG").
             equilibration_mdps: List of equilibration MDP filenames in order.
             gmx_command: Path to GROMACS executable (default: "gmx").
+            mdrun_flags: Extra mdrun flags by stage (``em``, ``eq``, ``prod``),
+                such as ``-ntmpi 1 -ntomp 4``; none when left out.
         """
         self._working_dir = Path(working_dir)
         self._prefix = prefix
         self._eq_mdps = equilibration_mdps
         self._gmx = gmx_command
+        self._mdrun_flags = dict(mdrun_flags or {})
 
         # Track state for workflow
         self._last_eq_output: Optional[str] = None
+
+    def _flags(self, stage: str) -> List[str]:
+        """The extra mdrun arguments of one stage."""
+        import shlex
+
+        return shlex.split(self._mdrun_flags.get(stage) or "")
 
     def run_full_workflow(self) -> None:
         """Run the complete GROMACS workflow.
@@ -2599,7 +2609,7 @@ class GromacsRunner:
 
         # mdrun
         self._run_command(
-            [self._gmx, "mdrun", "-deffnm", "em", "-v"],
+            [self._gmx, "mdrun", "-deffnm", "em", "-v", *self._flags("em")],
             "Running energy minimization (mdrun)",
         )
 
@@ -2675,7 +2685,7 @@ class GromacsRunner:
 
             # mdrun
             self._run_command(
-                [self._gmx, "mdrun", "-deffnm", output_name, "-v"],
+                [self._gmx, "mdrun", "-deffnm", output_name, "-v", *self._flags("eq")],
                 f"Running equilibration stage {stage_num} (mdrun)",
             )
 
@@ -2719,7 +2729,7 @@ class GromacsRunner:
 
         # mdrun
         self._run_command(
-            [self._gmx, "mdrun", "-deffnm", "prod", "-v"],
+            [self._gmx, "mdrun", "-deffnm", "prod", "-v", *self._flags("prod")],
             "Running production MD (mdrun)",
         )
 
