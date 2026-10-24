@@ -3092,18 +3092,39 @@ class TestGromacsRunStartedReplicate:
 
     @patch("polyzymd.exporters.gromacs.GromacsRunner")
     @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
-    def test_started_production_is_refused_with_the_way_to_continue(
+    def test_started_production_continues_from_its_checkpoint_after_the_gates(
+        self, _prefix, gromacs_runner, tmp_path: Path, monkeypatch
+    ) -> None:
+        from polyzymd.cli.main import _run_gromacs_impl
+
+        self._gromacs_dir(tmp_path, "em.gro", "prod.tpr", "prod.cpt", "prod.xtc")
+        gates = self._progress(monkeypatch, 500)
+        monkeypatch.setattr("polyzymd.cli.main._save_gromacs_progress", lambda *a: None)
+
+        _run_gromacs_impl(TestRunReusesBuild._config(tmp_path), replicate=1, gmx_path="gmx")
+
+        assert len(gates) == 1
+        gromacs_runner.return_value.continue_production.assert_called_once()
+        gromacs_runner.return_value.run_full_workflow.assert_not_called()
+
+    @patch("polyzymd.exporters.gromacs.GromacsRunner")
+    @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
+    def test_started_production_without_a_checkpoint_says_how_to_start_it_again(
         self, _prefix, gromacs_runner, tmp_path: Path, monkeypatch
     ) -> None:
         from polyzymd.cli.main import _run_gromacs_impl
         from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
 
-        self._gromacs_dir(tmp_path, "em.gro", "prod.tpr", "prod.cpt", "prod.xtc")
-        self._progress(monkeypatch, 500)
+        gromacs_dir = self._gromacs_dir(tmp_path, "em.gro", "prod.tpr", "prod.xtc")
+        (gromacs_dir / "prod.log").write_text(
+            "   nsteps = 15000\n           Step           Time\n           3500        7.00000\n"
+        )
+        self._progress(monkeypatch, 0)
 
-        with pytest.raises(ArtifactIntegrityError, match="-cpi prod.cpt") as raised:
+        with pytest.raises(ArtifactIntegrityError, match="wrote no checkpoint") as raised:
             _run_gromacs_impl(TestRunReusesBuild._config(tmp_path), replicate=1, gmx_path="gmx")
-        assert "500/2000 steps" in str(raised.value)
+        assert "ran about 3500 of" in str(raised.value)
+        assert "-cpi" not in str(raised.value)
         gromacs_runner.assert_not_called()
 
     @patch("polyzymd.exporters.gromacs.GromacsRunner")

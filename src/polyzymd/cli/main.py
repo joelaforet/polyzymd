@@ -1357,12 +1357,18 @@ def _run_gromacs_impl(
 
     from polyzymd.analyses.shared.gromacs import system_prefix
     from polyzymd.builders.system_builder import SystemBuilder
-    from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
+    from polyzymd.exporters.gromacs import (
+        GromacsError,
+        GromacsExporter,
+        GromacsInterrupted,
+        GromacsRunner,
+    )
 
     working_dir = sim_config.get_working_directory(replicate)
     _refuse_own_protocol(working_dir, "run")
     # Determine output directory for GROMACS files
     gromacs_dir = working_dir / "gromacs"
+    production_state = "run"
 
     # Reuse the files of an earlier `polyzymd build --format gromacs`.
     prefix = system_prefix(sim_config)
@@ -1370,7 +1376,10 @@ def _run_gromacs_impl(
     if all((gromacs_dir / name).is_file() for name in exported):
         from polyzymd.simulation.artifact_integrity import require_audited_build
 
-        if _gromacs_production_done_or_started(sim_config, working_dir, replicate, config_path):
+        production_state = _gromacs_production_state(
+            sim_config, working_dir, replicate, config_path
+        )
+        if production_state == "complete":
             return
         # Only files a passing audit vouches for, unchanged since, may run.
         require_audited_build(
@@ -1472,19 +1481,26 @@ def _run_gromacs_impl(
             gmx_command=gmx_path,
             mdrun_flags=mdrun_flags,
         )
-        runner.run_full_workflow()
+        try:
+            if production_state == "continue":
+                runner.continue_production()
+            else:
+                runner.run_full_workflow()
+        except GromacsInterrupted as stop:
+            _save_gromacs_progress(sim_config, gromacs_dir, replicate, config_path, run_start)
+            colored_echo(
+                f"\n{stop.description} was stopped by signal {stop.signal_number}; mdrun "
+                "wrote its checkpoint. Continue it with: "
+                f"polyzymd run -c {_shown(Path(config_path)) if config_path else '<config.yaml>'}"
+                f" -r {replicate}",
+                err=True,
+                level=logging.WARNING,
+            )
+            from polyzymd.simulation.signals import EXIT_CODE_INTERRUPTED
 
-        from polyzymd.engines import create_engine
-        from polyzymd.engines.gromacs.progress import record_run_provenance, started_since
-        from polyzymd.simulation.progress import save_progress
+            sys.exit(EXIT_CODE_INTERRUPTED)
 
-        engine = create_engine(sim_config, override="gromacs", defer_binary=True)
-        progress = engine.load_or_scan_progress(gromacs_dir, replicate)
-        progress.config_path = config_path
-        record_run_provenance(
-            started_since([*progress.equilibration_stages, *progress.segments], run_start)
-        )
-        save_progress(gromacs_dir, progress)
+        _save_gromacs_progress(sim_config, gromacs_dir, replicate, config_path, run_start)
 
         colored_echo("\nGROMACS simulation completed successfully!", phase="export")
         colored_echo(f"Output directory: {_shown(gromacs_dir)}", phase="export")
@@ -1504,30 +1520,33 @@ def _run_gromacs_impl(
         sys.exit(1)
 
 
-def _gromacs_production_done_or_started(
+def _gromacs_production_state(
     sim_config: "SimulationConfig",
     working_dir: Path,
     replicate: int,
     config_path: str,
-) -> bool:
-    """Stop a local GROMACS run that would repeat a started or finished production.
+) -> str:
+    """Return what a local GROMACS run does with this replicate's production.
 
-    The local workflow runs minimization, equilibration and production from
-    their first step, so running it again would replace the production on
-    disk. Returns True, after saying so, when the production is complete.
+    ``"complete"`` (after saying so), ``"continue"`` when production started
+    and ``prod.cpt`` lets it continue, or ``"run"`` for a run from
+    minimization (production has not started).
 
     Raises
     ------
     ArtifactIntegrityError
-        When production has started but is not complete; the message names
-        how to continue it.
+        When production started but left no checkpoint to continue from; the
+        message says how many steps ran and how to start production again.
     """
-    from polyzymd.engines.gromacs.progress import load_or_scan_gromacs_progress
+    from polyzymd.engines.gromacs.progress import (
+        _parse_gromacs_log,
+        load_or_scan_gromacs_progress,
+    )
     from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError, run_started
 
     gromacs_dir = working_dir / "gromacs"
     if not run_started(working_dir):
-        return False
+        return "run"
     production = sim_config.simulation_phases.production
     progress = load_or_scan_gromacs_progress(
         working_dir=gromacs_dir,
@@ -1544,25 +1563,52 @@ def _gromacs_production_done_or_started(
             "production steps); nothing to do.",
             phase="export",
         )
-        return True
+        return "complete"
     started = sorted(
         path.name
         for path in [*gromacs_dir.glob("prod*"), gromacs_dir / "state.cpt"]
         if path.exists() and path.suffix != ".mdp"
     )
     if not started:
-        return False
-    config_shown = _shown(Path(config_path)) if config_path else "<config.yaml>"
+        return "run"
+    if (gromacs_dir / "prod.cpt").is_file() and (gromacs_dir / "prod.tpr").is_file():
+        colored_echo(
+            f"Production of replicate {replicate} stopped at "
+            f"{progress.total_steps_completed}/{progress.total_steps_requested} steps; "
+            "continuing it from prod.cpt.",
+            phase="export",
+        )
+        return "continue"
+    ran = int(_parse_gromacs_log(gromacs_dir / "prod.log")["steps_completed"])
     raise ArtifactIntegrityError(
-        f"Production of replicate {replicate} has started in {_shown(gromacs_dir)} "
-        f"({', '.join(started[:4])}) but is not complete "
-        f"({progress.total_steps_completed}/{progress.total_steps_requested} steps). "
-        "polyzymd run would start it again from minimization and replace that "
-        "trajectory, so it stops here. To continue from the checkpoint, submit the "
-        f"chain (polyzymd submit -c {config_shown} -r {replicate}), or run "
-        "gmx mdrun -deffnm prod -cpi prod.cpt -append in that folder. To start "
-        "over, build the replicate into a new folder with --scratch-dir."
+        f"Production of replicate {replicate} started in {_shown(gromacs_dir)} "
+        f"({', '.join(started[:4])}) and ran about {ran} of "
+        f"{progress.total_steps_requested} steps, but mdrun wrote no checkpoint "
+        "(prod.cpt), so it cannot continue. To run production again from the end of "
+        f"equilibration, move the prod.* files of {_shown(gromacs_dir)} into another "
+        "folder (keep prod.mdp), then run the same command again."
     )
+
+
+def _save_gromacs_progress(
+    sim_config: "SimulationConfig",
+    gromacs_dir: Path,
+    replicate: int,
+    config_path: str,
+    run_start: object,
+) -> None:
+    """Record the GROMACS stages and production this run reached in ``progress.json``."""
+    from polyzymd.engines import create_engine
+    from polyzymd.engines.gromacs.progress import record_run_provenance, started_since
+    from polyzymd.simulation.progress import save_progress
+
+    engine = create_engine(sim_config, override="gromacs", defer_binary=True)
+    progress = engine.load_or_scan_progress(gromacs_dir, replicate)
+    progress.config_path = config_path
+    record_run_provenance(
+        started_since([*progress.equilibration_stages, *progress.segments], run_start)
+    )
+    save_progress(gromacs_dir, progress)
 
 
 def _run_openmm_impl(

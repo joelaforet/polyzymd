@@ -2417,6 +2417,24 @@ class GromacsError(Exception):
         super().__init__(f"GROMACS command failed: {command} (exit code {returncode})")
 
 
+class GromacsInterrupted(Exception):
+    """Raised when a signal stopped a local GROMACS step after mdrun shut down cleanly.
+
+    mdrun received one ``SIGTERM``, stopped at the next neighbour-search step
+    and wrote its checkpoint, so the step can be continued with ``-cpi``.
+    """
+
+    def __init__(self, description: str, signal_number: int) -> None:
+        self.description = description
+        self.signal_number = signal_number
+        super().__init__(f"{description} stopped by signal {signal_number}")
+
+
+#: Minutes between production checkpoints of a local run, so a hard kill
+#: loses at most this much work (mdrun's own default is 15).
+PRODUCTION_CHECKPOINT_MINUTES = "5"
+
+
 class GromacsRunner:
     """Execute GROMACS workflow from exported files with streaming output.
 
@@ -2467,6 +2485,47 @@ class GromacsRunner:
 
         # Track state for workflow
         self._last_eq_output: Optional[str] = None
+
+    def _checkpoint_flags(self) -> List[str]:
+        """The production mdrun arguments: ``-cpt`` unless the config's flags set it."""
+        flags = self._flags("prod")
+        if "-cpt" in flags:
+            return flags
+        return ["-cpt", PRODUCTION_CHECKPOINT_MINUTES, *flags]
+
+    def continue_production(self) -> None:
+        """Continue a started production from ``prod.cpt``, then post-process.
+
+        Runs ``mdrun -deffnm prod -cpi prod.cpt -append``, which extends
+        ``prod.xtc``, ``prod.edr`` and ``prod.log`` from the checkpoint's step.
+
+        Raises:
+            GromacsError: If ``prod.tpr`` or ``prod.cpt`` is missing, or a command fails.
+        """
+        missing = [n for n in ("prod.tpr", "prod.cpt") if not (self._working_dir / n).is_file()]
+        if missing:
+            raise GromacsError(
+                command="mdrun -deffnm prod -cpi prod.cpt -append",
+                returncode=1,
+                message=f"Cannot continue production: {', '.join(missing)} missing",
+            )
+        self._print_banner("Continue production MD", "from prod.cpt")
+        self._run_command(
+            [
+                self._gmx,
+                "mdrun",
+                "-deffnm",
+                "prod",
+                "-cpi",
+                "prod.cpt",
+                "-append",
+                "-v",
+                *self._checkpoint_flags(),
+            ],
+            "Continuing production MD from prod.cpt (mdrun -cpi)",
+        )
+        self._run_postprocessing()
+        self._print_summary()
 
     def _flags(self, stage: str) -> List[str]:
         """The extra mdrun arguments of one stage."""
@@ -2534,13 +2593,17 @@ class GromacsRunner:
         Raises:
             GromacsError: If command returns non-zero exit code.
         """
+        import signal
         import subprocess
         import sys
+        import threading
 
         logger.info(f"\n>>> {description}")
         logger.info(f">>> Command: {' '.join(cmd)}")
         logger.info("-" * 60)
 
+        received: list[int] = []
+        previous: dict[int, object] = {}
         try:
             process = subprocess.Popen(
                 cmd,
@@ -2550,7 +2613,26 @@ class GromacsRunner:
                 stdin=subprocess.PIPE if stdin_input else None,
                 text=True,
                 bufsize=1,  # Line buffered
+                # Its own session: Ctrl-C reaches only PolyzyMD, which passes on
+                # one signal. Two would make mdrun stop without a checkpoint.
+                start_new_session=True,
             )
+
+            def forward(signum: int, _frame: object) -> None:
+                if not received:
+                    received.append(signum)
+                    logger.warning(
+                        f"Received signal {signum}; asking GROMACS to stop at its next "
+                        "checkpoint-safe step and waiting for it to write the checkpoint"
+                    )
+                    try:
+                        process.send_signal(signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+
+            if threading.current_thread() is threading.main_thread():
+                for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGUSR1):
+                    previous[signum] = signal.signal(signum, forward)
 
             # If we have stdin input, write it and close
             if stdin_input:
@@ -2563,6 +2645,11 @@ class GromacsRunner:
                 sys.stdout.flush()
 
             process.wait()
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+            previous.clear()
+            if received:
+                raise GromacsInterrupted(description, received[0])
 
             if process.returncode != 0:
                 raise GromacsError(
@@ -2581,6 +2668,9 @@ class GromacsRunner:
                 message=f"GROMACS executable not found: {self._gmx}. "
                 "Ensure GROMACS is installed and in your PATH, or use --gmx-path.",
             )
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
 
     def _run_energy_minimization(self) -> None:
         """Run energy minimization step."""
@@ -2727,9 +2817,9 @@ class GromacsRunner:
             "Preparing production MD (grompp)",
         )
 
-        # mdrun
+        # mdrun, with a checkpoint every few minutes so a hard kill loses little
         self._run_command(
-            [self._gmx, "mdrun", "-deffnm", "prod", "-v", *self._flags("prod")],
+            [self._gmx, "mdrun", "-deffnm", "prod", "-v", *self._checkpoint_flags()],
             "Running production MD (mdrun)",
         )
 
