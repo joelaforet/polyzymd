@@ -47,6 +47,18 @@ verifies that the minimized state satisfies every constraint of the real System
 before heating starts. See {doc}`../explanation/simulation_safeguards` for the
 rationale.
 
+(minimization-constraints)=
+The log may then say
+`Minimized state violates a constraint by 0.22849 A (> 0.010 A); projecting the coordinates back onto the constraint manifold`.
+The minimizer does not hold constrained distances exactly, so after it a
+constrained distance can be off by more than 0.01 Å. PolyzyMD then moves the
+atoms back onto the exact constraint lengths with OpenMM `applyConstraints`
+and logs the residual as `Constraint violation after applyConstraints`. A
+value near zero there means the correction worked, and the run goes on. With
+`freeze_solute: true`, PolyzyMD also checks that the correction moved no
+solute heavy atom by more than 0.02 Å. If it did, the run stops with an error
+instead of a warning.
+
 ## Simple three-stage example
 
 ```yaml
