@@ -1,6 +1,7 @@
 """The star-sited monomer notebook runs top to bottom.
 
-``docs/source/tutorials/star_sited_monomers.ipynb`` is the sandbox the docs
+``star_sited_monomers.ipynb`` (shipped in ``polyzymd/templates/notebooks`` and
+copied into each project by ``polyzymd project init``) is the sandbox the docs
 and the polymer errors point users to. Its code cells run here in order, as a
 script (the environment has no Jupyter kernel to drive), so a renamed import
 or a changed builder API breaks this test instead of the user's first session.
@@ -16,9 +17,10 @@ import pytest
 
 NOTEBOOK = (
     Path(__file__).resolve().parents[2]
-    / "docs"
-    / "source"
-    / "tutorials"
+    / "src"
+    / "polyzymd"
+    / "templates"
+    / "notebooks"
     / "star_sited_monomers.ipynb"
 )
 
@@ -78,3 +80,13 @@ def _run_first_cells(smiles: str) -> dict[str, object]:
 def test_the_default_linking_atoms_give_the_repeat_unit(smiles: str, repeat_unit: str) -> None:
     """The listed C=C, CH2 first, gives the repeat unit whatever the atom order."""
     assert _run_first_cells(smiles)["repeat_unit"] == repeat_unit
+
+
+def test_project_init_puts_the_notebook_in_the_project(tmp_path: Path) -> None:
+    """A new project has the notebook, byte for byte the shipped one, in notebooks/."""
+    from polyzymd.analyses.project_scaffold import create_project
+
+    created = create_project(tmp_path / "paper", ["study_a"], git=False)
+    copy = created.root / "notebooks" / "star_sited_monomers.ipynb"
+    assert copy.read_bytes() == NOTEBOOK.read_bytes()
+    assert (created.root / "notebooks" / "README.md").is_file()

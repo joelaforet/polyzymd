@@ -48,7 +48,7 @@ solutes:
     # it is in the chain, with '*' on the two atoms that bond to the
     # neighbouring units (the C=C of the methacrylate becomes a single bond).
     # The first '*' bonds toward the head of the chain, the second toward the
-    # tail. The notebook docs/source/tutorials/star_sited_monomers.ipynb helps
+    # tail. The notebook notebooks/star_sited_monomers.ipynb of your project helps
     # you place them.
     monomers:
       - label: "A"

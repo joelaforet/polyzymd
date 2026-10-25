@@ -88,7 +88,7 @@ solutes:
   # pre-built SDF files (generation_mode: cached, charges: {method: preset})
   # or built with mBuild from star-sited SMILES (dynamic, charged with nagl).
   # A monomer is its repeat unit with '*' on the two linking atoms; the
-  # notebook docs/source/tutorials/star_sited_monomers.ipynb helps you write
+  # notebook notebooks/star_sited_monomers.ipynb of your project helps you write
   # it from a PubChem SMILES. For both modes and every key, see
   # https://polyzymd.readthedocs.io/en/latest/how_to/polymers.html
   # - type: polymer

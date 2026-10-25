@@ -18,7 +18,7 @@ carbons of the C=C double bond, which is a single bond in the chain.
 
 ## The notebook
 
-{download}`star_sited_monomers.ipynb <star_sited_monomers.ipynb>` is a sandbox
+{download}`star_sited_monomers.ipynb <../../../src/polyzymd/templates/notebooks/star_sited_monomers.ipynb>` is a sandbox
 for writing these SMILES. It:
 
 1. draws the monomer SMILES you paste (SBMA by default), with every atom
@@ -33,12 +33,12 @@ for writing these SMILES. It:
 
 It does not change your config. Check each result by eye.
 
-Copy it out of your PolyzyMD clone, so the clone stays clean, and open it in
-the PolyzyMD build environment (change `~/polyzymd` to your clone):
+`polyzymd project init` puts a copy in your project's `notebooks/` folder.
+Open it there in the PolyzyMD build environment (change `~/polyzymd` to the
+folder of your PolyzyMD clone):
 
 ```bash
-mkdir -p ~/star_sited && cp ~/polyzymd/docs/source/tutorials/star_sited_monomers.ipynb ~/star_sited/
-cd ~/star_sited
+cd my_paper/notebooks
 pixi run -e build --manifest-path ~/polyzymd/pixi.toml jupyter lab --no-browser star_sited_monomers.ipynb
 ```
 
