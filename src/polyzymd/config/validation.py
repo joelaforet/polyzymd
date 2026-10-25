@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 
 def collect_reference_warnings(config: Any) -> list[str]:
@@ -38,6 +38,121 @@ def collect_reference_warnings(config: Any) -> list[str]:
 
     _check_am1bcc(warnings, config)
     return warnings
+
+
+def stage_temperature_mismatch(stage: Any, temperature: float, *, last: bool) -> float | None:
+    """Return the stage temperature that differs from the production temperature.
+
+    A constant-temperature stage is compared by its ``temperature``. A ramp is
+    compared by its ``temperature_end``, and only when it is the last stage,
+    because production starts where that ramp ends.
+
+    Parameters
+    ----------
+    stage : Any
+        An equilibration stage.
+    temperature : float
+        The production temperature, ``thermodynamics.temperature`` (K).
+    last : bool
+        Whether the stage is the last one before production.
+
+    Returns
+    -------
+    float | None
+        The stage temperature (K) when it differs, else ``None``.
+    """
+    if getattr(stage, "is_temperature_ramping", False):
+        value = stage.temperature_end if last else None
+    else:
+        value = getattr(stage, "temperature", None)
+    if value is None or abs(float(value) - float(temperature)) < 1e-6:
+        return None
+    return float(value)
+
+
+def _stage_start(stage: Any) -> float | None:
+    """The temperature (K) a stage starts at: a ramp's start, else its temperature."""
+    if getattr(stage, "is_temperature_ramping", False):
+        return stage.temperature_start
+    return getattr(stage, "temperature", None)
+
+
+def stage_temperature_warning(stages: Sequence[Any], index: int, temperature: float) -> str | None:
+    """Return the warning for one equilibration stage's temperature, or ``None``.
+
+    A constant-temperature stage, and a ramp that is the last stage, are
+    compared with ``temperature`` (production's). A ramp before another stage
+    is compared with the temperature that stage starts at, since a mismatch is
+    a sudden jump between the two.
+
+    Parameters
+    ----------
+    stages : Sequence[Any]
+        The equilibration stages, in order.
+    index : int
+        The stage to check.
+    temperature : float
+        The production temperature, ``thermodynamics.temperature`` (K).
+
+    Returns
+    -------
+    str | None
+        The warning, or ``None`` when the temperature matches.
+    """
+    stage = stages[index]
+    last = index == len(stages) - 1
+    ramp = getattr(stage, "is_temperature_ramping", False)
+    if ramp and not last:
+        following = stages[index + 1]
+        start = _stage_start(following)
+        end = stage.temperature_end
+        if start is None or end is None or abs(float(end) - float(start)) < 1e-6:
+            return None
+        return (
+            f"equilibration stage '{stage.name}' ends at {float(end):g} K, but the next stage "
+            f"'{following.name}' starts at {float(start):g} K, a sudden jump of "
+            f"{abs(float(start) - float(end)):g} K. If you changed the temperature of this "
+            f"condition, also set simulation_phases.equilibration_stages.{index}.temperature_end."
+        )
+    value = stage_temperature_mismatch(stage, temperature, last=last)
+    if value is None:
+        return None
+    key = "temperature_end" if ramp else "temperature"
+    where = "ends at" if ramp else "runs at"
+    return (
+        f"equilibration stage '{stage.name}' {where} {value:g} K, but production runs at "
+        f"thermodynamics.temperature = {temperature:g} K. If you changed the temperature "
+        f"of this condition, also set simulation_phases.equilibration_stages.{index}.{key}."
+    )
+
+
+def collect_protocol_warnings(config: Any) -> list[str]:
+    """Return warnings for equilibration temperatures that do not join up.
+
+    Production runs at ``thermodynamics.temperature``. An equilibration stage
+    at another temperature is allowed, so this is a warning, not an error: a
+    condition copied to a new temperature often keeps the old stage
+    temperatures by mistake. A heating ramp is checked against the stage after
+    it, or against production when it is the last stage.
+
+    Parameters
+    ----------
+    config : Any
+        Simulation configuration.
+
+    Returns
+    -------
+    list[str]
+        One warning for each stage whose temperature does not join up.
+    """
+    phases = getattr(config, "simulation_phases", None)
+    thermodynamics = getattr(config, "thermodynamics", None)
+    if thermodynamics is None or phases is None:
+        return []
+    temperature = float(thermodynamics.temperature)
+    stages = list(getattr(phases, "equilibration_stages", None) or [])
+    found = (stage_temperature_warning(stages, i, temperature) for i in range(len(stages)))
+    return [warning for warning in found if warning is not None]
 
 
 def _check_am1bcc(warnings: list[str], config: Any) -> None:
@@ -172,6 +287,7 @@ def require_inputs(config: Any) -> None:
                 "fix: write the SDF again from your docking or drawing program."
             )
         _require_chargeable(molecule, substrate.charge_method, f"solute {substrate.name!r}")
+        _require_restraint_atom_names(config, substrate, molecule)
 
     from polyzymd.data.solvent_molecules import is_bundled_solvent, split_counter_ions
 
@@ -254,6 +370,102 @@ def require_inputs(config: Any) -> None:
             f"fix: in each charges: {{method: nagl, model: ...}}, name one of {installed}, "
             "or give the path of a model file."
         )
+
+
+def small_molecule_atom_names(molecule: Any) -> list[str]:
+    """Return the atom names a small molecule read from an SDF gets in the built system.
+
+    OpenFF keeps the atom names of a molecule only when every atom has one and
+    no two are alike. An SDF has no atom names unless it carries an
+    ``atom.prop._Name`` data field, so OpenFF names each atom when it writes
+    the topology: element symbol, count of that element so far in the file's
+    atom order, and an ``x`` suffix (``C1x``, ``C2x``, ``O1x``, ``H1x``; see
+    ``openff.toolkit.Molecule.generate_unique_atom_names``).
+
+    Parameters
+    ----------
+    molecule : rdkit.Chem.Mol
+        The molecule, with its hydrogens, in the SDF's atom order.
+    """
+    atoms = list(molecule.GetAtoms())
+    given = [atom.GetProp("_Name") if atom.HasProp("_Name") else "" for atom in atoms]
+    if len(set(given)) == len(given):
+        return given
+    counts: dict[str, int] = {}
+    names = []
+    for atom in atoms:
+        symbol = atom.GetSymbol()
+        counts[symbol] = counts.get(symbol, 0) + 1
+        names.append(f"{symbol}{counts[symbol]}x")
+    return names
+
+
+#: Words that end the list of values after ``name`` in a selection.
+_SELECTION_STOP_WORDS = frozenset({"and", "or", "not", "to"})
+
+
+def selection_atom_names(selection: str) -> list[str] | None:
+    """Return the atom names a selection asks for with ``name``, or None when they cannot be listed.
+
+    ``"resname LIG and name C1 C2"`` gives ``["C1", "C2"]``; a selection
+    without ``name`` gives ``[]``. A regular expression (``name =~ 'C.*'``)
+    or a ``not`` gives None: a missing name then need not mean that the
+    selection matches nothing.
+    """
+    import re
+    import shlex
+
+    try:
+        words = shlex.split(re.sub(r"([()])", r" \1 ", selection))
+    except ValueError:
+        return None
+    if any(word.lower() == "not" for word in words):
+        return None
+    names: list[str] = []
+    for position, word in enumerate(words):
+        if word != "name":
+            continue
+        for value in words[position + 1 :]:
+            if value == "=~":
+                return None
+            if value == "==":
+                continue
+            if value in ("(", ")") or value.lower() in _SELECTION_STOP_WORDS:
+                break
+            names.append(value)
+    return names
+
+
+def _require_restraint_atom_names(config: Any, solute: Any, molecule: Any) -> None:
+    """Raise ``ValueError`` when a restraint names atoms the small molecule will not have.
+
+    The built system names the atoms of a small molecule from an SDF without
+    atom names ``C1x``, ``C2x``, ... (:func:`small_molecule_atom_names`), so
+    ``name C1`` matches nothing and the build would fail only after solvation
+    and parameterisation. Only selections whose every ``name`` value is
+    missing are refused; any other selection is left to the build.
+    """
+    available = small_molecule_atom_names(molecule)
+    if not all(available):
+        return  # an unnamed single atom keeps its empty name; no name selects it
+    for index, restraint in enumerate(getattr(config, "restraints", None) or []):
+        if not restraint.enabled:
+            continue
+        for key in ("atom1", "atom2"):
+            atom = getattr(restraint, key)
+            if atom.component != solute.name:
+                continue
+            asked = selection_atom_names(atom.selection)
+            if not asked or any(name in available for name in asked):
+                continue
+            raise ValueError(
+                f"restraint {restraint.name!r}: {key} selection {atom.selection!r} names "
+                f"{', '.join(asked)}, which the small molecule {solute.name!r} will not have. "
+                f"In the built system its atoms, in the order of {Path(solute.sdf_path).name}, "
+                f"are named {', '.join(available)}.\n"
+                f"fix: in restraints.{index}.{key}.selection, use one of these names "
+                f"(for example name {available[0]})."
+            )
 
 
 def _require_shipped_molecule(cosolvent: Any) -> None:

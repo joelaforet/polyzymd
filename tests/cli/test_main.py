@@ -352,6 +352,52 @@ class TestValidateCommandReferenceWarnings:
         assert result.exit_code == 0
         assert "60 -> 300 K, +1 K every 600 steps" in result.output
         assert "derived duration 0.288000 ns" in result.output
+        assert "Protocol warnings" not in result.output
+
+    def test_validate_warns_when_equilibration_ends_below_production(self, tmp_path: Path) -> None:
+        """A condition moved to 330 K whose stages still end at 300 K is valid but warned."""
+        data = _config_with_pdb(tmp_path)
+        data["thermodynamics"]["temperature"] = 330.0
+        data["simulation_phases"]["equilibration_stages"] = [
+            {
+                "name": "heating",
+                "ensemble": "NVT",
+                "temperature_start": 60.0,
+                "temperature_end": 300.0,
+                "temperature_increment": 24.0,
+                "temperature_interval_steps": 100,
+            },
+            {"name": "hold", "ensemble": "NVT", "temperature": 300.0, "duration": 0.002},
+        ]
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+        assert "Configuration is valid!" in result.output
+        assert "Protocol warnings:" in result.output
+        assert (
+            "equilibration stage 'hold' runs at 300 K, but production runs at "
+            "thermodynamics.temperature = 330 K" in result.output
+        )
+        assert "simulation_phases.equilibration_stages.1.temperature" in result.output
+        # A heating ramp that is not the last stage is not compared.
+        assert "stage 'heating'" not in result.output
+        assert "- hold: 300 K, 0.002 ns (NVT); WARNING: production runs at 330 K" in (result.output)
+
+        # A copy moved to 330 K with the ramp still ending at 300 K jumps 30 K into 'hold'.
+        data["simulation_phases"]["equilibration_stages"][1]["temperature"] = 330.0
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+        assert (
+            "equilibration stage 'heating' ends at 300 K, but the next stage 'hold' starts "
+            "at 330 K" in result.output
+        )
+        assert "simulation_phases.equilibration_stages.0.temperature_end" in result.output
+        assert "WARNING: the next stage starts at another temperature" in result.output
 
     @pytest.mark.parametrize("where", ["production", "equilibration"])
     def test_validate_refuses_anisotropic_barostat_on_openmm(self, tmp_path: Path, where) -> None:

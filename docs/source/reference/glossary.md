@@ -59,11 +59,23 @@ result
   report.
 
 config hash
-  The first 16 hexadecimal characters of the SHA-256 of the config fields
-  that decide what was simulated. These fields are the enzyme and its PDB
-  content, the temperature and pressure, the naming template, the substrate,
-  the polymers and the co-solvents. Paths, simulation phases and force
-  fields are not in the hash.
+  The identity of a condition in analysis records and in a study freeze: the
+  first 16 hexadecimal characters of the SHA-256 of the config fields that
+  decide what was simulated. These fields are the config name, the protein and
+  its PDB content, the temperature and pressure, the naming template, the
+  small molecule and its SDF content, the polymers, the co-solvents, each
+  solute's and the solvent's force-field files and charge source, the water
+  model, the ions, the box and the enabled restraints. Paths and simulation
+  phases are not in the hash. It is not the {term}`build config hash`.
+
+build config hash
+  The `config_hash` of `build_provenance.json`: the full SHA-256 of every
+  field of the config as built. Input files count by their SHA-256. The output
+  folders (`projects_directory`, `scratch_directory`) and the minimization
+  settings are left out, so a copy of `config.yaml` in another folder has the
+  same hash. Any other edit, such as a simulation phase or `openmm.platform`,
+  changes it. `run` and `submit` refuse a build whose build config hash no
+  longer matches `config.yaml`.
 ```
 
 ## Force fields and system building

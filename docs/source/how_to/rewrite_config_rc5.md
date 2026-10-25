@@ -100,9 +100,13 @@ restraints:
       selection: "resid 105 and name OG"
     atom2:
       component: "Resorufin-Butyrate"
-      selection: "name C1"
+      selection: "name C13x"  # ester carbonyl carbon of the docked RBY
     distance: 3.3
 ```
+
+The atom name changes too. This SDF carries no atom names, so the built atoms
+are named by element, count in SDF order and `x`. The ester carbonyl carbon is
+`C13x`. See {ref}`restraint-ligand-atom-names`.
 
 ## New keys
 

@@ -387,6 +387,16 @@ def test_citation_matches_citation_cff() -> None:
     assert cff["authors"][0]["family-names"] == "Laforet"
 
 
+def test_readme_bibtex_cites_the_citation_cff_title() -> None:
+    """The README's BibTeX and the cite line give PolyzyMD one title."""
+    import re
+
+    from polyzymd.citation import TITLE
+
+    readme = (Path(__file__).resolve().parents[2] / "README.md").read_text(encoding="utf-8")
+    assert re.findall(r"^\s*title = \{(.*)\},$", readme, flags=re.M) == [TITLE]
+
+
 USER_MODULE = """
 def _scale(value):
     return value * SCALE

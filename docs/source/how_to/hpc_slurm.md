@@ -230,7 +230,9 @@ replicate folder:
 
 - `solvated_system.pdb`
 - `system.prmtop`, the analysis topology. If ParmEd cannot convert the
-  system, the file is missing and the build log says so.
+  system, the file is missing and the build log says so. A distance
+  restraint always has this effect. The analyses then read
+  `solvated_system.pdb`.
 - `system.xml`
 - `build_provenance.json`, the build record, and `build_provenance.md`
   beside it
@@ -239,7 +241,7 @@ replicate folder:
 The build writes `build_provenance.json` last. It replaced
 `build_manifest.json` in 1.3.0rc5, and PolyzyMD still reads the old name.
 `submit`, and the job before OpenMM makes a simulation, check the record's
-config hash, its file hashes and its particle count. A missing or damaged
+{term}`build config hash`, its file hashes and its particle count. A missing or damaged
 record means that the build did not finish. Build the replicate again.
 
 `submit` and `run` refuse a replicate that has not started unless a current

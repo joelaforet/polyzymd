@@ -83,6 +83,9 @@ def test_from_copies_a_sibling_condition_with_its_inputs(tmp_path: Path) -> None
     assert _output(second) == ((created.root / "runs" / "water_350_k").resolve(), None)
     assert list(load_study_file(created.root).conditions) == ["Water", "Water 350 K"]
     assert "# Solutes (REQUIRED)" in second.read_text()  # comments are kept
+    # The copy is named after its own folder, as --new names a template.
+    assert yaml.safe_load(first.read_text())["name"] == "water"
+    assert copied["name"] == "water_350_k"
 
 
 def test_from_refuses_a_condition_the_study_does_not_have(tmp_path: Path) -> None:
@@ -158,3 +161,24 @@ def test_a_copy_drops_the_machine_path_comment_of_a_deposited_config(tmp_path: P
     assert "machine path removed" not in copy.read_text()
     assert "# Solutes (REQUIRED)" in copy.read_text()  # comments are kept
     assert _output(copy) == ((created.root / "runs" / "water_350_k").resolve(), None)
+
+
+def test_the_structure_placeholders_name_the_solutes_keys(tmp_path: Path) -> None:
+    """add-condition --new explains structures/ with the keys the config really has."""
+    from polyzymd.config.schema import ProteinSolute, SmallMoleculeSolute
+
+    created = create_study(tmp_path / "st", new_conditions=["Water"], git=False)
+    structures = created.conditions["Water"].parent / "structures"
+    protein = (structures / "place_protein_here.placeholder.txt").read_text()
+    ligand = (structures / "place_ligand_here.placeholder.txt").read_text()
+
+    for text in (protein, ligand):
+        assert "enzyme." not in text and "substrate." not in text
+        assert "MOL2" not in text and "solutes:" in text
+    assert "type: protein" in protein and 'pdb_path: "structures/' in protein
+    assert "type: small_molecule" in ligand and 'sdf_path: "structures/' in ligand
+    assert "C1x" in ligand
+    for key in ("pdb_path", "name"):
+        assert key in ProteinSolute.model_fields
+    for key in ("sdf_path", "conformer_index", "name"):
+        assert key in SmallMoleculeSolute.model_fields

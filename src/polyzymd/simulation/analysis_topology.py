@@ -37,7 +37,9 @@ def write_analysis_topology(topology: Any, system: Any, positions: Any, path: Pa
         import parmed
         from openmm import unit
 
-        structure = parmed.openmm.load_topology(topology, system, xyz=positions)
+        structure = parmed.openmm.load_topology(
+            topology, _without_custom_forces(system), xyz=positions
+        )
         _type_constrained_bonds(structure, system, unit, parmed)
         _name_unnamed_atoms(structure)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +60,24 @@ def write_analysis_topology(topology: Any, system: Any, positions: Any, path: Pa
         return None
     LOGGER.info("Wrote analysis topology %s", path)
     return path
+
+
+def _without_custom_forces(system: Any) -> Any:
+    """Return a copy of ``system`` without its ``Custom*`` forces.
+
+    ParmEd cannot convert a custom force, such as the ``CustomBondForce`` of a
+    distance restraint, and the analysis topology needs none of them: it
+    carries the atoms, residues, elements, charges and bonds, which come from
+    the topology, the harmonic bonds, the constraints and the nonbonded
+    force. ``system`` itself is not changed.
+    """
+    import openmm
+
+    copy = openmm.XmlSerializer.deserialize(openmm.XmlSerializer.serialize(system))
+    for index in reversed(range(copy.getNumForces())):
+        if type(copy.getForce(index)).__name__.startswith("Custom"):
+            copy.removeForce(index)
+    return copy
 
 
 def _name_unnamed_atoms(structure: Any) -> int:
