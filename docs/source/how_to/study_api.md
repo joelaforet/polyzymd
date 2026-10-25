@@ -21,6 +21,8 @@ pixi shell -e analysis
 
 Alternatively, prefix each command with `pixi run -e analysis`, for example
 `pixi run -e analysis python my_analysis.py`.
+The `build` environment holds the same analysis tools, so `pixi shell -e build`
+works too. The quickstart uses it.
 :::
 
 ## 1. Load the study

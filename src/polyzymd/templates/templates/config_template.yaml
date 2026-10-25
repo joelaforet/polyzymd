@@ -199,7 +199,7 @@ solvent:
 # Selection syntax:
 #   resid N        : Residue number in the built topology (protein renumbered from 1)
 #   resname XXX    : Residue name (e.g., LIG, SER)
-#   name XXX       : Atom name (e.g., CA, OG, C1)
+#   name XXX       : Atom name (e.g., CA, OG; ligand atoms C1x, C2x, ...)
 #   pdbindex N     : the N-th atom of the built system, from 1 (PyMOL `index`,
 #                    not its `ID`: PDB serials skip a number at every TER)
 #   index N        : Internal atom index (0-indexed)
@@ -214,7 +214,7 @@ solvent:
 #       description: "Catalytic residue"
 #     atom2:
 #       component: "substrate"
-#       selection: "name C1"                    # Example: Ligand carbon
+#       selection: "name C1x"                   # Ligand atoms: C1x, C2x, ..., H1x
 #       description: "Substrate reactive atom"
 #     distance: 3.5                           # Angstroms (flat-bottom threshold)
 #     force_constant: 10000.0                 # kJ/mol/nm^2
@@ -250,7 +250,7 @@ thermodynamics:
 # ============================================================================
 # Configure equilibration and production runs.
 #
-# ensemble options: NVT, NPT, NVE
+# ensemble options: NVT, NPT (validate refuses NVE)
 # thermostat options: LangevinMiddle (recommended), Langevin. NoseHoover and
 #   Andersen run only on GROMACS; see "GROMACS and OpenMM" in the reference.
 # barostat options: MC (Monte Carlo), MCA (anisotropic, GROMACS only)
@@ -281,6 +281,9 @@ thermodynamics:
 #     PolyzyMD derives the duration
 #
 simulation_phases:
+  # These durations are for a real study (about 1.8 ns of equilibration). For a
+  # test run, shorten each duration and heat faster: temperature_increment: 24.0
+  # with temperature_interval_steps: 100 heats 60 -> 300 K in 0.002 ns.
   equilibration_stages:
     # Stage 1: Heat from 60K to 300K with everything restrained
     - name: "heating"
@@ -320,7 +323,7 @@ simulation_phases:
     ensemble: "NPT"
     duration: 100.0
     samples: 2500
-    checkpoint_interval: 60.0
+    checkpoint_interval: 60.0          # seconds of wall time between restart checkpoints
     time_step: 2.0
     thermostat: "LangevinMiddle"
     thermostat_timescale: 1.0

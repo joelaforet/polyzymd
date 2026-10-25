@@ -143,6 +143,8 @@ def test_add_condition_warns_where_new_runs_go_and_their_disk_space(tmp_path: Pa
         warning = next(line for line in result.output.splitlines() if line.startswith("warning:"))
         assert "runs" in warning and "a lot of disk space" in warning
         assert "scratch_directory" in warning and "cluster" in warning
+    assert "name: set to 'draft_2' in the copy" in result.output
+    assert "differs from Draft" in result.output
 
 
 def test_the_new_condition_template_validates_once_its_pdb_is_set(tmp_path: Path) -> None:

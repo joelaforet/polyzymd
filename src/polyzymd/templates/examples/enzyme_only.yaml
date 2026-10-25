@@ -76,7 +76,7 @@ restraints:
       description: "Catalytic serine"
     atom2:
       component: "Resorufin-Butyrate"
-      selection: "name C1"  # Substrate carbonyl carbon
+      selection: "name C1x"  # SDF atoms without names are C1x, C2x, ..., H1x
       description: "Substrate reactive carbon"
     distance: 3.3  # Angstroms threshold
     force_constant: 10000.0  # kJ/mol/nm^2

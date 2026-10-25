@@ -19,7 +19,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["record.json","series.npz"],"record.json:arguments":{"args":[{"select":"resid 45 and name O"},{"select":"resname EGM"}],"kwargs":{"mode_a":"single","mode_b":"com","pbc":true}},"record.json:bounds":[0.0,null],"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"pair_distance"},"record.json:name":"distances_gln_egm","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":"A","record.json:versions":"<masked>"}
+   "shared": {"files":["record.json","series.npz"],"record.json:arguments":{"args":[{"select":"resid 45 and name O"},{"select":"resname EGM"}],"kwargs":{"mode_a":"single","mode_b":"com","pbc":true}},"record.json:bounds":[0.0,null],"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"pair_distance"},"record.json:name":"distances_gln_egm","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":"A","record.json:versions":"<masked>"}
   },
   "distances_gln_egm_bound": {
    "A/replicate_1": {},
@@ -37,7 +37,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["record.json","series.npz"],"record.json:arguments":{"args":[{"select":"resid 12 and name OG"},{"select":"resname SBM"}],"kwargs":{"mode_a":"single","mode_b":"single","pbc":true}},"record.json:bounds":[0.0,null],"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"pair_distance"},"record.json:name":"distances_ser_sbm","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":"A","record.json:versions":"<masked>"}
+   "shared": {"files":["record.json","series.npz"],"record.json:arguments":{"args":[{"select":"resid 12 and name OG"},{"select":"resname SBM"}],"kwargs":{"mode_a":"single","mode_b":"single","pbc":true}},"record.json:bounds":[0.0,null],"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"pair_distance"},"record.json:name":"distances_ser_sbm","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":"A","record.json:versions":"<masked>"}
   },
   "distances_ser_sbm_below_3.5_A": {
    "A/replicate_1": {},
@@ -61,8 +61,8 @@
   },
   "problems": [],
   "protocol_version": "2",
-  "provenance.config_hashes.A": "c4429a507b8cea42",
-  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.A": "d19df94f4f261473",
+  "provenance.config_hashes.B": "d19df94f4f261473",
   "provenance.mdanalysis_version": "<masked>",
   "provenance.output_paths.figures": "<tmp>/out/figures/distances",
   "provenance.polyzymd_version": "<masked>",

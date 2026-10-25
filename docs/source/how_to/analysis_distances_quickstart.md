@@ -16,6 +16,8 @@ pixi shell -e analysis
 ```
 
 Alternatively, prefix each command with `pixi run -e analysis`.
+The `build` environment holds the same analysis tools, so `pixi shell -e build`
+works too. The quickstart uses it.
 :::
 
 ```{tip}
@@ -50,6 +52,25 @@ be unique. The optional keys are:
   one uses the analysis threshold. The default is 3.5 Å. Change it with
   `--set threshold=...`.
 - `below_label`: the name of that fraction in the report.
+
+### Pairs in `study.yaml` or `project.yaml`
+
+You can also list the pairs under the analysis in `study.yaml` or
+`project.yaml`. Then `polyzymd analyze --study` and `polyzymd analyze --project`
+need no `--set`:
+
+```yaml
+analyses:
+  distances:
+    pairs:
+      - label: "Ser76(OG)-Substrate(carbonyl C)"
+        selection_a: "protein and resid 76 and name OG"
+        selection_b: "resname RBY and name C13x"
+        threshold: 10.0
+```
+
+In `study.yaml`, `pairs:` can instead name a file, such as `pairs: pairs.yaml`.
+The path is relative to `study.yaml`.
 
 ## Run it
 

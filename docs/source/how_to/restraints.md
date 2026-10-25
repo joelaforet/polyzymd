@@ -40,7 +40,7 @@ restraints:
       description: "Catalytic serine oxygen"
     atom2:
       component: "Resorufin-Butyrate"
-      selection: "name C1"
+      selection: "name C1x"
       description: "Substrate carbonyl carbon"
     distance: 3.5
     force_constant: 10000.0
@@ -51,6 +51,21 @@ Each atom names the solute it belongs to in `component`: the `name` of a
 solute entry (a solute without a `name` is named after its type, such as
 `protein`). The selection is matched only among that component's atoms, so
 `resid 76` cannot pick a polymer residue 76.
+
+(restraint-ligand-atom-names)=
+### Atom names of a small molecule
+
+```{important}
+The atoms of a small molecule carry an `x` suffix in the built system. An SDF
+file usually has no atom names, so OpenFF names each atom by its element
+symbol, its count among the atoms of that element in the SDF's atom order, and
+`x`: `C1x`, `C2x`, ..., `O1x`, `H1x`. Write `name C1x`, not `name C1`. `C1x` is
+the first carbon of the SDF, which need not be the atom a crystal structure
+calls `C1`. An SDF that names every atom in an `atom.prop._Name` data field,
+with no two names alike, keeps its names. `polyzymd validate` checks each
+`name` in a small-molecule selection against the SDF and lists the names the
+molecule will have.
+```
 
 The units differ between the two keys:
 
@@ -84,7 +99,8 @@ Combine them with `and`, `or`, `not` and parentheses. Write a range as
 - Each restraint selection must match exactly one atom. Otherwise the build
   stops with `Restraint '<name>' requires exactly one atom per selection. Got
   <n> for atom1, <m> for atom2`. A selection that matches no atom stops with
-  `No atoms match selection: '<selection>'`.
+  `No atoms match selection: '<selection>' in component '<component>'`,
+  followed by the atom names of that component.
 
 ```{warning}
 Set `component` to the solute that holds the atom. A selection inside the wrong
@@ -102,8 +118,11 @@ analysis definitions accordingly.
 
 ## Step 4: find the right atom indices
 
-If the atom names in your input files are not enough, first build the system so
-you can inspect `solvated_system.pdb`:
+For a small molecule, the names follow from its SDF (see
+{ref}`restraint-ligand-atom-names`). For anything else, or to check a name,
+build the system and inspect `solvated_system.pdb`. A restraint whose selection
+matches no atom stops the build before it writes any file, so set
+`enabled: false` on the restraint for this first build:
 
 ```bash
 pixi run -e build polyzymd build -c config.yaml
@@ -142,7 +161,7 @@ restraints:
       selection: "resid 76 and name OG"
     atom2:
       component: "Resorufin-Butyrate"
-      selection: "name C1"
+      selection: "name C1x"
     distance: 3.5
     force_constant: 10000.0
     enabled: true
@@ -201,7 +220,7 @@ restraints:
       selection: "resid 76 and name OG"
     atom2:
       component: "Resorufin-Butyrate"
-      selection: "name C1"
+      selection: "name C1x"
     distance: 4.0
     force_constant: 5000.0
     enabled: false
@@ -219,7 +238,9 @@ restraints:
 
 ### no atoms match the selection
 
-Check residue numbering, atom names, and chain identity in the built PDB.
+The error lists the atom names of the component. A small-molecule atom name
+ends in `x` (`C1x`, not `C1`; see {ref}`restraint-ligand-atom-names`). Check
+residue numbering, atom names, and chain identity in the built PDB.
 Remember that the protein is renumbered from 1: a PDB whose first residue is
 number 5 shifts every `resid` down by 4 relative to the crystal numbering.
 
