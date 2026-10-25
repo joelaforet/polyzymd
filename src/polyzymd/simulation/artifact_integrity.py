@@ -233,18 +233,15 @@ def methods_to_cite(
     AM1-BCC, espaloma), Packmol when the build packed solvent or polymer chains
     with it (its seeds in ``provenance`` say so), and Machado and Pantano when
     ``ionic_strength`` set the ions. ``record`` is the build record without
-    ``cite``. Each part comes from one function in
-    :data:`polyzymd.simulation.build_citations.CITATION_SOURCES`. A reference
-    two parts share (Sage 2.3.0 and AshGC have one paper) is listed once.
+    ``cite``. Each reference and when it applies is one entry of
+    :data:`polyzymd.simulation.build_citations.REFERENCES`. A reference two
+    parts share (Sage 2.3.0 and AshGC have one paper) is listed once.
     """
-    from polyzymd.simulation.build_citations import CITATION_SOURCES, merge_repeated_references
+    from polyzymd.simulation.build_citations import cite
 
     context = dict(record or {})
     context["provenance"] = dict(provenance or context.get("provenance") or {})
-    cited: list[str] = []
-    for source in CITATION_SOURCES:
-        cited.extend(source(config, context))
-    return merge_repeated_references(cited)
+    return cite(config, context)
 
 
 def _audit(realize: Any, components: Sequence[Any] | None, config: Any) -> Any:

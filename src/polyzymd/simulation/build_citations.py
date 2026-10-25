@@ -1,11 +1,11 @@
 """The references a build record lists under "Methods to cite".
 
-Each function takes the config and the build record (``engine``, the package
-versions, ``provenance`` and ``components`` of ``build_provenance.json``) and
-returns the references of one part of the build, or an empty list when the
-build did not use it. :data:`CITATION_SOURCES` lists them in the order the record prints
-them; :func:`polyzymd.simulation.artifact_integrity.methods_to_cite` joins
-their results. To cite one more method, add a function and list it there.
+Each reference is one :class:`Reference` in :data:`REFERENCES`, in print
+order: the reference as printed (authors, year, title, journal, DOI), when the
+build used what it describes (a predicate of the :class:`BuildFacts` read once
+from the config and the build record) and what it is cited for. To cite one
+more method, add one entry, e.g. ``Reference(PAPER, "mBuild", lambda f, _:
+"polymer_builder" in f.provenance)``; :func:`cite` lists it.
 
 Every DOI below was checked against Crossref (papers) or DataCite (Zenodo).
 OpenFF parameters and software are cited as
@@ -15,9 +15,15 @@ lists for an item, the paper and the Zenodo DOI of the release.
 
 from __future__ import annotations
 
+import itertools
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+from polyzymd import citation
+from polyzymd.builders.solvent import MACHADO_PANTANO
+from polyzymd.utils.packmol import PACKMOL
 
 FF14SB = (
     "Maier, J. A., Martinez, C., Kasavajhala, K., Wickstrom, L., Hauser, K. E. and "
@@ -103,191 +109,196 @@ OPENFF_FORCEFIELDS_ZENODO = "doi:10.5281/zenodo.3473553"
 NAGL_REPOSITORY = "https://github.com/openforcefield/openff-nagl-models"
 
 
-def _solutes(config: Any) -> list[Any]:
-    """The solutes the build placed (a polymer entry can be disabled)."""
-    return [s for s in getattr(config, "solutes", None) or [] if getattr(s, "enabled", True)]
+def _release(name: Any) -> tuple[int, int]:
+    """(major, minor) of an OpenFF Parsley (1) or Sage (2) file, (-1, 0) for ff14SB, else (0, 0)."""
+    file = Path(name).name.lower()
+    match = re.match(r"openff(?:_unconstrained)?-([12])\.(\d+)\.", file)
+    if "ff14sb" in file:
+        return (-1, 0)
+    return (int(match[1]), int(match[2])) if match else (0, 0)
 
 
-def _co_solvents(config: Any) -> list[Any]:
-    return list(getattr(getattr(config, "solvent", None), "co_solvents", None) or [])
+def _joined(names: Any) -> str:
+    return ", ".join(sorted(set(names)))
 
 
-def _force_field_files(config: Any) -> list[str]:
-    """The force-field files the build loaded, in the order the config names them."""
-    files: list[str] = []
-    named = [getattr(s, "force_field", None) or [] for s in _solutes(config)]
-    named.append(getattr(getattr(config, "solvent", None), "force_field", None) or [])
-    for group in named:
-        for name in group:
-            if str(name) not in files:
-                files.append(str(name))
-    return files
+@dataclass(frozen=True)
+class BuildFacts:
+    """What a build used, read once from the config and the record for :data:`REFERENCES`."""
 
+    record: dict[str, Any]
+    provenance: dict[str, Any]
+    force_fields: tuple[Path, ...]  # each file once, in the order the config names them
+    water: Any
+    charge_methods: frozenset[str]  # with "am1bcc" for NAGL and shipped charges, AM1-BCC too
+    nagl_models: tuple[str, ...]
+    shipped_co_solvents: str  # co-solvents with charges shipped with PolyzyMD, joined
+    ion_files: str  # the OpenFF files that gave the ions their parameters, joined
+    ionic_strength: Any
+    packmol: bool  # whether the build packed solvent or polymer chains (its seeds say so)
 
-def _openff_release(name: str) -> tuple[int, int] | None:
-    """The (major, minor) release of an OpenFF Sage or Parsley file, by its name."""
-    match = re.match(r"openff(?:_unconstrained)?-(\d+)\.(\d+)\.", Path(name).name.lower())
-    return (int(match.group(1)), int(match.group(2))) if match else None
-
-
-def _force_field_references(name: str) -> list[str]:
-    """The references of one force-field file, by the file's name."""
-    file = Path(name).name
-    release = _openff_release(name)
-    if "ff14sb" in file.lower():
-        return [f"{file} (the OpenFF SMIRNOFF port of Amber ff14SB): {FF14SB}"]
-    release_doi = f"{file} (the openff-forcefields release): {OPENFF_FORCEFIELDS_ZENODO}"
-    if release is not None and release[0] == 2:
-        cited = [f"{file} (a release of OpenFF Sage 2): {SAGE}"]
-        if release == (2, 3):
-            cited.append(f"{file} (OpenFF Sage 2.3.0): {SAGE_2_3}")
-        return cited + [release_doi]
-    if release is not None and release[0] == 1:
-        return [f"{file} (a release of OpenFF Parsley 1): {PARSLEY}", release_doi]
-    return [f"{file}: PolyzyMD has no reference for this file; cite its source."]
-
-
-def cite_polyzymd(config: Any, record: dict[str, Any]) -> list[str]:
-    """PolyzyMD itself, at the installed version."""
-    from polyzymd.citation import DOI, citation_line
-
-    return [citation_line() + (f" doi:{DOI}" if DOI else "")]
-
-
-def cite_engine(config: Any, record: dict[str, Any]) -> list[str]:
-    """The MD engine the build is for: OpenMM or GROMACS."""
-    engine = record.get("engine")
-    if engine == "openmm":
-        version = record.get("openmm_version")
-        return [f"OpenMM{f' {version}' if version else ''}: {OPENMM}"]
-    if engine == "gromacs":
-        return [f"GROMACS: {GROMACS}"]
-    return []
-
-
-def cite_openff_software(config: Any, record: dict[str, Any]) -> list[str]:
-    """The OpenFF Toolkit, OpenFF Interchange and the Open Force Field Initiative.
-
-    The Toolkit and Interchange parameterize every build. OpenFF asks for the
-    Toolkit's paper and release DOI, Interchange's release DOI (it has no
-    paper), and the Initiative's paper.
-    """
-
-    def release(key: str, doi: str) -> str:
-        version = record.get(key)
-        return f"{f'version {version}, ' if version else ''}{doi}"
-
-    return [
-        f"OpenFF Toolkit: {OPENFF_TOOLKIT}",
-        f"OpenFF Toolkit release: {release('openff_toolkit_version', OPENFF_TOOLKIT_ZENODO)}",
-        "OpenFF Interchange release: "
-        f"{release('openff_interchange_version', OPENFF_INTERCHANGE_ZENODO)}",
-        f"Open Force Field Initiative: {OPENFF_INITIATIVE}",
-    ]
-
-
-def cite_force_fields(config: Any, record: dict[str, Any]) -> list[str]:
-    """Each force-field file the build loaded."""
-    return [ref for name in _force_field_files(config) for ref in _force_field_references(name)]
-
-
-def cite_water_model(config: Any, record: dict[str, Any]) -> list[str]:
-    """The water model (PolyzyMD builds TIP3P only)."""
-    model = getattr(getattr(getattr(config, "solvent", None), "water", None), "model", None)
-    if getattr(model, "value", model) == "tip3p":
-        return [f"TIP3P water: {TIP3P}"]
-    return []
-
-
-def cite_charge_models(config: Any, record: dict[str, Any]) -> list[str]:
-    """The charge models of the molecules the build charged (NAGL, AM1-BCC, espaloma).
-
-    Library charges belong to the force field cited above, and preset charges
-    to the SDF files they came with.
-    """
-    specs = [getattr(s, "charges", None) for s in _solutes(config) + _co_solvents(config)]
-    specs = [spec for spec in specs if spec is not None]
-    methods = {spec.method for spec in specs}
-    cited: list[str] = []
-    for model in sorted({spec.model for spec in specs if spec.method == "nagl" and spec.model}):
-        if Path(model).name.lower().startswith("openff-gnn-am1bcc-1."):
-            cited.append(
-                f"AshGC (OpenFF NAGL model {model}), a graph neural network for AM1-BCC "
-                f"charges: {SAGE_2_3}"
-            )
-        else:
-            cited.append(
-                f"OpenFF NAGL charge model {model}, a graph neural network for AM1-BCC charges "
-                f"({NAGL_REPOSITORY}); it has no journal article, so cite the model release and "
-                "AM1-BCC."
-            )
-    shipped = sorted(
-        {
-            str(cosolvent.name)
-            for cosolvent in _co_solvents(config)
-            if getattr(getattr(cosolvent, "charges", None), "method", None) == "preset"
-        }
-    )
-    if shipped:
-        # scripts/generate_solvent_sdfs.py made the shipped charges with the
-        # OpenFF Toolkit's AM1-BCC (docs: reference/configuration.md).
-        cited.append(
-            f"Charges of {', '.join(shipped)}: shipped with PolyzyMD, computed with AM1-BCC "
-            "(cited below)."
-        )
-    if shipped or "nagl" in methods or "am1bcc" in methods:
-        cited.extend(AM1BCC)
-    if "espaloma" in methods:
-        cited.append(ESPALOMA_CHARGE)
-    return cited
-
-
-def cite_ion_parameters(config: Any, record: dict[str, Any]) -> list[str]:
-    """Joung and Cheatham, when the build added Na+ or Cl- with an OpenFF Sage or Parsley file.
-
-    The Na+ and Cl- Lennard-Jones parameters of ``openff-1.*`` and ``openff-2.*``
-    are the TIP3P set of Joung and Cheatham (2008), Table 5; the
-    openff-forcefields package keeps that table as ``data/jc.csv``.
-    """
-    files = sorted(
-        {
-            Path(name).name
+    @classmethod
+    def of(cls, config: Any, record: dict[str, Any]) -> BuildFacts:
+        solvent = getattr(config, "solvent", None)
+        # A polymer entry can be disabled; it is then not built.
+        solutes = [s for s in getattr(config, "solutes", None) or [] if getattr(s, "enabled", True)]
+        co_solvents = list(getattr(solvent, "co_solvents", None) or [])
+        names = [n for s in solutes for n in getattr(s, "force_field", None) or []]
+        names += getattr(solvent, "force_field", None) or []
+        specs = [s.charges for s in solutes + co_solvents if getattr(s, "charges", None)]
+        model = getattr(getattr(solvent, "water", None), "model", None)
+        ions = [
+            name
             for component in record.get("components") or []
             if component.get("type") == "ions"
             for domain in component.get("domains") or []
             for name in domain.get("force_field") or []
-            if _openff_release(name) is not None and _openff_release(name)[0] in (1, 2)
-        }
-    )
-    if not files:
-        return []
-    return [f"Na+ and Cl- parameters of {', '.join(files)} (TIP3P set): {JOUNG_CHEATHAM}"]
+        ]
+        shipped = _joined(
+            str(c.name)
+            for c in co_solvents
+            if getattr(getattr(c, "charges", None), "method", None) == "preset"
+        )
+        methods = {spec.method for spec in specs}
+        provenance = record.get("provenance") or {}
+        return cls(
+            record=record,
+            provenance=provenance,
+            force_fields=tuple(Path(n) for n in dict.fromkeys(str(n) for n in names)),
+            water=getattr(model, "value", model),
+            charge_methods=frozenset(
+                methods | ({"am1bcc"} if shipped or "nagl" in methods else set())
+            ),
+            nagl_models=tuple(sorted({s.model for s in specs if s.method == "nagl" and s.model})),
+            shipped_co_solvents=shipped,
+            ion_files=_joined(Path(name).name for name in ions if _release(name)[0] > 0),
+            ionic_strength=getattr(getattr(solvent, "ions", None), "ionic_strength", None),
+            packmol=bool({"solvent_packmol_seed", "polymer_packmol_seed"} & provenance.keys()),
+        )
+
+    def release(self, package: str, doi: str) -> str:
+        """``doi`` of an OpenFF package release, after the version the record names."""
+        version = self.record.get(f"openff_{package}_version")
+        return f"{f'version {version}, ' if version else ''}{doi}"
 
 
-def cite_packmol(config: Any, record: dict[str, Any]) -> list[str]:
-    """Packmol, when the build packed solvent or polymer chains with it (its seeds say so)."""
-    from polyzymd.utils.packmol import PACKMOL
+@dataclass(frozen=True)
+class Reference:
+    """One line of "Methods to cite": a reference, what it is cited for, and when.
 
-    provenance = record.get("provenance") or {}
-    packed = ("solvent_packmol_seed", "polymer_packmol_seed")
-    return [PACKMOL] if any(key in provenance for key in packed) else []
+    ``label`` is a format string of ``f`` (the facts) and ``x`` (the item), or
+    a function ``(facts, item)``; ``text`` may be such a function for the few
+    lines that carry a version or a model name. ``when(facts, item)`` says
+    whether the build used it. ``each`` names a tuple of :class:`BuildFacts`
+    to check it for, item by item; ``item`` is None without it.
+    """
+
+    text: str | Callable[[BuildFacts, Any], str]
+    label: str | Callable[[BuildFacts, Any], str] = ""
+    when: Callable[[BuildFacts, Any], Any] = lambda facts, item: True
+    each: str = ""
+
+    def line(self, facts: BuildFacts, item: Any) -> str:
+        text = self.text if isinstance(self.text, str) else self.text(facts, item)
+        label = self.label
+        label = label.format(f=facts, x=item) if isinstance(label, str) else label(facts, item)
+        return f"{label}: {text}" if label else text
 
 
-def cite_ion_rule(config: Any, record: dict[str, Any]) -> list[str]:
-    """Machado and Pantano, when ``ionic_strength`` set the ions."""
-    from polyzymd.builders.solvent import MACHADO_PANTANO
+def _file(text: str, what: str, when: Callable[[Path], Any]) -> Reference:
+    """A reference cited for each force-field file ``when`` matches, by the file's name."""
+    return Reference(text, "{x.name}" + what, lambda f, x: when(x), each="force_fields")
 
-    ions = getattr(getattr(config, "solvent", None), "ions", None)
-    return [MACHADO_PANTANO] if getattr(ions, "ionic_strength", None) is not None else []
+
+def _ashgc(facts: BuildFacts, model: str) -> bool:
+    return Path(model).name.lower().startswith("openff-gnn-am1bcc-1.")
+
+
+NO_REFERENCE = "PolyzyMD has no reference for this file; cite its source."
+#: Every reference "Methods to cite" can list, in the order it lists them.
+REFERENCES: tuple[Reference, ...] = (
+    Reference(lambda f, _: " doi:".join(filter(None, (citation.citation_line(), citation.DOI)))),
+    Reference(
+        OPENMM,
+        lambda f, _: " ".join(filter(None, ("OpenMM", f.record.get("openmm_version")))),
+        lambda f, _: f.record.get("engine") == "openmm",
+    ),
+    Reference(GROMACS, "GROMACS", lambda f, _: f.record.get("engine") == "gromacs"),
+    # OpenFF asks for the Toolkit's paper and release DOI, Interchange's release
+    # DOI (it has no paper), and the Initiative's paper; both run every build.
+    Reference(OPENFF_TOOLKIT, "OpenFF Toolkit"),
+    Reference(lambda f, _: f.release("toolkit", OPENFF_TOOLKIT_ZENODO), "OpenFF Toolkit release"),
+    Reference(
+        lambda f, _: f.release("interchange", OPENFF_INTERCHANGE_ZENODO),
+        "OpenFF Interchange release",
+    ),
+    Reference(OPENFF_INITIATIVE, "Open Force Field Initiative"),
+    # The Sage paper describes 2.0.0 and is cited for every Sage 2 release.
+    _file(FF14SB, " (the OpenFF SMIRNOFF port of Amber ff14SB)", lambda x: _release(x)[0] < 0),
+    _file(SAGE, " (a release of OpenFF Sage 2)", lambda x: _release(x)[0] == 2),
+    _file(SAGE_2_3, " (OpenFF Sage 2.3.0)", lambda x: _release(x) == (2, 3)),
+    _file(PARSLEY, " (a release of OpenFF Parsley 1)", lambda x: _release(x)[0] == 1),
+    _file(
+        OPENFF_FORCEFIELDS_ZENODO, " (the openff-forcefields release)", lambda x: _release(x)[0] > 0
+    ),
+    _file(NO_REFERENCE, "", lambda x: _release(x)[0] == 0),
+    Reference(TIP3P, "TIP3P water", lambda f, _: f.water == "tip3p"),
+    # The Na+ and Cl- Lennard-Jones parameters of openff-1.* and openff-2.* are
+    # the TIP3P set of Joung and Cheatham (2008), Table 5 (data/jc.csv of
+    # openff-forcefields).
+    Reference(
+        JOUNG_CHEATHAM,
+        "Na+ and Cl- parameters of {f.ion_files} (TIP3P set)",
+        lambda f, _: f.ion_files,
+    ),
+    # Charge models. Library charges belong to the force field cited above, and
+    # preset charges to the SDF files they came with.
+    Reference(
+        SAGE_2_3,
+        "AshGC (OpenFF NAGL model {x}), a graph neural network for AM1-BCC charges",
+        _ashgc,
+        each="nagl_models",
+    ),
+    Reference(
+        lambda f, model: (
+            f"OpenFF NAGL charge model {model}, a graph neural network for AM1-BCC charges "
+            f"({NAGL_REPOSITORY}); it has no journal article, so cite the model release and "
+            "AM1-BCC."
+        ),
+        when=lambda f, x: not _ashgc(f, x),
+        each="nagl_models",
+    ),
+    # scripts/generate_solvent_sdfs.py made the shipped charges with the
+    # OpenFF Toolkit's AM1-BCC (docs: reference/configuration.md).
+    Reference(
+        "shipped with PolyzyMD, computed with AM1-BCC (cited below).",
+        "Charges of {f.shipped_co_solvents}",
+        lambda f, _: f.shipped_co_solvents,
+    ),
+    *(Reference(paper, when=lambda f, _: "am1bcc" in f.charge_methods) for paper in AM1BCC),
+    Reference(ESPALOMA_CHARGE, when=lambda f, _: "espaloma" in f.charge_methods),
+    Reference(PACKMOL, when=lambda f, _: f.packmol),
+    Reference(MACHADO_PANTANO, when=lambda f, _: f.ionic_strength is not None),
+    # A tool the build records in its provenance goes here, as one entry:
+    # Reference(MBUILD, "mBuild", lambda f, _: "polymer_builder" in f.provenance),
+)
+
+
+def cite(config: Any, record: dict[str, Any]) -> list[str]:
+    """The lines of "Methods to cite" for a build, each reference once."""
+    facts = BuildFacts.of(config, record)
+    cited: list[str] = []
+    for each, group in itertools.groupby(REFERENCES, key=lambda reference: reference.each):
+        entries = list(group)
+        for item in getattr(facts, each) if each else (None,):
+            cited += [ref.line(facts, item) for ref in entries if ref.when(facts, item)]
+    return merge_repeated_references(cited)
 
 
 def _references() -> list[str]:
-    """Every full reference this module defines, longest first."""
-    found: list[str] = []
-    for value in globals().values():
-        items = value if isinstance(value, tuple) else (value,)
-        found += [item for item in items if isinstance(item, str) and " doi:" in item]
-    return sorted(set(found), key=len, reverse=True)
+    """Every full reference of :data:`REFERENCES`, longest first."""
+    found = {r.text for r in REFERENCES if isinstance(r.text, str) and " doi:" in r.text}
+    return sorted(found, key=len, reverse=True)
 
 
 def merge_repeated_references(cited: list[str]) -> list[str]:
@@ -314,17 +325,3 @@ def merge_repeated_references(cited: list[str]) -> list[str]:
             head = merged[index][: -len(reference) - 2] if merged[index] != reference else ""
             merged[index] = f"{head} and {what}: {reference}" if head else line
     return merged
-
-
-#: The parts of a build that have references, in the order the record lists them.
-CITATION_SOURCES: tuple[Callable[[Any, dict[str, Any]], list[str]], ...] = (
-    cite_polyzymd,
-    cite_engine,
-    cite_openff_software,
-    cite_force_fields,
-    cite_water_model,
-    cite_ion_parameters,
-    cite_charge_models,
-    cite_packmol,
-    cite_ion_rule,
-)

@@ -18,7 +18,10 @@ starts with PolyzyMD at the version that made the build.
 
 Cite each of these methods that your build used. `build_provenance.md` lists
 the ones a build used under "Methods to cite", together with the force fields,
-the water model, the ion parameters and the charge models below.
+the water model, the ion parameters and the charge models below. For contributors:
+each reference and when a build cites it is one `Reference` entry of the
+`REFERENCES` table in `polyzymd/simulation/build_citations.py`; to cite one
+more method, add an entry there and the reference here.
 
 - Eastman, P., Galvelis, R., Peláez, R. P., Abreu, C. R. A., Farr, S. E.,
   Gallicchio, E., Gorenko, A., Henry, M. M., Hu, F., Huang, J., Krämer, A.,

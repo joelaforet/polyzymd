@@ -245,6 +245,21 @@ def test_merge_repeated_references_keeps_the_first_and_names_both_uses() -> None
     assert merged == [f"a and b: {SAGE_2_3}", TIP3P, "no reference"]
 
 
+def test_a_reference_added_to_the_table_is_cited_when_its_condition_holds(monkeypatch) -> None:
+    from polyzymd.simulation import build_citations
+    from polyzymd.simulation.artifact_integrity import methods_to_cite
+
+    paper = "Doe, J. (2026). A polymer builder. J. Chem. 1, 1-2. doi:10.1000/example"
+    entry = build_citations.Reference(
+        paper, "builder", lambda f, _: "polymer_builder" in f.provenance
+    )
+    monkeypatch.setattr(build_citations, "REFERENCES", (*build_citations.REFERENCES, entry))
+
+    cited = methods_to_cite(_build_config(), {"polymer_builder": "mbuild"})
+    assert cited[-1] == f"builder: {paper}"
+    assert f"builder: {paper}" not in methods_to_cite(_build_config())
+
+
 #: The references https://openforcefield.org/science/how-to-cite/ lists for OpenFF.
 TOOLKIT_PAPER = "doi:10.1021/acs.jctc.8b00640"
 INITIATIVE = "doi:10.1021/acs.jpcb.4c01558"
