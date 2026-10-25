@@ -527,8 +527,7 @@ class MonomerSpec(_ConfigModel):
     smiles: str | None = Field(
         None,
         description=(
-            "Repeat-unit SMILES with '*' on the two linking atoms (required for dynamic "
-            "generation)"
+            "Repeat-unit SMILES with '*' on the two linking atoms (required for dynamic generation)"
         ),
     )
     residue_name: str | None = Field(
@@ -1061,8 +1060,7 @@ class IonConfig(_ConfigModel):
         None,
         gt=0.0,
         description=(
-            "Ionic strength (mol/L) of the box, counter-ions included; replaces "
-            "nacl_concentration"
+            "Ionic strength (mol/L) of the box, counter-ions included; replaces nacl_concentration"
         ),
     )
     kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L); not built")
@@ -1138,7 +1136,7 @@ class SolventConfig(_ConfigModel):
     def _primary_is_now_water(cls, data: Any) -> Any:
         if isinstance(data, dict) and "primary" in data:
             raise ValueError(
-                "solvent.primary is now solvent.water: {model: tip3p}. " f"See {REWRITE_GUIDE}"
+                f"solvent.primary is now solvent.water: {{model: tip3p}}. See {REWRITE_GUIDE}"
             )
         return data
 

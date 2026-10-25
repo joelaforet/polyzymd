@@ -151,8 +151,7 @@ def parse_star_smiles(smiles: str, n_sites: int, what: str) -> StarSitedUnit:
         neighbour = star.GetNeighbors()[0]
         if neighbour.GetAtomicNum() == 0:
             raise ValueError(
-                f"{what}: two '*' in {smiles!r} are bonded to each other.\n"
-                "fix: correct the SMILES."
+                f"{what}: two '*' in {smiles!r} are bonded to each other.\nfix: correct the SMILES."
             )
         anchors.append(neighbour.GetIdx())
     if n_sites == 2 and anchors[0] == anchors[1]:

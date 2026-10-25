@@ -186,9 +186,11 @@ def run_user_analysis(
     if part is not None and part not in (parts or []):
         raise ProtocolError(
             f"{run} has no part {part!r}.",
-            hint=f"Use --run with one of {', '.join(parts)}."
-            if parts
-            else "Leave --run out; this function measures one quantity.",
+            hint=(
+                f"Use --run with one of {', '.join(parts)}."
+                if parts
+                else "Leave --run out; this function measures one quantity."
+            ),
         )
     extra = {} if parts is None else {"parts": parts}
     if user.kind == "timeseries":

@@ -802,8 +802,7 @@ def replicate_chain_state(sim_config: SimulationConfig, replicate: int) -> tuple
             return "refused", f"refused: {exc}"
     return (
         "continue",
-        f"continue from step {progress.total_steps_completed} to "
-        f"{progress.total_steps_requested}",
+        f"continue from step {progress.total_steps_completed} to {progress.total_steps_requested}",
     )
 
 

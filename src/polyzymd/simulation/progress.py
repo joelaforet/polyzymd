@@ -985,9 +985,7 @@ def _scan_segment_dir(
             duration_ns = (steps_completed * timestep_fs) / 1e6
 
             if is_likely_running:
-                LOGGER.info(
-                    f"Segment {seg_idx} is still running " f"(~{steps_completed} steps so far)"
-                )
+                LOGGER.info(f"Segment {seg_idx} is still running (~{steps_completed} steps so far)")
                 return SegmentRecord(
                     index=seg_idx,
                     steps_completed=steps_completed,
