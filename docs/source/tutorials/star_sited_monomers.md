@@ -33,12 +33,22 @@ for writing these SMILES. It:
 
 It does not change your config. Check each result by eye.
 
-Open it in the PolyzyMD build environment, from the folder of your PolyzyMD
-clone:
+Copy it out of your PolyzyMD clone, so the clone stays clean, and open it in
+the PolyzyMD build environment (change `~/polyzymd` to your clone):
 
 ```bash
-pixi run -e build jupyter lab docs/source/tutorials/star_sited_monomers.ipynb
+mkdir -p ~/star_sited && cp ~/polyzymd/docs/source/tutorials/star_sited_monomers.ipynb ~/star_sited/
+cd ~/star_sited
+pixi run -e build --manifest-path ~/polyzymd/pixi.toml jupyter lab --no-browser star_sited_monomers.ipynb
 ```
+
+JupyterLab prints a link with a token, such as
+`http://localhost:8888/lab?token=...`. Open it in your web browser.
+
+On Windows with WSL, `localhost` in the Windows browser may not reach WSL (the
+page says the connection was refused). Then start JupyterLab with
+`--ip=0.0.0.0` added, find the WSL address with `hostname -I`, and open
+`http://<that address>:8888/lab?token=...` instead.
 
 ## Use the result
 

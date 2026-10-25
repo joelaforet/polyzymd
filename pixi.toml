@@ -130,6 +130,7 @@ parmed                = ">=3.4.3"
 hoomd                 = { version = ">=4", build = "cpu*" }
 # Opens docs/source/tutorials/star_sited_monomers.ipynb (pixi run -e build jupyter lab ...).
 jupyterlab            = ">=4"
+notebook              = ">=7"  # JupyterLab looks for its extension at startup
 openbabel             = ">=3.1"
 rdkit                 = ">=2023.09"
 pdbfixer              = ">=1.9"
