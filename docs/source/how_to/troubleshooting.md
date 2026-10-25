@@ -243,10 +243,13 @@ too large, or a system that is not stable.
 3. Add a stage that holds the protein while the solvent and polymer relax.
    See {doc}`equilibration`.
 
-### `Minimized state violates a constraint by ... A (> 0.010 A)`
+### `Minimized state violates a constraint by ... A, and ... A remains`
 
-This is a warning, and PolyzyMD corrects it before heating. The next log line,
-`Constraint violation after applyConstraints`, should be near zero. See
+The minimizer holds constrained distances only approximately; PolyzyMD puts
+the atoms back onto the exact lengths before heating, and normally logs that
+as one INFO line. This WARNING means the correction left more than 0.01 Å:
+check the input structure around the atoms with the largest hydrogen
+displacement in `minimization/phase.json`. See
 {ref}`minimization-constraints`.
 
 ### `CUDA out of memory`

@@ -78,7 +78,7 @@ that GROMACS computes the same energies as OpenMM through Interchange.
 | What | OpenMM | GROMACS |
 |---|---|---|
 | Trajectory | DCD | XTC |
-| Analysis topology | `system.prmtop`, written from the built system (`solvated_system.pdb` when the build has a distance restraint) | the run's `.tpr`, or the `.top` when MDAnalysis cannot read the `.tpr` |
+| Analysis topology | `system.prmtop`, written from the built system | the run's `.tpr`, or the `.top` when MDAnalysis cannot read the `.tpr` |
 
 ## What `grompp` may warn about
 

@@ -132,8 +132,7 @@ Analysis finds trajectories by name.
 **OpenMM.** Copy the trajectory to `production_0/production_0_trajectory.dcd`
 in the replicate folder. A run in several parts goes to `production_1/`,
 `production_2/` and so on, with no gaps; their times must follow on from one
-another. Analysis reads the topology from the built `system.prmtop`, or from
-`solvated_system.pdb` when the build has a distance restraint.
+another. Analysis reads the topology from the built `system.prmtop`.
 
 ```bash
 mkdir production_0

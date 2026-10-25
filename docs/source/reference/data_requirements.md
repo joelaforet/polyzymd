@@ -276,9 +276,7 @@ and production trajectories as indexed daisy-chain segments:
   IDs, so the loader takes them from `solvated_system.pdb` beside it, and
   `chainid A` selects the protein. For this it reads only the residue name and
   chain ID columns of the PDB's `ATOM` and `HETATM` lines, so it works at any
-  system size. A build with a distance restraint has no `system.prmtop`,
-  because ParmEd cannot convert the restraint. Its analyses read
-  `solvated_system.pdb`.
+  system size.
 - `solvated_system.pdb` is the viewer topology, for PyMOL or VMD with the DCD
   segments. Above 99,999 atoms OpenMM writes its serials in hex and MDAnalysis
   cannot read its CONECT records, and OpenMM writes CONECT records only for
