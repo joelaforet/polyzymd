@@ -82,7 +82,7 @@ pdb = app.PDBFile("../solvated_system.pdb")
 with open("../system.xml") as f:
     system = mm.XmlSerializer.deserialize(f.read())
 ca = [a.index + 1 for a in pdb.topology.atoms()
-      if a.name == "CA" and a.residue.name not in ("HOH", "NA", "CL")]
+      if a.name == "CA" and a.residue.chain.id == "A"]   # chain A is the protein
 system.addForce(PlumedForce(f"""
 rg: GYRATION ATOMS={",".join(map(str, ca))}
 metad: METAD ARG=rg SIGMA=0.02 HEIGHT=1.0 PACE=100 FILE=HILLS
@@ -165,7 +165,8 @@ polyzymd analyze --project .
 
 The replicate takes part in every analysis and comparison like the
 replicates PolyzyMD ran. Frame times come from the trajectory, and the
-study's equilibration window applies to them.
+study's equilibration window applies to them. To read the trajectories with
+MDAnalysis or `gmx` tools yourself, see {doc}`own_analysis`.
 
 ```{warning}
 PolyzyMD analyses weight every frame equally. The frames of a biased run, such
@@ -198,3 +199,4 @@ condition from its own config instead.
 - {doc}`../explanation/physics_audit` — what the build audit checks
 - {doc}`run_gromacs` — run GROMACS with PolyzyMD's protocol
 - {doc}`study_folder` — studies, conditions and replicates
+- {doc}`own_analysis` — analyze the trajectories with your own tools

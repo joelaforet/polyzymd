@@ -20,13 +20,14 @@ PROJECT_FOLDERS = {
     "stats": "Statistics scripts that read pz.Project('.').replicate_table(run); freeze publishes them",
     "figures": "Notebooks and scripts that read results with pz.Project('.').results(run)",
     "notebooks": (
-        "Notebooks that help prepare inputs; star_sited_monomers.ipynb writes the star-sited "
-        "SMILES of a monomer for dynamic polymers"
+        "Notebooks to try things in; star_sited_monomers.ipynb writes the star-sited SMILES "
+        "of a monomer for dynamic polymers, load_replicates.ipynb loads a replicate into "
+        "MDAnalysis from its config"
     ),
 }
 
 #: Notebooks shipped with PolyzyMD that project init copies into ``notebooks/``.
-PROJECT_NOTEBOOKS = ("star_sited_monomers.ipynb",)
+PROJECT_NOTEBOOKS = ("star_sited_monomers.ipynb", "load_replicates.ipynb")
 
 PROJECT_GITIGNORE = """\
 # Where this machine keeps the trajectories: never commit or publish it.

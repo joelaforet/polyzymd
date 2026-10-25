@@ -1,6 +1,8 @@
 # Which Analysis Should I Run?
 
 You already have trajectories. This page helps you choose the analyses that match the question you want to answer.
+To read the trajectories with MDAnalysis or `gmx` tools of your own instead,
+see {doc}`own_analysis`.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -76,3 +78,4 @@ stored.
 - {doc}`analysis_compare_conditions` — Comparing conditions step by step
 - {doc}`../explanation/analysis_concepts` — How the analyses work
 - {doc}`../reference/analysis_functions` — Every shipped analysis function
+- {doc}`own_analysis` — Analyze the trajectories with your own tools

@@ -86,6 +86,7 @@ analysis_chooser
 analysis_agent_protocol
 analysis_compare_conditions
 study_api
+own_analysis
 hpc_execution
 ```
 
