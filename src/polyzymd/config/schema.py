@@ -507,14 +507,16 @@ class PolymerPackingConfig(_ConfigModel):
 class MonomerSpec(_ConfigModel):
     """Specification for a single monomer type in a co-polymer.
 
-    For dynamic polymer generation, provide the raw (unactivated) monomer SMILES.
-    The system will run initiation reactions to create the active fragments.
+    For dynamic generation, ``smiles`` is the repeat unit as it is in the chain,
+    with ``*`` on the two atoms that bond to the neighbouring repeat units:
+    ``[*]CC([*])(C)C(=O)OC`` for methyl methacrylate. The first ``*`` bonds
+    toward the head of the chain, the second toward its tail.
 
     Attributes:
         label: Single character label for this monomer (e.g., "A", "B")
         probability: Probability of selecting this monomer (0-1)
         name: Optional full name (e.g., "SBMA", "EGPMA")
-        smiles: Raw monomer SMILES string (required for dynamic generation)
+        smiles: Star-sited repeat-unit SMILES (required for dynamic generation)
         residue_name: 3-character PDB residue name (auto-generated if not provided)
     """
 
@@ -523,7 +525,10 @@ class MonomerSpec(_ConfigModel):
     name: str | None = Field(None, description="Full monomer name")
     smiles: str | None = Field(
         None,
-        description="Raw monomer SMILES (required for dynamic generation mode)",
+        description=(
+            "Repeat-unit SMILES with '*' on the two linking atoms (required for dynamic "
+            "generation)"
+        ),
     )
     residue_name: str | None = Field(
         None,
@@ -544,70 +549,68 @@ class PolymerGenerationMode(str, Enum):
     """Mode for polymer generation."""
 
     CACHED = "cached"  # Load pre-built SDF files from disk
-    DYNAMIC = "dynamic"  # Generate polymers on-the-fly using Polymerist
+    DYNAMIC = "dynamic"  # Build chains with mBuild from star-sited SMILES
 
 
-class ReactionConfig(_ConfigModel):
-    """Paths to reaction templates for ATRP polymer generation.
+class EndGroupOption(_ConfigModel):
+    """One cap a chain end can get, drawn with ``probability``.
 
-    These .rxn files define the chemical transformations used to create
-    polymer fragments from raw monomer SMILES. For ATRP, this includes:
-    - Initiation: Activates the vinyl group (e.g., chlorination)
-    - Polymerization: Creates chain-extending fragments
-    - Termination: Restores the alkene for chain ends
-
-    You can use "default" as a special value to use the bundled ATRP
-    methacrylate reaction templates that ship with PolyzyMD.
-
-    Example:
-        reactions:
-          initiation: "default"
-          polymerization: "default"
-          termination: "default"
-
-    Attributes:
-        initiation: Path to the initiation reaction template (.rxn) or "default"
-        polymerization: Path to the polymerization reaction template (.rxn) or "default"
-        termination: Path to the termination reaction template (.rxn) or "default"
+    ``smiles`` has one ``*`` on the atom that bonds to the chain: ``[*][H]``
+    caps with a hydrogen, ``[*]C`` with a methyl group, and
+    ``[*]C=C(C)C(=O)OC`` with a whole methyl methacrylate unit that kept its
+    double bond. ``label`` is the one character the chain's sequence shows for
+    this cap. With ``residue_name`` the cap is a residue of its own; without
+    it, its atoms join the residue of the repeat unit it caps.
     """
 
-    initiation: Path = Field(..., description="Path to ATRP initiation .rxn file or 'default'")
-    polymerization: Path = Field(
-        ..., description="Path to ATRP polymerization .rxn file or 'default'"
+    label: str = Field(..., min_length=1, max_length=1, description="Cap label in the sequence")
+    smiles: str = Field(..., min_length=1, description="Cap SMILES with one '*'")
+    probability: float = Field(..., ge=0.0, le=1.0, description="Probability of this cap")
+    name: str | None = Field(None, description="Cap name")
+    residue_name: str | None = Field(
+        None,
+        max_length=3,
+        description="3-char residue name; the cap is then its own residue",
     )
-    termination: Path = Field(..., description="Path to ATRP termination .rxn file or 'default'")
 
-    @field_validator("initiation", "polymerization", "termination", mode="before")
+
+class PolymerEndGroups(_ConfigModel):
+    """The caps of a dynamically generated chain: the options of each end.
+
+    Each end draws one of its options per chain; the probabilities of each
+    end sum to 1. A fixed cap is one option with probability 1. There is no
+    default; the caps are part of the molecule the study simulates.
+    """
+
+    head: list[EndGroupOption] = Field(
+        ..., min_length=1, description="Caps of the first repeat unit's head '*'"
+    )
+    tail: list[EndGroupOption] = Field(
+        ..., min_length=1, description="Caps of the last repeat unit's tail '*'"
+    )
+
+    @field_validator("head", "tail", mode="before")
     @classmethod
-    def resolve_default_paths(cls, v, info) -> Path:
-        """Resolve 'default' to bundled ATRP reaction paths."""
-        from polyzymd.data.reactions import (
-            get_atrp_initiation_path,
-            get_atrp_polymerization_path,
-            get_atrp_termination_path,
-        )
+    def _refuse_bare_smiles(cls, value: Any, info: Any) -> Any:
+        """Refuse a cap given as a plain SMILES; each end is a list of options."""
+        if isinstance(value, str):
+            smiles = value if "*" in value else "[*][H]"
+            raise ValueError(
+                f"end_groups.{info.field_name} is a list of caps with probabilities, each "
+                "SMILES with one '*', for example "
+                f"{info.field_name}: [{{label: H, smiles: '{smiles}', probability: 1.0}}]"
+            )
+        return value
 
-        if isinstance(v, str) and v.lower() == "default":
-            # Map field name to the appropriate getter
-            field_to_getter = {
-                "initiation": get_atrp_initiation_path,
-                "polymerization": get_atrp_polymerization_path,
-                "termination": get_atrp_termination_path,
-            }
-            getter = field_to_getter.get(info.field_name)
-            if getter:
-                return getter()
-            raise ValueError(f"Unknown reaction field: {info.field_name}")
 
-        # Convert string to Path if needed
-        if isinstance(v, str):
-            v = Path(v)
+def _without_stereo(smiles: str) -> str:
+    """Return ``smiles`` without its stereo marks (``@``, ``/``, ``\\``)."""
+    return re.sub(r"[@/\\]", "", smiles)
 
-        # Validate .rxn extension
-        if isinstance(v, Path) and v.suffix.lower() != ".rxn":
-            raise ValueError(f"Expected .rxn file, got {v.suffix}")
 
-        return v
+def _count_stars(smiles: str) -> int:
+    """Count the ``*`` atoms of a SMILES string (``*`` and ``[*]`` alike)."""
+    return smiles.count("*")
 
 
 class PolymerSolute(_Solute):
@@ -615,11 +618,12 @@ class PolymerSolute(_Solute):
 
     Supports two generation modes:
     - "cached": Load pre-built polymer SDF files from sdf_directory
-    - "dynamic": Generate polymers on-the-fly using Polymerist from SMILES
+    - "dynamic": Build chains with mBuild from star-sited SMILES
 
     For dynamic mode, you must provide:
-    - SMILES for each monomer in monomers[].smiles
-    - Reaction templates in the reactions field
+    - the star-sited repeat unit of each monomer in monomers[].smiles
+    - the star-sited caps of each end in end_groups (head and tail), each a
+      list of options with probabilities
 
     Attributes:
         generation_mode: "cached" for pre-built SDFs, "dynamic" for on-the-fly generation
@@ -628,11 +632,11 @@ class PolymerSolute(_Solute):
         length: Number of monomer units per polymer chain
         count: Number of polymer chains to add
         sdf_directory: Path to pre-built polymer SDF files (for cached mode)
-        reactions: Reaction templates for ATRP (required for dynamic mode)
+        end_groups: Star-sited caps of each chain (required for dynamic mode)
         charges: preset (the charges in the cached SDFs) or, for dynamic
             generation, nagl, am1bcc or espaloma
         max_retries: Maximum retries for polymer generation (ring-piercing failures)
-        cache_directory: Directory for caching generated polymers and fragments
+        cache_directory: Directory for caching generated polymers
         packing: Settings for packing polymers around the solute
         random_seed: Random seed for polymer sequence generation (for reproducibility)
     """
@@ -649,8 +653,8 @@ class PolymerSolute(_Solute):
     sdf_directory: Path | None = Field(
         None, description="Directory with pre-built polymer SDFs (for cached mode)"
     )
-    reactions: ReactionConfig | None = Field(
-        None, description="ATRP reaction templates (required for dynamic mode)"
+    end_groups: PolymerEndGroups | None = Field(
+        None, description="Star-sited head and tail caps (required for dynamic mode)"
     )
     charges: ChargeSpec = Field(
         ..., description="preset (cached SDFs) or nagl, am1bcc, espaloma (dynamic generation)"
@@ -658,10 +662,10 @@ class PolymerSolute(_Solute):
     max_retries: int = Field(
         10,
         ge=1,
-        description="Maximum retries for polymer generation (handles ring-piercing failures)",
+        description="Builds tried before a chain with a pierced ring or overlapping atoms is refused",
     )
     cache_directory: Path = Field(
-        Path(".polymer_cache"), description="Cache directory for generated polymers and fragments"
+        Path(".polymer_cache"), description="Cache directory for generated polymers"
     )
     packing: PolymerPackingConfig = Field(
         default_factory=PolymerPackingConfig,
@@ -680,16 +684,24 @@ class PolymerSolute(_Solute):
             raise ValueError(f"Monomer probabilities must sum to 1.0, got {total}")
         return self
 
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_reactions(cls, data: Any) -> Any:
+        """Refuse ``reactions:``: chains are built from star-sited SMILES since 1.3.0rc5."""
+        if isinstance(data, dict) and "reactions" in data:
+            raise ValueError(
+                "polymer key 'reactions' was removed in PolyzyMD 1.3.0rc5: dynamic chains are "
+                "built from star-sited SMILES. Give each monomer's repeat unit with '*' on its "
+                "two linking atoms ([*]CC([*])(C)C(=O)OC for methyl methacrylate) and the caps "
+                "in end_groups, for example end_groups: {head: [{label: H, smiles: '[*][H]', "
+                f"probability: 1.0}}], tail: [...]}}. See {REWRITE_GUIDE}"
+            )
+        return data
+
     @model_validator(mode="after")
     def validate_generation_mode_requirements(self) -> "PolymerSolute":
         """Validate that required fields are present for the selected generation mode."""
         if self.generation_mode == PolymerGenerationMode.DYNAMIC:
-            if self.length < 3:
-                raise ValueError(
-                    "Dynamic generation mode requires 'length' >= 3 because Polymerist "
-                    "requires a non-empty middle sequence"
-                )
-
             # Dynamic mode requires SMILES for all monomers
             missing_smiles = [m.label for m in self.monomers if m.smiles is None]
             if missing_smiles:
@@ -697,14 +709,92 @@ class PolymerSolute(_Solute):
                     f"Dynamic generation mode requires 'smiles' for all monomers. "
                     f"Missing SMILES for monomers: {missing_smiles}"
                 )
-
-            # Dynamic mode requires reaction templates
-            if self.reactions is None:
+            for monomer in self.monomers:
+                stars = _count_stars(monomer.smiles)
+                if stars != 2:
+                    raise ValueError(
+                        f"monomer {monomer.label!r}: its smiles {monomer.smiles!r} has {stars} "
+                        "'*' sites; a repeat unit needs exactly 2, on the atoms that bond to "
+                        "the neighbouring units ([*]CC([*])(C)C(=O)OC for methyl "
+                        "methacrylate). The notebook at "
+                        "https://polyzymd.readthedocs.io/en/latest/tutorials/"
+                        "star_sited_monomers.html helps you place them."
+                    )
+            if self.length < 3:
                 raise ValueError(
-                    "Dynamic generation mode requires 'reactions' field with ATRP reaction templates"
+                    f"length {self.length}: a dynamic chain's length counts its two ends (head "
+                    "and tail caps) and its repeat units, so it is at least 3; length 5 is "
+                    "2 ends + 3 repeat units."
+                )
+            if self.end_groups is None:
+                raise ValueError(
+                    "Dynamic generation mode requires 'end_groups' with the caps of the head and "
+                    "tail, each a list of SMILES with one '*' and probabilities, for example "
+                    "end_groups: {head: [{label: H, smiles: '[*][H]', probability: 1.0}], "
+                    "tail: [{label: H, smiles: '[*][H]', probability: 1.0}]}. There is no "
+                    "default cap."
+                )
+            for end in ("head", "tail"):
+                options = getattr(self.end_groups, end)
+                for option in options:
+                    stars = _count_stars(option.smiles)
+                    if stars != 1:
+                        raise ValueError(
+                            f"end_groups.{end} {option.label!r}: {option.smiles!r} has {stars} "
+                            "'*' sites; a cap needs exactly 1, on the atom that bonds to the "
+                            "chain ([*][H], [*]C)."
+                        )
+                labels = [option.label for option in options]
+                repeated = sorted({label for label in labels if labels.count(label) > 1})
+                if repeated:
+                    raise ValueError(
+                        f"end_groups.{end} options share label {repeated}; give each its own."
+                    )
+                total = sum(option.probability for option in options)
+                if abs(total - 1.0) > 1e-6:
+                    hint = (
+                        "a single cap needs probability 1.0"
+                        if len(options) == 1
+                        else "the caps of one end are drawn from these probabilities"
+                    )
+                    raise ValueError(
+                        f"end_groups.{end} probabilities must sum to 1.0, got {total:g}; {hint}."
+                    )
+            for key in ("label", "name"):
+                values = [getattr(m, key) for m in self.monomers if getattr(m, key)]
+                repeated = sorted({v for v in values if values.count(v) > 1})
+                if repeated:
+                    raise ValueError(
+                        f"monomers share {key} {repeated}; give each monomer its own {key}."
+                    )
+            # Stereoisomers of one monomer (the letters that set tacticity) may share
+            # a residue name; other monomers may not.
+            constitution: dict[str, list[str]] = {}
+            for m in self.monomers:
+                if m.residue_name:
+                    constitution.setdefault(m.residue_name, []).append(m.smiles)
+            repeated = sorted(
+                name
+                for name, forms in constitution.items()
+                if len(forms) > 1
+                and (
+                    len({_without_stereo(f) for f in forms}) > 1  # different monomers
+                    or len(set(forms)) < len(forms)  # the same SMILES twice
+                )
+            )
+            if repeated:
+                raise ValueError(
+                    f"monomers share residue_name {repeated}, so analyses could not tell them "
+                    "apart. Give each monomer its own residue_name (only stereoisomers of one "
+                    "monomer, which set the tacticity, may share one)."
                 )
 
         elif self.generation_mode == PolymerGenerationMode.CACHED:
+            if self.end_groups is not None and self.length < 3:
+                raise ValueError(
+                    f"length {self.length}: with end_groups the length counts the two ends "
+                    "and the repeat units, so it is at least 3."
+                )
             # Cached mode requires sdf_directory
             if self.sdf_directory is None:
                 raise ValueError(

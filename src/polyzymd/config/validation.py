@@ -193,7 +193,7 @@ def _check_directory(warnings: list[str], path_value: Any, label: str) -> Path |
 
 
 def _check_polymer_references(warnings: list[str], polymers: Any) -> None:
-    """Check polymer SDF and reaction-template references."""
+    """Check the SDF directory of cached polymers."""
 
     generation_mode = str(getattr(polymers, "generation_mode", "")).lower()
     if generation_mode.endswith("cached"):
@@ -204,15 +204,6 @@ def _check_polymer_references(warnings: list[str], polymers: Any) -> None:
         )
         if sdf_directory is not None:
             _check_cached_polymer_sdfs(warnings, polymers, sdf_directory)
-
-    reactions = getattr(polymers, "reactions", None)
-    if reactions is not None:
-        for field_name in ("initiation", "polymerization", "termination"):
-            _check_file(
-                warnings,
-                getattr(reactions, field_name, None),
-                f"polymer {field_name} reaction template",
-            )
 
 
 def _check_cached_polymer_sdfs(warnings: list[str], polymers: Any, sdf_directory: Path) -> None:
@@ -313,36 +304,40 @@ def require_inputs(config: Any) -> None:
 
     polymers = config.polymers
     if polymers is not None and polymers.enabled and polymers.generation_mode.value == "dynamic":
-        from rdkit.Chem import AllChem
+        from polyzymd.builders.polymer_generator import parse_star_smiles, require_mbuild_polymer
 
-        initiation = Path(polymers.reactions.initiation)
-        if not initiation.is_file():
-            raise ValueError(
-                f"polymer initiation reaction {initiation} does not exist.\n"
-                f"fix: correct {_key(config, polymers, 'reactions.initiation')}, or set it to "
-                "default."
-            )
-        reaction = AllChem.ReactionFromRxnFile(str(initiation))
-        templates = [
-            reaction.GetReactantTemplate(i) for i in range(reaction.GetNumReactantTemplates())
+        units = [
+            (f"monomer {m.label!r}", parse_star_smiles(m.smiles, 2, f"monomer {m.label!r}"))
+            for m in polymers.monomers
         ]
-        for monomer in polymers.monomers:
-            what = f"monomer {monomer.label!r}"
-            molecule = Chem.MolFromSmiles(monomer.smiles)
-            if molecule is None:
+        caps = [
+            (f"end_groups.{end} {option.label!r}", option)
+            for end in ("head", "tail")
+            for option in getattr(polymers.end_groups, end)
+        ]
+        units += [(what, parse_star_smiles(option.smiles, 1, what)) for what, option in caps]
+        for what, unit in units:
+            _require_chargeable(unit.mol, polymers.charger, what)
+        from polyzymd.config.schema import reserved_residue_names
+
+        named = [(f"monomer {m.label!r}", m.residue_name) for m in polymers.monomers]
+        named += [(what, option.residue_name) for what, option in caps]
+        for what, residue_name in named:
+            if residue_name and residue_name.upper() in reserved_residue_names():
                 raise ValueError(
-                    f"{what}: RDKit cannot read the SMILES {monomer.smiles!r}.\n"
-                    "fix: correct the SMILES."
+                    f"{what} has residue_name '{residue_name}', an amino-acid, nucleic-acid, "
+                    "water or ion name, so selections such as 'protein' would include the "
+                    "polymer.\n"
+                    f"fix: set the residue_name of {what} in {_key(config, polymers, 'monomers')} "
+                    "or end_groups to another 3-letter name."
                 )
-            molecule = Chem.AddHs(molecule)
-            if not any(molecule.HasSubstructMatch(template) for template in templates):
-                raise ValueError(
-                    f"{what} ({monomer.smiles}) has no group the initiation reaction {initiation.name} "
-                    "reacts with, so no polymer can be grown from it.\n"
-                    "fix: give the monomer with its polymerisable group (a methacrylate for the "
-                    "default reactions), or reactions that match it."
-                )
-            _require_chargeable(molecule, polymers.charger, what)
+        try:
+            require_mbuild_polymer()
+        except ImportError as exc:
+            raise ValueError(str(exc)) from exc
+
+    if polymers is not None and polymers.enabled:
+        _require_cached_chemistry(config, polymers)
 
     from openff.toolkit.typing.engines.smirnoff.forcefield import get_available_force_fields
 
@@ -370,6 +365,39 @@ def require_inputs(config: Any) -> None:
             f"fix: in each charges: {{method: nagl, model: ...}}, name one of {installed}, "
             "or give the path of a model file."
         )
+
+
+def _require_cached_chemistry(config: Any, polymers: Any) -> None:
+    """Raise ``ValueError`` when cached chains were built from other SMILES or caps.
+
+    Only chains that dynamic generation made carry the build metadata this
+    compares; the build makes the same check for the chains it loads.
+    """
+    if polymers.generation_mode.value != "cached" or polymers.sdf_directory is None:
+        return
+    if not any(m.smiles for m in polymers.monomers) and polymers.end_groups is None:
+        return
+    from polyzymd.builders.polymer import PolymerBuilder
+
+    end_groups = None
+    if polymers.end_groups is not None:
+        end_groups = {
+            end: [option.model_dump() for option in getattr(polymers.end_groups, end)]
+            for end in ("head", "tail")
+        }
+    builder = PolymerBuilder(
+        characters=[m.label for m in polymers.monomers],
+        probabilities=[m.probability for m in polymers.monomers],
+        length=polymers.length,
+        type_prefix=polymers.type_prefix,
+        sdf_directory=polymers.sdf_directory,
+        monomer_smiles={(m.name or m.label): m.smiles for m in polymers.monomers if m.smiles},
+        monomer_names={m.label: (m.name or m.label) for m in polymers.monomers},
+        end_groups=end_groups,
+    )
+    directory = Path(polymers.sdf_directory)
+    for sdf in sorted(directory.glob(f"{polymers.type_prefix}_seq=*_charged.sdf")):
+        builder._check_cached_chemistry(sdf)
 
 
 def small_molecule_atom_names(molecule: Any) -> list[str]:

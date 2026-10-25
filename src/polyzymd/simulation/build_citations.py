@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from polyzymd import citation
+from polyzymd.builders.polymer_generator import MBUILD
 from polyzymd.builders.solvent import MACHADO_PANTANO
 from polyzymd.utils.packmol import PACKMOL
 
@@ -279,8 +280,8 @@ REFERENCES: tuple[Reference, ...] = (
     Reference(ESPALOMA_CHARGE, when=lambda f, _: "espaloma" in f.charge_methods),
     Reference(PACKMOL, when=lambda f, _: f.packmol),
     Reference(MACHADO_PANTANO, when=lambda f, _: f.ionic_strength is not None),
-    # A tool the build records in its provenance goes here, as one entry:
-    # Reference(MBUILD, "mBuild", lambda f, _: "polymer_builder" in f.provenance),
+    # mBuild, when the build generated polymer chains with it.
+    Reference(MBUILD, when=lambda f, _: "polymer_builder" in f.provenance),
 )
 
 

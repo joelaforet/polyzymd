@@ -29,7 +29,7 @@ autodoc_mock_imports = [
     "parmed",
     "rdkit",
     "numpy",
-    "polymerist",
+    "mbuild",
 ]
 
 # -- Project information -----------------------------------------------------

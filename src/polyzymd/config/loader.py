@@ -33,9 +33,6 @@ PATH_KEYS = frozenset(
         "sdf_path",
         "sdf_directory",
         "cache_directory",
-        "initiation",
-        "polymerization",
-        "termination",
     }
 )
 #: Where runs and job files go. They are resolved against the config's folder,
@@ -497,8 +494,21 @@ def load_config(path: Union[str, Path]) -> SimulationConfig:
     base_path = path.parent.absolute()
 
     data = ConfigLoader(base_path).load(path)
+    _place_default_polymer_cache(data, base_path)
 
     return SimulationConfig.model_validate(data)
+
+
+def _place_default_polymer_cache(data: Dict[str, Any], base_path: Path) -> None:
+    """Put a polymer's default cache folder next to the config, as the docs say.
+
+    The default ``cache_directory`` (``.polymer_cache``) is otherwise relative
+    to the folder a command runs from. The config hash keeps only a folder's
+    name, so a build's hash does not change.
+    """
+    for solute in data.get("solutes") or []:
+        if isinstance(solute, dict) and solute.get("type") == "polymer":
+            solute.setdefault("cache_directory", str(base_path / ".polymer_cache"))
 
 
 def _without_unread_fields(model: BaseModel, data: Dict[str, Any]) -> Dict[str, Any]:

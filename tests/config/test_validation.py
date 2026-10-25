@@ -148,8 +148,10 @@ def test_collect_reference_warnings_reports_empty_cached_polymer_directory(
     assert any("Missing cached polymer SDF files" in warning for warning in warnings)
 
 
-def test_collect_reference_warnings_reports_missing_reaction_templates(tmp_path: Path) -> None:
-    """Dynamic polymer custom reaction paths should be checked at runtime."""
+def test_collect_reference_warnings_has_nothing_to_check_for_dynamic_polymers(
+    tmp_path: Path,
+) -> None:
+    """Dynamic polymers are built from SMILES, so they reference no files."""
 
     data = _minimal_config_data(tmp_path)
     data["solutes"].append(
@@ -159,25 +161,20 @@ def test_collect_reference_warnings_reports_missing_reaction_templates(tmp_path:
             "charges": NAGL,
             "generation_mode": "dynamic",
             "type_prefix": "PEG",
-            "monomers": [{"label": "A", "probability": 1.0, "smiles": "C=C"}],
+            "monomers": [{"label": "A", "probability": 1.0, "smiles": "[*]CC([*])(C)C(=O)OC"}],
+            "end_groups": {
+                "head": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+                "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+            },
             "length": 4,
             "count": 1,
-            "reactions": {
-                "initiation": tmp_path / "missing_init.rxn",
-                "polymerization": tmp_path / "missing_poly.rxn",
-                "termination": tmp_path / "missing_term.rxn",
-            },
         }
     )
     config = SimulationConfig(**data)
 
     warnings = collect_reference_warnings(config)
 
-    assert any("Missing polymer initiation reaction template" in warning for warning in warnings)
-    assert any(
-        "Missing polymer polymerization reaction template" in warning for warning in warnings
-    )
-    assert any("Missing polymer termination reaction template" in warning for warning in warnings)
+    assert not any("polymer" in warning.lower() for warning in warnings)
 
 
 def test_am1bcc_without_ambertools_is_reported_before_the_build(
@@ -268,25 +265,88 @@ def test_cosolvents_the_build_cannot_make_are_refused(tmp_path: Path, smiles, me
         require_inputs(_buildable(tmp_path, solvent=solvent))
 
 
-def test_a_monomer_without_a_polymerisable_group_is_refused(tmp_path: Path) -> None:
-    """The default ATRP initiation reacts with methacrylates only."""
-    polymers = {
+def _dynamic_polymer(smiles: str, head: str = "[*][H]", tail: str = "[*][H]") -> dict:
+    """The keys of a dynamic one-monomer polymer solute."""
+    return {
         "generation_mode": "dynamic",
         "type_prefix": "P",
         "length": 5,
         "count": 1,
-        "reactions": {
-            "initiation": "default",
-            "polymerization": "default",
-            "termination": "default",
+        "monomers": [{"label": "A", "probability": 1.0, "smiles": smiles}],
+        "end_groups": {
+            "head": [{"label": "H", "smiles": head, "probability": 1.0}],
+            "tail": [{"label": "H", "smiles": tail, "probability": 1.0}],
         },
-        "monomers": [{"label": "A", "probability": 1.0, "smiles": "CC(=C)C(=O)OCCO"}],
         "charges": NAGL,
     }
-    require_inputs(_buildable(tmp_path, polymer=polymers))
-    polymers["monomers"] = [{"label": "A", "probability": 1.0, "smiles": "CCO"}]
-    with pytest.raises(ValueError, match="no group the initiation reaction"):
-        require_inputs(_buildable(tmp_path, polymer=polymers))
+
+
+def test_star_sited_monomers_and_caps_are_accepted(tmp_path: Path) -> None:
+    """A repeat unit with two '*' and caps with one pass the input checks."""
+    polymer = _dynamic_polymer("[*]CC([*])(C)C(=O)OCCO", head="[*]C")
+    require_inputs(_buildable(tmp_path, polymer=polymer))
+
+
+@pytest.mark.parametrize(
+    ("polymer", "message"),
+    [
+        (_dynamic_polymer("[*]CC([*])(C)C(=O"), "cannot read the SMILES"),
+        (_dynamic_polymer("[*]=CC([*])C"), "bonded to one atom by a single bond"),
+        (_dynamic_polymer("[*]C([*])C(=O)OC"), "both '\\*' .* are on one atom"),
+        (_dynamic_polymer("[*]CC([*])(C)C(=O)OC", tail="[*]=C"), "end_groups.tail 'H'"),
+        (_dynamic_polymer("[*]CC([*])[Si](C)(C)C"), "Si, which the NAGL charge model"),
+    ],
+    ids=["unreadable", "double_bond", "one_atom", "cap", "element"],
+)
+def test_star_sites_the_build_cannot_use_are_refused(tmp_path: Path, polymer, message) -> None:
+    """Bad repeat units and caps are refused before the build, with a fix."""
+    with pytest.raises(ValueError, match=message) as error:
+        require_inputs(_buildable(tmp_path, polymer=polymer))
+    assert "fix:" in str(error.value)
+
+
+@pytest.mark.parametrize("residue_name", ["ALA", "SOL", "NA"])
+def test_a_monomer_residue_name_the_selections_take_is_refused(
+    tmp_path: Path, residue_name: str
+) -> None:
+    """A monomer named like a protein, water or ion residue would join those selections."""
+    polymer = _dynamic_polymer("[*]CC([*])(C)C(=O)OC")
+    polymer["monomers"][0]["residue_name"] = "MMA"
+    require_inputs(_buildable(tmp_path, polymer=polymer))
+    polymer["monomers"][0]["residue_name"] = residue_name
+    config = _buildable(tmp_path, polymer=polymer)
+    config.require_buildable(inputs=False)
+    with pytest.raises(ValueError, match=f"residue_name '{residue_name}'") as error:
+        require_inputs(config)
+    assert "fix:" in str(error.value)
+
+
+def test_every_cap_option_is_parsed(tmp_path: Path) -> None:
+    """The second option of an end is checked like the first."""
+    polymer = _dynamic_polymer("[*]CC([*])(C)C(=O)OC")
+    polymer["end_groups"]["head"] = [
+        {"label": "H", "smiles": "[*][H]", "probability": 0.5},
+        {"label": "S", "smiles": "[*][Si](C)(C)C", "probability": 0.5},
+    ]
+    with pytest.raises(ValueError, match="end_groups.head 'S'") as error:
+        require_inputs(_buildable(tmp_path, polymer=polymer))
+    assert "Si" in str(error.value)
+
+
+@pytest.mark.parametrize("residue_name", ["ALA", "HOH"])
+def test_a_cap_residue_name_the_selections_take_is_refused(
+    tmp_path: Path, residue_name: str
+) -> None:
+    """A cap that is its own residue may not take a protein or water residue name."""
+    polymer = _dynamic_polymer("[*]CC([*])(C)C(=O)OC")
+    polymer["end_groups"]["tail"] = [
+        {"label": "V", "smiles": "[*]C=C(C)C(=O)OC", "probability": 1.0, "residue_name": "MMV"}
+    ]
+    require_inputs(_buildable(tmp_path, polymer=polymer))
+    polymer["end_groups"]["tail"][0]["residue_name"] = residue_name
+    with pytest.raises(ValueError, match="end_groups.tail 'V' has residue_name") as error:
+        require_inputs(_buildable(tmp_path, polymer=polymer))
+    assert "fix:" in str(error.value)
 
 
 def test_a_force_field_that_is_not_installed_is_refused(tmp_path: Path) -> None:

@@ -181,18 +181,50 @@ def polymer_sequences(context: AuditContext) -> list[Finding]:
     chains = Counter()
     for domain in polymers[0].domains:
         chains[domain.name.split(":", 1)[-1]] += len(domain.atoms)
+    config_polymers = context.config.polymers if context.config is not None else None
+    # A dynamic chain's sequence starts with its head cap and ends with its tail cap.
+    capped = (
+        config_polymers is not None and getattr(config_polymers, "end_groups", None) is not None
+    )
     monomers = Counter()
+    ends = {"head": Counter(), "tail": Counter()}
     for sequence, n in chains.items():
+        if capped and len(sequence) >= 3:
+            ends["head"][sequence[0]] += n
+            ends["tail"][sequence[-1]] += n
+            sequence = sequence[1:-1]
         for label in sequence:
             monomers[label] += n
     total = sum(monomers.values()) or 1
     reached = ", ".join(f"{label} {monomers[label] / total:.3f}" for label in sorted(monomers))
     configured = ""
-    if context.config is not None and context.config.polymers is not None:
+    if config_polymers is not None:
         configured = "; configured " + ", ".join(
-            f"{m.label} {m.probability:g}" for m in context.config.polymers.monomers
+            f"{m.label} {m.probability:g}" for m in config_polymers.monomers
         )
-    detail = f"{len(chains)} sequences over {sum(chains.values())} chains; monomer fractions {reached}{configured}"
+    caps = ""
+    if capped:
+        # Caps that are a monomer's end form carry that monomer's label; with
+        # them counted, the fractions are those of every monomer of the chains.
+        labels = {m.label for m in config_polymers.monomers}
+        units = Counter(monomers)
+        for counter in ends.values():
+            for label, count in counter.items():
+                if label in labels:
+                    units[label] += count
+        if units != monomers:
+            whole = sum(units.values()) or 1
+            caps += "; with end units " + ", ".join(
+                f"{label} {units[label] / whole:.3f}" for label in sorted(units)
+            )
+        caps += "; caps " + "; ".join(
+            f"{end} " + ", ".join(f"{label} {count}" for label, count in sorted(counter.items()))
+            for end, counter in ends.items()
+        )
+    detail = (
+        f"{len(chains)} sequences over {sum(chains.values())} chains; monomer fractions "
+        f"{reached}{configured}{caps}"
+    )
     return [Finding("composition.polymer_sequences", polymers[0].name, "INFO", detail)]
 
 

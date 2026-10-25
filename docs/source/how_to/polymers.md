@@ -23,7 +23,7 @@ PolyzyMD gets the polymer structures in one of two ways. The
 | `generation_mode` | Source of each chain | Guide |
 |---|---|---|
 | `cached` (default) | A pre-built SDF file for each sequence, in `sdf_directory` | This page |
-| `dynamic` | Built from monomer SMILES with ATRP reaction templates | {doc}`dynamic_polymers` |
+| `dynamic` | Built with mBuild from star-sited monomer and cap SMILES | {doc}`dynamic_polymers` |
 
 ## Write the polymer entry
 
@@ -70,9 +70,22 @@ For a homopolymer, give one monomer with `probability: 1.0`.
 
 ## Name the SDF files
 
-For each chain, the builder draws a sequence such as `AABAA`. It reads a
-sequence and its reverse as the same chain. It uses the form that comes first
-in alphabetical order. For example, `ABAAA` becomes `AAABA`.
+For each chain, the builder draws a sequence such as `AABAA`. In `cached`
+mode it looks up a sequence and its reverse under one file name: the form that
+comes first in alphabetical order, so `ABAAA` is looked up as `AAABA`. If that
+file is missing, it loads the file of the reversed sequence, which is how
+`dynamic` mode names a chain it built in that direction.
+
+For a head-to-tail chain a sequence and its reverse are different molecules
+(the head sits on a different monomer), so in `cached` mode the file you
+provide sets the direction of every chain of that sequence. The two are
+equivalent only in distribution, and only when the head and tail ends are
+drawn alike. `dynamic` mode reads each sequence from head to tail and builds
+it as drawn; see {doc}`dynamic_polymers`.
+
+When the config gives `end_groups`, `cached` mode also draws each chain's
+caps, and the sequence starts with the head cap's label and ends with the tail
+cap's label, as in `dynamic` mode (`length` then counts the two ends).
 
 The builder then loads this file from `sdf_directory`:
 

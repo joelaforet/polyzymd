@@ -167,30 +167,26 @@ class TestConfigValidation:
         assert len(config.monomers) == 2
 
     @pytest.mark.parametrize("length", [1, 2])
-    def test_dynamic_polymer_length_requires_non_empty_middle_sequence(self, length: int):
-        """Dynamic polymer configuration should reject lengths below three."""
-        from polyzymd.config.schema import MonomerSpec, PolymerSolute, ReactionConfig
+    def test_dynamic_polymer_length_one_and_two_are_refused(self, length: int):
+        """A dynamic chain's length counts its two caps, so 1- and 2-mers have no repeat unit."""
+        from polyzymd.config.schema import MonomerSpec, PolymerSolute
 
-        reactions = ReactionConfig(
-            initiation=Path("initiation.rxn"),
-            polymerization=Path("polymerization.rxn"),
-            termination=Path("termination.rxn"),
-        )
-
-        with pytest.raises(ValidationError, match="length.*>= 3"):
-            PolymerSolute(
-                type="polymer",
-                force_field=[SAGE],
-                charges=NAGL,
-                type_prefix="TEST",
-                generation_mode="dynamic",
-                monomers=[
-                    MonomerSpec(label="A", probability=1.0, name="EGMA", smiles="C=C"),
-                ],
-                length=length,
-                count=1,
-                reactions=reactions,
-            )
+        cap = [{"label": "H", "smiles": "[*][H]", "probability": 1.0}]
+        arguments = {
+            "type": "polymer",
+            "force_field": [SAGE],
+            "charges": NAGL,
+            "type_prefix": "TEST",
+            "generation_mode": "dynamic",
+            "monomers": [
+                MonomerSpec(label="A", probability=1.0, name="MMA", smiles="[*]CC([*])(C)C(=O)OC"),
+            ],
+            "end_groups": {"head": cap, "tail": cap},
+            "count": 1,
+        }
+        with pytest.raises(ValidationError, match="length 5 is 2 ends \\+ 3 repeat units"):
+            PolymerSolute(**arguments, length=length)
+        assert PolymerSolute(**arguments, length=3).length == 3
 
     def test_cached_polymer_length_one_is_accepted(self):
         """Cached polymer configuration should allow single-monomer SDF inputs."""

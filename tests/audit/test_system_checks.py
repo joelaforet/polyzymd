@@ -338,3 +338,38 @@ def test_ionic_strength_passes_with_a_concentrated_co_solvent(concentrated) -> N
         ("ions.ionic_strength", "system")
     ].detail
     assert ("ions.salt", "system") not in findings
+
+
+def _sequence_finding(chains: dict[str, int], end_groups) -> str:
+    """Run composition.polymer_sequences on hand-made chain domains and return its detail."""
+    from types import SimpleNamespace
+
+    from polyzymd.audit.checks.system import polymer_sequences
+
+    domains = [SimpleNamespace(name=f"SE:{seq}", atoms=[None] * n) for seq, n in chains.items()]
+    monomers = [
+        SimpleNamespace(label="A", probability=0.5),
+        SimpleNamespace(label="B", probability=0.5),
+    ]
+    config = SimpleNamespace(polymers=SimpleNamespace(monomers=monomers, end_groups=end_groups))
+    polymer = SimpleNamespace(type="polymer", name="polymer", domains=domains)
+    context = SimpleNamespace(components=[polymer], config=config)
+    [finding] = polymer_sequences(context)
+    assert finding.status == "INFO"
+    return finding.detail
+
+
+def test_polymer_sequences_counts_repeat_units_and_caps_separately() -> None:
+    """With end_groups the first and last labels are caps: fractions count the middle only."""
+    detail = _sequence_finding({"AABAB": 2, "BAAAA": 1}, end_groups=object())
+    # Repeat units: ABA twice and AAA once: A 7, B 2.
+    assert "2 sequences over 3 chains" in detail
+    assert "monomer fractions A 0.778, B 0.222" in detail
+    assert "configured A 0.5, B 0.5" in detail
+    assert detail.endswith("; caps head A 2, B 1; tail A 1, B 2")
+
+
+def test_polymer_sequences_without_end_groups_counts_every_label() -> None:
+    detail = _sequence_finding({"AABAB": 2, "BAAAA": 1}, end_groups=None)
+    assert "monomer fractions A 0.667, B 0.333" in detail
+    assert "caps" not in detail

@@ -20,6 +20,7 @@ Later 1.3 releases only add keys; an rc5 config keeps working.
 | `force_field.nagl_model` (or nothing: 1.3.0rc4 and earlier charged with `openff-gnn-am1bcc-0.1.0-rc.3.pt`) | `model:` in each `charges: {method: nagl}` |
 | `substrate.charge_method: nagl` | `charges: {method: nagl, model: ...}` (see below for which model) |
 | `polymers.charger` (dynamic polymers) | `charges: {method: nagl, model: ...}` (or `am1bcc`, `espaloma`) |
+| `polymers.reactions` and monomer SMILES with their C=C double bond (dynamic polymers) | each monomer's repeat unit with `*` on its two linking atoms (`C=C(C)C(=O)OC` becomes `[*]CC([*])(C)C(=O)OC`), and `end_groups: {head: [...], tail: [...]}`, the caps each end can get with one `*` each and their probabilities; see {doc}`dynamic_polymers` |
 | cached polymers (charges in the SDFs) | `charges: {method: preset}` |
 | `co_solvents[].charge_method`, or nothing, on a co-solvent PolyzyMD ships charges for (dmso, urea, ...) | `charges: {method: preset}`: those always got their shipped charges |
 | `co_solvents[].charge_method` on any other co-solvent | `co_solvents[].charges: {method: nagl, model: ...}` (or `am1bcc`, `espaloma`) |

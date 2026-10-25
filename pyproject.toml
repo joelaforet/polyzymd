@@ -78,11 +78,14 @@ analysis = [
     "seaborn>=0.13",
 ]
 
-# Polymer building (polymerist integration)
+# Dynamic polymers are built with mBuild's Polymer from the fork
+# github.com/joelaforet/mbuild, tag biopolymers-v0.1.0, which the pixi
+# environments install; a pip install needs
+#   pip install "mbuild @ git+https://github.com/joelaforet/mbuild@biopolymers-v0.1.0"
+# (PyPI does not accept a git dependency here).
 polymers = [
-    "polymerist>=1.1.0",
+    "mbuild",
     "networkx>=3.0",
-    "anytree>=2.8.0",
 ]
 
 # Development tools
