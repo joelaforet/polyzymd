@@ -8,7 +8,7 @@ the neighbouring repeat units. Each chain end gets a cap with one `*`.
 |---|---|---|
 | Methyl methacrylate (MMA), as sold | `C=C(C)C(=O)OC` | none |
 | MMA repeat unit | `[*]CC([*])(C)C(=O)OC` | 2 |
-| MMA as a chain end that kept its C=C (the chain ends PolyzyMD built before 1.3.0rc5) | `[*]C=C(C)C(=O)OC` | 1 |
+| MMA as a chain end that kept its C=C (the chain ends PolyzyMD built before 1.3.0) | `[*]C=C(C)C(=O)OC` | 1 |
 | Hydrogen cap | `[*][H]` | 1 |
 | Methyl cap | `[*]C` | 1 |
 
@@ -27,7 +27,7 @@ for writing these SMILES. It:
 3. puts `*` on the two atoms you name, redraws the repeat unit, and prints the
    star-sited SMILES;
 4. writes the chain-end form of your monomer (the monomer with one `*` and
-   its C=C kept, as at the ends of the chains PolyzyMD built before 1.3.0rc5) and prints a
+   its C=C kept, as at the ends of the chains PolyzyMD built before 1.3.0) and prints a
    `type: polymer` entry to paste into your config;
 5. builds one short chain with the PolyzyMD builder (optional).
 

@@ -22,7 +22,7 @@ from polyzymd.simulation.analysis_topology import ANALYSIS_TOPOLOGY_NAME, write_
 MANIFEST_NAME = "build_provenance.json"
 #: The same record for people (Markdown).
 PROVENANCE_MARKDOWN = "build_provenance.md"
-#: Name of the record before 1.3.0rc5, still read for existing runs.
+#: Name of the record before 1.3.0, still read for existing runs.
 LEGACY_MANIFEST_NAME = "build_manifest.json"
 _BUILD_ARTIFACTS = ("solvated_system.pdb", "system.xml")
 # Written when ParmEd can convert the system; its absence is not an error.
@@ -76,7 +76,7 @@ def require_audited_build(
 ) -> dict[str, Any]:
     """Return the build record of ``working_dir`` if a run may use its files.
 
-    The record must exist, come from PolyzyMD 1.3.0rc5 or later (it carries a
+    The record must exist, come from PolyzyMD 1.3.0 or later (it carries a
     physics audit), match ``engine`` and the current config, list files that
     are unchanged on disk, and record an audit that passed. ``config_path`` and
     ``replicate`` make the fix in the message a command that can be run as is.
@@ -99,7 +99,7 @@ def require_audited_build(
         raise AuditGateError(f"{path} cannot be read: {exc}\n{rebuild}") from exc
     if int(record.get("schema_version", 1)) < 2 or record.get("audit") is None:
         raise AuditGateError(
-            f"{path} records no physics audit (built before PolyzyMD 1.3.0rc5, or without "
+            f"{path} records no physics audit (built by PolyzyMD 1.3.0rc4 or earlier, or without "
             f"one), so nothing shows the system is what the config asks for.\n{rebuild}"
         )
     if engine is not None and record.get("engine") != engine:
@@ -128,7 +128,7 @@ def require_audited_build(
 
 def build_record_path(working_dir: Path) -> Path:
     """The run folder's build record: ``build_provenance.json``, or the older
-    ``build_manifest.json`` of a run built before 1.3.0rc5."""
+    ``build_manifest.json`` of a run built before 1.3.0."""
     current = Path(working_dir) / MANIFEST_NAME
     legacy = Path(working_dir) / LEGACY_MANIFEST_NAME
     return legacy if legacy.is_file() and not current.is_file() else current

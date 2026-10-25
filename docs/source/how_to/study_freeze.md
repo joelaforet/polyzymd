@@ -92,12 +92,17 @@ the freeze. So you can freeze early, and freeze again when you fill the gaps.
      `LICENSE*` and the files that freeze writes;
    - the files under the folders that `study init` and `project init`
      make: `conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`,
-     `results/` and `environment/`. Reference structures go in
-     `structures/`, and data files that a function reads go in
-     `analyses/data/`.
+     `results/` and `environment/`, and for a project `notebooks/`.
+     Reference structures go in `structures/`, and data files that a
+     function reads go in `analyses/data/`.
 
    Freeze does not deposit other files, such as notes or a copied
    trajectory, and prints one `not deposited:` warning that names them.
+
+   PolyzyMD vouches only for the files it generates: builds, runs, and the
+   results of its analyses and of your `function:` analyses. Files you make
+   yourself, such as scripts and their outputs in `stats/`, are deposited as
+   you wrote them, but PolyzyMD does not check them or vouch for them.
 
 4. Commit your inputs: `study.yaml`, `conditions/`, `analyses/` and
    `figures/`.
@@ -158,7 +163,7 @@ Otherwise, freeze does these steps:
    - An OpenMM replicate records no OpenMM version, or a GROMACS replicate
      has no `GROMACS version:` line in `gromacs/prod.log`.
    - A file that `build_provenance.json` (or `build_manifest.json`, before
-     1.3.0rc5) lists is missing from the replicate folder.
+     1.3.0) lists is missing from the replicate folder.
 3. It hashes every trajectory and topology file on this machine (SHA-256,
    computed once per file and cached).
 4. It writes gzipped copies of the engine inputs of each replicate to

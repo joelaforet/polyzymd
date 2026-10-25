@@ -300,7 +300,7 @@ def test_reactions_are_refused_with_the_rewrite_guide(data) -> None:
     data["solutes"].append(_dynamic(reactions=reactions))
     with pytest.raises(ValidationError, match="rewrite_config_rc5") as error:
         load(data)
-    assert "1.3.0rc5" in str(error.value)
+    assert "1.3.0" in str(error.value)
     assert "end_groups" in str(error.value)
 
 

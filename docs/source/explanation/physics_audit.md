@@ -2,7 +2,7 @@
 
 A simulation is only as good as the system it integrates. A config says which
 force field, charge model, water model, salt and restraints the system has.
-Before 1.3.0rc5, nothing checked that the built system had them. PolyzyMD now
+Before 1.3.0, nothing checked that the built system had them. PolyzyMD now
 checks every build against its config, records the result, and refuses to run
 files that no passing check vouches for.
 
@@ -149,7 +149,7 @@ The checks continue after the build:
   `progress.json`. A segment whose System differs stops before its first step,
   the chain is not resubmitted, and `polyzymd status` shows
   `SYSTEM DIVERGED FROM THE AUDITED BUILD` with the action `inspect`. A run
-  that started before 1.3.0rc5 has no audited build to compare with; its
+  that started before 1.3.0 has no audited build to compare with; its
   record says so, and it goes on.
 
 ## What the audit does not check
@@ -187,6 +187,6 @@ the config with a reason, where a reviewer sees it. `polyzymd status
 - {doc}`../reference/physics_checks` — every check, its status and component
 - {doc}`../reference/data_requirements` — the build record and run files
 - {doc}`../reference/configuration` — solutes, charges and `modeling_exceptions`
-- {doc}`../how_to/rewrite_config_rc5` — rewrite a config for 1.3.0rc5
+- {doc}`../how_to/rewrite_config_rc5` — rewrite a config for 1.3.0
 - {doc}`simulation_safeguards` — the build and run safeguards that came before
 - {doc}`../how_to/own_protocol` — run an audited build with your own protocol

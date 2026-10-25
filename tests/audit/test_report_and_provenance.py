@@ -282,8 +282,9 @@ def test_methods_to_cite_name_the_engine_and_the_openff_versions() -> None:
     assert "doi:10.1021/acs.jpcb.3c06662" in openmm[1]
     assert not any("doi:10.1016/j.softx.2015.06.001" in c for c in openmm)
     assert openmm[2].startswith("OpenFF Toolkit: Mobley") and TOOLKIT_PAPER in openmm[2]
-    assert openmm[3] == f"OpenFF Toolkit release: version 0.16.9, {TOOLKIT_ZENODO}"
-    assert openmm[4] == f"OpenFF Interchange release: version 0.4.2, {INTERCHANGE_ZENODO}"
+    # Each release is cited by its own Zenodo DOI (scripts/update_openff_release_dois.py).
+    assert openmm[3] == "OpenFF Toolkit release: version 0.16.9, doi:10.5281/zenodo.15306573"
+    assert openmm[4] == "OpenFF Interchange release: version 0.4.2, doi:10.5281/zenodo.14932643"
     assert openmm[5].startswith("Open Force Field Initiative:") and INITIATIVE in openmm[5]
     gromacs = methods_to_cite(_build_config(), record={**record, "engine": "gromacs"})
     assert gromacs[1].startswith("GROMACS: Abraham, M. J.")
@@ -291,6 +292,33 @@ def test_methods_to_cite_name_the_engine_and_the_openff_versions() -> None:
     assert not any("doi:10.1021/acs.jpcb.3c06662" in c for c in gromacs)
     # Without a record (no engine known) neither engine is cited.
     assert not any(c.startswith(("OpenMM", "GROMACS")) for c in methods_to_cite(_build_config()))
+
+
+def test_a_release_missing_from_the_table_is_cited_by_the_doi_of_every_release() -> None:
+    from polyzymd.simulation.artifact_integrity import methods_to_cite
+
+    record = {
+        "openff_toolkit_version": "99.0.0",
+        "openff_interchange_version": "v0.5.2",
+        "openff_forcefields_version": "2026.01.0",
+    }
+    cited = methods_to_cite(_build_config(), record=record)
+    assert f"OpenFF Toolkit release: version 99.0.0, {TOOLKIT_ZENODO}" in cited
+    # Interchange tags its releases with a leading v.
+    assert "OpenFF Interchange release: version v0.5.2, doi:10.5281/zenodo.18842670" in cited
+    assert (
+        "openff-2.3.0.offxml (the openff-forcefields release): version 2026.01.0, "
+        "doi:10.5281/zenodo.18228115"
+    ) in cited
+
+
+def test_the_release_table_lists_the_versions_of_each_openff_package() -> None:
+    from polyzymd.simulation.build_citations import _release_dois
+
+    table = _release_dois()
+    for package in ("toolkit", "interchange", "forcefields"):
+        assert len(table[package]) > 20
+        assert all(doi.startswith("10.5281/zenodo.") for doi in table[package].values())
 
 
 def test_sage_2_3_and_ashgc_cite_their_paper_and_older_files_do_not() -> None:

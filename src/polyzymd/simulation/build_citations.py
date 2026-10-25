@@ -15,7 +15,9 @@ lists for an item, the paper and the Zenodo DOI of the release.
 
 from __future__ import annotations
 
+import functools
 import itertools
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -103,10 +105,22 @@ OPENFF_INITIATIVE = (
     "open software and open science for molecular modeling. J. Phys. Chem. B 128(29), "
     "7043-7067. doi:10.1021/acs.jpcb.4c01558"
 )
-#: Zenodo DOIs OpenFF lists for its releases (each resolves to the release list).
+#: Zenodo DOIs OpenFF lists for its releases (each resolves to the latest
+#: release); cited when the version a build used is not in the release table.
 OPENFF_TOOLKIT_ZENODO = "doi:10.5281/zenodo.597754"
 OPENFF_INTERCHANGE_ZENODO = "doi:10.5281/zenodo.8147764"
 OPENFF_FORCEFIELDS_ZENODO = "doi:10.5281/zenodo.3473553"
+#: Version -> Zenodo DOI of each release, written by scripts/update_openff_release_dois.py.
+RELEASE_DOIS = "openff_release_dois.json"
+
+
+@functools.cache
+def _release_dois() -> dict[str, dict[str, str]]:
+    from importlib.resources import files
+
+    return json.loads(files("polyzymd.data").joinpath(RELEASE_DOIS).read_text(encoding="utf-8"))
+
+
 NAGL_REPOSITORY = "https://github.com/openforcefield/openff-nagl-models"
 
 
@@ -178,8 +192,15 @@ class BuildFacts:
         )
 
     def release(self, package: str, doi: str) -> str:
-        """``doi`` of an OpenFF package release, after the version the record names."""
+        """The DOI of the OpenFF ``package`` release the record names, after its version.
+
+        The release's own DOI when :data:`RELEASE_DOIS` lists the version,
+        otherwise ``doi``, the DOI of every release.
+        """
         version = self.record.get(f"openff_{package}_version")
+        if version:
+            found = _release_dois().get(package, {}).get(str(version).removeprefix("v"))
+            doi = f"doi:{found}" if found else doi
         return f"{f'version {version}, ' if version else ''}{doi}"
 
 
@@ -239,8 +260,11 @@ REFERENCES: tuple[Reference, ...] = (
     _file(SAGE, " (a release of OpenFF Sage 2)", lambda x: _release(x)[0] == 2),
     _file(SAGE_2_3, " (OpenFF Sage 2.3.0)", lambda x: _release(x) == (2, 3)),
     _file(PARSLEY, " (a release of OpenFF Parsley 1)", lambda x: _release(x)[0] == 1),
-    _file(
-        OPENFF_FORCEFIELDS_ZENODO, " (the openff-forcefields release)", lambda x: _release(x)[0] > 0
+    Reference(
+        lambda f, x: f.release("forcefields", OPENFF_FORCEFIELDS_ZENODO),
+        "{x.name} (the openff-forcefields release)",
+        lambda f, x: _release(x)[0] > 0,
+        each="force_fields",
     ),
     _file(NO_REFERENCE, "", lambda x: _release(x)[0] == 0),
     Reference(TIP3P, "TIP3P water", lambda f, _: f.water == "tip3p"),

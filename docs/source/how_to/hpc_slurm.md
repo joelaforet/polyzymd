@@ -239,7 +239,7 @@ replicate folder:
 - `gromacs/audited_files.sha256`, for a GROMACS build
 
 The build writes `build_provenance.json` last. It replaced
-`build_manifest.json` in 1.3.0rc5, and PolyzyMD still reads the old name.
+`build_manifest.json` in 1.3.0, and PolyzyMD still reads the old name.
 `submit`, and the job before OpenMM makes a simulation, check the record's
 {term}`build config hash`, its file hashes and its particle count. A missing or damaged
 record means that the build did not finish. Build the replicate again.

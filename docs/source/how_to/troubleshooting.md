@@ -61,7 +61,7 @@ error: config: this config uses the layout of PolyzyMD 1.3.0rc4 and earlier (enz
 ```
 
 The config has an `enzyme:`, `substrate:`, `polymers:` or top-level
-`force_field:` section. PolyzyMD 1.3.0rc5 lists each solute as an entry of
+`force_field:` section. PolyzyMD 1.3.0 lists each solute as an entry of
 `solutes:`, with its own `force_field`. Rewrite the config as
 {doc}`rewrite_config_rc5` shows.
 

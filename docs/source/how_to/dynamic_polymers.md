@@ -70,7 +70,7 @@ least 3.
 
 ### Chain ends that keep the monomer's double bond
 
-Before 1.3.0rc5, PolyzyMD built dynamic chains with ATRP reaction templates.
+Before 1.3.0, PolyzyMD built dynamic chains with ATRP reaction templates.
 Those chains, such as the SBMA-EGMA 5-mers of studies made with those
 releases, are three polymerized repeat units with a whole monomer at each end
 that kept its C=C double bond, bonded to the chain through its CH2 carbon (now

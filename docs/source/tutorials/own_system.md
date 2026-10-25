@@ -142,7 +142,7 @@ Directories:
 
 Per-Replicate Output:
   Replicate 1:
-    Working dir: /home/me/my_paper/runs/trpcage/water/trpcage_apo_none_100ns_300K_run1
+    Working dir: /home/me/my_paper/runs/trpcage/water/trpcage_apo_none_run1
 ```
 
 The report ends with `Validation passed. Ready to build.` between two lines

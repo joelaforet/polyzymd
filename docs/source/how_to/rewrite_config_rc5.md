@@ -1,15 +1,15 @@
-# Rewrite a config for 1.3.0rc5
+# Rewrite a config for 1.3.0
 
-PolyzyMD 1.3.0rc5 changes the layout of `config.yaml` once, so that every
+PolyzyMD 1.3.0 changes the layout of `config.yaml` once, so that every
 component of the system states its own force field and charges. A config
 written for 1.3.0rc4 or earlier stops with an error that links here. Rewrite
 it by hand, or write a new template with
 `polyzymd study add-condition LABEL --new` and copy your values in.
-Later 1.3 releases only add keys; an rc5 config keeps working.
+Later 1.3 releases only add keys; a 1.3.0 config keeps working.
 
 ## What moved
 
-| 1.3.0rc4 and earlier | 1.3.0rc5 |
+| 1.3.0rc4 and earlier | 1.3.0 |
 |---|---|
 | `enzyme:` | an entry of `solutes:` with `type: protein` |
 | `substrate:` | an entry of `solutes:` with `type: small_molecule` |

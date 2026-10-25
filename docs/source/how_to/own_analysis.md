@@ -387,14 +387,17 @@ polyzymd analyze --project .
 ### As a script in `stats/`
 
 Results that a `function:` entry cannot produce, such as the output of `gmx`
-tools, go in `stats/` with the script that made them. `polyzymd project
-freeze` then treats them as follows:
+tools, go in `stats/` with the script that made them. PolyzyMD vouches only
+for the files it generates. It deposits your files with the project, but it
+does not check them or vouch for them: you do. `polyzymd project freeze`
+treats them as follows:
 
 - It deposits every file under `stats/`, and hashes each one (size and
   SHA-256) in the manifest.
 - It does not record which trajectories or which version of the script made
   an output file, and it does not check whether the output is older than the
-  script. Run the script again before you freeze.
+  script. Run the script again before you freeze. PolyzyMD will not add such
+  a check: it only checks what it generated.
 - Freeze stops while a file in `stats/` is not committed. Commit the script
   and its outputs.
 - The deposit's `README.md` says how to redraw the figures and recompute
@@ -404,8 +407,9 @@ freeze` then treats them as follows:
   not deposited; freeze names them in a warning.
 
 Do not put files of your own in `results/`. Freeze deposits and hashes them
-with PolyzyMD's results, with no warning, and `polyzymd analyze --recompute`
-does not reproduce them.
+with PolyzyMD's results, with no warning, so a reader cannot tell them from
+results PolyzyMD vouches for, and `polyzymd analyze --recompute` does not
+reproduce them.
 
 ## Related pages
 

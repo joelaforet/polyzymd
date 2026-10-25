@@ -227,7 +227,7 @@ def load_custom_substructures(path: Path) -> dict[str, dict[str, list[str]]]:
     return data
 
 
-#: The page that maps every key of a 1.3.0rc4 config to its place in rc5.
+#: The page that maps every key of a 1.3.0rc4 config to its place in 1.3.0.
 REWRITE_GUIDE = "https://polyzymd.readthedocs.io/en/latest/how_to/rewrite_config_rc5.html"
 
 #: Same default as polyzymd.utils.charging.DEFAULT_NAGL_MODEL (not imported: it loads RDKit).
@@ -690,10 +690,10 @@ class PolymerSolute(_Solute):
     @model_validator(mode="before")
     @classmethod
     def _refuse_reactions(cls, data: Any) -> Any:
-        """Refuse ``reactions:``: chains are built from star-sited SMILES since 1.3.0rc5."""
+        """Refuse ``reactions:``: chains are built from star-sited SMILES since 1.3.0."""
         if isinstance(data, dict) and "reactions" in data:
             raise ValueError(
-                "polymer key 'reactions' was removed in PolyzyMD 1.3.0rc5: dynamic chains are "
+                "polymer key 'reactions' was removed in PolyzyMD 1.3.0: dynamic chains are "
                 "built from star-sited SMILES. Give each monomer's repeat unit with '*' on its "
                 "two linking atoms ([*]CC([*])(C)C(=O)OC for methyl methacrylate) and the caps "
                 "in end_groups, for example end_groups: {head: [{label: H, smiles: '[*][H]', "
@@ -1917,7 +1917,7 @@ class ForceFieldConfig(_ConfigModel):
 
     Attributes:
         protein: Force field of the protein solute.
-        small_molecule: Force field of every other molecule (rc5 builds them with one).
+        small_molecule: Force field of every other molecule (1.3.0 builds them with one).
         nagl_model: NAGL model of every component charged with nagl.
     """
 

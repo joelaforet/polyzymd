@@ -126,7 +126,7 @@ Every build writes `build_provenance.json` and `build_provenance.md` beside
 the files it built. The record answers three questions: what was built, from
 what, and did the built system pass the physics audit. It replaced
 `build_manifest.json`, which PolyzyMD still reads for runs built before
-1.3.0rc5. A record without an audit cannot vouch for new runs: `run` and
+1.3.0. A record without an audit cannot vouch for new runs: `run` and
 `submit` refuse a replicate that has not started until it is rebuilt.
 
 | Key | Meaning |
@@ -141,7 +141,7 @@ what, and did the built system pass the physics audit. It replaced
 | `components` | One record per component (each solute, `solvent`, `ions`): `name`, `type`, `segid`, `placement` (`fixed` or `packed`), `n_atoms`, `n_molecules`, the atom ranges of each molecule, and its `domains`. A domain is a set of atoms with one `force_field` list and one `charges` source (`method`, `model`, `source_file`), and the inputs it can be rebuilt from (`reference`). `provenance` holds each input file's path and SHA-256 |
 | `provenance` | Seeds and the box: see below |
 | `audit` | The physics audit: `passed`, `counts` per status, every `finding` (`check`, `component`, `status`, `detail`, and `examples` of the first terms that differ) and `accepted_exceptions` |
-| `cite` | References of what this build used: PolyzyMD at its version, the engine (OpenMM 8 or GROMACS), the OpenFF Toolkit (its paper and release DOI), OpenFF Interchange (its release DOI) and the Open Force Field Initiative paper, as OpenFF asks, each force-field file (the Sage 2.3.0 paper too for `openff-2.3.0*`, and the openff-forcefields release DOI for OpenFF files), the water model, the Na+ and Cl- parameters (Joung and Cheatham) when the build added ions with an OpenFF Sage or Parsley file, the charge models (AshGC or another NAGL model with the AM1-BCC papers, AM1-BCC, or EspalomaCharge; AM1-BCC also for a library co-solvent's shipped charges), Packmol when the build packed solvent or polymer chains with it, mBuild when it built polymer chains, and Machado and Pantano when `ionic_strength` set the ions. A force-field file PolyzyMD has no reference for is listed with a note to cite its source. A reference cited for two things, such as the Sage 2.3.0 and AshGC paper, is listed once. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
+| `cite` | References of what this build used: PolyzyMD at its version, the engine (OpenMM 8 or GROMACS), the OpenFF Toolkit (its paper and the DOI of the release used), OpenFF Interchange (the DOI of the release used) and the Open Force Field Initiative paper, as OpenFF asks, each force-field file (the Sage 2.3.0 paper too for `openff-2.3.0*`, and the DOI of the openff-forcefields release used for OpenFF files), the water model, the Na+ and Cl- parameters (Joung and Cheatham) when the build added ions with an OpenFF Sage or Parsley file, the charge models (AshGC or another NAGL model with the AM1-BCC papers, AM1-BCC, or EspalomaCharge; AM1-BCC also for a library co-solvent's shipped charges), Packmol when the build packed solvent or polymer chains with it, mBuild when it built polymer chains, and Machado and Pantano when `ionic_strength` set the ions. A force-field file PolyzyMD has no reference for is listed with a note to cite its source. A reference cited for two things, such as the Sage 2.3.0 and AshGC paper, is listed once. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
 
 `provenance` keys:
 
@@ -174,8 +174,8 @@ Files written next to the record:
 | File | Written when | Meaning |
 |------|--------------|---------|
 | `build_provenance.failed.json`, `build_provenance.failed.md` | The audit of an OpenMM build fails | The full record of the failed build, to read. No `system.xml` is committed, so nothing can run from it. A failed GROMACS build keeps `build_provenance.json` with `audit.passed: false` and writes no `audited_files.sha256` |
-| `gromacs/audited_files.sha256` | A GROMACS build passes its audit | `sha256sum` lines for every file GROMACS reads. The local and SLURM GROMACS job scripts run `sha256sum --check` on it before `grompp` and stop if a file changed. A run that started before 1.3.0rc5 has none and continues from its own files |
-| `production_N/production_N_system_check.json` | Each OpenMM production segment starts | `compared` (whether a passing build record vouched for `system.xml`), `matches_build`, and the terms that differ. A segment whose System differs from the audited build stops before its first step and is not resubmitted; `polyzymd status` shows `SYSTEM DIVERGED FROM THE AUDITED BUILD`. When no passing record vouches for `system.xml` (a run started before 1.3.0rc5), `compared` is false and the run goes on |
+| `gromacs/audited_files.sha256` | A GROMACS build passes its audit | `sha256sum` lines for every file GROMACS reads. The local and SLURM GROMACS job scripts run `sha256sum --check` on it before `grompp` and stop if a file changed. A run that started before 1.3.0 has none and continues from its own files |
+| `production_N/production_N_system_check.json` | Each OpenMM production segment starts | `compared` (whether a passing build record vouched for `system.xml`), `matches_build`, and the terms that differ. A segment whose System differs from the audited build stops before its first step and is not resubmitted; `polyzymd status` shows `SYSTEM DIVERGED FROM THE AUDITED BUILD`. When no passing record vouches for `system.xml` (a run started before 1.3.0), `compared` is false and the run goes on |
 
 When loading multi-segment trajectories, the analysis loader verifies that the
 segments form one contiguous, evenly spaced time line and raises
@@ -190,11 +190,18 @@ at a segment boundary is repaired with a warning instead (see
 The `naming_template` field in the `output` section of `config.yaml` controls
 how per-replicate directories are named.
 
-**Default template:**
+**Default template** (when the config sets none):
 
 ```
 {enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}
 ```
+
+Configs that `polyzymd study add-condition --new` writes set
+`{enzyme}_{substrate}_{polymer_type}_run{replicate}` instead. Each condition
+has its own runs folder, so the name needs neither, and running longer
+({doc}`../how_to/run_longer`) or changing the temperature then keeps the
+replicate's folder: a changed temperature is refused as a change of physics
+instead of pointing the config at a new, unbuilt folder.
 
 **Available placeholders:**
 

@@ -672,6 +672,7 @@ class TestGromacsFreeze:
             "openmm_version": None,
             "openff_toolkit_version": "0.18.1",
             "openff_interchange_version": "0.5.1",
+            "openff_forcefields_version": "2026.01.0",
         }
         for run in (tmp_path / "scratch").iterdir():
             (run / "build_manifest.json").write_text(json.dumps(built))
