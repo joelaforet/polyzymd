@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -322,7 +323,7 @@ class GromacsEngine(SimulationEngine):
             eq, prod = self._resolve_stage_mdrun_flags(local)  # type: ignore[arg-type]
         finally:
             self._gmx_binary = saved
-        return {"em": flags, "eq": eq or flags, "prod": prod or flags}
+        return {"em": _without_gpu_offload(flags), "eq": eq or flags, "prod": prod or flags}
 
     def _resolve_stage_mdrun_flags(
         self, effective_slurm: SlurmConfig
@@ -594,3 +595,15 @@ class GromacsEngine(SimulationEngine):
             trajectory_format="xtc",
             topology_format=topology_format,
         )
+
+
+def _without_gpu_offload(flags: str | None) -> str | None:
+    """Drop ``-pme gpu``, ``-update gpu`` and ``-bonded gpu`` from mdrun flags.
+
+    Energy minimization cannot offload PME, update or bonded work to the GPU
+    ("PME GPU does not support: Non-dynamical integrator"); the SLURM job
+    script drops them for minimization the same way.
+    """
+    if not flags:
+        return flags
+    return " ".join(re.sub(r"-(pme|update|bonded)\s+gpu", " ", flags).split())

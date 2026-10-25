@@ -360,6 +360,19 @@ def test_rebuild_is_refused_once_a_gromacs_run_has_started(tmp_path, marker):
         assert_rebuild_allowed(tmp_path)
 
 
+def test_a_refused_rebuild_names_the_folder_to_remove_and_the_option(tmp_path):
+    """A failed run leaves minimization/; the refusal says what to do about it."""
+    run = tmp_path / "my run_run1"
+    (run / "minimization").mkdir(parents=True)
+
+    with pytest.raises(ArtifactIntegrityError) as error:
+        assert_rebuild_allowed(run)
+    message = str(error.value)
+    assert f"remove the folder {run} (rm -r '{run}')" in message
+    assert "--scratch-dir <new folder>" in message
+    assert "output.scratch_directory" in message
+
+
 def test_rebuild_is_allowed_over_gromacs_build_outputs(tmp_path):
     gromacs = tmp_path / "gromacs"
     gromacs.mkdir()

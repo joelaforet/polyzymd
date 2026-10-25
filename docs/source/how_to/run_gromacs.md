@@ -33,11 +33,13 @@ The run calls `gmx` from `PATH`. To use another GROMACS binary, give
 `--gmx-path /path/to/gmx`. To run GROMACS for a config whose `engine` is
 `openmm`, give `--engine gromacs`.
 
-The run calls `gmx mdrun -deffnm <stage> -v` for each stage. It does not read
-the run settings in the `gromacs:` block of `config.yaml` (`mdrun_flags`,
-`ntmpi`, `ntomp` and the other fields except `analysis_topology`); only
-[SLURM jobs](#submit-to-a-slurm-cluster) use them. GROMACS then chooses its own
-thread counts and GPU use.
+The run calls `gmx mdrun -deffnm <stage> -v` for each stage, with the same
+mdrun settings a [SLURM job](#submit-to-a-slurm-cluster) gets from the
+`gromacs:` block of `config.yaml`: `ntomp` (`-ntomp`), `ntmpi` (`-ntmpi`, for
+a thread-MPI `gmx`), the GPU offload flags when `gpu: true`, and
+`mdrun_flags` (with the stage flags `mdrun_flags_equilibration` and
+`mdrun_flags_production`). Energy minimization runs without `-pme gpu`,
+`-update gpu` and `-bonded gpu`, which it cannot use.
 
 PolyzyMD builds the system, writes the GROMACS files to
 `<replicate folder>/gromacs/` and runs each stage in order. It prints the

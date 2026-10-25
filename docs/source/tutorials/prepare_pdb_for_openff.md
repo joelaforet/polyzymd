@@ -328,6 +328,14 @@ solutes:
     charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
 ```
 
+The SDF has no atom names. In the built system OpenFF names the benzene atoms
+by element, count and an `x` suffix: `C1x` to `C6x`, then `H1x` to `H6x`. The
+carbons keep the order of the `HETATM` records, so crystal atom `C1` becomes
+`C1x`. A restraint on benzene selects `name C1x`, not `name C1`; see
+{ref}`restraint-ligand-atom-names`. `polyzymd validate` refuses a
+small-molecule selection whose names the molecule will not have and lists the
+names it will have.
+
 ## What you did
 
 You read a PDB entry, removed what PolyzyMD does not need, added hydrogens,

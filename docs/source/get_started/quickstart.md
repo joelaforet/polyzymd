@@ -123,7 +123,7 @@ Summary:
 
 Simulation phases:
   Equilibration: 0.002000 ns across 1 stage(s)
-    - equil: 0.002 ns (NVT)
+    - equil: 300 K, 0.002 ns (NVT)
   Production: 0.004 ns (NPT)
 ```
 

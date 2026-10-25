@@ -24,6 +24,8 @@ pixi shell -e analysis
 ```
 
 Alternatively, prefix each command with `pixi run -e analysis`.
+The `build` environment holds the same analysis tools, so `pixi shell -e build`
+works too. The quickstart uses it.
 :::
 
 :::{admonition} Resource requirements

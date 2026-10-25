@@ -99,6 +99,7 @@ pixi run -e build polyzymd submit \
 The allocated node must pass the driver probe and CUDA execution test. A newer
 driver does not cause PolyzyMD to select another environment.
 
+(local-nvidia-gpu)=
 ## Run on a local NVIDIA GPU
 
 Run on the GPU of a workstation or a laptop in two steps. Build in the `build`
@@ -127,6 +128,15 @@ older CUDA version.
    ```bash
    pixi run -e build polyzymd build -c config.yaml -r 1
    pixi run -e sim-cuda-12-6 polyzymd run -c config.yaml -r 1
+   ```
+
+   These commands work inside the clone of the repository. In a project
+   folder outside the clone, add the clone's `pixi.toml`, or `pixi run`
+   stops with `could not find pixi.toml`:
+
+   ```bash
+   pixi run --manifest-path ~/polyzymd/pixi.toml -e build polyzymd build -c config.yaml -r 1
+   pixi run --manifest-path ~/polyzymd/pixi.toml -e sim-cuda-12-6 polyzymd run -c config.yaml -r 1
    ```
 
 `polyzymd run` finds the finished build and prints

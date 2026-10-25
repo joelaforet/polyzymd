@@ -621,16 +621,27 @@ class SimulationRunner:
             self._system.getNumConstraints(),
         )
         if violation > CONSTRAINT_TOLERANCE_ANGSTROM:
-            LOGGER.warning(
-                "Minimized state violates a constraint by %.5f A (> %.3f A); "
-                "projecting the coordinates back onto the constraint manifold",
-                violation,
-                CONSTRAINT_TOLERANCE_ANGSTROM,
-            )
+            # The minimizer holds constraints only approximately, so this is
+            # routine: the coordinates are put back onto the exact lengths.
             simulation.context.applyConstraints(1e-6)
             final_positions = simulation.context.getState(getPositions=True).getPositions()
             corrected = self._max_constraint_violation_angstrom(self._system, final_positions)
-            LOGGER.info("Constraint violation after applyConstraints: %.3e A", corrected)
+            if corrected > CONSTRAINT_TOLERANCE_ANGSTROM:
+                LOGGER.warning(
+                    "Minimized state violates a constraint by %.5f A, and %.5f A remains "
+                    "after applyConstraints (> %.3f A)",
+                    violation,
+                    corrected,
+                    CONSTRAINT_TOLERANCE_ANGSTROM,
+                )
+            else:
+                LOGGER.info(
+                    "Minimized state was %.5f A off its constraints (> %.3f A); put back "
+                    "onto them with applyConstraints (%.1e A remains)",
+                    violation,
+                    CONSTRAINT_TOLERANCE_ANGSTROM,
+                    corrected,
+                )
             if frozen_indices:
                 # applyConstraints splits the correction by inverse mass, so a frozen
                 # heavy atom can move by roughly 1/12 of the residual violation.

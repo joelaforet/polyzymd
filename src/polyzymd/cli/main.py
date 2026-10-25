@@ -347,6 +347,35 @@ def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     return True
 
 
+def _emit_protocol_warnings(sim_config: object, *, phase: str = "cli") -> bool:
+    """Print equilibration temperatures that differ from the production temperature.
+
+    Parameters
+    ----------
+    sim_config : object
+        Loaded simulation configuration.
+    phase : str, optional
+        Color phase for CLI output, by default ``"cli"``.
+
+    Returns
+    -------
+    bool
+        ``True`` when any warnings were emitted.
+    """
+
+    from polyzymd.config.validation import collect_protocol_warnings
+
+    warnings = collect_protocol_warnings(sim_config)
+    if not warnings:
+        return False
+
+    colored_echo("Protocol warnings:", phase=phase, level=logging.WARNING)
+    for warning in warnings:
+        colored_echo(f"  Warning: {warning}", phase=phase, level=logging.WARNING)
+    colored_echo(phase=phase)
+    return True
+
+
 def _echo_box_plan(sim_config: "SimulationConfig", *, phase: str) -> None:
     """Print the periodic box the build will make, sized from the enzyme PDB."""
     import numpy as np
@@ -4101,6 +4130,7 @@ def validate(config: str) -> None:
     files exist.
     """
     from polyzymd.config.schema import SimulationConfig
+    from polyzymd.config.validation import stage_temperature_warning
 
     warn_if_wrong_pixi_env("validate", "build")
 
@@ -4113,6 +4143,7 @@ def validate(config: str) -> None:
         click.echo(click.style("Configuration is valid!", fg="green"))
         colored_echo()
         _emit_reference_warnings(sim_config)
+        _emit_protocol_warnings(sim_config)
         colored_echo()
         colored_echo("Summary:")
         colored_echo(f"  Name: {sim_config.name}")
@@ -4145,18 +4176,31 @@ def validate(config: str) -> None:
             f"{sim_config.simulation_phases.total_equilibration_duration:.6f} ns "
             f"across {len(eq_stages)} stage(s)"
         )
-        for stage in eq_stages:
+        production_kelvin = sim_config.thermodynamics.temperature
+        for index, stage in enumerate(eq_stages):
+            differs = stage_temperature_warning(eq_stages, index, production_kelvin)
+            ends_before_production = stage.is_temperature_ramping and index < len(eq_stages) - 1
+            flag = ""
+            if differs:
+                flag = (
+                    "; WARNING: the next stage starts at another temperature"
+                    if ends_before_production
+                    else f"; WARNING: production runs at {production_kelvin:g} K"
+                )
             if stage.is_temperature_ramping:
                 colored_echo(
                     f"    - {stage.name}: {stage.temperature_start:g} -> "
                     f"{stage.temperature_end:g} K, +{stage.temperature_increment:g} K "
                     f"every {stage.temperature_interval_steps} steps; "
                     f"derived duration {stage.resolved_duration:.6f} ns "
-                    f"({stage.ensemble.value})"
+                    f"({stage.ensemble.value}){flag}",
+                    level=logging.WARNING if differs else logging.INFO,
                 )
             else:
                 colored_echo(
-                    f"    - {stage.name}: {stage.resolved_duration:g} ns ({stage.ensemble.value})"
+                    f"    - {stage.name}: {stage.temperature:g} K, "
+                    f"{stage.resolved_duration:g} ns ({stage.ensemble.value}){flag}",
+                    level=logging.WARNING if differs else logging.INFO,
                 )
         prod = sim_config.simulation_phases.production
         colored_echo(f"  Production: {prod.duration} ns ({prod.ensemble.value})")

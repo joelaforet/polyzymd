@@ -100,6 +100,10 @@ polyzymd validate -c <path>
 - Monomer probabilities sum to 1.0
 - Valid enum values (water model, ensemble, etc.)
 - Co-solvent specification (mole_fraction XOR concentration)
+- Equilibration temperatures (warning): a constant-temperature stage, or a
+  ramp's `temperature_end` in the last stage, that differs from
+  `thermodynamics.temperature`. Production runs at
+  `thermodynamics.temperature`. The summary marks each such stage.
 
 ### Example
 
@@ -126,7 +130,7 @@ Summary:
 
 Simulation phases:
   Equilibration: 0.002000 ns across 1 stage(s)
-    - equil: 0.002 ns (NVT)
+    - equil: 300 K, 0.002 ns (NVT)
   Production: 0.004 ns (NPT)
 ```
 
@@ -183,10 +187,11 @@ polyzymd build -c config.yaml -r 1 --format gromacs
 The build command creates:
 - `solvated_system.pdb` - Complete system with water and ions, for viewers
 - `system.prmtop` - Analysis topology with every atom, element, charge and
-  bond; MDAnalysis reads it directly and it has no atom limit
+  bond; MDAnalysis reads it directly and it has no atom limit. It carries no
+  restraint forces, which analyses do not read
 - `system.xml` - OpenMM serialized system with restraints
 - `build_provenance.json` - the build record: SHA-256 hashes of the files
-  above, the config hash, OpenMM and PolyzyMD versions, the PACKMOL seeds
+  above, the build config hash, OpenMM and PolyzyMD versions, the PACKMOL seeds
   under `provenance`, a record of each component, and the physics audit with
   any accepted `modeling_exceptions`
 - `build_provenance.md` - the same record, for people to read
@@ -1234,7 +1239,8 @@ Adds a condition to an existing study, in `conditions/<label>/`:
 - `--new` writes a template `config.yaml` to fill in, and `structures/` with
   placeholder files.
 - `--from OTHER_LABEL` copies the config of that condition of the study, with
-  the input files it names.
+  the input files it names. The copy's `name:` is set to the new condition's
+  folder name, as `--new` sets it, and the command prints it.
 - `--config CONFIG` copies `CONFIG`, with the input files it names, as
   `study init --condition` does. When the config's `scratch_directory` holds
   runs of the config, that folder is written to `data.local.yaml` and printed
