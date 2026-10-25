@@ -618,10 +618,12 @@ class PolymerSolute(_Solute):
     """Polymer chains packed around the fixed solutes (``type: polymer``).
 
     Supports two generation modes:
+
     - "cached": Load pre-built polymer SDF files from sdf_directory
     - "dynamic": Build chains with mBuild from star-sited SMILES
 
     For dynamic mode, you must provide:
+
     - the star-sited repeat unit of each monomer in monomers[].smiles
     - the star-sited caps of each end in end_groups (head and tail), each a
       list of options with probabilities

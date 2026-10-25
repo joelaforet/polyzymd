@@ -10,6 +10,39 @@ The examples use a project with three conditions of Trp-cage: `Water` and
 `Urea 1 M`, run with OpenMM, and `GROMACS Water`, run with GROMACS. The Python
 examples run from the project folder.
 
+## Try it in a notebook
+
+{download}`load_replicates.ipynb <../../../src/polyzymd/templates/notebooks/load_replicates.ipynb>`
+is a sandbox for the code on this page. `polyzymd project init` puts a copy
+in your project's `notebooks/` folder. By default it takes the first study in
+`project.yaml`, its control condition and its first replicate with production
+frames. It:
+
+1. lists the conditions of the study, their configs and their replicates;
+2. loads the replicate with PolyzyMD's loader (`replicate.universe()`) and
+   prints its frames, times, segments, and the residue and atom names of the
+   built system;
+3. counts the atoms of the selections in the table under
+   [Names in the built system](#names-in-the-built-system);
+4. measures the radius of gyration of the protein over the analyzed frames,
+   and plots it;
+5. loads the same replicate by hand from its files, as in
+   [Load a replicate in MDAnalysis](#load-a-replicate-in-mdanalysis), and
+   checks that both universes hold the same atoms and the same first frame.
+
+Set a study, condition or replicate in its first cell to load another, or
+`config_path` to load a config outside a project. It writes nothing into the
+project. Open it in the PolyzyMD `build` environment, which has JupyterLab
+(change `~/polyzymd` to the folder of your PolyzyMD clone):
+
+```bash
+cd my_paper/notebooks
+pixi run -e build --manifest-path ~/polyzymd/pixi.toml jupyter lab --no-browser load_replicates.ipynb
+```
+
+Open the link with a token that JupyterLab prints. On Windows with WSL, see
+{doc}`../tutorials/star_sited_monomers` if the page does not open.
+
 ## Find the replicate folder
 
 Each replicate runs in its own folder: the config's `naming_template` (such as
