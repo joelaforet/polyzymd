@@ -243,6 +243,15 @@ too large, or a system that is not stable.
 3. Add a stage that holds the protein while the solvent and polymer relax.
    See {doc}`equilibration`.
 
+### `Minimized state violates a constraint by ... A, and ... A remains`
+
+The minimizer holds constrained distances only approximately; PolyzyMD puts
+the atoms back onto the exact lengths before heating, and normally logs that
+as one INFO line. This WARNING means the correction left more than 0.01 Å:
+check the input structure around the atoms with the largest hydrogen
+displacement in `minimization/phase.json`. See
+{ref}`minimization-constraints`.
+
 ### `CUDA out of memory`
 
 The GPU has no more memory. Make the system smaller:
@@ -432,6 +441,14 @@ boundary faults of the OpenMM restart chain, and prints a warning:
 
 The replicate provenance records both repairs under `segment_join`. The
 loader still refuses a larger overlap or gap, or a change of frame interval.
+
+OpenMM 8.2 and later write every new DCD file as if its first frame were one
+frame interval after step 0. A continuation segment written that way seems to
+start again at the first frame time. PolyzyMD 1.3.0 writes the real step of
+the first frame. For segments written before, the loader reads the step of
+each frame from the `production_N_state_data.csv` beside the DCD and prints a
+warning. Only the times are read this way; the coordinates do not change. A
+segment without that CSV is still refused.
 Causes are a missing segment, two chains that wrote into one replicate folder
 (for example after a duplicated SLURM submission), or a report interval that
 changed during the chain.

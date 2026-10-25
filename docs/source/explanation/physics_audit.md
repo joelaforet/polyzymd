@@ -93,7 +93,7 @@ The audit recomputes from the built system what the config asked for:
   temperature or annealing ramp, pressure coupling, constraints, velocity
   generation and the position-restraint switches of each stage.
 
-On the Paper 1 systems (about 90,000 atoms with 78 polymer chains), the whole
+On a system of about 90,000 atoms with 78 polymer chains, the whole
 audit takes about one minute on a cluster node.
 
 ## When a check fails
@@ -127,7 +127,7 @@ that accepts nothing is reported, so stale entries do not stay in a config.
 ## The record and the gates
 
 The build writes `build_provenance.json` and a readable
-`build_provenance.md`. They hold the versions, seeds, config hash, the SHA-256
+`build_provenance.md`. They hold the versions, seeds, {term}`build config hash`, the SHA-256
 of every file the engine reads, the component records and the full audit. See
 {doc}`../reference/data_requirements`.
 
@@ -164,7 +164,11 @@ does not check that the config describes good science:
   audit does not compute them again; `charges.source` reports a warning that
   says so;
 - how closely GROMACS and OpenMM sample the same ensemble where their
-  algorithms differ (see {doc}`../reference/gromacs_openmm`).
+  algorithms differ (see {doc}`../reference/gromacs_openmm`);
+- the chemistry of dynamically built polymer chains against their SMILES
+  (atoms, bonds, stereochemistry, caps): the builder assembles each chain from
+  the SMILES and checks its geometry, and the audit checks the parameters and
+  charges of the chain it is given.
 
 A wrong config is built faithfully, and recorded.
 

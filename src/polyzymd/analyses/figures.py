@@ -41,23 +41,41 @@ def _label(quantity: str, unit: str | None) -> str:
     return f"{text} ({'Å' if unit == 'A' else unit})" if unit else text
 
 
+def _bounds_text(bounds: Any) -> str | None:
+    """Say where intervals stop for a metric with bounds, or None without bounds."""
+    low, high = (list(bounds or (None, None)) + [None, None])[:2]
+    if low is None and high is None:
+        return None
+    if low is not None and high is not None:
+        return f"intervals are clipped to the metric's range {low:g} to {high:g}"
+    return f"intervals are clipped at {low if low is not None else high:g}, a bound of the metric"
+
+
 def _footnote(
-    fig: Any, replicates: set[int], equilibration: str | None, window: str, **wording: str
+    fig: Any,
+    replicates: set[int],
+    equilibration: str | None,
+    window: str,
+    bounds: Any = (None, None),
+    **wording: str,
 ) -> None:
     """Footnote what the interval is and its n, or say that no interval is drawn.
 
     ``replicates`` holds the replicate counts of the conditions drawn. With one
     count the footnote gives that n, and with several it says that n is per
-    condition. A condition with one replicate has no interval, and the
-    footnote says so.
+    condition. A condition with fewer than three replicates has no interval,
+    and the footnote says so. Intervals are clipped to the metric's bounds.
     """
     from polyzymd.analyses.shared.plotting import add_uncertainty_footnote
 
-    if max(replicates) < 2:
-        _note(fig, f"No interval: every condition has one replicate; {window}.")
+    if max(replicates) < 3:
+        _note(fig, f"No interval: every condition has fewer than three replicates; {window}.")
         return
-    if min(replicates) < 2:
-        wording["points"] += "; a condition with one replicate has no interval"
+    if min(replicates) < 3:
+        wording["points"] += "; a condition with fewer than three replicates has no interval"
+    clipped = _bounds_text(bounds)
+    if clipped:
+        wording["points"] += f"; {clipped}"
     n = next(iter(replicates)) if len(replicates) == 1 else None
     add_uncertainty_footnote(fig, n_replicates=n, equilibration=equilibration, **wording)
 
@@ -116,7 +134,12 @@ def plot_timeseries(
     import numpy as np
 
     from polyzymd.analyses.shared.loader import convert_time, parse_time_string
-    from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend, band_half_widths
+    from polyzymd.analyses.shared.plotting import (
+        apply_axis_style,
+        apply_legend,
+        band_half_widths,
+        clip_to_bounds,
+    )
 
     settings, labels, colors = _setup(source, plot_settings)
     equilibration = source.study[labels[0]].equilibration
@@ -145,7 +168,8 @@ def plot_timeseries(
                 label=f"{label} (n = {len(items)})",
             )
             if band is not None:
-                ax.fill_between(times, mean - band, mean + band, color=color, alpha=0.2, zorder=2)
+                low, high = clip_to_bounds(mean - band, mean + band, source.bounds)
+                ax.fill_between(times, low, high, color=color, alpha=0.2, zorder=2)
         else:
             ax.plot(
                 [],
@@ -167,6 +191,7 @@ def plot_timeseries(
         counts,
         equilibration,
         f"production window t >= {equilibration}",
+        bounds=source.bounds,
         drawn="Band",
         of="the condition mean at each time",
         counts="n per condition in the legend",
@@ -382,6 +407,7 @@ def plot_condition_values(
 
     from polyzymd.analyses.shared.plotting import (
         apply_axis_style,
+        clip_to_bounds,
         error_bar_half_widths,
         scatter_replicate_values,
     )
@@ -393,10 +419,17 @@ def plot_condition_values(
     stats = [mean_sem_ci(entry) for entry in data]
     positions, theme = np.arange(len(labels)), settings.theme
     fig, ax = _subplots(figsize=(10, 6))
+    means = np.array([item.mean for item in stats], dtype=float)
+    half = error_bar_half_widths([item.sem for item in stats], data)
+    yerr = None
+    if half is not None:
+        bounds = (0.0, 1.0) if values.is_fraction else getattr(values, "bounds", (None, None))
+        low, high = clip_to_bounds(means - np.asarray(half), means + np.asarray(half), bounds)
+        yerr = np.vstack([means - low, high - means])
     ax.bar(
         positions,
-        [item.mean for item in stats],
-        yerr=error_bar_half_widths([item.sem for item in stats], data),
+        means,
+        yerr=yerr,
         color=[colors[label] for label in labels],
         edgecolor=theme.bar_edgecolor,
         linewidth=theme.bar_linewidth,
@@ -422,6 +455,7 @@ def plot_condition_values(
         {len(entry) for entry in data},
         equilibration,
         f"production window t >= {equilibration}",
+        bounds=(0.0, 1.0) if values.is_fraction else getattr(values, "bounds", (None, None)),
         of="the condition mean",
         counts="n per condition under each bar",
         points="Bars: condition means; points: per-replicate values",
@@ -455,7 +489,12 @@ def plot_profile(
     """
     import numpy as np
 
-    from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend, band_half_widths
+    from polyzymd.analyses.shared.plotting import (
+        apply_axis_style,
+        apply_legend,
+        band_half_widths,
+        clip_to_bounds,
+    )
 
     settings, labels, colors = _setup(values.source, plot_settings)
     labels = [label for label in labels if values.values.get(label)]
@@ -474,7 +513,10 @@ def plot_profile(
         mean, band = matrix.mean(axis=0), band_half_widths(matrix)
         ax.plot(x, mean, color=color, linewidth=1.8, zorder=3, label=f"{label} (n = {len(matrix)})")
         if band is not None:
-            ax.fill_between(x, mean - band, mean + band, color=color, alpha=0.2, zorder=2)
+            low, high = clip_to_bounds(
+                mean - band, mean + band, getattr(values, "bounds", (None, None))
+            )
+            ax.fill_between(x, low, high, color=color, alpha=0.2, zorder=2)
     where = {str(k): position for k, position in zip(values.labels, x, strict=True)}
     for key in highlight:
         if str(key) in where:
@@ -497,6 +539,7 @@ def plot_profile(
         counts,
         equilibration,
         f"production window t >= {equilibration}",
+        bounds=getattr(values, "bounds", (None, None)),
         drawn="Band",
         of=f"the condition mean at each {xlabel.lower()}",
         counts="n per condition in the legend",
@@ -533,6 +576,7 @@ def plot_decomposition(
         apply_axis_style,
         apply_legend,
         band_half_widths,
+        clip_to_bounds,
         get_palette_colors,
     )
 
@@ -552,7 +596,10 @@ def plot_decomposition(
             mean, band = matrix.mean(axis=0), band_half_widths(matrix)
             ax.plot(x, mean, color=color, linewidth=1.5, label=part.replace("_", " "))
             if band is not None:
-                ax.fill_between(x, mean - band, mean + band, color=color, alpha=0.2)
+                low, high = clip_to_bounds(
+                    mean - band, mean + band, getattr(values, "bounds", (None, None))
+                )
+                ax.fill_between(x, low, high, color=color, alpha=0.2)
         apply_axis_style(
             ax, settings, title=f"{label} (n = {len(matrix)})", ylabel=_label("value", unit)
         )
@@ -629,7 +676,7 @@ def plot_differences(
         ax.axhline(0.0, color="0.5", linewidth=0.8)
         ax.plot(x, delta, color=color, linewidth=1.5, label="difference")
         ax.fill_between(x, low, high, color=color, alpha=0.25, label="95% interval")
-        marked = [row.significant for row in rows]
+        marked = [bool(row.significant) for row in rows]
         ax.scatter(x[marked], delta[marked], color="red", s=14, zorder=3, label="significant")
         n = f"n = {len(values.values[label])} vs {len(values.values[rows[0].a])}"
         apply_axis_style(

@@ -386,7 +386,7 @@ class TestPartialReport:
 
         root = self._study(tmp_path)
         result = CliRunner().invoke(cli, ["analyze", "first", "--study", str(root), "--no-plots"])
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 3, result.output
         assert "status partial" in result.output
         report = json.loads((root / "results" / "first" / "report.json").read_text())
         assert report["status"] == "partial"
@@ -531,7 +531,9 @@ class TestTimeseriesParts:
             cli, ["analyze", "shape", "--study", str(root), "--run", "double", "--no-plots"]
         )
         assert chosen.exit_code == 0, chosen.output
-        assert pz.Study(root).results("shape").report.run == "double"
+        # A --run view is printed; the stored report keeps the default result.
+        assert "printed and not saved" in chosen.output
+        assert pz.Study(root).results("shape").report.run == "x"
         wrong = CliRunner().invoke(
             cli, ["analyze", "shape", "--study", str(root), "--run", "nope", "--no-plots"]
         )

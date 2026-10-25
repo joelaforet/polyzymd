@@ -99,6 +99,7 @@ pixi run -e build polyzymd submit \
 The allocated node must pass the driver probe and CUDA execution test. A newer
 driver does not cause PolyzyMD to select another environment.
 
+(local-nvidia-gpu)=
 ## Run on a local NVIDIA GPU
 
 Run on the GPU of a workstation or a laptop in two steps. Build in the `build`
@@ -129,11 +130,40 @@ older CUDA version.
    pixi run -e sim-cuda-12-6 polyzymd run -c config.yaml -r 1
    ```
 
+   These commands work inside the clone of the repository. In a project
+   folder outside the clone, add the clone's `pixi.toml`, or `pixi run`
+   stops with `could not find pixi.toml`:
+
+   ```bash
+   pixi run --manifest-path ~/polyzymd/pixi.toml -e build polyzymd build -c config.yaml -r 1
+   pixi run --manifest-path ~/polyzymd/pixi.toml -e sim-cuda-12-6 polyzymd run -c config.yaml -r 1
+   ```
+
 `polyzymd run` finds the finished build and prints
 `Reusing the build in <replicate folder>`. It then minimizes, equilibrates
 and runs production on the GPU. Give the same `-r` replicates to both
-commands. Without a build, `polyzymd run` in a `sim-cuda-*` environment tries
-to build and fails, because OpenFF is missing.
+commands. Without a build, or with build files that changed since the build,
+`polyzymd run` in a `sim-cuda-*` environment stops before it writes anything.
+It prints the `polyzymd build` command to run in `build`.
+
+### Stop and continue a local run
+
+Stop a local run with `kill -TERM <pid>`. The run saves its state, prints the
+command that continues it and exits with code 99. Run the same command again
+to continue:
+
+```bash
+pixi run -e sim-cuda-12-6 polyzymd run -c config.yaml -r 1
+```
+
+`polyzymd run` continues production from the saved state, as a SLURM chain
+does. It does not run production again from its start. After `Ctrl+C` or a
+hard kill, it continues from the state saved with the last trajectory frame. When production is
+complete, it prints `already complete; nothing to do` and exits with code 0.
+While a local run is alive, `polyzymd status` shows it as `RUNNING` with the
+note `local run`.
+
+To run a finished replicate longer, see {doc}`run_longer`.
 
 ## Run on a CPU
 

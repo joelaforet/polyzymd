@@ -24,7 +24,9 @@ repository root, activate it once:
 pixi shell -e build
 ```
 
-The commands then work in any folder of this shell.
+The commands then work in any folder of this shell. A `pixi run -e ...`
+command outside the clone needs the clone's `pixi.toml`:
+`pixi run --manifest-path ~/polyzymd/pixi.toml -e build polyzymd ...`.
 :::
 
 ## Step 1: Make the project
@@ -92,9 +94,9 @@ explain its keys. Change these fields:
 | `name` of the protein under `solutes:` | The name of the protein. It is part of the run folder names |
 | `pdb_path` of the protein | The PDB file, relative to the config: `structures/trpcage.pdb` |
 | `thermodynamics.temperature` | The temperature in K. Also change the temperatures of the equilibration stages |
-| `simulation_phases.production.duration` | The production length in ns. The template has 100 ns |
+| `simulation_phases.production.duration` | The production length in ns. The template has 100 ns. Its equilibration takes about 1.8 ns; for a test run, shorten it as the comment above `equilibration_stages` says |
 | `output.scratch_directory` | On a cluster, your scratch storage. Leave it `null` to write the runs into `runs/` |
-| `openmm.platform` | `CUDA` for a GPU, as `polyzymd submit` needs. `CPU` to run with `polyzymd run` on a laptop |
+| `openmm.platform` | `CUDA` for an NVIDIA GPU, as `polyzymd submit` needs. A laptop or workstation with an NVIDIA GPU also uses `CUDA`: see {ref}`the local GPU recipe <local-nvidia-gpu>`. `CPU` only for a machine without one |
 
 The template is set up for OpenMM. To run GROMACS, change `engine` to
 `gromacs`. GROMACS does not read the `openmm:` block, so you can leave it, and
@@ -156,6 +158,7 @@ polyzymd study add-condition "Urea 2 M" --from Water --study trpcage
 
 ```
 condition Urea 2 M: /home/me/my_paper/trpcage/conditions/urea_2_m/config.yaml, listed in study.yaml
+name: set to 'urea_2_m' in the copy; change description: and the settings in which Urea 2 M differs from Water
 warning: the runs go into runs/trpcage/urea_2_m unless you set scratch_directory in config.yaml; trajectories can use a lot of disk space, so on a cluster set scratch_directory to scratch storage
 next: commit, and run polyzymd study check
 ```
@@ -165,8 +168,8 @@ next: commit, and run polyzymd study check
 `runs/trpcage/urea_2_m/`. If you set `scratch_directory` in the first
 config, set it again in the copy.
 
-In the copy, set `name: "urea_2_m"` and replace `co_solvents: []` with the
-urea:
+The copy's `name:` is `urea_2_m`, the folder name, as for `--new`. In the
+copy, change `description:` and replace `co_solvents: []` with the urea:
 
 ```yaml
   co_solvents:
@@ -200,7 +203,9 @@ polyzymd submit -c trpcage/conditions/urea_2_m/config.yaml -r 1-3 --preset aa100
 
 See {doc}`../how_to/hpc_slurm` and {doc}`../how_to/monitor_simulations`.
 
-On a workstation, run one replicate after the other with `polyzymd run`:
+On a workstation, run one replicate after the other with `polyzymd run`.
+With an NVIDIA GPU, build in `build` and run in a `sim-cuda-*` environment,
+as {ref}`the local GPU recipe <local-nvidia-gpu>` shows:
 
 ```bash
 polyzymd run -c trpcage/conditions/water/config.yaml -r 1

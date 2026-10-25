@@ -47,7 +47,7 @@ from polyzymd.simulation.report_state import (
 def _write_dcd_header(path: Path, frames: int, interval: int) -> None:
     """Write the 100-byte header OpenMM's DCDReporter starts every trajectory with.
 
-    DCDReporter always passes ``firstStep=reportInterval``, whatever step the
+    OpenMM 8.2 and later pass ``firstStep=reportInterval``, whatever step the
     simulation starts at, so the header steps are relative to the segment start.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -247,6 +247,13 @@ class TestReportIntervalCheck:
         with pytest.raises(ReportIntervalChangeError, match="every 20000 steps"):
             check_report_interval_unchanged(progress, tmp_path, 1, 200000)
 
+    def test_the_refusal_gives_the_samples_that_keep_the_spacing(self, tmp_path):
+        """Running longer with the same frame spacing needs samples raised with the duration."""
+        progress = self._progress(report_interval=20000)
+        progress.total_steps_requested = 400000
+        with pytest.raises(ReportIntervalChangeError, match="samples: 20 for this duration"):
+            check_report_interval_unchanged(progress, tmp_path, 1, 40000)
+
     def test_override_allows_the_change(self, tmp_path, caplog):
         progress = self._progress(report_interval=20000)
         # `polyzymd status` raises this logger to ERROR for the rest of the process.
@@ -363,6 +370,57 @@ class TestRestartEndToEnd:
         assert seg.start_step == 0
         assert seg.last_reported_step == 20
         assert seg.samples_written == 4
+
+    def test_trajectory_headers_give_the_step_of_the_first_frame(self, tmp_path):
+        """Each segment's DCD header starts at its first frame's step, whatever the OpenMM."""
+        from polyzymd.simulation.report_state import dcd_frame_info
+
+        _run_segment_zero(tmp_path)
+        _run_segment_one(tmp_path)
+        seg0 = dcd_frame_info(tmp_path / "production_0" / "production_0_trajectory.dcd")
+        seg1 = dcd_frame_info(tmp_path / "production_1" / "production_1_trajectory.dcd")
+        assert seg0 == (4, 5, REPORT_INTERVAL)
+        assert seg1 == (2, 25, REPORT_INTERVAL)
+        assert _csv_steps(tmp_path / "production_1" / "production_1_state_data.csv")[0] == 25
+
+    def test_segment_started_again_moves_the_earlier_attempts_resume_files_aside(
+        self, tmp_path, caplog
+    ):
+        """Its old INTERRUPTED marker would otherwise make the new segment look interrupted."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        for name in ("INTERRUPTED", "interrupted_state.xml", "interrupted_checkpoint.chk"):
+            (seg_dir / name).write_text("old")
+
+        _run_segment_zero(tmp_path)
+
+        assert not (seg_dir / "INTERRUPTED").exists()
+        assert not (seg_dir / "interrupted_state.xml").exists()
+        (moved,) = seg_dir.glob("earlier-attempt-*")
+        assert sorted(p.name for p in moved.iterdir()) == [
+            "INTERRUPTED",
+            "interrupted_checkpoint.chk",
+            "interrupted_state.xml",
+        ]
+        assert "left by an earlier attempt" in caplog.text
+
+    def test_an_interrupted_segment_gets_its_trajectory_hash_when_the_next_starts(self, tmp_path):
+        """freeze then finds a hash for every segment of a resumed replicate."""
+        from polyzymd.simulation.progress import trajectory_digest
+
+        _run_segment_zero(tmp_path)
+        progress = load_progress(tmp_path)
+        seg0 = progress.segments[0]
+        seg0.status = SegmentStatus.INTERRUPTED
+        seg0.trajectory_sha256 = None
+        seg0.trajectory_bytes = None
+        save_progress(tmp_path, progress)
+
+        _run_segment_one(tmp_path)
+        seg0 = load_progress(tmp_path).segments[0]
+        expected = trajectory_digest(tmp_path / "production_0" / "production_0_trajectory.dcd")
+        assert seg0.trajectory_sha256 == expected["trajectory_sha256"]
+        assert seg0.trajectory_bytes == expected["trajectory_bytes"]
 
     def test_hard_kill_resumes_after_the_last_frame(self, tmp_path):
         """Pattern B: a hard-killed segment is continued without a repeated step."""

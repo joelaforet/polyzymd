@@ -55,3 +55,27 @@ print("ok", [c.residue_name for c in config.solvent.co_solvents])
 """
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert result.returncode == 0 and "ok" in result.stdout, result.stderr[-2000:]
+
+
+def test_output_paths_behind_a_symlinked_folder_are_used_as_the_os_resolves_them(tmp_path):
+    """`..` after a symlinked config folder leads where the OS says, not where text collapse says."""
+    from pathlib import Path
+
+    from polyzymd.config.schema import OutputConfig
+
+    real = tmp_path / "pl" / "deep" / "conditions" / "water"
+    real.mkdir(parents=True)
+    (tmp_path / "pl" / "deep" / "runs").mkdir()
+    project = tmp_path / "project" / "conditions"
+    project.mkdir(parents=True)
+    (project / "water").symlink_to(real)
+
+    output = OutputConfig(
+        projects_directory=project / "water" / ".." / ".." / "runs",
+        scratch_directory=project / "water" / ".." / ".." / "runs",
+    )
+    expected = (project / "water" / ".." / ".." / "runs").resolve()
+    assert expected == (tmp_path / "pl" / "deep" / "runs").resolve()
+    assert Path(output.effective_scratch_directory).resolve() == expected
+    assert Path(output.get_slurm_logs_directory()).resolve().parent == expected
+    assert Path(output.get_job_scripts_directory()).resolve().parent == expected

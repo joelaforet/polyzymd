@@ -543,7 +543,8 @@ def test_header_carries_completed_count():
 
 def test_unfinished_hides_completed_rows_and_collapses_done_systems():
     text = render_agent(_two_systems(), now=NOW, unfinished=True)
-    assert "## DONE  2/2 completed" in text
+    # The collapsed line keeps the config path: two systems may share a name.
+    assert "## DONE  (d/config.yaml)  2/2 completed" in text
     assert "COMPLETED" not in text
     assert "run2   500.0/1000ns" in text
     assert "2 system(s)  4 replicate(s): 3 completed, 1 running" in text
@@ -695,7 +696,10 @@ def test_footer_splits_restart_and_inspect():
     )
     assert "polyzymd submit -c c.yaml -r 2 --preset p\n" in text
     assert "--skip-build" not in text
-    assert "# dead chains that need a look before restarting:\nSYS run1\nSYS run3" in text
+    assert (
+        "# dead chains that need a look before restarting:\n"
+        "SYS run1  (c.yaml)\nSYS run3  (c.yaml)" in text
+    )
     assert "-r 1" not in text and "-r 3" not in text
     assert "action: inspect" in text
 
@@ -840,3 +844,129 @@ def test_a_replicate_run_with_its_own_protocol_is_never_called_dead(tmp_path: Pa
     text = render_agent([report], now=NOW, preset_hint="p")
     assert "OWN_PROTOCOL" in text and "does not run or resubmit it" in text
     assert "polyzymd submit" not in text
+
+
+def _local_report(tmp_path: Path, seg_status: SegmentStatus, jobs: list | None = None):
+    from polyzymd.cli.status_report import build_system_report
+
+    scratch = tmp_path / "scratch"
+    rep_dir = scratch / "SYS_run1"
+    progress = _write_progress(rep_dir, 13_500, SimulationStatus.INTERRUPTED, seg_status)
+    (rep_dir / "production_0").mkdir()
+    cfg = _mock_cfg(scratch, tmp_path / "slurm_logs")
+    cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+    engine = MagicMock()
+    engine.resolve_engine_working_directory.side_effect = lambda p: p
+    engine.load_or_scan_progress.return_value = progress
+    return rep_dir, lambda: build_system_report(
+        cfg,
+        "c.yaml",
+        engine_inst=engine,
+        jobs=[] if jobs is None else jobs,
+        now=NOW,
+        job_name_fn=lambda c, r: f"SYS_run{r}",
+    )
+
+
+def test_a_lock_holder_without_squeue_is_not_called_a_local_run(tmp_path: Path):
+    """Without squeue, the lock may be held by a SLURM job as well."""
+    from polyzymd.cli import status_report
+    from tests.simulation.test_progress import _lock_held_by_another_process
+
+    rep_dir, _ = _local_report(tmp_path, SegmentStatus.RUNNING)
+    cfg = _mock_cfg(tmp_path / "scratch", tmp_path / "slurm_logs")
+    cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+    engine = MagicMock()
+    engine.resolve_engine_working_directory.side_effect = lambda p: p
+    engine.load_or_scan_progress.return_value = _write_progress(
+        rep_dir, 13_500, SimulationStatus.INTERRUPTED, SegmentStatus.RUNNING
+    )
+    with _lock_held_by_another_process(rep_dir):
+        report = status_report.build_system_report(
+            cfg, "c.yaml", engine_inst=engine, jobs=None, now=NOW, job_name_fn=lambda c, r: "x"
+        )
+    (rep,) = report.replicates
+    assert rep.verdict == "running"
+    assert rep.note.startswith("lock held (local run or job)")
+
+
+def test_a_local_run_that_holds_the_lock_is_running(tmp_path: Path):
+    """A `polyzymd run` on a workstation has no SLURM job, but it is alive."""
+    from tests.simulation.test_progress import _lock_held_by_another_process
+
+    rep_dir, build = _local_report(tmp_path, SegmentStatus.RUNNING)
+    with _lock_held_by_another_process(rep_dir):
+        report = build()
+    (rep,) = report.replicates
+    assert rep.verdict == "running"
+    assert rep.note.startswith("local run")
+
+
+def test_a_local_run_stopped_by_a_signal_gets_the_local_resume_command(tmp_path: Path):
+    from polyzymd.cli.status_report import assign_actions
+
+    rep_dir, build = _local_report(tmp_path, SegmentStatus.INTERRUPTED)
+    (rep_dir / "production_0" / "INTERRUPTED").write_text("steps_completed=13500\n")
+    report = build()
+    assign_actions([report])
+    (rep,) = report.replicates
+    assert (rep.verdict, rep.action) == ("interrupted", "continue")
+    assert "INTERRUPTED" in render_agent([report], now=NOW)
+    text = render_agent([report], now=NOW, preset_hint="p")
+    lines = text.splitlines()
+    # The workstation command, and the cluster one in case its SLURM logs were purged.
+    assert "polyzymd run -c c.yaml -r 1" in lines
+    assert "polyzymd submit -c c.yaml -r 1 --preset p" in lines
+
+
+def test_a_failed_local_run_shows_its_error(tmp_path: Path):
+    """A local run that failed (no SLURM log) shows the error it recorded."""
+    from polyzymd.cli.status_report import LOCAL_RUN_ERROR
+
+    rep_dir, build = _local_report(tmp_path, SegmentStatus.INTERRUPTED)
+    (rep_dir / LOCAL_RUN_ERROR).write_text("CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)\n")
+    (rep,) = build().replicates
+    assert rep.last_error == "local run: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)"
+
+
+def test_a_running_local_row_prints_its_note():
+    text = render_agent(
+        [
+            SystemReport(
+                "SYS",
+                "c.yaml",
+                "/s",
+                [_rep(1, "running", note="local run (a process holds the replicate lock)")],
+            )
+        ],
+        now=NOW,
+    )
+    assert "RUNNING" in text and "local run (a process holds the replicate lock)" in text
+
+
+def test_a_system_without_replicate_folders_is_not_started():
+    text = render_agent([SystemReport("SYS", "c.yaml", "/s", [])], now=NOW)
+    assert "## SYS  (c.yaml)  not started: no replicate folders" in text
+    assert "0/0 completed" not in text
+
+
+def test_a_finished_replicate_whose_config_asks_for_more_is_extendable(tmp_path: Path):
+    from polyzymd.cli.status_report import build_system_report
+
+    scratch = tmp_path / "scratch"
+    rep_dir = scratch / "SYS_run1"
+    progress = _write_progress(
+        rep_dir, 250_000_000, SimulationStatus.COMPLETED, SegmentStatus.COMPLETED
+    )
+    cfg = _mock_cfg(scratch, tmp_path / "slurm_logs")
+    cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+    engine = MagicMock()
+    engine.resolve_engine_working_directory.side_effect = lambda p: p
+    engine.load_or_scan_progress.return_value = progress
+    report = build_system_report(
+        cfg, "c.yaml", engine_inst=engine, jobs=[], now=NOW, job_name_fn=lambda c, r: "x"
+    )
+    (rep,) = report.replicates
+    assert (rep.verdict, rep.action) == ("extendable", "continue")
+    assert "the config now asks for 1000 ns" in rep.note
+    assert "EXTENDABLE" in render_agent([report], now=NOW)

@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from polyzymd.config.schema import SimulationConfig
-from polyzymd.config.validation import collect_reference_warnings, require_inputs
+from polyzymd.config.validation import (
+    collect_protocol_warnings,
+    collect_reference_warnings,
+    require_inputs,
+)
 
 SAGE = ["openff-2.3.0.offxml"]
 
@@ -144,8 +148,10 @@ def test_collect_reference_warnings_reports_empty_cached_polymer_directory(
     assert any("Missing cached polymer SDF files" in warning for warning in warnings)
 
 
-def test_collect_reference_warnings_reports_missing_reaction_templates(tmp_path: Path) -> None:
-    """Dynamic polymer custom reaction paths should be checked at runtime."""
+def test_collect_reference_warnings_has_nothing_to_check_for_dynamic_polymers(
+    tmp_path: Path,
+) -> None:
+    """Dynamic polymers are built from SMILES, so they reference no files."""
 
     data = _minimal_config_data(tmp_path)
     data["solutes"].append(
@@ -155,25 +161,20 @@ def test_collect_reference_warnings_reports_missing_reaction_templates(tmp_path:
             "charges": NAGL,
             "generation_mode": "dynamic",
             "type_prefix": "PEG",
-            "monomers": [{"label": "A", "probability": 1.0, "smiles": "C=C"}],
+            "monomers": [{"label": "A", "probability": 1.0, "smiles": "[*]CC([*])(C)C(=O)OC"}],
+            "end_groups": {
+                "head": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+                "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+            },
             "length": 4,
             "count": 1,
-            "reactions": {
-                "initiation": tmp_path / "missing_init.rxn",
-                "polymerization": tmp_path / "missing_poly.rxn",
-                "termination": tmp_path / "missing_term.rxn",
-            },
         }
     )
     config = SimulationConfig(**data)
 
     warnings = collect_reference_warnings(config)
 
-    assert any("Missing polymer initiation reaction template" in warning for warning in warnings)
-    assert any(
-        "Missing polymer polymerization reaction template" in warning for warning in warnings
-    )
-    assert any("Missing polymer termination reaction template" in warning for warning in warnings)
+    assert not any("polymer" in warning.lower() for warning in warnings)
 
 
 def test_am1bcc_without_ambertools_is_reported_before_the_build(
@@ -264,25 +265,88 @@ def test_cosolvents_the_build_cannot_make_are_refused(tmp_path: Path, smiles, me
         require_inputs(_buildable(tmp_path, solvent=solvent))
 
 
-def test_a_monomer_without_a_polymerisable_group_is_refused(tmp_path: Path) -> None:
-    """The default ATRP initiation reacts with methacrylates only."""
-    polymers = {
+def _dynamic_polymer(smiles: str, head: str = "[*][H]", tail: str = "[*][H]") -> dict:
+    """The keys of a dynamic one-monomer polymer solute."""
+    return {
         "generation_mode": "dynamic",
         "type_prefix": "P",
         "length": 5,
         "count": 1,
-        "reactions": {
-            "initiation": "default",
-            "polymerization": "default",
-            "termination": "default",
+        "monomers": [{"label": "A", "probability": 1.0, "smiles": smiles}],
+        "end_groups": {
+            "head": [{"label": "H", "smiles": head, "probability": 1.0}],
+            "tail": [{"label": "H", "smiles": tail, "probability": 1.0}],
         },
-        "monomers": [{"label": "A", "probability": 1.0, "smiles": "CC(=C)C(=O)OCCO"}],
         "charges": NAGL,
     }
-    require_inputs(_buildable(tmp_path, polymer=polymers))
-    polymers["monomers"] = [{"label": "A", "probability": 1.0, "smiles": "CCO"}]
-    with pytest.raises(ValueError, match="no group the initiation reaction"):
-        require_inputs(_buildable(tmp_path, polymer=polymers))
+
+
+def test_star_sited_monomers_and_caps_are_accepted(tmp_path: Path) -> None:
+    """A repeat unit with two '*' and caps with one pass the input checks."""
+    polymer = _dynamic_polymer("[*]CC([*])(C)C(=O)OCCO", head="[*]C")
+    require_inputs(_buildable(tmp_path, polymer=polymer))
+
+
+@pytest.mark.parametrize(
+    ("polymer", "message"),
+    [
+        (_dynamic_polymer("[*]CC([*])(C)C(=O"), "cannot read the SMILES"),
+        (_dynamic_polymer("[*]=CC([*])C"), "bonded to one atom by a single bond"),
+        (_dynamic_polymer("[*]C([*])C(=O)OC"), "both '\\*' .* are on one atom"),
+        (_dynamic_polymer("[*]CC([*])(C)C(=O)OC", tail="[*]=C"), "end_groups.tail 'H'"),
+        (_dynamic_polymer("[*]CC([*])[Si](C)(C)C"), "Si, which the NAGL charge model"),
+    ],
+    ids=["unreadable", "double_bond", "one_atom", "cap", "element"],
+)
+def test_star_sites_the_build_cannot_use_are_refused(tmp_path: Path, polymer, message) -> None:
+    """Bad repeat units and caps are refused before the build, with a fix."""
+    with pytest.raises(ValueError, match=message) as error:
+        require_inputs(_buildable(tmp_path, polymer=polymer))
+    assert "fix:" in str(error.value)
+
+
+@pytest.mark.parametrize("residue_name", ["ALA", "SOL", "NA"])
+def test_a_monomer_residue_name_the_selections_take_is_refused(
+    tmp_path: Path, residue_name: str
+) -> None:
+    """A monomer named like a protein, water or ion residue would join those selections."""
+    polymer = _dynamic_polymer("[*]CC([*])(C)C(=O)OC")
+    polymer["monomers"][0]["residue_name"] = "MMA"
+    require_inputs(_buildable(tmp_path, polymer=polymer))
+    polymer["monomers"][0]["residue_name"] = residue_name
+    config = _buildable(tmp_path, polymer=polymer)
+    config.require_buildable(inputs=False)
+    with pytest.raises(ValueError, match=f"residue_name '{residue_name}'") as error:
+        require_inputs(config)
+    assert "fix:" in str(error.value)
+
+
+def test_every_cap_option_is_parsed(tmp_path: Path) -> None:
+    """The second option of an end is checked like the first."""
+    polymer = _dynamic_polymer("[*]CC([*])(C)C(=O)OC")
+    polymer["end_groups"]["head"] = [
+        {"label": "H", "smiles": "[*][H]", "probability": 0.5},
+        {"label": "S", "smiles": "[*][Si](C)(C)C", "probability": 0.5},
+    ]
+    with pytest.raises(ValueError, match="end_groups.head 'S'") as error:
+        require_inputs(_buildable(tmp_path, polymer=polymer))
+    assert "Si" in str(error.value)
+
+
+@pytest.mark.parametrize("residue_name", ["ALA", "HOH"])
+def test_a_cap_residue_name_the_selections_take_is_refused(
+    tmp_path: Path, residue_name: str
+) -> None:
+    """A cap that is its own residue may not take a protein or water residue name."""
+    polymer = _dynamic_polymer("[*]CC([*])(C)C(=O)OC")
+    polymer["end_groups"]["tail"] = [
+        {"label": "V", "smiles": "[*]C=C(C)C(=O)OC", "probability": 1.0, "residue_name": "MMV"}
+    ]
+    require_inputs(_buildable(tmp_path, polymer=polymer))
+    polymer["end_groups"]["tail"][0]["residue_name"] = residue_name
+    with pytest.raises(ValueError, match="end_groups.tail 'V' has residue_name") as error:
+        require_inputs(_buildable(tmp_path, polymer=polymer))
+    assert "fix:" in str(error.value)
 
 
 def test_a_force_field_that_is_not_installed_is_refused(tmp_path: Path) -> None:
@@ -299,3 +363,172 @@ def test_a_charged_cosolvent_with_ionic_strength_is_accepted(tmp_path: Path, smi
         "ions": {"ionic_strength": 0.13},
     }
     require_inputs(_buildable(tmp_path, solvent=solvent))
+
+
+def _benzene_sdf(tmp_path: Path) -> Path:
+    """An SDF of benzene with hydrogens, as an SDF from a crystal ligand: no atom names."""
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+
+    molecule = Chem.AddHs(Chem.MolFromSmiles("c1ccccc1"))
+    AllChem.EmbedMolecule(molecule, randomSeed=1)
+    path = tmp_path / "benzene.sdf"
+    path.write_text(Chem.MolToMolBlock(molecule) + "$$$$\n")
+    return path
+
+
+def _ligand_restraint(selection: str, **keys: object) -> dict[str, object]:
+    return {
+        "type": "flat_bottom",
+        "name": "in_cavity",
+        "atom1": {"component": "Enz", "selection": "name CA"},
+        "atom2": {"component": "benzene", "selection": selection},
+        "distance": 7.0,
+        **keys,
+    }
+
+
+def test_small_molecule_atom_names_follow_openff() -> None:
+    """The names validate predicts are the names OpenFF gives the built topology."""
+    from openff.toolkit import Molecule, Topology
+    from rdkit import Chem
+
+    from polyzymd.config.validation import small_molecule_atom_names
+
+    rdkit_molecule = Chem.AddHs(Chem.MolFromSmiles("OCc1ccccc1Cl"))
+    molecule = Molecule.from_rdkit(rdkit_molecule)
+    for atom in molecule.atoms:
+        atom.metadata["residue_name"] = "LIG"
+    built = [atom.name for atom in Topology.from_molecules([molecule]).to_openmm().atoms()]
+    assert small_molecule_atom_names(rdkit_molecule) == built
+    assert built[:3] == ["O1x", "C1x", "C2x"]
+
+
+@pytest.mark.parametrize(
+    ("selection", "names"),
+    [
+        ("name C1", ["C1"]),
+        ("resname LIG and name C1x", ["C1x"]),
+        ("(name C1 or name C2) and element C", ["C1", "C2"]),
+        ("resname LIG and not name H1", None),
+        ("name C1 C2", ["C1", "C2"]),
+        ("name == 'C1'", ["C1"]),
+        ("resid 1", []),
+        ("name =~ 'C.*'", None),
+    ],
+)
+def test_selection_atom_names(selection: str, names) -> None:
+    from polyzymd.config.validation import selection_atom_names
+
+    assert selection_atom_names(selection) == names
+
+
+def test_a_restraint_on_a_ligand_atom_name_the_build_will_not_have_is_refused(
+    tmp_path: Path,
+) -> None:
+    """name C1 matches nothing once OpenFF names benzene's atoms C1x ... H6x."""
+    small_molecule = {"name": "benzene", "sdf_path": _benzene_sdf(tmp_path), "charges": NAGL}
+    config = _buildable(
+        tmp_path,
+        small_molecule=small_molecule,
+        restraints=[_ligand_restraint("name C1")],
+    )
+    with pytest.raises(ValueError) as error:
+        require_inputs(config)
+    message = str(error.value)
+    assert "restraint 'in_cavity': atom2 selection 'name C1'" in message
+    assert "C1x, C2x, C3x, C4x, C5x, C6x, H1x" in message
+    assert "fix: in restraints.0.atom2.selection" in message
+
+
+@pytest.mark.parametrize(
+    "restraint",
+    [
+        _ligand_restraint("name C1x"),
+        _ligand_restraint("resname LIG and name C3x"),
+        _ligand_restraint("index 3"),
+        _ligand_restraint("name C1", enabled=False),
+    ],
+)
+def test_restraints_on_names_the_ligand_will_have_pass(tmp_path: Path, restraint) -> None:
+    small_molecule = {"name": "benzene", "sdf_path": _benzene_sdf(tmp_path), "charges": NAGL}
+    require_inputs(_buildable(tmp_path, small_molecule=small_molecule, restraints=[restraint]))
+
+
+def test_an_sdf_that_names_every_atom_keeps_its_names(tmp_path: Path) -> None:
+    """With unique names in an atom.prop._Name field, OpenFF keeps them, and so does the check."""
+    from openff.toolkit import Molecule, Topology
+    from rdkit import Chem
+
+    from polyzymd.config.validation import small_molecule_atom_names
+
+    path = _benzene_sdf(tmp_path)
+    names = [f"C{i}" for i in range(1, 7)] + [f"H{i}" for i in range(1, 7)]
+    text = path.read_text().replace("$$$$\n", f"> <atom.prop._Name>\n{' '.join(names)}\n\n$$$$\n")
+    path.write_text(text)
+    rdkit_molecule = next(iter(Chem.SDMolSupplier(str(path), removeHs=False)))
+    molecule = Molecule.from_file(str(path))
+    built = [atom.name for atom in Topology.from_molecules([molecule]).to_openmm().atoms()]
+    assert small_molecule_atom_names(rdkit_molecule) == built == names
+
+    small_molecule = {"name": "benzene", "sdf_path": path, "charges": NAGL}
+    restraint = _ligand_restraint("name C1")
+    require_inputs(_buildable(tmp_path, small_molecule=small_molecule, restraints=[restraint]))
+
+
+def test_collect_protocol_warnings_compares_stages_with_production(tmp_path: Path) -> None:
+    """Constant stages and a final ramp's end are compared with thermodynamics.temperature."""
+    data = _minimal_config_data(tmp_path)
+    assert collect_protocol_warnings(SimulationConfig.model_validate(data)) == []
+
+    data["thermodynamics"] = {"temperature": 330.0}
+    data["simulation_phases"]["equilibration_stages"] = [
+        {"name": "hold", "duration": 0.1, "temperature": 300.0, "ensemble": "NVT"},
+        {
+            "name": "heating",
+            "ensemble": "NVT",
+            "temperature_start": 100.0,
+            "temperature_end": 300.0,
+            "temperature_increment": 10.0,
+            "temperature_interval_steps": 100,
+        },
+    ]
+    warnings = collect_protocol_warnings(SimulationConfig.model_validate(data))
+
+    assert len(warnings) == 2
+    assert "stage 'hold' runs at 300 K" in warnings[0]
+    assert "equilibration_stages.0.temperature" in warnings[0]
+    assert "stage 'heating' ends at 300 K" in warnings[1]
+    assert "equilibration_stages.1.temperature_end" in warnings[1]
+
+    data["simulation_phases"]["equilibration_stages"][0]["temperature"] = 330.0
+    data["simulation_phases"]["equilibration_stages"][1]["temperature_end"] = 330.0
+    assert collect_protocol_warnings(SimulationConfig.model_validate(data)) == []
+
+
+def test_collect_protocol_warnings_compares_a_ramp_with_the_stage_after_it(tmp_path: Path) -> None:
+    """A ramp before another stage must end where that stage starts."""
+    data = _minimal_config_data(tmp_path)
+    data["thermodynamics"] = {"temperature": 320.0}
+    ramp = {
+        "name": "heating",
+        "ensemble": "NVT",
+        "temperature_start": 100.0,
+        "temperature_end": 300.0,
+        "temperature_increment": 10.0,
+        "temperature_interval_steps": 100,
+    }
+    hold = {"name": "hold", "duration": 0.1, "temperature": 320.0, "ensemble": "NVT"}
+    data["simulation_phases"]["equilibration_stages"] = [ramp, hold]
+
+    warnings = collect_protocol_warnings(SimulationConfig.model_validate(data))
+
+    assert len(warnings) == 1
+    assert "stage 'heating' ends at 300 K, but the next stage 'hold' starts at 320 K" in (
+        warnings[0]
+    )
+    assert "jump of 20 K" in warnings[0]
+    assert "equilibration_stages.0.temperature_end" in warnings[0]
+
+    ramp["temperature_end"] = 320.0
+    assert collect_protocol_warnings(SimulationConfig.model_validate(data)) == []

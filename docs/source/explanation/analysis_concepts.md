@@ -178,7 +178,7 @@ control, on one value per replicate:
 - **Effect sizes**, Cohen's d and Hedges' g, oriented like the difference, so
   you can see not just whether a difference is significant but how large it is.
 
-A row is not testable when a condition has fewer than two replicates, or when
+A row is not testable when a condition has fewer than three replicates, or when
 both conditions have the same value in every replicate; it then takes no part
 in the correction. The report states a verdict per comparison in plain words.
 For the report's fields, see {doc}`../reference/analysis_protocol_report`, and
@@ -245,6 +245,15 @@ interrupted segment's saved state and its frames belong to the same time line.
 The frame count of an interrupted segment is not recorded, so the last segment
 of a chain may be partial. Dropping it instead would leave a gap between the
 segments that were kept, and the lineage check would refuse the trajectory.
+
+A replicate whose production has not reached the total its config asks for
+makes the report `partial`, and `analyze` exits with 3. Its `problem:` line
+says how far it got, for example `replicate 3 has run 63% of production`. An
+OpenMM replicate's frames so far are read, as above. A GROMACS replicate whose
+production did not finish is left out and listed under `excluded_replicates`:
+its raw `prod.xtc` ends wherever `mdrun` stopped and was never post-processed.
+Only runs that keep a record (`progress.json`, or for GROMACS `prod.log`) are
+judged this way.
 
 ## See also
 

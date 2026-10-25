@@ -23,7 +23,7 @@ import time
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -309,6 +309,11 @@ class SimulationProgress(BaseModel):
         ISO-format timestamp of the last update.
     replicate : int
         Replicate index (1-based).
+    started_total_steps, started_total_samples : int or None
+        ``total_steps_requested`` and ``total_samples_requested`` when the
+        first production segment started: the production length of the
+        config the replicate was built with. Later runs that raise the length
+        do not change them. ``None`` in files written before they existed.
     """
 
     config_path: str = ""
@@ -320,6 +325,8 @@ class SimulationProgress(BaseModel):
     status: SimulationStatus = SimulationStatus.NOT_STARTED
     last_updated: str = Field(default_factory=lambda: _now_iso())
     replicate: int = 1
+    started_total_steps: Optional[int] = None
+    started_total_samples: Optional[int] = None
 
     @property
     def equilibration_complete(self) -> bool:
@@ -515,8 +522,10 @@ def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path
     # before or after its record exists; attach it to the record here.
     for seg in progress.segments:
         if seg.system_check is None:
-            check = working_dir / f"production_{seg.index}" / (
-                f"production_{seg.index}_system_check.json"
+            check = (
+                working_dir
+                / f"production_{seg.index}"
+                / (f"production_{seg.index}_system_check.json")
             )
             if check.is_file():
                 try:
@@ -529,7 +538,11 @@ def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path
     # interleave their writes into it and rename a half-written file over the
     # progress file.  ``_atomic_write`` uses a unique temporary name, fsyncs
     # it, and renames it into place.
-    _atomic_write(target, (json.dumps(progress.model_dump(mode="json"), indent=2) + "\n").encode())
+    data = progress.model_dump(mode="json")
+    for key in ("started_total_steps", "started_total_samples"):
+        if data.get(key) is None:
+            data.pop(key, None)
+    _atomic_write(target, (json.dumps(data, indent=2) + "\n").encode())
     LOGGER.debug(f"Saved progress to {target}")
     return target
 
@@ -857,8 +870,24 @@ def _scan_segment_dir(
     # progress.json is rebuilt from scratch (see #90).
     provenance = _read_segment_provenance(params_json)
 
+    # A marker older than the segment's final state was left by an earlier
+    # attempt that the segment then ran again to the end.
+    stale_marker = (
+        interrupted_marker.exists()
+        and state_xml.exists()
+        and state_xml.stat().st_mtime > interrupted_marker.stat().st_mtime
+    )
+    if stale_marker:
+        LOGGER.warning(
+            "Segment %d: %s is older than %s; the segment ran to its end after that "
+            "interruption, so it is read as completed",
+            seg_idx,
+            interrupted_marker.name,
+            state_xml.name,
+        )
+
     # Determine status
-    if interrupted_marker.exists():
+    if interrupted_marker.exists() and not stale_marker:
         status = SegmentStatus.INTERRUPTED
         # Read metadata from the INTERRUPTED marker
         steps_completed, total_steps = _parse_interrupted_marker(interrupted_marker)
@@ -1250,6 +1279,7 @@ def check_report_interval_unchanged(
     report_interval: int,
     *,
     allow_change: bool = False,
+    command: str = "run-segment",
 ) -> None:
     """Refuse to resume a chain at a different trajectory frame interval.
 
@@ -1276,13 +1306,26 @@ def check_report_interval_unchanged(
     if previous is None or previous[1] == report_interval:
         return
     source_segment, previous_interval = previous
+    keep = ""
+    total = progress.total_steps_requested
+    if total and total % previous_interval == 0:
+        samples = total // previous_interval
+        keep = (
+            f" To run longer with the same frame spacing, raise production.samples with "
+            f"production.duration: samples: {samples} for this duration."
+        )
     message = (
         f"Segment {segment_index} would write a frame every {report_interval} steps, "
         f"but segment {source_segment} wrote one every {previous_interval} steps. "
         f"Changing production duration or samples part-way through a chain changes "
         f"the frame spacing, and the segments can then no longer be joined into one "
-        f"evenly spaced trajectory. Restore the configuration that started the chain, "
-        f"or pass --allow-report-interval-change to run-segment to accept the change."
+        f"evenly spaced trajectory.{keep} Otherwise restore the configuration that "
+        f"started the chain"
+        + (
+            ", or pass --allow-report-interval-change to run-segment to accept the change."
+            if command == "run-segment"
+            else "."
+        )
     )
     if not allow_change:
         raise ReportIntervalChangeError(message)
@@ -1476,6 +1519,11 @@ def load_or_scan_progress(
         # Ensure metadata is set (may be missing from old progress files)
         if not progress.config_path and config_path:
             progress.config_path = config_path
+        # Until production starts, the length of the config is the one the
+        # replicate is built with; afterwards it is kept as it was.
+        if not progress.segments and total_steps > 0:
+            progress.started_total_steps = total_steps
+            progress.started_total_samples = total_samples or None
         # Always sync total_steps/samples from config — the user may have
         # changed the production duration since the progress file was written.
         if total_steps > 0:
@@ -1492,9 +1540,41 @@ def load_or_scan_progress(
     progress.total_samples_requested = total_samples
     progress.timestep_fs = timestep_fs
     progress.replicate = replicate
+    if not progress.segments and total_steps > 0:
+        progress.started_total_steps = total_steps
+        progress.started_total_samples = total_samples or None
 
     # Check completion
     if progress.is_complete:
         progress.status = SimulationStatus.COMPLETED
 
     return progress
+
+
+def recorded_production_lengths(working_dir: Path) -> list[tuple[float, int]]:
+    """Return the (duration in ns, samples) a started replicate may have been built with.
+
+    In order: the length ``progress.json`` recorded when production started
+    (``started_total_steps``), what ``production_0_parameters.json`` recorded
+    when the first segment started, and the current totals in
+    ``progress.json`` (for files written before the first existed).
+    """
+    found: list[tuple[float, int]] = []
+    prior = load_progress(working_dir)
+    if prior is not None and prior.started_total_steps and prior.timestep_fs:
+        duration = prior.started_total_steps * prior.timestep_fs / 1e6
+        samples = prior.started_total_samples or 0
+        found += [(duration, samples), (round(duration, 9), samples)]
+    params = Path(working_dir) / "production_0" / "production_0_parameters.json"
+    try:
+        values = json.loads(params.read_text())["__values__"]["integ_params"]["__values__"]
+        found.append(
+            (float(values["total_time"]["__values__"]["value"]), int(values["num_samples"]))
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    if prior is not None and prior.total_steps_requested and prior.timestep_fs:
+        duration = prior.total_steps_requested * prior.timestep_fs / 1e6
+        found.append((duration, prior.total_samples_requested or 0))
+        found.append((round(duration, 9), prior.total_samples_requested or 0))
+    return list(dict.fromkeys(found))

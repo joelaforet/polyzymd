@@ -86,28 +86,36 @@ solutes:
 
   # Random co-polymer chains packed around the protein (OPTIONAL), from
   # pre-built SDF files (generation_mode: cached, charges: {method: preset})
-  # or generated from monomer SMILES (dynamic, charged with nagl). For both
-  # modes and every key, see
+  # or built with mBuild from star-sited SMILES (dynamic, charged with nagl).
+  # A monomer is its repeat unit with '*' on the two linking atoms; the
+  # notebook notebooks/star_sited_monomers.ipynb of your project helps you write
+  # it from a PubChem SMILES. For both modes and every key, see
   # https://polyzymd.readthedocs.io/en/latest/how_to/polymers.html
   # - type: polymer
-  #   generation_mode: "dynamic"          # Generate chains from monomer SMILES
-  #   type_prefix: "<monomer1>-<monomer2>"  # Used in output directory names
+  #   generation_mode: "dynamic"          # Build chains from star-sited SMILES
+  #   type_prefix: "SBMA-EGMA"           # Used in output directory names
   #   force_field: ["openff-2.3.0.offxml"]
   #   charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
-  #   reactions:                          # Bundled ATRP methacrylate templates
-  #     initiation: "default"
-  #     polymerization: "default"
-  #     termination: "default"
   #   monomers:                           # Probabilities must sum to 1.0
   #     - label: "A"
   #       probability: 0.75
-  #       name: "<monomer_1_name>"
-  #       smiles: "<monomer_1_SMILES>"
+  #       name: "SBMA"                    # sulfobetaine methacrylate
+  #       smiles: "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"  # repeat unit, '*' on the two linking atoms
+  #       residue_name: "SBM"
   #     - label: "B"
   #       probability: 0.25
-  #       name: "<monomer_2_name>"
-  #       smiles: "<monomer_2_SMILES>"
-  #   length: 10                          # Monomers per chain
+  #       name: "EGMA"                    # methoxy tetra(ethylene glycol) methacrylate
+  #       smiles: "[*]CC([*])(C)C(=O)OCCOCCOCCOCCOC"
+  #       residue_name: "EGM"
+  #   end_groups:                         # Caps of each end, drawn per chain; each end's
+  #     head:                             # probabilities sum to 1.0. Here: the monomer
+  #       - {label: "A", name: "SBMA", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", residue_name: "SBM", probability: 0.75}
+  #       - {label: "B", name: "EGMA", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", residue_name: "EGM", probability: 0.25}
+  #     tail:                             # with its C=C kept. A fixed hydrogen cap is
+  #       - {label: "A", name: "SBMA", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", residue_name: "SBM", probability: 0.75}
+  #       - {label: "B", name: "EGMA", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", residue_name: "EGM", probability: 0.25}
+  #                                       # [{label: "H", smiles: "[*][H]", probability: 1.0}]
+  #   length: 5                           # Monomers per chain, the two ends included
   #   count: 4                            # Number of chains
 
 # ============================================================================
@@ -191,7 +199,7 @@ solvent:
 # Selection syntax:
 #   resid N        : Residue number in the built topology (protein renumbered from 1)
 #   resname XXX    : Residue name (e.g., LIG, SER)
-#   name XXX       : Atom name (e.g., CA, OG, C1)
+#   name XXX       : Atom name (e.g., CA, OG; ligand atoms C1x, C2x, ...)
 #   pdbindex N     : the N-th atom of the built system, from 1 (PyMOL `index`,
 #                    not its `ID`: PDB serials skip a number at every TER)
 #   index N        : Internal atom index (0-indexed)
@@ -206,7 +214,7 @@ solvent:
 #       description: "Catalytic residue"
 #     atom2:
 #       component: "substrate"
-#       selection: "name C1"                    # Example: Ligand carbon
+#       selection: "name C1x"                   # Ligand atoms: C1x, C2x, ..., H1x
 #       description: "Substrate reactive atom"
 #     distance: 3.5                           # Angstroms (flat-bottom threshold)
 #     force_constant: 10000.0                 # kJ/mol/nm^2
@@ -242,7 +250,7 @@ thermodynamics:
 # ============================================================================
 # Configure equilibration and production runs.
 #
-# ensemble options: NVT, NPT, NVE
+# ensemble options: NVT, NPT (validate refuses NVE)
 # thermostat options: LangevinMiddle (recommended), Langevin. NoseHoover and
 #   Andersen run only on GROMACS; see "GROMACS and OpenMM" in the reference.
 # barostat options: MC (Monte Carlo), MCA (anisotropic, GROMACS only)
@@ -273,6 +281,9 @@ thermodynamics:
 #     PolyzyMD derives the duration
 #
 simulation_phases:
+  # These durations are for a real study (about 1.8 ns of equilibration). For a
+  # test run, shorten each duration and heat faster: temperature_increment: 24.0
+  # with temperature_interval_steps: 100 heats 60 -> 300 K in 0.002 ns.
   equilibration_stages:
     # Stage 1: Heat from 60K to 300K with everything restrained
     - name: "heating"
@@ -312,7 +323,7 @@ simulation_phases:
     ensemble: "NPT"
     duration: 100.0
     samples: 2500
-    checkpoint_interval: 60.0
+    checkpoint_interval: 60.0          # seconds of wall time between restart checkpoints
     time_step: 2.0
     thermostat: "LangevinMiddle"
     thermostat_timescale: 1.0

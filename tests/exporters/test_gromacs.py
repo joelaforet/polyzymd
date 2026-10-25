@@ -1631,6 +1631,10 @@ def test_a_local_gromacs_run_uses_the_configured_mdrun_flags(tmp_path, monkeypat
     path.write_text(yaml.safe_dump(data))
     gpu = create_engine(SimulationConfig.from_yaml(path), override="gromacs", defer_binary=True)
     assert "-nb gpu" in gpu.local_mdrun_flags("gmx")["eq"]
+    # Energy minimization cannot offload PME, update or bonded work (as in the job script).
+    em = gpu.local_mdrun_flags("gmx")["em"]
+    assert "-nb gpu" in em
+    assert not any(f"-{work} gpu" in em for work in ("pme", "update", "bonded"))
 
     commands = []
     runner = GromacsRunner(tmp_path, "trpcage", [], "gmx", mdrun_flags=flags)
@@ -1641,3 +1645,36 @@ def test_a_local_gromacs_run_uses_the_configured_mdrun_flags(tmp_path, monkeypat
         pass
     mdrun = next(cmd for cmd in commands if "mdrun" in cmd)
     assert mdrun[-6:] == ["-pin", "on", "-ntmpi", "1", "-ntomp", "3"]
+
+
+def _fake_gmx(tmp_path, code):
+    script = tmp_path / f"gmx{code}"
+    script.write_text(
+        "#!/bin/bash\n"
+        'while [ $# -gt 0 ]; do if [ "$1" = "-o" ]; then echo part > "$2"; fi; shift; done\n'
+        f"cat > /dev/null; exit {code}\n"
+    )
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_postprocessing_writes_under_temporary_names_and_renames_on_success(tmp_path):
+    from polyzymd.exporters.gromacs import GromacsRunner, postprocessing_needed
+
+    (tmp_path / "prod.xtc").write_text("x")
+    assert postprocessing_needed(tmp_path)
+    runner = GromacsRunner(tmp_path, "sys", [], gmx_command=_fake_gmx(tmp_path, 0))
+    runner.run_postprocessing()
+    assert (tmp_path / "prod_nojump.xtc").is_file() and (tmp_path / "prod_centered.xtc").is_file()
+    assert not list(tmp_path.glob("*.part.xtc"))
+    assert not postprocessing_needed(tmp_path)
+
+
+def test_a_failed_postprocessing_leaves_no_trajectory_under_the_final_name(tmp_path):
+    from polyzymd.exporters.gromacs import GromacsError, GromacsRunner
+
+    (tmp_path / "prod.xtc").write_text("x")
+    runner = GromacsRunner(tmp_path, "sys", [], gmx_command=_fake_gmx(tmp_path, 1))
+    with pytest.raises(GromacsError):
+        runner.run_postprocessing()
+    assert not (tmp_path / "prod_nojump.xtc").exists()

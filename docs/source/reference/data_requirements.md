@@ -135,19 +135,21 @@ what, and did the built system pass the physics audit. It replaced
 | `engine` | `openmm` or `gromacs`: the engine these files are for |
 | `polyzymd_version`, `openmm_version`, `openff_toolkit_version`, `openff_interchange_version` | The software that built the system |
 | `build_uuid` | A unique ID of this build |
-| `config_hash` | SHA-256 of the config as built. `run` and `submit` refuse a build whose hash no longer matches `config.yaml`. The hash counts input files by their SHA-256 and leaves out the config's folder and output folders, so a copy of `config.yaml` in another folder matches |
+| `config_hash` | The {term}`build config hash`: SHA-256 of the config as built. `run` and `submit` refuse a build whose hash no longer matches `config.yaml`. The hash counts input files by their SHA-256 and leaves out the config's folder and output folders, so a copy of `config.yaml` in another folder matches |
 | `particle_count` | Number of atoms |
 | `artifacts` | Each file the engine reads (`system.xml`, `solvated_system.pdb`, `system.prmtop`; for GROMACS the `.top`, `.itp`, `.gro` and `.mdp` files), with its SHA-256. A file changed after the build is refused |
 | `components` | One record per component (each solute, `solvent`, `ions`): `name`, `type`, `segid`, `placement` (`fixed` or `packed`), `n_atoms`, `n_molecules`, the atom ranges of each molecule, and its `domains`. A domain is a set of atoms with one `force_field` list and one `charges` source (`method`, `model`, `source_file`), and the inputs it can be rebuilt from (`reference`). `provenance` holds each input file's path and SHA-256 |
 | `provenance` | Seeds and the box: see below |
 | `audit` | The physics audit: `passed`, `counts` per status, every `finding` (`check`, `component`, `status`, `detail`, and `examples` of the first terms that differ) and `accepted_exceptions` |
-| `cite` | References of the methods this build used beyond its force fields and charge models, Packmol when the build packed solvent or polymer chains with it, and Machado and Pantano when `ionic_strength` set the ions. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
+| `cite` | References of what this build used: PolyzyMD at its version, the engine (OpenMM 8 or GROMACS), the OpenFF Toolkit (its paper and release DOI), OpenFF Interchange (its release DOI) and the Open Force Field Initiative paper, as OpenFF asks, each force-field file (the Sage 2.3.0 paper too for `openff-2.3.0*`, and the openff-forcefields release DOI for OpenFF files), the water model, the Na+ and Cl- parameters (Joung and Cheatham) when the build added ions with an OpenFF Sage or Parsley file, the charge models (AshGC or another NAGL model with the AM1-BCC papers, AM1-BCC, or EspalomaCharge; AM1-BCC also for a library co-solvent's shipped charges), Packmol when the build packed solvent or polymer chains with it, mBuild when it built polymer chains, and Machado and Pantano when `ionic_strength` set the ions. A force-field file PolyzyMD has no reference for is listed with a note to cite its source. A reference cited for two things, such as the Sage 2.3.0 and AshGC paper, is listed once. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
 
 `provenance` keys:
 
 | Key | Meaning |
 |-----|---------|
 | `polymer_seed`, `packmol_seed` | Replicate seed used for polymer generation and PACKMOL |
+| `polymer_sequence_seed` | Seed of the polymer sequence draw: `random_seed` of the polymer solute, or the replicate seed |
+| `polymer_builder` | The mBuild that built dynamic polymer chains: version, source URL, tag and commit (absent when no chain was built) |
 | `polymer_packmol_seed` | Seed passed to the polymer-packing PACKMOL run |
 | `solvent_packmol_seed` | Seed passed to the solvation PACKMOL run |
 | `box_vectors_nm` | The periodic cell as a 3x3 row-major matrix in nm |
@@ -348,14 +350,7 @@ directory and referenced from `config.yaml`.
 |---|---|---|---|
 | Protein structure | PDB (`.pdb`) | `pdb_path` of the protein solute | Standard residue names, protonated at simulation pH, no missing heavy atoms in regions of interest |
 | Substrate | SDF (`.sdf`) | `sdf_path` of the small-molecule solute | 3D coordinates with docked pose, explicit hydrogens preferred. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
-| Polymer (if pre-built) | SDF (`.sdf`) | `sdf_directory` of the polymer solute | One SDF per chain, or use dynamic generation from SMILES |
-| Reaction templates | RXN or `"default"` | `reactions.*` of the polymer solute | The string `"default"` loads bundled ATRP templates; a file path loads a custom template |
-
-```{note}
-The sentinel value `"default"` for reaction templates is **not** a file path.
-Do not prepend a directory to it. PolyzyMD resolves `"default"` to bundled
-reaction files at runtime.
-```
+| Polymer (if pre-built) | SDF (`.sdf`) | `sdf_directory` of the polymer solute | One SDF per chain, or use dynamic generation from star-sited SMILES (no file) |
 
 ---
 
@@ -418,11 +413,6 @@ are resolved from the current directory.
   `scratch_directory` value but later changed it in `config.yaml`, analysis
   looks in the wrong location. The `scratch_directory` in
   `config.yaml` must match where the trajectory files actually reside.
-
-- **The `"default"` sentinel for reactions.** Setting
-  `reactions.initiation: "default"` on a polymer solute tells PolyzyMD to use a bundled
-  reaction template. Writing `"structures/default"` or any path containing
-  `"default"` will fail because no such file exists.
 
 - **Missing replicate directories.** Each replicate number given with
   `--replicates` must have a run directory on disk. If replicate 3 was never

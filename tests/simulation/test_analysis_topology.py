@@ -47,6 +47,31 @@ def test_prmtop_carries_every_bond_element_and_residue(tmp_path: Path, water_box
     assert set(universe.residues.resnames) == {"HOH"}
 
 
+def test_a_restraint_force_does_not_stop_the_prmtop(tmp_path: Path, water_box) -> None:
+    """A distance restraint's CustomBondForce is left out of the prmtop, not fatal."""
+    import openmm
+
+    topology, system, positions = water_box
+    restrained = openmm.XmlSerializer.deserialize(openmm.XmlSerializer.serialize(system))
+    restraint = openmm.CustomBondForce("0.5*k*max(0, r-r0)^2")
+    restraint.addGlobalParameter("k", 1000.0)
+    restraint.addGlobalParameter("r0", 0.6)
+    restraint.addBond(0, 3, [])
+    restrained.addForce(restraint)
+
+    path = write_analysis_topology(
+        topology, restrained, positions, tmp_path / ANALYSIS_TOPOLOGY_NAME
+    )
+
+    assert path is not None and path.is_file()
+    assert mda.Universe(str(path)).atoms.n_atoms == 3 * topology.getNumResidues()
+    # The System passed in keeps its restraint.
+    assert any(
+        isinstance(restrained.getForce(i), openmm.CustomBondForce)
+        for i in range(restrained.getNumForces())
+    )
+
+
 def test_rebuild_from_pdb_and_system_xml(tmp_path: Path, water_box) -> None:
     """A run that predates system.prmtop gets one from the two files it has."""
     from openmm import XmlSerializer

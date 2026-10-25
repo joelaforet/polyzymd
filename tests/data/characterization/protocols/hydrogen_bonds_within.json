@@ -28,7 +28,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{"key":"atom","tolerance_ps":100.0}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hbond_lifetimes"},"record.json:labels":null,"record.json:name":"hbond_lifetimes_inter","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{"key":"atom","tolerance_ps":100.0}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hbond_lifetimes"},"record.json:labels":null,"record.json:name":"hbond_lifetimes_inter","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "hbond_lifetimes_intra": {
    "A/replicate_1": {},
@@ -37,7 +37,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"}],"kwargs":{"key":"atom","tolerance_ps":100.0}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hbond_lifetimes"},"record.json:labels":null,"record.json:name":"hbond_lifetimes_intra","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"}],"kwargs":{"key":"atom","tolerance_ps":100.0}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hbond_lifetimes"},"record.json:labels":null,"record.json:name":"hbond_lifetimes_intra","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "hydrogen_bonds_inter": {
    "A/replicate_1": {},
@@ -46,7 +46,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hydrogen_bonds"},"record.json:labels":null,"record.json:name":"hydrogen_bonds_inter","record.json:parts":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hydrogen_bonds"},"record.json:labels":null,"record.json:name":"hydrogen_bonds_inter","record.json:parts":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "hydrogen_bonds_intra": {
    "A/replicate_1": {},
@@ -55,7 +55,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hydrogen_bonds"},"record.json:labels":null,"record.json:name":"hydrogen_bonds_intra","record.json:parts":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hydrogen_bonds"},"record.json:labels":null,"record.json:name":"hydrogen_bonds_intra","record.json:parts":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "residue_hbond_occupancy_inter": {
    "A/replicate_1": {},
@@ -64,7 +64,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_hbond_occupancy"},"record.json:labels":[12,30,45],"record.json:name":"residue_hbond_occupancy_inter","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_hbond_occupancy"},"record.json:labels":[12,30,45],"record.json:name":"residue_hbond_occupancy_inter","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "residue_hbond_occupancy_intra": {
    "A/replicate_1": {},
@@ -73,7 +73,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_hbond_occupancy"},"record.json:labels":[12,30,45],"record.json:name":"residue_hbond_occupancy_intra","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_hbond_occupancy"},"record.json:labels":[12,30,45],"record.json:name":"residue_hbond_occupancy_intra","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "residue_pair_hbond_occupancy_inter": {
    "A/replicate_1": {},
@@ -82,7 +82,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["labels.json","record.json","values.npz"],"labels.json:":["12-SBM","45-EGM"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_pair_hbond_occupancy"},"record.json:labels":"returned","record.json:missing":0.0,"record.json:name":"residue_pair_hbond_occupancy_inter","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["labels.json","record.json","values.npz"],"labels.json:":["12-SBM","45-EGM"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_pair_hbond_occupancy"},"record.json:labels":"returned","record.json:missing":0.0,"record.json:name":"residue_pair_hbond_occupancy_inter","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "residue_pair_hbond_occupancy_intra": {
    "A/replicate_1": {},
@@ -91,7 +91,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["labels.json","record.json","values.npz"],"labels.json:":["30-45"],"record.json:arguments":{"args":[{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_pair_hbond_occupancy"},"record.json:labels":"returned","record.json:missing":0.0,"record.json:name":"residue_pair_hbond_occupancy_intra","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["labels.json","record.json","values.npz"],"labels.json:":["30-45"],"record.json:arguments":{"args":[{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_pair_hbond_occupancy"},"record.json:labels":"returned","record.json:missing":0.0,"record.json:name":"residue_pair_hbond_occupancy_intra","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   }
  },
  "shared": {
@@ -105,8 +105,8 @@
   },
   "problems": [],
   "protocol_version": "2",
-  "provenance.config_hashes.A": "c4429a507b8cea42",
-  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.A": "d19df94f4f261473",
+  "provenance.config_hashes.B": "d19df94f4f261473",
   "provenance.mdanalysis_version": "<masked>",
   "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
   "provenance.polyzymd_version": "<masked>",
@@ -342,12 +342,14 @@
    "cohens_d": [1.18818,0.0,0.258199],
    "delta": [0.166667,0.0,0.0277778],
    "delta_ci95": [[-0.189752,0.523085],null,[-0.291912,0.347467]],
+   "direction": ["no significant change","not testable","no significant change"],
    "entry": ["12","30","45"],
-   "every row": {"a":"A","b":"B","correction":"BH","direction":"no significant change","significant":false,"test":"welch_t"},
+   "every row": {"a":"A","b":"B","correction":"BH","test":"welch_t"},
    "family_size": [2,null,2],
    "hedges_g": [0.950542,0.0,0.206559],
    "p": [0.23814,null,0.776898],
    "p_adjusted": [0.476279,null,0.776898],
+   "significant": [false,null,false],
    "testable": [true,false,true]
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_hbond_occupancy_inter",
@@ -361,7 +363,7 @@
    "name": "inter"
   },
   "run": "inter_residues",
-  "text": "# polyzymd analyze hydrogen_bonds  metric inter_residues  unit none  run inter_residues  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\nA vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: the 95 percent interval of condition A at 12 extends past the bounds 0 to 1 of inter_residues, where a t interval is not reliable\nwarning: condition A has the same inter_residues at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same inter_residues at 30 in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45 extends past the bounds 0 to 1 of inter_residues, where a t interval is not reliable\nwarning: A vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 2 tested labels differ in inter_residues after BH over a family of 2; larger at none; smaller at none\n",
+  "text": "# polyzymd analyze hydrogen_bonds  metric inter_residues  unit none  run inter_residues  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\nA vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: the 95 percent interval of condition A at 12 extends past the bounds 0 to 1 of inter_residues, where a t interval is not reliable\nwarning: condition A has the same inter_residues at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same inter_residues at 30 in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45 extends past the bounds 0 to 1 of inter_residues, where a t interval is not reliable\nwarning: A vs B at 30 is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 2 tested labels differ in inter_residues after BH over a family of 2; larger at none; smaller at none\n",
   "unit": null
  },
  "two conditions, run intra_any_fraction": {
@@ -564,12 +566,14 @@
    "cohens_d": [0.0,1.09545,1.09545],
    "delta": [0.0,0.0833333,0.0833333],
    "delta_ci95": [null,[-0.116593,0.28326],[-0.116593,0.28326]],
+   "direction": ["not testable","no significant change","no significant change"],
    "entry": ["12","30","45"],
-   "every row": {"a":"A","b":"B","correction":"BH","direction":"no significant change","significant":false,"test":"welch_t"},
+   "every row": {"a":"A","b":"B","correction":"BH","test":"welch_t"},
    "family_size": [null,2,2],
    "hedges_g": [0.0,0.876356,0.876356],
    "p": [null,0.273893,0.273893],
    "p_adjusted": [null,0.273893,0.273893],
+   "significant": [null,false,false],
    "testable": [false,true,true]
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_hbond_occupancy_intra",
@@ -583,7 +587,7 @@
    "name": "intra"
   },
   "run": "intra_residues",
-  "text": "# polyzymd analyze hydrogen_bonds  metric intra_residues  unit none  run intra_residues  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\nA vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition A has the same intra_residues at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same intra_residues at 12 in every replicate, so its interval is not estimable\nwarning: A vs B at 12 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 2 tested labels differ in intra_residues after BH over a family of 2; larger at none; smaller at none\n",
+  "text": "# polyzymd analyze hydrogen_bonds  metric intra_residues  unit none  run intra_residues  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\nA vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition A has the same intra_residues at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same intra_residues at 12 in every replicate, so its interval is not estimable\nwarning: A vs B at 12 is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 2 tested labels differ in intra_residues after BH over a family of 2; larger at none; smaller at none\n",
   "unit": null
  },
  "unknown run": {

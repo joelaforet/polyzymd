@@ -22,7 +22,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{"types":["EGM","SBM"]}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"contact_lifetimes"},"record.json:labels":["polymer","EGM","SBM"],"record.json:name":"contact_lifetimes","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{"types":["EGM","SBM"]}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"contact_lifetimes"},"record.json:labels":["polymer","EGM","SBM"],"record.json:name":"contact_lifetimes","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   },
   "residue_occlusion": {
    "A/replicate_1": {},
@@ -31,7 +31,7 @@
    "B/replicate_1": {},
    "B/replicate_2": {},
    "B/replicate_3": {},
-   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["contact_fraction","exposed_fraction","occluded_area","exposed_area","EGM_contact_fraction","SBM_contact_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{"types":["EGM","SBM"]}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_occlusion"},"record.json:labels":[12,30,45],"record.json:name":"residue_occlusion","record.json:parts":["contact_fraction","exposed_fraction","occluded_area","exposed_area","EGM_contact_fraction","SBM_contact_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["contact_fraction","exposed_fraction","occluded_area","exposed_area","EGM_contact_fraction","SBM_contact_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{"types":["EGM","SBM"]}},"record.json:chosen":{},"record.json:config_hash":"d19df94f4f261473","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_occlusion"},"record.json:labels":[12,30,45],"record.json:name":"residue_occlusion","record.json:parts":["contact_fraction","exposed_fraction","occluded_area","exposed_area","EGM_contact_fraction","SBM_contact_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
   }
  },
  "shared": {
@@ -45,8 +45,8 @@
   },
   "problems": [],
   "protocol_version": "2",
-  "provenance.config_hashes.A": "c4429a507b8cea42",
-  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.A": "d19df94f4f261473",
+  "provenance.config_hashes.B": "d19df94f4f261473",
   "provenance.mdanalysis_version": "<masked>",
   "provenance.output_paths.figures": "<tmp>/out/figures/contacts",
   "provenance.polyzymd_version": "<masked>",
@@ -79,13 +79,13 @@
   },
   "figures": ["contacts/contacts_EGM_contact_fraction_comparison.png","contacts/contacts_class_bars.png"],
   "metric": "EGM_contact_fraction",
-  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
   },
   "run": "EGM_contact_fraction",
-  "text": "# polyzymd analyze contacts  metric EGM_contact_fraction  unit none  run EGM_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same EGM_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: EGM_contact_fraction for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "text": "# polyzymd analyze contacts  metric EGM_contact_fraction  unit none  run EGM_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same EGM_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: not testable: EGM_contact_fraction for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
   "unit": null
  },
  "two conditions, run EGM_contact_fraction_residues": {
@@ -98,14 +98,14 @@
   "metric": "EGM_contact_fraction",
   "pairwise": {
    "entry": ["12","30","45"],
-   "every row": {"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}
+   "every row": {"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":null,"test":"welch_t","testable":false}
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
   },
   "run": "EGM_contact_fraction_residues",
-  "text": "# polyzymd analyze contacts  metric EGM_contact_fraction  unit none  run EGM_contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 0  family na  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition A has the same EGM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition A has the same EGM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition A has the same EGM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: A vs B is not testable at any of its 3 labels: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: EGM_contact_fraction for A vs B needs at least two replicates per condition and values that vary (n 3 vs 3)\n",
+  "text": "# polyzymd analyze contacts  metric EGM_contact_fraction  unit none  run EGM_contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 0  family na  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition A has the same EGM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition A has the same EGM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition A has the same EGM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: A vs B is not testable at any of its 3 labels: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: not testable: EGM_contact_fraction for A vs B needs at least three replicates per condition and values that vary (n 3 vs 3)\n",
   "unit": null
  },
  "two conditions, run EGM_mean_lifetime": {
@@ -132,13 +132,13 @@
   },
   "figures": ["contacts/contacts_SBM_contact_fraction_comparison.png","contacts/contacts_class_bars.png"],
   "metric": "SBM_contact_fraction",
-  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
   },
   "run": "SBM_contact_fraction",
-  "text": "# polyzymd analyze contacts  metric SBM_contact_fraction  unit none  run SBM_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same SBM_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: SBM_contact_fraction for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "text": "# polyzymd analyze contacts  metric SBM_contact_fraction  unit none  run SBM_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same SBM_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: not testable: SBM_contact_fraction for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
   "unit": null
  },
  "two conditions, run SBM_contact_fraction_residues": {
@@ -151,14 +151,14 @@
   "metric": "SBM_contact_fraction",
   "pairwise": {
    "entry": ["12","30","45"],
-   "every row": {"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}
+   "every row": {"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":null,"test":"welch_t","testable":false}
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
   },
   "run": "SBM_contact_fraction_residues",
-  "text": "# polyzymd analyze contacts  metric SBM_contact_fraction  unit none  run SBM_contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 0  family na  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition A has the same SBM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition A has the same SBM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition A has the same SBM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: A vs B is not testable at any of its 3 labels: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: SBM_contact_fraction for A vs B needs at least two replicates per condition and values that vary (n 3 vs 3)\n",
+  "text": "# polyzymd analyze contacts  metric SBM_contact_fraction  unit none  run SBM_contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 0  family na  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition A has the same SBM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition A has the same SBM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition A has the same SBM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: A vs B is not testable at any of its 3 labels: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: not testable: SBM_contact_fraction for A vs B needs at least three replicates per condition and values that vary (n 3 vs 3)\n",
   "unit": null
  },
  "two conditions, run SBM_mean_lifetime": {
@@ -205,14 +205,14 @@
   "metric": "contact_fraction",
   "pairwise": {
    "entry": ["12","30","45"],
-   "every row": {"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}
+   "every row": {"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":null,"test":"welch_t","testable":false}
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
   },
   "run": "contact_fraction_residues",
-  "text": "# polyzymd analyze contacts  metric contact_fraction  unit none  run contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 0  family na  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition A has the same contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition A has the same contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition A has the same contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: condition B has the same contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: A vs B is not testable at any of its 3 labels: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: contact_fraction for A vs B needs at least two replicates per condition and values that vary (n 3 vs 3)\n",
+  "text": "# polyzymd analyze contacts  metric contact_fraction  unit none  run contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 0  family na  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition A has the same contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition A has the same contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition A has the same contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: condition B has the same contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: A vs B is not testable at any of its 3 labels: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: not testable: contact_fraction for A vs B needs at least three replicates per condition and values that vary (n 3 vs 3)\n",
   "unit": null
  },
  "two conditions, run coverage": {
@@ -222,13 +222,13 @@
   },
   "figures": ["contacts/contacts_class_bars.png","contacts/contacts_coverage_comparison.png"],
   "metric": "coverage",
-  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
   },
   "run": "coverage",
-  "text": "# polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same coverage in every replicate, so its interval is not estimable\nwarning: condition B has the same coverage in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: coverage for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "text": "# polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same coverage in every replicate, so its interval is not estimable\nwarning: condition B has the same coverage in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: not testable: coverage for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
   "unit": null
  },
  "two conditions, run lifetime_events": {
@@ -238,10 +238,10 @@
   },
   "figures": ["contacts/contacts_lifetime_events_comparison.png"],
   "metric": "lifetime_events",
-  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
   "run": "lifetime_events",
-  "text": "# polyzymd analyze contacts  metric lifetime_events  unit none  run lifetime_events  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same lifetime_events in every replicate, so its interval is not estimable\nwarning: condition B has the same lifetime_events in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: lifetime_events for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "text": "# polyzymd analyze contacts  metric lifetime_events  unit none  run lifetime_events  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same lifetime_events in every replicate, so its interval is not estimable\nwarning: condition B has the same lifetime_events in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: not testable: lifetime_events for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
   "unit": null
  },
  "two conditions, run mean_contact_fraction": {
@@ -251,13 +251,13 @@
   },
   "figures": ["contacts/contacts_class_bars.png","contacts/contacts_mean_contact_fraction_comparison.png"],
   "metric": "mean_contact_fraction",
-  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
   },
   "run": "mean_contact_fraction",
-  "text": "# polyzymd analyze contacts  metric mean_contact_fraction  unit none  run mean_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same mean_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same mean_contact_fraction in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: mean_contact_fraction for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "text": "# polyzymd analyze contacts  metric mean_contact_fraction  unit none  run mean_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same mean_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same mean_contact_fraction in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: not testable: mean_contact_fraction for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
   "unit": null
  },
  "two conditions, run mean_lifetime": {
@@ -314,12 +314,14 @@
    "cohens_d": [1.18818,0.0,0.258199],
    "delta": [5.49012,0.0,0.75337],
    "delta_ci95": [[-6.25056,17.2308],null,[-7.91703,9.42377]],
+   "direction": ["no significant change","not testable","no significant change"],
    "entry": ["12","30","45"],
-   "every row": {"a":"A","b":"B","correction":"BH","direction":"no significant change","significant":false,"test":"welch_t"},
+   "every row": {"a":"A","b":"B","correction":"BH","test":"welch_t"},
    "family_size": [2,null,2],
    "hedges_g": [0.950542,0.0,0.206559],
    "p": [0.23814,null,0.776898],
    "p_adjusted": [0.476279,null,0.776898],
+   "significant": [false,null,false],
    "testable": [true,false,true]
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
@@ -327,7 +329,7 @@
    "classes": {"polar":[12,30,45]}
   },
   "run": "occluded_area_residues",
-  "text": "# polyzymd analyze contacts  metric occluded_area  unit A^2  run occluded_area_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: the 95 percent interval of condition A at 12 extends past the bounds 0 to inf of occluded_area, where a t interval is not reliable\nwarning: condition A has the same occluded_area at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same occluded_area at 30 in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45 extends past the bounds 0 to inf of occluded_area, where a t interval is not reliable\nwarning: A vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 2 tested labels differ in occluded_area after BH over a family of 2; larger at none; smaller at none\n",
+  "text": "# polyzymd analyze contacts  metric occluded_area  unit A^2  run occluded_area_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: the 95 percent interval of condition A at 12 extends past the bounds 0 to inf of occluded_area, where a t interval is not reliable\nwarning: condition A has the same occluded_area at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same occluded_area at 30 in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45 extends past the bounds 0 to inf of occluded_area, where a t interval is not reliable\nwarning: A vs B at 30 is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 2 tested labels differ in occluded_area after BH over a family of 2; larger at none; smaller at none\n",
   "unit": "A^2"
  },
  "two conditions, run occlusion_fraction": {
@@ -357,13 +359,13 @@
   },
   "figures": ["contacts/contacts_class_bars.png","contacts/contacts_polar_contact_fraction_comparison.png"],
   "metric": "polar_contact_fraction",
-  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"A","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
   },
   "run": "polar_contact_fraction",
-  "text": "# polyzymd analyze contacts  metric polar_contact_fraction  unit none  run polar_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same polar_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same polar_contact_fraction in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: polar_contact_fraction for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "text": "# polyzymd analyze contacts  metric polar_contact_fraction  unit none  run polar_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same polar_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same polar_contact_fraction in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: not testable: polar_contact_fraction for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
   "unit": null
  },
  "unknown run": {

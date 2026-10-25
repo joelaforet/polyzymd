@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shlex
 import tempfile
 import uuid
 import warnings
@@ -197,7 +198,7 @@ def _manifest(
     """
     from polyzymd.utils.version import build_versions, get_polyzymd_version
 
-    return {
+    record = {
         "schema_version": 2,
         "engine": engine,
         "build_uuid": str(uuid.uuid4()),
@@ -213,28 +214,34 @@ def _manifest(
         },
         "components": [c.to_dict() for c in components or []],
         "audit": audit.to_dict() if audit is not None else None,
-        "cite": methods_to_cite(config, provenance),
     }
+    record["cite"] = methods_to_cite(config, provenance, record=record)
+    return record
 
 
-def methods_to_cite(config: Any, provenance: dict[str, Any] | None = None) -> list[str]:
-    """Return the references of the methods this build used.
+def methods_to_cite(
+    config: Any,
+    provenance: dict[str, Any] | None = None,
+    *,
+    record: dict[str, Any] | None = None,
+) -> list[str]:
+    """Return the references of what this build used, for "Methods to cite".
 
-    The force fields and charge models are named in the component records;
-    this lists the other methods: Packmol when the build packed solvent or
-    polymer chains with it (its seeds in ``provenance`` say so), and how
-    ``ionic_strength`` set the ions.
+    PolyzyMD itself, the engine (OpenMM or GROMACS, from ``record``), the
+    OpenFF Toolkit and Interchange, each force-field file, the water model, the
+    Na+ and Cl- parameters, the charge models (AshGC or another NAGL model,
+    AM1-BCC, espaloma), Packmol when the build packed solvent or polymer chains
+    with it (its seeds in ``provenance`` say so), and Machado and Pantano when
+    ``ionic_strength`` set the ions. ``record`` is the build record without
+    ``cite``. Each reference and when it applies is one entry of
+    :data:`polyzymd.simulation.build_citations.REFERENCES`. A reference two
+    parts share (Sage 2.3.0 and AshGC have one paper) is listed once.
     """
-    from polyzymd.builders.solvent import MACHADO_PANTANO
-    from polyzymd.utils.packmol import PACKMOL
+    from polyzymd.simulation.build_citations import cite
 
-    cited = []
-    if any(key in (provenance or {}) for key in ("solvent_packmol_seed", "polymer_packmol_seed")):
-        cited.append(PACKMOL)
-    ions = getattr(getattr(config, "solvent", None), "ions", None)
-    if getattr(ions, "ionic_strength", None) is not None:
-        cited.append(MACHADO_PANTANO)
-    return cited
+    context = dict(record or {})
+    context["provenance"] = dict(provenance or context.get("provenance") or {})
+    return cite(config, context)
 
 
 def _audit(realize: Any, components: Sequence[Any] | None, config: Any) -> Any:
@@ -262,6 +269,10 @@ def _audit(realize: Any, components: Sequence[Any] | None, config: Any) -> Any:
                 )
             ]
         )
+
+
+#: The documentation page that explains the physics audit of a build record.
+PHYSICS_AUDIT_PAGE = "https://polyzymd.readthedocs.io/en/latest/explanation/physics_audit.html"
 
 
 def provenance_markdown(record: dict[str, Any], audit: Any = None) -> str:
@@ -296,13 +307,14 @@ def provenance_markdown(record: dict[str, Any], audit: Any = None) -> str:
         lines += ["", audit.to_markdown()]
     elif record.get("audit") is None:
         lines += ["", "No physics audit was recorded for this build."]
+    lines += ["", f"What the physics audit checks, and what it does not: {PHYSICS_AUDIT_PAGE}"]
     lines += [
         "",
         "## Methods to cite",
         "",
-        "Cite the force fields and charge models of the components above, and:",
+        "The software, force fields, models and methods this build used:",
         "",
-    ] + ([f"- {reference}" for reference in record.get("cite") or []] or ["- nothing else"])
+    ] + ([f"- {reference}" for reference in record.get("cite") or []] or ["- none recorded"])
     seeds = record.get("provenance") or {}
     if seeds:
         lines += ["", "## Inputs and seeds", ""] + [
@@ -624,16 +636,22 @@ def assert_rebuild_allowed(working_dir: Path) -> None:
     from polyzymd.simulation.own_protocol import protocol_dir
 
     own = protocol_dir(working_dir)
+    elsewhere = (
+        "To keep it and build into another folder, pass --scratch-dir <new folder> "
+        "(or set output.scratch_directory in the config)."
+    )
     if own is not None:
         raise ArtifactIntegrityError(
             f"Refusing to rebuild {working_dir}: it is being run with your own protocol "
-            f"({own}), which uses this build. Use a new output directory."
+            f"({own}), which uses this build. {elsewhere}"
         )
     active = _run_outputs(Path(working_dir))
     if active:
         raise ArtifactIntegrityError(
             f"Refusing to rebuild started campaign {working_dir}; found {active[0]}. "
-            "Use a new output directory."
+            "A rebuild would replace the system that run started from. "
+            f"To discard that run and build again, remove the folder {working_dir} "
+            f"(rm -r {shlex.quote(str(working_dir))}). {elsewhere}"
         )
 
 
@@ -704,3 +722,64 @@ def replicate_lock_held_elsewhere(working_dir: Path) -> bool | None:
             return False
     except OSError:
         return None
+
+
+def length_variants(working_dir: Path, config: Any, replicate: int) -> list[Any]:
+    """Return copies of ``config`` with the production length a started replicate began with.
+
+    A chain run longer has a config whose ``production.duration`` and
+    ``samples`` (and, with ``{duration}`` in ``output.naming_template``, the
+    template, written with the old length to keep the folder) differ from
+    the config it was built with. Each copy puts back one length the replicate
+    recorded (:func:`polyzymd.simulation.progress.recorded_production_lengths`).
+    Empty when nothing is recorded.
+    """
+    from polyzymd.simulation.progress import recorded_production_lengths
+
+    recorded = recorded_production_lengths(Path(working_dir))
+    if not recorded:
+        return []
+    phases = config.simulation_phases
+    template = config.output.naming_template
+    variants: list[Any] = []
+    for duration, samples in recorded:
+        production = phases.production.model_copy(
+            update={"duration": duration, "samples": samples or phases.production.samples}
+        )
+        adjusted = config.model_copy(
+            update={"simulation_phases": phases.model_copy(update={"production": production})}
+        )
+        token = f"{int(duration) if duration >= 1 else f'{duration:g}'}ns"
+        templates = [template]
+        if "{duration}" not in template and token in template:
+            templates.append(template.replace(token, "{duration}ns", 1))
+        for candidate in templates:
+            variant = adjusted.model_copy(
+                update={"output": adjusted.output.model_copy(update={"naming_template": candidate})}
+            )
+            if candidate != template and variant.get_working_directory(replicate) != Path(
+                working_dir
+            ):
+                continue
+            variants.append(variant)
+    return variants
+
+
+def build_matches_config(working_dir: Path, config: Any, replicate: int) -> bool | None:
+    """Whether the build record's config hash fits ``config``, without hashing build files.
+
+    A changed production length of a started replicate fits (see
+    :func:`length_variants`). ``None`` when the folder has no readable build
+    record.
+    """
+    path = build_record_path(Path(working_dir))
+    try:
+        expected = json.loads(path.read_text()).get("config_hash")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if expected is None:
+        return None
+    for candidate in [config, *length_variants(working_dir, config, replicate)]:
+        if expected in (config_hash(candidate), _absolute_path_config_hash(candidate)):
+            return True
+    return False

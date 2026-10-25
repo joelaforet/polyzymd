@@ -10,11 +10,14 @@ found by :func:`~polyzymd.analyses.shared.window.resolve_replicate_trajectory_wi
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from polyzymd.analyses.exceptions import ProtocolError
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -54,8 +57,16 @@ class Replicate:
             segment records again. Use :attr:`frames` to skip both.
         """
         if self._universe is None:
+            from polyzymd.analyses.shared.loader import TrajectoryLineageError
+
             try:
                 self._universe = self.condition._provider.load_universe(self.index)
+            except TrajectoryLineageError as exc:
+                raise ProtocolError(
+                    f"Cannot join the production segments of {self!r}: {exc}",
+                    hint="Compare progress.json with the production_N folders, as the "
+                    "TrajectoryLineageError section of the troubleshooting page describes.",
+                ) from exc
             except (ValueError, IndexError, KeyError, OSError) as exc:
                 # MDAnalysis and ParmEd raise these for a topology they cannot
                 # read; say so, rather than leaving a bare parser error.
@@ -191,9 +202,11 @@ class Replicate:
             # they were copied, so a moved or downloaded study keeps its results.
             path = Path(item.path).resolve()
             return {
-                "path": str(path.relative_to(data_root))
-                if path.is_relative_to(data_root)
-                else path.name,
+                "path": (
+                    str(path.relative_to(data_root))
+                    if path.is_relative_to(data_root)
+                    else path.name
+                ),
                 "format": item.format,
                 "size_bytes": item.size_bytes,
                 "sha256": file_sha256(path, recorded.get(path)),
@@ -392,12 +405,57 @@ class Condition:
         self.config_hash = compute_config_hash(written)
         self.config = with_data_dir(written, self.data_dir)
         try:
-            found = sorted(int(index) for index, _ in self.config.discover_replicate_dirs())
+            folders = dict(self.config.discover_replicate_dirs())
         except (OSError, ValueError) as exc:
             raise ProtocolError(
                 f"Condition {label!r}: cannot read {config_path}: {exc}",
                 hint="Point the condition at a PolyzyMD simulation config.yaml.",
             ) from exc
+        found = sorted(int(index) for index in folders)
+        #: Replicate folders found on disk that hold no production output yet.
+        self.not_run: list[int] = []
+        if replicates is None:
+            self.not_run = [index for index in found if not _has_production(folders[index])]
+            if self.not_run and len(self.not_run) < len(found):
+                LOGGER.warning(
+                    "Condition %r: replicate %s %s no production output yet (never built "
+                    "or never run); left out. Name the replicates to analyse with "
+                    "replicates: in study.yaml to make that explicit.",
+                    label,
+                    ", ".join(str(index) for index in self.not_run),
+                    "has" if len(self.not_run) == 1 else "have",
+                )
+                found = [index for index in found if index not in self.not_run]
+            else:
+                self.not_run = []
+        #: Replicates whose production has not reached its configured total, by
+        #: index, with how far it got; their frames are read (OpenMM) or left out
+        #: (GROMACS, see ``unfinished``).
+        self.incomplete: dict[int, str] = {}
+        #: GROMACS replicates left out because their production did not finish.
+        self.unfinished: dict[int, str] = {}
+        for index in found:
+            share = _production_share(self.config, folders[index], index)
+            if share is None:
+                continue
+            engine_name, text = share
+            if engine_name == "gromacs" and replicates is None and len(found) > 1:
+                # Its raw prod.xtc ends wherever mdrun stopped and was never
+                # post-processed, as an unfinished OpenMM segment is.
+                self.unfinished[index] = f"{text}; its trajectory is not read"
+            else:
+                self.incomplete[index] = text
+        if self.unfinished and len(self.unfinished) < len(found):
+            LOGGER.warning(
+                "Condition %r: replicate %s left out: production did not finish (%s).",
+                label,
+                ", ".join(str(i) for i in self.unfinished),
+                "; ".join(self.unfinished.values()),
+            )
+            found = [index for index in found if index not in self.unfinished]
+        else:
+            self.incomplete.update(self.unfinished)
+            self.unfinished = {}
         chosen = found if replicates is None else sorted({int(index) for index in replicates})
         missing = sorted(set(chosen) - set(found))
         if not chosen or missing:
@@ -414,9 +472,81 @@ class Condition:
             )
         self._provider = UniverseProvider.from_config(self.config)
         self.replicates = [Replicate(self, index) for index in chosen]
+        #: Replicates whose build record names another config than this one.
+        self.built_from_other_config: list[int] = []
+        from polyzymd.simulation.artifact_integrity import build_matches_config
+
+        for index in chosen:
+            folder = folders.get(index)
+            try:
+                matches = build_matches_config(folder, self.config, index) if folder else None
+            except Exception:  # noqa: BLE001 - a warning must never stop the analysis
+                matches = None
+            if matches is False:
+                self.built_from_other_config.append(index)
+        if self.built_from_other_config:
+            LOGGER.warning(
+                "Condition %r: replicate %s was built from another config than %s.",
+                label,
+                ", ".join(map(str, self.built_from_other_config)),
+                config_path,
+            )
 
     def __repr__(self) -> str:
         return f"Condition(label={self.label!r}, replicates={[r.index for r in self.replicates]})"
+
+
+def _production_share(config: Any, folder: Path, index: int) -> tuple[str, str] | None:
+    """Return the engine and how much of its production a replicate has run, if not all.
+
+    Read from the run's own record (``progress.json``, or a scan of its files)
+    without writing anything. ``None`` when production is complete, when the
+    replicate was run with the user's own protocol, or when the record cannot
+    be read.
+    """
+    from polyzymd.simulation.own_protocol import protocol_dir
+
+    if protocol_dir(folder) is not None:
+        return None
+    try:
+        from polyzymd.engines import create_engine
+
+        engine = create_engine(config, defer_binary=True)
+        working_dir = engine.resolve_engine_working_directory(Path(folder))
+        # Judge only a run that keeps a record: progress.json, or for GROMACS
+        # its production log. Files copied without one say nothing about it.
+        if not (working_dir / "progress.json").is_file() and not (
+            engine.name == "gromacs" and (working_dir / "prod.log").is_file()
+        ):
+            return None
+        progress = engine.load_or_scan_progress(working_dir, index)
+    except Exception:  # noqa: BLE001 - a record that cannot be read is not a verdict
+        return None
+    total = progress.total_steps_requested
+    if not total or progress.total_steps_completed >= total:
+        return None
+    done_ns = progress.total_steps_completed * progress.timestep_fs / 1e6
+    total_ns = total * progress.timestep_fs / 1e6
+    share = 100.0 * progress.total_steps_completed / total
+    return engine.name, f"{share:.0f}% of production ({done_ns:.4g} of {total_ns:.4g} ns)"
+
+
+def _has_production(folder: Path) -> bool:
+    """Whether a replicate folder holds production output a loader can read.
+
+    OpenMM writes ``production_N`` folders and GROMACS ``gromacs/prod*``
+    files; a run with the user's own protocol keeps its files under
+    ``protocol/``. A folder with none of these was never run (for example,
+    a ``polyzymd run`` that stopped before building left only
+    ``progress.json``).
+    """
+    folder = Path(folder)
+    if any(folder.glob("production_*")) or (folder / "protocol").exists():
+        return True
+    gromacs = folder / "gromacs"
+    return (gromacs / "protocol").exists() or any(
+        path.suffix != ".mdp" for path in gromacs.glob("prod*")
+    )
 
 
 class Study:

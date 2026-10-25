@@ -58,6 +58,7 @@ troubleshoot_openff_pdb_ingestion
 
 hpc_slurm
 monitor_simulations
+run_longer
 hardware_platforms
 run_gromacs
 own_protocol

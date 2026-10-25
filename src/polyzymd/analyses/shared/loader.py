@@ -39,6 +39,7 @@ _WARNED_GRO_TOPOLOGY_PATHS: set[Path] = set()
 _WARNED_TPR_FALLBACK_PATHS: set[Path] = set()
 _WARNED_CHAIN_ID_PATHS: set[Path] = set()
 _WARNED_ELEMENT_ENRICHMENT_KEYS: set[str] = set()
+_WARNED_DCD_TIME_SHIFT_PATHS: set[Path] = set()
 
 PBC_POLICIES: tuple[str, ...] = ("as_is", "make_whole")
 MAKE_WHOLE_SELECTION = "not (water or resname NA CL K MG ZN SOD CLA POT NA+ CL-)"
@@ -473,7 +474,95 @@ def open_universe(
                     else "Select by residue name."
                 ),
             )
+    _shift_openmm_dcd_times(universe, files)
     return universe
+
+
+def openmm_dcd_time_shift(trajectory_file: str | Path, frame_interval_ps: float) -> float | None:
+    """Return how far an OpenMM DCD's header times fall behind its frames, in ps.
+
+    OpenMM 8.2 and later write every DCD as if its first frame were at step
+    ``reportInterval``. A production segment that continues a chain at a
+    later step then reads in MDAnalysis as if its times started again from
+    the first frame interval. The state-data CSV written beside it records
+    the real step of each frame: OpenMM writes the frame and the CSV row at
+    the same step, the frame first. The shift is taken from the CSV only when
+    the header has that signature (first step equal to the interval), the
+    CSV has at least two rows, one frame interval apart, and the first CSV
+    step is a whole
+    number of intervals after the header's first step.
+
+    Parameters
+    ----------
+    trajectory_file : str or Path
+        ``production_N_trajectory.dcd``; its CSV is
+        ``production_N_state_data.csv`` in the same folder.
+    frame_interval_ps : float
+        Time between frames in ps, as MDAnalysis reads it from the header.
+
+    Returns
+    -------
+    float or None
+        Time in ps to add to every frame's header time, or ``None`` when the
+        header needs no shift or the CSV cannot vouch for one.
+    """
+    from polyzymd.simulation.report_state import _csv_steps, dcd_frame_info
+
+    path = Path(trajectory_file)
+    if path.suffix.lower() != ".dcd" or not path.name.endswith("_trajectory.dcd"):
+        return None
+    header = dcd_frame_info(path)
+    if header is None:
+        return None
+    frames, first_step, interval = header
+    if frames <= 0 or interval <= 1 or first_step != interval:
+        return None
+    steps = _csv_steps(path.with_name(path.name[: -len("_trajectory.dcd")] + "_state_data.csv"))
+    # Two rows at least, so the CSV itself shows the frame interval.
+    if len(steps) < 2 or steps[1] - steps[0] != interval:
+        return None
+    if steps[0] <= first_step or steps[0] % interval:
+        return None
+    shift = (steps[0] - first_step) / interval * frame_interval_ps
+    if path not in _WARNED_DCD_TIME_SHIFT_PATHS:
+        _WARNED_DCD_TIME_SHIFT_PATHS.add(path)
+        LOGGER.warning(
+            "%s: its header puts the first frame at step %d, but the state-data CSV "
+            "beside it records step %d. OpenMM 8.2 and later write the frame interval "
+            "as the first step of every new trajectory file. Reading its frame times "
+            "from step %d.",
+            path,
+            first_step,
+            steps[0],
+            steps[0],
+        )
+    return shift
+
+
+def _shift_openmm_dcd_times(universe: Any, files: Sequence[str | Path]) -> None:
+    """Give each OpenMM DCD of ``universe`` the frame times its CSV records.
+
+    See :func:`openmm_dcd_time_shift`. The shift is stored as MDAnalysis'
+    ``time_offset`` of the file's reader, so every frame's ``ts.time``
+    carries it.
+    """
+    if not files:
+        return
+    trajectory = getattr(universe, "trajectory", None)
+    readers = getattr(trajectory, "readers", None)
+    if readers is None:
+        readers = [trajectory]
+    if len(readers) != len(files):
+        return
+    for reader, path in zip(readers, files):
+        ts = getattr(reader, "ts", None)
+        data = getattr(ts, "data", None)
+        dt = _finite_numeric_time(getattr(ts, "dt", None))
+        if not isinstance(data, dict) or dt is None or dt <= 0:
+            continue
+        shift = openmm_dcd_time_shift(path, dt)
+        if shift:
+            data["time_offset"] = float(data.get("time_offset", 0.0)) + shift
 
 
 def read_openmm_system(path: str | Path) -> tuple[NDArray[np.float64], list[tuple[int, int]]]:
@@ -690,15 +779,19 @@ def _trajectory_raw_time(trajectory: Any) -> float | None:
     Returns
     -------
     float | None
-        Raw finite timestep time from ``ts.data['time']``, or ``None`` when it is
-        unavailable.
+        Raw finite timestep time from ``ts.data['time']`` plus the reader's
+        ``ts.data['time_offset']``, or ``None`` when it is unavailable.
     """
 
     ts = getattr(trajectory, "ts", None)
     data = getattr(ts, "data", None)
     if not isinstance(data, dict):
         return None
-    return _finite_numeric_time(data.get("time"))
+    time = _finite_numeric_time(data.get("time"))
+    offset = _finite_numeric_time(data.get("time_offset"))
+    if time is None or offset is None:
+        return time
+    return time + offset
 
 
 def _trajectory_time(trajectory: Any) -> float | None:
@@ -851,6 +944,7 @@ def _probe_segment_timing(universe: Any, trajectory_file: Path) -> _SegmentTimin
     """
 
     universe.load_new(str(trajectory_file))
+    _shift_openmm_dcd_times(universe, [trajectory_file])
     trajectory = universe.trajectory
     n_frames = int(len(trajectory))
     if n_frames == 0:

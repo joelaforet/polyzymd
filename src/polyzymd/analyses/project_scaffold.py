@@ -19,7 +19,14 @@ PROJECT_FOLDERS = {
     "analyses": "Measurement functions every study uses, listed in project.yaml as file.py:function",
     "stats": "Statistics scripts that read pz.Project('.').replicate_table(run); freeze publishes them",
     "figures": "Notebooks and scripts that read results with pz.Project('.').results(run)",
+    "notebooks": (
+        "Notebooks that help prepare inputs; star_sited_monomers.ipynb writes the star-sited "
+        "SMILES of a monomer for dynamic polymers"
+    ),
 }
+
+#: Notebooks shipped with PolyzyMD that project init copies into ``notebooks/``.
+PROJECT_NOTEBOOKS = ("star_sited_monomers.ipynb",)
 
 PROJECT_GITIGNORE = """\
 # Where this machine keeps the trajectories: never commit or publish it.
@@ -140,8 +147,9 @@ def create_project(
 ) -> CreatedProject:
     """Write a new project folder at ``root`` with one empty study per label.
 
-    Writes ``project.yaml`` listing the studies, ``analyses/``, ``stats/``
-    and ``figures/`` with a README each, ``.gitignore``, ``LICENSE-code``
+    Writes ``project.yaml`` listing the studies, ``analyses/``, ``stats/``,
+    ``figures/`` and ``notebooks/`` with a README each (``notebooks/`` also
+    gets the notebooks PolyzyMD ships, :data:`PROJECT_NOTEBOOKS`), ``.gitignore``, ``LICENSE-code``
     (MIT), ``LICENSE-data`` (CC-BY-4.0) and ``README.md``, and for each label
     a study folder made by
     :func:`~polyzymd.analyses.study_scaffold.create_study` with a
@@ -192,6 +200,11 @@ def create_project(
     for folder, what in PROJECT_FOLDERS.items():
         (root / folder).mkdir(exist_ok=True)
         (root / folder / "README.md").write_text(f"# {folder}/\n\n{what}.\n")
+    from importlib.resources import files
+
+    shipped = files("polyzymd.templates").joinpath("notebooks")
+    for name in PROJECT_NOTEBOOKS:
+        (root / "notebooks" / name).write_bytes(shipped.joinpath(name).read_bytes())
     created = CreatedProject(root, {})
     for label in studies:
         created.studies[label] = _write_study(root / label)

@@ -2417,6 +2417,41 @@ class GromacsError(Exception):
         super().__init__(f"GROMACS command failed: {command} (exit code {returncode})")
 
 
+def postprocessing_needed(working_dir: Path) -> bool:
+    """Whether a finished ``prod.xtc`` lacks its post-processed trajectories.
+
+    True when ``prod_nojump.xtc`` or ``prod_centered.xtc`` is missing or
+    older than ``prod.xtc``, as after a stop during post-processing.
+    """
+    production = Path(working_dir) / "prod.xtc"
+    if not production.is_file():
+        return False
+    written = production.stat().st_mtime
+    for name in ("prod_nojump.xtc", "prod_centered.xtc"):
+        path = Path(working_dir) / name
+        if not path.is_file() or path.stat().st_mtime < written:
+            return True
+    return False
+
+
+class GromacsInterrupted(Exception):
+    """Raised when a signal stopped a local GROMACS step after mdrun shut down cleanly.
+
+    mdrun received one ``SIGTERM``, stopped at the next neighbour-search step
+    and wrote its checkpoint, so the step can be continued with ``-cpi``.
+    """
+
+    def __init__(self, description: str, signal_number: int) -> None:
+        self.description = description
+        self.signal_number = signal_number
+        super().__init__(f"{description} stopped by signal {signal_number}")
+
+
+#: Minutes between production checkpoints of a local run, so a hard kill
+#: loses at most this much work (mdrun's own default is 15).
+PRODUCTION_CHECKPOINT_MINUTES = "5"
+
+
 class GromacsRunner:
     """Execute GROMACS workflow from exported files with streaming output.
 
@@ -2467,6 +2502,47 @@ class GromacsRunner:
 
         # Track state for workflow
         self._last_eq_output: Optional[str] = None
+
+    def _checkpoint_flags(self) -> List[str]:
+        """The production mdrun arguments: ``-cpt`` unless the config's flags set it."""
+        flags = self._flags("prod")
+        if "-cpt" in flags:
+            return flags
+        return ["-cpt", PRODUCTION_CHECKPOINT_MINUTES, *flags]
+
+    def continue_production(self) -> None:
+        """Continue a started production from ``prod.cpt``, then post-process.
+
+        Runs ``mdrun -deffnm prod -cpi prod.cpt -append``, which extends
+        ``prod.xtc``, ``prod.edr`` and ``prod.log`` from the checkpoint's step.
+
+        Raises:
+            GromacsError: If ``prod.tpr`` or ``prod.cpt`` is missing, or a command fails.
+        """
+        missing = [n for n in ("prod.tpr", "prod.cpt") if not (self._working_dir / n).is_file()]
+        if missing:
+            raise GromacsError(
+                command="mdrun -deffnm prod -cpi prod.cpt -append",
+                returncode=1,
+                message=f"Cannot continue production: {', '.join(missing)} missing",
+            )
+        self._print_banner("Continue production MD", "from prod.cpt")
+        self._run_command(
+            [
+                self._gmx,
+                "mdrun",
+                "-deffnm",
+                "prod",
+                "-cpi",
+                "prod.cpt",
+                "-append",
+                "-v",
+                *self._checkpoint_flags(),
+            ],
+            "Continuing production MD from prod.cpt (mdrun -cpi)",
+        )
+        self._run_postprocessing()
+        self._print_summary()
 
     def _flags(self, stage: str) -> List[str]:
         """The extra mdrun arguments of one stage."""
@@ -2534,13 +2610,17 @@ class GromacsRunner:
         Raises:
             GromacsError: If command returns non-zero exit code.
         """
+        import signal
         import subprocess
         import sys
+        import threading
 
         logger.info(f"\n>>> {description}")
         logger.info(f">>> Command: {' '.join(cmd)}")
         logger.info("-" * 60)
 
+        received: list[int] = []
+        previous: dict[int, object] = {}
         try:
             process = subprocess.Popen(
                 cmd,
@@ -2550,7 +2630,26 @@ class GromacsRunner:
                 stdin=subprocess.PIPE if stdin_input else None,
                 text=True,
                 bufsize=1,  # Line buffered
+                # Its own session: Ctrl-C reaches only PolyzyMD, which passes on
+                # one signal. Two would make mdrun stop without a checkpoint.
+                start_new_session=True,
             )
+
+            def forward(signum: int, _frame: object) -> None:
+                if not received:
+                    received.append(signum)
+                    logger.warning(
+                        f"Received signal {signum}; asking GROMACS to stop at its next "
+                        "checkpoint-safe step and waiting for it to write the checkpoint"
+                    )
+                    try:
+                        process.send_signal(signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+
+            if threading.current_thread() is threading.main_thread():
+                for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGUSR1, signal.SIGHUP):
+                    previous[signum] = signal.signal(signum, forward)
 
             # If we have stdin input, write it and close
             if stdin_input:
@@ -2563,6 +2662,11 @@ class GromacsRunner:
                 sys.stdout.flush()
 
             process.wait()
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+            previous.clear()
+            if received:
+                raise GromacsInterrupted(description, received[0])
 
             if process.returncode != 0:
                 raise GromacsError(
@@ -2581,6 +2685,9 @@ class GromacsRunner:
                 message=f"GROMACS executable not found: {self._gmx}. "
                 "Ensure GROMACS is installed and in your PATH, or use --gmx-path.",
             )
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
 
     def _run_energy_minimization(self) -> None:
         """Run energy minimization step."""
@@ -2727,9 +2834,9 @@ class GromacsRunner:
             "Preparing production MD (grompp)",
         )
 
-        # mdrun
+        # mdrun, with a checkpoint every few minutes so a hard kill loses little
         self._run_command(
-            [self._gmx, "mdrun", "-deffnm", "prod", "-v", *self._flags("prod")],
+            [self._gmx, "mdrun", "-deffnm", "prod", "-v", *self._checkpoint_flags()],
             "Running production MD (mdrun)",
         )
 
@@ -2741,8 +2848,17 @@ class GromacsRunner:
                 message="Production MD failed: prod.xtc not produced",
             )
 
+    def run_postprocessing(self) -> None:
+        """Write ``prod_nojump.xtc`` and ``prod_centered.xtc`` from a finished ``prod.xtc``."""
+        self._run_postprocessing()
+
     def _run_postprocessing(self) -> None:
-        """Run trajectory post-processing with trjconv."""
+        """Run trajectory post-processing with trjconv.
+
+        Each file is written under a temporary name and renamed when trjconv
+        succeeds, so a stop part-way never leaves a truncated trajectory under
+        the name analysis reads.
+        """
         self._print_banner("Step 4: Trajectory Post-processing")
 
         logger.info("Removing periodic boundary jumps and centering trajectory...")
@@ -2758,13 +2874,14 @@ class GromacsRunner:
                 "-f",
                 "prod.xtc",
                 "-o",
-                "prod_nojump.xtc",
+                "prod_nojump.part.xtc",
                 "-pbc",
                 "nojump",
             ],
             "Removing PBC jumps (trjconv)",
             stdin_input="System\n",
         )
+        (self._working_dir / "prod_nojump.part.xtc").replace(self._working_dir / "prod_nojump.xtc")
 
         # Step 2: Center on protein and make molecules whole
         # echo -e "Protein\nSystem" | gmx trjconv -s prod.tpr -f prod_nojump.xtc -o prod_centered.xtc -center -pbc mol -ur compact
@@ -2777,7 +2894,7 @@ class GromacsRunner:
                 "-f",
                 "prod_nojump.xtc",
                 "-o",
-                "prod_centered.xtc",
+                "prod_centered.part.xtc",
                 "-center",
                 "-pbc",
                 "mol",
@@ -2786,6 +2903,9 @@ class GromacsRunner:
             ],
             "Centering trajectory (trjconv)",
             stdin_input="Protein\nSystem\n",
+        )
+        (self._working_dir / "prod_centered.part.xtc").replace(
+            self._working_dir / "prod_centered.xtc"
         )
 
     def _print_banner(self, title: str, subtitle: str = "") -> None:

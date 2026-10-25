@@ -122,7 +122,7 @@ an apo simulation.
 
 ## Polymers (`type: polymer`)
 
-PolyzyMD supports two modes for polymer generation: **cached** (load from pre-built SDF files) and **dynamic** (generate on-the-fly from SMILES).
+PolyzyMD supports two modes for polymer generation: **cached** (load from pre-built SDF files) and **dynamic** (built with mBuild from star-sited monomer and cap SMILES).
 
 ```{tip}
 For a complete guide on dynamic polymer generation, see {doc}`../how_to/dynamic_polymers`.
@@ -154,32 +154,39 @@ The entry is one item of `solutes:`; all its keys are indented under the `-`.
 
 ### Dynamic Generation Configuration
 
-To generate polymers on-the-fly from monomer SMILES (without pre-built SDF files):
+To build chains from monomer SMILES (without pre-built SDF files), give each
+monomer as its repeat unit with `*` on the two linking atoms, and the caps
+each chain end can get, with one `*` each and their probabilities. This
+example builds the SBMA-EGMA chains PolyzyMD built with its ATRP templates before 1.3.0rc5: each end is a whole monomer
+that kept its C=C double bond:
 
 ```yaml
   - type: polymer
     generation_mode: "dynamic"               # Enable dynamic generation
-    type_prefix: "SBMA-EGPMA"
-    reactions:                               # ATRP reaction templates
-      initiation: "default"                  # or "/path/to/custom.rxn"
-      polymerization: "default"
-      termination: "default"
+    type_prefix: "SBMA-EGMA"
     monomers:
       - label: "A"
         probability: 0.7
         name: "SBMA"
-        smiles: "[H]C([H])=C(C(=O)OC...)..." # Required for dynamic mode
+        smiles: "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"  # repeat unit, two '*'
         residue_name: "SBM"                  # Optional 3-letter residue name
       - label: "B"
         probability: 0.3
-        name: "EGPMA"
-        smiles: "[H]C([H])=C(C(=O)OC...)..."
+        name: "EGMA"
+        smiles: "[*]CC([*])(C)C(=O)OCCOCCOCCOCCOC"
         residue_name: "EGM"
-    length: 5
+    end_groups:                              # Required: caps of each end, drawn per chain
+      head:                                  # (each end's probabilities sum to 1)
+        - {label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 0.7}
+        - {label: "B", name: "EGMA", residue_name: "EGM", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", probability: 0.3}
+      tail:
+        - {label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 0.7}
+        - {label: "B", name: "EGMA", residue_name: "EGM", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", probability: 0.3}
+    length: 5                                # Monomers per chain, the two ends included
     count: 2
     force_field: ["openff-2.3.0.offxml"]
     charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}   # or am1bcc, espaloma
-    max_retries: 10                          # Retries for ring-piercing detection
+    max_retries: 10                          # Builds tried before a bad chain is refused
     cache_directory: ".polymer_cache"
 ```
 
@@ -190,14 +197,14 @@ To generate polymers on-the-fly from monomer SMILES (without pre-built SDF files
 | `generation_mode` | string | No | "cached" | `cached` or `dynamic` |
 | `type_prefix` | string | Yes | - | Identifier for polymer type |
 | `monomers` | list | Yes | - | Monomer specifications |
-| `length` | int | Yes | - | Chain length (number of monomers) |
+| `length` | int | Yes | - | Monomers per chain. With `end_groups` (always in dynamic mode, optional in cached mode) the two ends are included, so it is at least 3 |
 | `count` | int | Yes | - | Number of chains to add |
 | `sdf_directory` | path | In cached mode | null | Directory with pre-built polymer SDFs |
 | `cache_directory` | path | No | ".polymer_cache" | Cache directory |
-| `reactions` | object | No | all "default" | ATRP reaction templates (dynamic mode) |
+| `end_groups` | object | In dynamic mode; optional in cached mode | - | `head` and `tail`: lists of caps (`label`, `smiles` with one `*`, `probability`, optional `name` and `residue_name`); each end's probabilities sum to 1. In cached mode the chains then draw their caps too, and the caps are checked against the build metadata of cached chains that dynamic mode made |
 | `force_field` | list | Yes | - | Force field files; the same file as `solvent.force_field` |
 | `charges` | object | Yes | - | `preset` in cached mode (the charges in the SDFs); `nagl` (with `model`), `am1bcc` or `espaloma` in dynamic mode |
-| `max_retries` | int | No | 10 | Max attempts for ring-piercing avoidance |
+| `max_retries` | int | No | 10 | Builds tried before a chain with a pierced ring or overlapping atoms is refused (dynamic mode) |
 | `random_seed` | int | No | null | Seed for polymer sequence draws (default: the replicate number) |
 | `packing` | object | No | see below | PACKMOL placement settings |
 
@@ -250,8 +257,8 @@ each brick face.
 | `label` | string | Yes | Single character (A, B, C...) |
 | `probability` | float | Yes | Selection probability (must sum to 1.0) |
 | `name` | string | No | Full monomer name |
-| `smiles` | string | Dynamic only | Raw monomer SMILES (with C=C double bond) |
-| `residue_name` | string | No | 3-letter residue code for topology |
+| `smiles` | string | Dynamic mode; optional in cached mode | Repeat-unit SMILES with `*` on the two linking atoms; the first `*` bonds toward the head. In cached mode it is checked against the build metadata of cached chains that dynamic mode made |
+| `residue_name` | string | No | 3-letter residue code for topology; one per monomer, not an amino-acid, nucleic-acid, water or ion name |
 
 ### Charges
 
@@ -633,7 +640,7 @@ restraints:
       description: "Catalytic serine"    # Optional description
     atom2:
       component: "Resorufin-Butyrate"
-      selection: "name C1"
+      selection: "name C1x"
       description: "Substrate carbon"
     distance: 3.3                        # Angstroms
     force_constant: 10000.0              # kJ/mol/nm²
@@ -646,7 +653,9 @@ polymer residue 76. Each selection must give exactly one atom. The physics
 audit selects the atom again, with another library, and checks that the
 restraint in the built system joins the atoms the config names
 (`restraint.atom_identity`). See {doc}`../how_to/restraints` for detailed
-selection syntax.
+selection syntax. The atoms of a small molecule from an SDF without atom names
+are named `C1x`, `C2x`, ..., `H1x` in the built system (see
+{ref}`restraint-ligand-atom-names`).
 
 Only the OpenMM engine applies distance restraints. With `engine: gromacs`,
 `validate` refuses an enabled restraint, and `build --format gromacs`,
@@ -748,7 +757,7 @@ accepted. The quickstart uses one stage of 0.002 ns.
 
 Energy minimization runs before the first equilibration stage. It is a
 runtime-only setting: changing it does not alter the built system or its
-`build_provenance.json` config hash.
+{term}`build config hash`.
 
 ```yaml
 simulation_phases:
@@ -884,64 +893,28 @@ every component from the files its entry names and compare the built system
 with them term by term, so a term taken from another component's force field
 fails the build.
 
-### Key Collision Warnings
+### Two force fields in one system
 
-When building systems with both proteins and small molecules, you may see warnings like:
+A system with a protein and other molecules is built from two force-field
+files: the protein's and the one the small molecule, the polymers and the
+solvent share. PolyzyMD loads both into one OpenFF `ForceField` and
+parameterizes the whole solvated system in one `create_interchange()` call. In
+that call the file loaded last, the small-molecule file, would also give the
+protein its generic bonded and Lennard-Jones terms. So PolyzyMD then
+parameterizes the protein alone with its own file and replaces every protein
+bonded, Lennard-Jones and constraint term with that result. The protein keeps
+the library charges of its file. The build stops if the protein file does not
+cover a protein term that the combined call covered, or if the two files use
+different nonbonded scaling factors or mixing rules.
 
-```
-Key collision with different parameters, fixing. Key is [#6X4:1]-[#1:2]
-```
+The build does not call `Interchange.combine()`. In earlier releases that call
+printed "Key collision with different parameters" while it merged the
+protein's and the other molecules' parameters.
 
-**This is expected behavior and does not indicate a problem.**
-
-#### Why This Happens
-
-PolyzyMD uses different force fields for different molecule types:
-- **Proteins**: ff14SB (Amber force field ported to OpenFF format)
-- **Small molecules**: OpenFF Sage (general small molecule force field)
-
-When these force fields are combined, the same SMIRKS pattern (e.g., `[#6X4:1]-[#1:2]` for sp³ carbon-hydrogen bonds) may appear in both, but with **different parameter values**. This is expected because:
-
-1. ff14SB was optimized for protein behavior
-2. OpenFF Sage was optimized for general organic molecules
-3. Both are valid parameterizations for their respective domains
-
-#### How OpenFF Handles This
-
-OpenFF Interchange detects these collisions and resolves them by appending `_DUPLICATE` to the key, allowing both parameter sets to coexist:
-
-```python
-# Simplified OpenFF behavior
-if key in existing_parameters:
-    if parameters_are_identical:
-        pass  # No action needed
-    else:
-        key.id += "_DUPLICATE"  # Keep both parameter sets
-```
-
-This ensures that:
-- Protein atoms use ff14SB parameters
-- Small molecule atoms use OpenFF Sage parameters
-- The simulation runs correctly with appropriate parameters for each molecule type
-
-#### What You'll See in Logs
-
-With PolyzyMD's logging, you can identify which molecule combinations trigger collisions:
-
-```
-Combining 7 component Interchange(s)
-  Components: LipA, ResorufinButyrate, EGPMA-SBMA_AAABA, ..., dmso, water/ions
-[DEBUG] Combining 'LipA' with 'ResorufinButyrate'...
-Key collision with different parameters, fixing. Key is [#6X4:1]-[#1:2]
-...
-```
-
-Collisions typically occur when combining protein Interchanges (using ff14SB) with small molecule Interchanges (using OpenFF Sage).
-
-#### Further Reading
-
-For more details on this behavior, see the OpenFF Interchange documentation:
-- [Sharp Edges: Combining Interchanges](https://docs.openforcefield.org/projects/interchange/en/stable/using/edges.html)
+Whether two force fields suit each other is a modeling choice, and you make it
+when you name the files. The physics audit checks that each component got the
+terms of the files its entry names; it does not judge whether the files fit
+together. See {doc}`../explanation/physics_audit`.
 
 ---
 

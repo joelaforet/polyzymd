@@ -124,7 +124,7 @@ For the format of each line and the verdict words, see
   diagnostic and changes no value.
 - `family` is the number of comparisons that the BH correction covers.
 - `not_testable` on a comparison line, and `not testable:` in its verdict,
-  mean that no test is possible: a condition has fewer than two replicates,
+  mean that no test is possible: a condition has fewer than three replicates,
   or every replicate of both conditions has the same value, so there is no
   variance to test. It does not mean that the conditions are the same.
 - `no test recorded` means that a stored comparison holds a raw p value but no
@@ -158,8 +158,10 @@ and the frames. To measure it again, add `--recompute`.
 | `error: No analysis named 'catalytic_triad'.` | The catalytic triad is a routine on the study API: follow {doc}`analysis_triad_quickstart`, or run `polyzymd analyze distances --set pairs=<pairs.yaml>` for the distances. |
 | `polyzymd: command not found` | Run through `pixi run -e analysis`. |
 
-The command exits with 0 on success. On each error above, it exits with 2 and
-prints the message and the fix, one line each.
+The command exits with 0 when every report is complete. A report that left a
+condition or a replicate out is `partial`: it is printed with a `problem:`
+line for each, and the command exits with 3. On each error above, it exits
+with 2 and prints the message and the fix, one line each.
 
 ## See also
 

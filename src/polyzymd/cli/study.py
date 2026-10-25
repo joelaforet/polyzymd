@@ -15,8 +15,35 @@ EXIT_STUDY_ERROR = 2
 PROJECT_CHECK = "polyzymd.project_check"
 
 
-def _report_status(path: Path) -> str:
-    """Return how ``study check`` describes a run's ``report.json``: absent, complete or partial."""
+def _tested_below_three(report: dict) -> bool:
+    """Whether a stored report has a p value for conditions of fewer than three replicates.
+
+    Reports made since comparisons need three replicates per condition have
+    none, so such a report was made before that rule.
+    """
+    counts: dict[str, int] = {}
+    for item in report.get("conditions") or []:
+        if isinstance(item, dict) and "label" in item:
+            counts[item["label"]] = max(counts.get(item["label"], 0), item.get("n_replicates") or 0)
+    for row in report.get("pairwise") or []:
+        if not isinstance(row, dict) or row.get("p") is None:
+            continue
+        if min(counts.get(row.get("a"), 0), counts.get(row.get("b"), 0)) < 3:
+            return True
+    for trend in report.get("trends") or []:
+        if not isinstance(trend, dict) or trend.get("p") is None:
+            continue
+        if any(counts.get(label, 0) < 3 for label in trend.get("conditions") or []):
+            return True
+    return False
+
+
+def _report_status(path: Path, settings: dict | None = None) -> str:
+    """Return how ``study check`` describes a run's ``report.json``: absent, complete or partial.
+
+    With ``settings``, the settings the study file gives the run, a report
+    whose recorded settings differ is named as made with other settings.
+    """
     import json
 
     if not path.is_file():
@@ -25,10 +52,26 @@ def _report_status(path: Path) -> str:
         report = json.loads(path.read_text())
     except (OSError, ValueError):
         return " with an unreadable report"
+    other = ""
+    recorded = ((report.get("provenance") or {}).get("study") or {}).get("settings")
+    if settings is not None and isinstance(recorded, dict):
+        canonical = json.dumps(settings, sort_keys=True, default=str)
+        if json.dumps(recorded, sort_keys=True, default=str) != canonical:
+            shown = ", ".join(f"{k}={v}" for k, v in recorded.items()) or "defaults"
+            other = (
+                f", but that report was made with other settings ({shown}); "
+                "polyzymd analyze with --study remakes it"
+            )
+    if _tested_below_three(report):
+        other += (
+            ", but that report was made before the three-replicate rule and tests "
+            "conditions of fewer than three replicates; polyzymd analyze with --study "
+            "remakes it"
+        )
     problems = report.get("problems") or []
     if report.get("status", "complete") == "complete":
-        return " with its report"
-    return f" with a partial report ({len(problems)} problems): " + "; ".join(problems)
+        return " with its report" + other
+    return f" with a partial report ({len(problems)} problems){other}: " + "; ".join(problems)
 
 
 @click.group("study")
@@ -62,7 +105,7 @@ def check_command(path: Path, production: bool = False) -> None:
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.results import REPORT_FILE
     from polyzymd.analyses.study import with_data_dir
-    from polyzymd.analyses.study_file import load_study_file
+    from polyzymd.analyses.study_file import load_study_file, portable
     from polyzymd.citation import citation_line
     from polyzymd.config.schema import SimulationConfig
 
@@ -183,7 +226,20 @@ def check_command(path: Path, production: bool = False) -> None:
         click.echo(
             f"analysis {what}: {settings}; {window}; "
             + (
-                f"stored results in {folder}" + _report_status(folder / REPORT_FILE)
+                f"stored results in {folder}"
+                + _report_status(
+                    folder / REPORT_FILE,
+                    (
+                        # Stored reports record settings fit to publish: files relative.
+                        portable(
+                            dict(entry.settings),
+                            protocol.root,
+                            protocol.project.root if protocol.project is not None else None,
+                        )
+                        if entry.function is None
+                        else None
+                    ),
+                )
                 if stored
                 else "no stored results"
             )
@@ -749,6 +805,12 @@ def add_condition_command(
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_STUDY_ERROR)
     click.echo(f"condition {label}: {path}, listed in study.yaml")
+    if source is not None:
+        name = (yaml.safe_load(path.read_text()) or {}).get("name")
+        click.echo(
+            f"name: set to {name!r} in the copy; change description: and the settings "
+            f"in which {label} differs from {source}"
+        )
     root = find_study_file(study_path).parent
     data = root / DATA_FILE
     where = (yaml.safe_load(data.read_text()) or {}).get(label) if data.is_file() else None

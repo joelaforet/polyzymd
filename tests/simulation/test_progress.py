@@ -1272,6 +1272,29 @@ class TestStaleInterruptedMarkerCrossCheck:
         assert len(p.segments) == 1
         assert p.segments[0].steps_completed == marker_steps
 
+    def test_marker_older_than_the_final_state_reads_as_completed(self, tmp_path):
+        """A segment run again to its end after an interruption is completed, not interrupted."""
+        import os
+
+        _write_interrupted_segment_on_disk(tmp_path, 0, steps_completed=13_500, total_steps=50_000)
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=0.1)
+        marker = tmp_path / "production_0" / "INTERRUPTED"
+        os.utime(marker, (marker.stat().st_mtime - 60,) * 2)
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert p.segments[0].status == SegmentStatus.COMPLETED
+
+    def test_marker_newer_than_the_final_state_still_reads_as_interrupted(self, tmp_path):
+        import os
+
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=0.1)
+        _write_interrupted_segment_on_disk(tmp_path, 0, steps_completed=13_500, total_steps=50_000)
+        state = tmp_path / "production_0" / "production_0_state.xml"
+        os.utime(state, (state.stat().st_mtime - 60,) * 2)
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+
     def test_stale_marker_does_not_affect_status(self, tmp_path):
         """Even when the CSV overrides the marker value, status stays INTERRUPTED."""
         _write_interrupted_segment_on_disk(
