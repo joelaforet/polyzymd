@@ -79,7 +79,7 @@
   "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":0.0,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_EGM_contact_fraction_comparison.png","contacts/contacts_class_bars.png"],
   "metric": "EGM_contact_fraction",
-  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
@@ -94,7 +94,7 @@
   "metric": "EGM_contact_fraction",
   "pairwise": {
    "entry": ["12","30","45"],
-   "every row": {"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}
+   "every row": {"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
@@ -108,7 +108,7 @@
   "conditions": [{"ci95":[NaN,NaN],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":NaN,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[NaN,NaN,NaN],"replicates":[1,2,3],"sem":NaN,"statistical_inefficiency":[]},{"ci95":[NaN,NaN],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":NaN,"n_effective":[],"n_replicates":3,"replicate_values":[NaN,NaN,NaN],"replicates":[1,2,3],"sem":NaN,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_EGM_mean_lifetime_comparison.png"],
   "metric": "EGM_mean_lifetime",
-  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":null,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":null,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
   "run": "EGM_mean_lifetime",
   "text": "# polyzymd analyze contacts  metric EGM_mean_lifetime  unit ns  run EGM_mean_lifetime  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\nB  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\ncontrol vs B  delta nan  ci95 na  p na  p_adj na  test welch_t  correction BH  d na  not_testable\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so the event count there is 0 (none of those atoms to touch) and no comparison with it is tested. Check the selection if that condition has them.\nwarning: contacts: control replicate 1, control replicate 2, control replicate 3, B replicate 1, B replicate 2, B replicate 3 have no contact event for EGM, so EGM_mean_lifetime is undefined (nan) there.\nverdict: not testable: EGM_mean_lifetime for control vs B, as control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3 (n 3 vs 3)\n",
@@ -118,7 +118,7 @@
   "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":0.0,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_SBM_contact_fraction_comparison.png","contacts/contacts_class_bars.png"],
   "metric": "SBM_contact_fraction",
-  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
@@ -133,7 +133,7 @@
   "metric": "SBM_contact_fraction",
   "pairwise": {
    "entry": ["12","30","45"],
-   "every row": {"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}
+   "every row": {"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
@@ -147,7 +147,7 @@
   "conditions": [{"ci95":[NaN,NaN],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":NaN,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[NaN,NaN,NaN],"replicates":[1,2,3],"sem":NaN,"statistical_inefficiency":[]},{"ci95":[NaN,NaN],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":NaN,"n_effective":[],"n_replicates":3,"replicate_values":[NaN,NaN,NaN],"replicates":[1,2,3],"sem":NaN,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_SBM_mean_lifetime_comparison.png"],
   "metric": "SBM_mean_lifetime",
-  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":null,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":null,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
   "run": "SBM_mean_lifetime",
   "text": "# polyzymd analyze contacts  metric SBM_mean_lifetime  unit ns  run SBM_mean_lifetime  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\nB  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\ncontrol vs B  delta nan  ci95 na  p na  p_adj na  test welch_t  correction BH  d na  not_testable\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so the event count there is 0 (none of those atoms to touch) and no comparison with it is tested. Check the selection if that condition has them.\nwarning: contacts: control replicate 1, control replicate 2, control replicate 3, B replicate 1, B replicate 2, B replicate 3 have no contact event for SBM, so SBM_mean_lifetime is undefined (nan) there.\nverdict: not testable: SBM_mean_lifetime for control vs B, as control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3 (n 3 vs 3)\n",
@@ -157,7 +157,7 @@
   "conditions": [{"ci95":[NaN,NaN],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":NaN,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[NaN,NaN,NaN],"replicates":[1,2,3],"sem":NaN,"statistical_inefficiency":[]},{"ci95":[NaN,NaN],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":NaN,"n_effective":[],"n_replicates":3,"replicate_values":[NaN,NaN,NaN],"replicates":[1,2,3],"sem":NaN,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_censored_fraction_comparison.png"],
   "metric": "censored_fraction",
-  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":null,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":null,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
   "run": "censored_fraction",
   "text": "# polyzymd analyze contacts  metric censored_fraction  unit none  run censored_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\nB  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\ncontrol vs B  delta nan  ci95 na  p na  p_adj na  test welch_t  correction BH  d na  not_testable\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so the event count there is 0 (none of those atoms to touch) and no comparison with it is tested. Check the selection if that condition has them.\nwarning: contacts: control replicate 1, control replicate 2, control replicate 3, B replicate 1, B replicate 2, B replicate 3 have no contact event for polymer, so censored_fraction is undefined (nan) there.\nverdict: not testable: censored_fraction for control vs B, as control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3 (n 3 vs 3)\n",
@@ -169,7 +169,7 @@
   "metric": "contact_fraction",
   "pairwise": {
    "entry": ["12","30","45"],
-   "every row": {"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}
+   "every row": {"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
@@ -183,7 +183,7 @@
   "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":0.0,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_class_bars.png","contacts/contacts_coverage_comparison.png"],
   "metric": "coverage",
-  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
@@ -196,7 +196,7 @@
   "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":0.0,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_lifetime_events_comparison.png"],
   "metric": "lifetime_events",
-  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
   "run": "lifetime_events",
   "text": "# polyzymd analyze contacts  metric lifetime_events  unit none  run lifetime_events  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\ncontrol vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition control has the same lifetime_events in every replicate, so its interval is not estimable\nwarning: condition B has the same lifetime_events in every replicate, so its interval is not estimable\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so the event count there is 0 (none of those atoms to touch) and no comparison with it is tested. Check the selection if that condition has them.\nverdict: not testable: lifetime_events for control vs B, as control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3 (n 3 vs 3)\n",
@@ -206,7 +206,7 @@
   "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":0.0,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_class_bars.png","contacts/contacts_mean_contact_fraction_comparison.png"],
   "metric": "mean_contact_fraction",
-  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
@@ -219,7 +219,7 @@
   "conditions": [{"ci95":[NaN,NaN],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":NaN,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[NaN,NaN,NaN],"replicates":[1,2,3],"sem":NaN,"statistical_inefficiency":[]},{"ci95":[NaN,NaN],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":NaN,"n_effective":[],"n_replicates":3,"replicate_values":[NaN,NaN,NaN],"replicates":[1,2,3],"sem":NaN,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_mean_lifetime_comparison.png"],
   "metric": "mean_lifetime",
-  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":null,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":null,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
   "run": "mean_lifetime",
   "text": "# polyzymd analyze contacts  metric mean_lifetime  unit ns  run mean_lifetime  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\nB  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\ncontrol vs B  delta nan  ci95 na  p na  p_adj na  test welch_t  correction BH  d na  not_testable\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so the event count there is 0 (none of those atoms to touch) and no comparison with it is tested. Check the selection if that condition has them.\nwarning: contacts: control replicate 1, control replicate 2, control replicate 3, B replicate 1, B replicate 2, B replicate 3 have no contact event for polymer, so mean_lifetime is undefined (nan) there.\nverdict: not testable: mean_lifetime for control vs B, as control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3 (n 3 vs 3)\n",
@@ -229,7 +229,7 @@
   "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":0.0,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},{"ci95":[18.3969,36.2848],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":27.3408,"n_effective":[],"n_replicates":3,"replicate_values":[30.031,28.7408,23.2507],"replicates":[1,2,3],"sem":2.07871,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_class_bars.png","contacts/contacts_occluded_area_comparison.png"],
   "metric": "occluded_area",
-  "pairwise": [{"a":"control","b":"B","cohens_d":10.7392,"correction":"BH","delta":27.3408,"delta_ci95":[18.3969,36.2848],"direction":"no significant change","entry":null,"family_size":null,"hedges_g":8.59135,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":10.7392,"correction":"BH","delta":27.3408,"delta_ci95":[18.3969,36.2848],"direction":"not testable","entry":null,"family_size":null,"hedges_g":8.59135,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
@@ -247,7 +247,7 @@
    "delta": [18.3004,0.0,9.04044],
    "delta_ci95": [[10.4264,26.1744],null,[-0.684028,18.7649]],
    "entry": ["12","30","45"],
-   "every row": {"a":"control","b":"B","correction":"BH","direction":"no significant change","family_size":null,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false},
+   "every row": {"a":"control","b":"B","correction":"BH","direction":"not testable","family_size":null,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false},
    "hedges_g": [6.53197,0.0,2.61279]
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
@@ -262,7 +262,7 @@
   "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":0.0,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},{"ci95":[0.0602206,0.113441],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.0868308,"n_effective":[],"n_replicates":3,"replicate_values":[0.0949418,0.0908628,0.0746879],"replicates":[1,2,3],"sem":0.0061846,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_class_bars.png","contacts/contacts_occlusion_fraction_comparison.png"],
   "metric": "occlusion_fraction",
-  "pairwise": [{"a":"control","b":"B","cohens_d":11.4635,"correction":"BH","delta":0.0868308,"delta_ci95":[0.0602206,0.113441],"direction":"no significant change","entry":null,"family_size":null,"hedges_g":9.17079,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":11.4635,"correction":"BH","delta":0.0868308,"delta_ci95":[0.0602206,0.113441],"direction":"not testable","entry":null,"family_size":null,"hedges_g":9.17079,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}
@@ -275,7 +275,7 @@
   "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":0.0,"n_effective":[],"n_replicates":3,"no_partner":"polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]}],
   "figures": ["contacts/contacts_class_bars.png","contacts/contacts_polar_contact_fraction_comparison.png"],
   "metric": "polar_contact_fraction",
-  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":false,"test":"welch_t","testable":false}],
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"not testable","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"reason":"control has no partner: polymer_selection 'chainid C' matched no atoms in replicate 1, 2, 3","significant":null,"test":"welch_t","testable":false}],
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
   "provenance.settings.residues": {
    "classes": {"polar":[12,30,45]}

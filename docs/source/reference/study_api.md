@@ -154,7 +154,7 @@ recorded.
 - The correction family is every tested row of the call, over every stratum
   with `within`. For a labelled result, that is every label of every compared
   condition.
-- A row is not testable when a condition has fewer than two replicates, or
+- A row is not testable when a condition has fewer than three replicates, or
   when both conditions have the same value in every replicate. It then takes
   no part in the correction.
 - Labels in `untested` are summarized but not tested.

@@ -90,7 +90,7 @@ pairs changed", put those outcomes in one family. Pass their p values to
 report that family.
 
 **Untestable rows.** A row is not testable when a condition has fewer than
-two replicates, or when both conditions have the same value in every
+three replicates, or when both conditions have the same value in every
 replicate, such as a residue that is never in contact. Such a row takes no
 part in the correction. You can also leave out a label whose value the other
 labels fix, such as the last of a set of fractions that sum to 1.
@@ -116,6 +116,12 @@ the bars are, of which quantity, and across which replicates. An example is
 n = 5 replicates; production window t >= 10ns." When the conditions have
 different numbers of replicates, the footnote says that n is given per
 condition.
+
+A condition with fewer than three replicates gets no error bar or band. For a
+metric with a bound, such as an RMSD (at least 0) or a fraction (0 to 1), a
+drawn interval is clipped to that range, and the footnote says so: a t
+interval is symmetric, so near a bound it reaches values the metric cannot
+take.
 
 A distribution figure draws a Gaussian kernel density estimate of the frame
 values. Near a finite bound of the series, PolyzyMD corrects the estimate by

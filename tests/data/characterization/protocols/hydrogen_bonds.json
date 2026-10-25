@@ -242,17 +242,19 @@
    "cohens_d": [1.18818,0.0,0.258199],
    "delta": [0.166667,0.0,0.0277778],
    "delta_ci95": [[-0.189752,0.523085],null,[-0.291912,0.347467]],
+   "direction": ["no significant change","not testable","no significant change"],
    "entry": ["12","30","45"],
-   "every row": {"a":"A","b":"B","correction":"BH","direction":"no significant change","significant":false,"test":"welch_t"},
+   "every row": {"a":"A","b":"B","correction":"BH","test":"welch_t"},
    "family_size": [2,null,2],
    "hedges_g": [0.950542,0.0,0.206559],
    "p": [0.23814,null,0.776898],
    "p_adjusted": [0.476279,null,0.776898],
+   "significant": [false,null,false],
    "testable": [true,false,true]
   },
   "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_hbond_occupancy_protein_polymer",
   "run": "protein_polymer_residues",
-  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_residues  unit none  run protein_polymer_residues  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\nA vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: the 95 percent interval of condition A at 12 extends past the bounds 0 to 1 of protein_polymer_residues, where a t interval is not reliable\nwarning: condition A has the same protein_polymer_residues at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same protein_polymer_residues at 30 in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45 extends past the bounds 0 to 1 of protein_polymer_residues, where a t interval is not reliable\nwarning: A vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 2 tested labels differ in protein_polymer_residues after BH over a family of 2; larger at none; smaller at none\n",
+  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_residues  unit none  run protein_polymer_residues  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\nA vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: the 95 percent interval of condition A at 12 extends past the bounds 0 to 1 of protein_polymer_residues, where a t interval is not reliable\nwarning: condition A has the same protein_polymer_residues at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same protein_polymer_residues at 30 in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45 extends past the bounds 0 to 1 of protein_polymer_residues, where a t interval is not reliable\nwarning: A vs B at 30 is not testable: a condition has fewer than three replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 2 tested labels differ in protein_polymer_residues after BH over a family of 2; larger at none; smaller at none\n",
   "unit": null
  },
  "unknown run": {

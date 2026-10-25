@@ -175,11 +175,10 @@ def segment_frames(working_dir: Path, segment_index: int) -> ReportedFrame | Non
     """Return the last trajectory frame written by one production segment.
 
     The step comes from the ``Step`` column of the state-data CSV.  The DCD
-    header gives only the frame count and interval: OpenMM's
-    ``DCDReporter`` always writes ``reportInterval`` as the first step, so
-    header steps count from the segment start, not from step 0.  OpenMM
-    writes the trajectory frame before the state-data row of the same step,
-    so when the DCD holds more frames than the CSV has rows, the missing
+    header's first step is not used: OpenMM 8.2 and later write
+    ``reportInterval`` there whatever step the segment starts at (see
+    :func:`production_dcd_reporter`).  OpenMM writes the trajectory frame
+    before the state-data row of the same step, so when the DCD holds more frames than the CSV has rows, the missing
     rows are added at the frame interval.  When the header is missing or
     was rescaled for steps beyond 2**31 (OpenMM then stores the interval as
     1), the CSV alone is used.
@@ -235,6 +234,53 @@ def last_reported_frame(working_dir: Path, before_segment: int) -> ReportedFrame
         if frame is not None:
             return frame
     return None
+
+
+#: Largest first step a DCD header can hold: OpenMM stores it as a 32-bit integer.
+DCD_MAX_FIRST_STEP = 2**31 - 1
+
+
+def production_dcd_reporter(path: Path | str, report_interval: int) -> Any:
+    """Return an OpenMM ``DCDReporter`` whose header gives the real first step.
+
+    From OpenMM 8.2 on, ``DCDReporter`` writes ``reportInterval`` as the step
+    of the first frame, whatever step the simulation is at. A segment that
+    continues a chain at step 46000 then claims to start at step 2500, and
+    MDAnalysis reads its frames as times that start again from the first
+    frame interval. OpenMM 8.1 wrote the simulation's step. This reporter
+    writes the step of its first frame, as OpenMM 8.1 did, under every OpenMM
+    version. Past :data:`DCD_MAX_FIRST_STEP` the header cannot hold the step,
+    so OpenMM's own header is kept; the frame steps are still in the
+    state-data CSV.
+
+    Parameters
+    ----------
+    path : Path or str
+        Trajectory file to write.
+    report_interval : int
+        Steps between frames.
+    """
+    from openmm.app import DCDReporter
+    from openmm.app.dcdfile import DCDFile
+
+    class _FirstStepDCDReporter(DCDReporter):
+        def report(self, simulation: Any, state: Any) -> None:
+            if self._dcd is None and not self._append:
+                first = int(simulation.currentStep)
+                if getattr(self, "_atomSubset", None) is None and (
+                    0 < first <= DCD_MAX_FIRST_STEP - self._reportInterval
+                ):
+                    self._dcd = DCDFile(
+                        self._out,
+                        simulation.topology,
+                        simulation.integrator.getStepSize(),
+                        first,
+                        self._reportInterval,
+                        self._append,
+                    )
+            super().report(simulation, state)
+
+    return _FirstStepDCDReporter(str(path), report_interval)
 
 
 def first_report_step(step: int, report_interval: int) -> int:

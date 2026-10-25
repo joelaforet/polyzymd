@@ -322,6 +322,33 @@ polyzymd run -c config.yaml -r 1-3 --engine gromacs --dry-run
 GROMACS output is streamed in real-time for familiar user experience.
 On any failure, execution stops immediately and intermediate files are preserved.
 
+A replicate whose production has started is not run from its start again:
+
+- OpenMM: `run` continues production from the saved state, as `run-segment`
+  does in a SLURM chain. A complete replicate prints `already complete;
+  nothing to do`. The build must still match the config, except for the
+  production duration and samples. Otherwise `run` refuses: restore the
+  config, or run the changed config in a new output directory.
+- GROMACS: a complete replicate prints `already complete; nothing to do`. A
+  started production continues from `prod.cpt` with
+  `gmx mdrun -cpi prod.cpt -append`, after the same audit checks as a new
+  run. Without a checkpoint it is refused, and the message says how to run
+  production again. A run that stopped before production runs again from
+  minimization, after the same audit checks as a new run. A build made before PolyzyMD 1.3.0rc5 has no
+  audit record, so it must be built again.
+
+A replicate that has no usable build stops before it writes anything when the
+environment cannot build (a `sim-cuda-*` environment has no RDKit or OpenFF).
+The message gives the `polyzymd build` command to run in `build`.
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Every replicate is complete |
+| 1 | Error, or a refusal by a check |
+| 99 | A signal (`SIGTERM` or `SIGUSR1`) stopped the run after it saved its state. Run the same command again to continue |
+
 ### Notes
 
 - Requires GROMACS only when `--engine gromacs` is selected
@@ -680,15 +707,17 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | Verdict | Meaning |
 |---------|---------|
 | `COMPLETED` | `progress.json` reports all production steps done |
-| `RUNNING` | A SLURM job that works in this replicate's run directory is in state `R` (or completing/configuring) |
+| `RUNNING` | A SLURM job that works in this replicate's run directory is in state `R` (or completing/configuring), or, with the note `local run`, a `polyzymd run` on this machine holds the replicate lock |
 | `QUEUED` | A matching job exists but is pending; the reason is shown in parentheses |
 | `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log whose `Work dir:` line names this run directory, with the log filename in brackets. |
+| `EXTENDABLE` | Production finished the length it started with, but the config now asks for more (see {doc}`../how_to/run_longer`). `action: continue`; the note gives the new length. |
+| `INTERRUPTED` | A run stopped by a signal outside SLURM after it saved its state (note `stopped by a signal outside SLURM, state saved`, `action: continue`). The footer gives the `polyzymd run` command that continues it on the machine that ran it. |
 | `STOPPED` | `polyzymd cancel` left a `STOP` file and no job is queued or running. The footer gives `polyzymd cancel --resume` and `polyzymd submit` to restart the chain. |
 | `NOT_STARTED` | Directory exists but no minimization, equilibration or production output was written (typically a failed build; the build log is consulted). A replicate whose job died during minimization or equilibration is `DEAD`. |
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
 | `CORRUPT` | `progress.json` exists but cannot be read (empty, truncated or of the wrong shape). The `last:` field says why. `status` leaves the file as it is; fix or remove it by hand. |
 
-Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package and anything unrecognised. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list (`<preset nodes>` in the example above stands for that list).
+Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package and anything unrecognised. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A local run that a signal stopped after it saved its state is `INTERRUPTED`, not `DEAD`. A local run that failed records its error in `polyzymd_run_error.txt`, which the `last:` field shows. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list (`<preset nodes>` in the example above stands for that list).
 
 Throughput (`ns/d`) of OpenMM runs comes from segment file timestamps: the parameters JSON written at segment start and the state-data CSV written on every report. A running segment that has run for at least an hour sets the rate, since it reflects the GPU the chain is on now; otherwise the newest stopped segment does. GROMACS runs, and OpenMM runs without those files, use the times in `progress.json`. The ETA is remaining nanoseconds divided by that rate and is only printed for `RUNNING` and `QUEUED` replicates.
 
@@ -917,14 +946,14 @@ as `gmx rmsf -od` reports. An unknown name is refused with the list of all of th
 | `NAME` | Yes, without `--study` | Canonical analysis name, for example `rg`; with `--study`, a run of the study file, and every run when left out. |
 | `-c, --config PATH` | Yes, without `--study` | Simulation `config.yaml`. Repeatable; the first one is the control. Refused with `--study`. |
 | `--data DIR` | No | Directory holding the run directories of every condition, for this command only, in place of each config's `scratch_directory` and of a study's `data.local.yaml`. The config hash is that of the config as written. |
-| `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. Refused with `--study`, `-c` or `--output-dir`. |
+| `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. A partial report, and no failure, exits 3. Refused with `--study`, `-c` or `--output-dir`. |
 | `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates` and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study, and that report is printed but not saved as the run's `report.json`. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
 | `--list` | No | Print every shipped analysis, what it measures, and its settings with their defaults, then exit. |
-| `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example one atom pair for distances. Default: the first one the analysis lists; the rest appear in `all_runs`. |
-| `--set KEY=VALUE` | No | Top-level analysis setting. Repeatable. The value is read as YAML, so `--set threshold=3.0` gives a number and `--set groups='{protein: chainid A, polymer: chainid C}'` a mapping. A dotted key such as `groups.protein` is refused; give the whole top-level setting as a mapping instead. |
+| `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example one atom pair for distances. Default: the first one the analysis lists; the rest appear in `all_runs`. With `--study` or `--project`, a report shown with `--run` is printed and not saved; the stored `report.json` keeps the default result. |
+| `--set KEY=VALUE` | No | Top-level analysis setting. Repeatable. With `--study` or `--project`, a `--set` that changes the run's settings in the study file gives a one-off answer: it is printed, and nothing is stored in `<study>/results/<run>/`. To keep it, add a named analysis under `analyses:`, or give `--output-dir`. The value is read as YAML, so `--set threshold=3.0` gives a number and `--set groups='{protein: chainid A, polymer: chainid C}'` a mapping. A dotted key such as `groups.protein` is refused; give the whole top-level setting as a mapping instead. |
 | `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. |
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
 | `--output-dir PATH` | No | Directory for `polyzymd_results/`, where the measured values are stored, and `figures/`. Default: the current directory. |
@@ -1014,17 +1043,27 @@ The verdict vocabulary is fixed so a caller can branch on it:
 | `no significant difference` | The test ran and the adjusted p value did not clear alpha |
 | `no test recorded` | The comparison stored no multiplicity-corrected p value, so the comparison describes a difference without deciding it |
 | `changed` | The difference is significant but the two means are equal at the stored precision |
-| `not testable` | A condition has fewer than two replicates, or every replicate of both conditions has the same value, so the test is undefined |
+| `not testable` | A condition has fewer than three replicates, or every replicate of both conditions has the same value, so the test is undefined |
 
 `--format json` prints the full report. Every field is documented in
-{doc}`analysis_protocol_report`.
+{doc}`analysis_protocol_report`. With `--project`, or with `--study` and no
+`RUN`, stdout holds one JSON document for every study and run:
+
+```json
+{"status": "complete", "studies": {"<study>": {"<run>": {"analysis": "rg", "...": "..."}}}}
+```
+
+`status` is `failed` when a run failed (its entry is `{"status": "failed"}`),
+`partial` when a report left a condition or replicate out, and `complete`
+otherwise. The `== study` and `== run` lines go to stderr.
 
 ### Exit codes
 
 | Code | Meaning |
 |------|---------|
-| 0 | The analysis ran and the report was printed |
+| 0 | The analysis ran and every report is complete |
 | 2 | A typed analysis error: unknown analysis name, missing config, bad `--replicates` or `--set`, an invalid study file, or a pipeline failure; with `--study` and no `RUN`, any run that failed. The message is printed on one line prefixed `error:` and the fix on the next prefixed `fix:`, both on stderr |
+| 3 | A report is partial: a condition or a replicate folder was left out. The report is printed (and stored), and its `problem:` lines say what was left out. With `--project` or `--study` and no `RUN`, any partial report gives 3 when no run failed |
 
 ### Example
 
@@ -1345,13 +1384,20 @@ output:
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Error (validation failure, build failure, etc.) |
-| 2 | Typed analysis error from {ref}`polyzymd analyze <cli-analyze>`, whose message and fix are printed on stderr, one line each |
-| 3 | `polyzymd check-progress`: error; the SLURM job does not resubmit |
-| 99 | Graceful shutdown — simulation was interrupted but interrupted state was saved (see {doc}`../how_to/hpc_slurm`) |
+A code means different things for different commands. Read it with the
+command that returned it.
+
+| Command | 0 | 1 | 2 | 3 | 99 |
+|---------|---|---|---|---|----|
+| Most commands (`validate`, `build`, `submit`, `status`, ...) | Success | Error (validation failure, build failure, etc.) | | | |
+| `run` | Every replicate complete | Error, or a refusal by a check | | | A signal stopped the run after it saved its state; run the same command again to continue |
+| `run-segment` | Segment completed | Error | Another job holds the replicate | | Graceful shutdown: the state was saved, and the job resubmits (see {doc}`../how_to/hpc_slurm`) |
+| `check-progress` | Simulation complete; do not resubmit | Work remains; resubmit | | **Error**: the SLURM job does not resubmit | |
+| {ref}`analyze <cli-analyze>` | Every report complete | | Typed analysis error; message and fix on stderr, one line each | **Partial** report: a condition or replicate was left out; the report is printed | |
+
+`3` means an error for `check-progress` and a partial report for `analyze`.
+The job scripts depend on the `check-progress` codes, so they stay as they
+are.
 
 ---
 

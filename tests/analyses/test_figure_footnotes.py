@@ -82,7 +82,9 @@ def test_different_counts_are_given_per_condition(tmp_path, saved) -> None:
 
 def test_a_one_replicate_condition_is_said_to_have_no_interval(tmp_path, saved) -> None:
     replicate_values({"A": [1.0, 1.2, 1.4], "B": [2.0]}).plot(tmp_path, name="one")
-    assert _note(saved["one"]).endswith("a condition with one replicate has no interval.")
+    assert _note(saved["one"]).endswith(
+        "a condition with fewer than three replicates has no interval."
+    )
 
 
 def test_grouped_bars_name_the_t_interval_of_the_mean(tmp_path, saved) -> None:
@@ -126,7 +128,7 @@ def test_decomposition_bands_are_intervals_of_each_line(tmp_path, saved) -> None
     ("test", "method"), [("welch", "Welch t"), ("student", "Student t (pooled variance)")]
 )
 def test_difference_bands_name_the_test_of_the_difference(tmp_path, saved, test, method) -> None:
-    profile = _profile({"A": [1.0, 1.2, 1.4], "B": [2.0, 2.3]})
+    profile = _profile({"A": [1.0, 1.2, 1.4], "B": [2.0, 2.3, 2.6]})
     report = profile.compare(test=test)
     study_figures.plot_differences(profile, report, tmp_path, "delta", xlabel="Residue")
     note = _note(saved["delta"])
@@ -154,3 +156,10 @@ def test_the_audit_fails_a_band_saved_without_a_footnote(tmp_path) -> None:
     with pytest.raises(AssertionError, match="without a footnote"):
         plotting.save_figure(fig, tmp_path / "bare.png", PlotSettings())
     plt.close(fig)
+
+
+def test_a_bounded_metric_says_its_intervals_are_clipped(tmp_path, saved) -> None:
+    """An RMSD-like metric bounded below by 0 says so in the footnote."""
+    values = replicate_values(PER_CONDITION, series_bounds=(0.0, None))
+    values.plot(tmp_path, name="bounded")
+    assert "intervals are clipped at 0, a bound of the metric" in _note(saved["bounded"])

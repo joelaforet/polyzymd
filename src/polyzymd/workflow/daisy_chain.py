@@ -761,6 +761,52 @@ class DaisyChainSubmitter:
             )
 
 
+def replicate_chain_state(sim_config: SimulationConfig, replicate: int) -> tuple[str, str]:
+    """Return what a submitted chain would do for one OpenMM replicate, without writing.
+
+    ``("complete", text)``, ``("continue", text)`` from step N to M,
+    ``("refused", reason)`` when its next segment would change the frame
+    spacing, or ``("start", text)`` when production has not started.
+    """
+    from polyzymd.simulation.progress import (
+        ReportIntervalChangeError,
+        check_report_interval_unchanged,
+        get_next_segment_info,
+        load_or_scan_progress,
+    )
+
+    working_dir = sim_config.get_working_directory(replicate)
+    production = sim_config.simulation_phases.production
+    total_steps = int(production.duration * 1e6 / production.time_step)
+    if not (working_dir / "progress.json").is_file():
+        return "start", "not started: the chain builds nothing and starts from the build"
+    progress = load_or_scan_progress(
+        working_dir=working_dir,
+        total_steps=total_steps,
+        total_samples=production.samples,
+        timestep_fs=production.time_step,
+        replicate=replicate,
+    )
+    if not progress.segments:
+        return "start", "production not started: the chain starts it"
+    if progress.is_complete:
+        done_ns = progress.total_steps_completed * progress.timestep_fs / 1e6
+        return "complete", f"complete ({done_ns:g} ns); skipped"
+    following = get_next_segment_info(progress, total_steps, production.samples)
+    if following is not None:
+        try:
+            check_report_interval_unchanged(
+                progress, working_dir, following["segment_index"], following["report_interval"]
+            )
+        except ReportIntervalChangeError as exc:
+            return "refused", f"refused: {exc}"
+    return (
+        "continue",
+        f"continue from step {progress.total_steps_completed} to "
+        f"{progress.total_steps_requested}",
+    )
+
+
 def _check_build(
     working_dir: Path, sim_config: SimulationConfig, config_path: Any, replicate: int
 ) -> None:
@@ -978,6 +1024,20 @@ def submit_daisy_chain(
             _check_build(
                 sim_config.get_working_directory(replicate), sim_config, config_path, replicate
             )
+        # A complete replicate needs no job; a refused one would only fail in its job.
+        keep = []
+        for replicate in dc_config.replicates:
+            state, text = replicate_chain_state(sim_config, replicate)
+            if state == "refused":
+                raise ValueError(f"Replicate {replicate}: {text}")
+            if state == "complete":
+                LOGGER.info(f"Replicate {replicate}: {text}")
+                continue
+            keep.append(replicate)
+        dc_config.replicates = keep
+        if not keep:
+            LOGGER.info("Every replicate is complete; nothing to submit.")
+            return {}
 
     # Create submitter and submit
     submitter = DaisyChainSubmitter(

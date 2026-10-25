@@ -48,6 +48,26 @@ files. For the list of files, see [Output files](#gromacs-output-files).
 
 To see the plan without writing a file, add `--dry-run`.
 
+### Stop and continue a local run
+
+Press `Ctrl+C`, or send `SIGTERM` to the `polyzymd` process. PolyzyMD passes
+one signal to `mdrun` and waits. `mdrun` stops at its next safe step and
+writes its checkpoint, `prod.cpt`, and PolyzyMD exits with code 99 and prints
+the command that continues the run. Production also writes a checkpoint every
+5 minutes, so a hard kill loses at most that much work.
+
+Run the same command again to continue:
+
+```bash
+pixi run -e build polyzymd run -c config.yaml -r 1
+```
+
+PolyzyMD checks the audited files and the config as for a new run, then runs
+`gmx mdrun -deffnm prod -cpi prod.cpt -append` and the post-processing. A
+complete replicate prints `already complete; nothing to do`. A production
+that stopped without a checkpoint cannot continue: the message says how many
+steps ran and how to run production again from the end of equilibration.
+
 ## Export the files only
 
 Use `polyzymd build --format gromacs` when you only want PolyzyMD to build and

@@ -186,7 +186,9 @@ def test_single_replicates_get_no_interval_claim(tmp_path, figures) -> None:
     replicate_values({"A": [1.0], "B": [2.0]}).plot(tmp_path, name="single")
     ax = figures["single"].axes[0]
     assert not any(isinstance(item, ErrorbarContainer) for item in ax.containers)
-    assert _footnote(figures["single"]).startswith("No interval: every condition has one replicate")
+    assert _footnote(figures["single"]).startswith(
+        "No interval: every condition has fewer than three replicates"
+    )
 
 
 def test_cli_rg_writes_the_legacy_figures_and_records_them(configs, tmp_path) -> None:
@@ -426,3 +428,21 @@ def test_new_bounds_reuse_the_stored_series_and_update_its_record(configs, tmp_p
             assert np.array_equal(old.values, new.values)
             record = json.loads((new.path / "record.json").read_text())
             assert record["bounds"] == [0, None] and "versions" in record
+
+
+def test_two_replicates_get_no_interval_and_bounds_clip_the_bars(tmp_path, figures) -> None:
+    """Below three replicates no interval is drawn; a fraction's error bar stops at 1."""
+    replicate_values({"A": [1.0, 1.2], "B": [2.0, 2.4]}).plot(tmp_path, name="two")
+    ax = figures["two"].axes[0]
+    assert not any(isinstance(item, ErrorbarContainer) for item in ax.containers)
+
+
+def test_clip_to_bounds_keeps_intervals_inside_the_metric() -> None:
+    import numpy as np
+
+    from polyzymd.analyses.shared.plotting import clip_to_bounds
+
+    low, high = clip_to_bounds(np.array([-0.5, 0.2]), np.array([0.4, 1.3]), (0.0, 1.0))
+    assert low.tolist() == [0.0, 0.2] and high.tolist() == [0.4, 1.0]
+    low, high = clip_to_bounds(np.array([-1.0]), np.array([1.0]), (None, None))
+    assert low.tolist() == [-1.0] and high.tolist() == [1.0]

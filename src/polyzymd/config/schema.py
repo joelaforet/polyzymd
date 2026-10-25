@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 import logging
 import math
+import os
 import re
 import shlex
 import warnings
@@ -1682,7 +1683,6 @@ def expand_path(path: Path) -> Path:
     Returns:
         Path with variables expanded
     """
-    import os
 
     expanded = os.path.expandvars(str(path))
     expanded = os.path.expanduser(expanded)
@@ -1808,7 +1808,12 @@ class OutputConfig(_ConfigModel):
 
     @property
     def effective_scratch_directory(self) -> Path:
-        """Get the effective scratch directory (falls back to projects if not set)."""
+        """Get the effective scratch directory (falls back to projects if not set).
+
+        The path is used as written: ``..`` parts are not collapsed as text,
+        because behind a symlinked folder the operating system resolves them
+        to another place. Printed paths are shortened where they are printed.
+        """
         return self.scratch_directory if self.scratch_directory else self.projects_directory
 
     def format_directory_name(

@@ -159,7 +159,8 @@ class TestVerdict:
         report = _report(tmp_path, {"A": [10.0], "B": [12.0]})
 
         assert report.pairwise[0].testable is False
-        assert report.pairwise[0].significant is False
+        assert report.pairwise[0].significant is None
+        assert report.pairwise[0].direction == "not testable"
         assert report.pairwise[0].delta_ci95 is None
         assert report.verdict[0].startswith(VERDICT_NOT_TESTABLE)
         assert any("one replicate" in warning for warning in report.warnings)
@@ -314,16 +315,16 @@ def test_a_narrow_interval_is_not_printed_as_one_number(limits, text) -> None:
 
 
 def test_the_untestable_reason_is_the_real_one() -> None:
-    """Two replicates with no variance are said to have no variance, not to lack replicates."""
+    """Three replicates with no variance are said to have no variance, not to lack replicates."""
     from polyzymd.analyses.protocols import _verdict
 
     conditions = [
-        ConditionReport(label=label, n_replicates=2, mean=0.0, replicate_values=[0.0, 0.0])
+        ConditionReport(label=label, n_replicates=3, mean=0.0, replicate_values=[0.0] * 3)
         for label in ("A", "B")
     ]
     pair = PairwiseReport(a="A", b="B", delta=0.0, testable=False)
     text = " ".join(_verdict("m", None, conditions, [pair]))
-    assert "same value in every replicate" in text and "at least two" not in text
+    assert "same value in every replicate" in text and "at least 3" not in text
 
 
 def test_a_selection_on_a_missing_topology_attribute_is_a_protocol_error() -> None:
@@ -339,8 +340,8 @@ def test_a_selection_on_a_missing_topology_attribute_is_a_protocol_error() -> No
     assert "resname" in (info.value.hint or "")
 
 
-def test_a_test_with_two_replicates_and_a_constant_control_warns_of_low_power() -> None:
-    """A significant verdict at n 2 vs 2 against a control with no variance says it has little power."""
+def test_two_replicates_per_condition_are_never_called_significant() -> None:
+    """At n 2 vs 2 the verdict gives the means and says not testable, whatever p says."""
     from polyzymd.analyses.protocols import _verdict
 
     conditions = [
@@ -351,9 +352,24 @@ def test_a_test_with_two_replicates_and_a_constant_control_warns_of_low_power() 
         a="Water", b="SDS", delta=0.4, p=0.03, p_adjusted=0.03, significant=True, testable=True
     )
     (text,) = _verdict("coverage", None, conditions, [pair])
+    assert text.startswith("not testable (n < 3): coverage for Water vs SDS")
+    assert "means 0 vs 0.4" in text and "n 2 vs 2" in text
+    assert "larger" not in text and "p_adj" not in text
+
+
+def test_a_constant_control_at_three_replicates_warns_of_low_power() -> None:
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label="Water", n_replicates=3, mean=0.0, replicate_values=[0.0] * 3),
+        ConditionReport(label="SDS", n_replicates=3, mean=0.4, replicate_values=[0.39, 0.4, 0.41]),
+    ]
+    pair = PairwiseReport(
+        a="Water", b="SDS", delta=0.4, p=0.03, p_adjusted=0.03, significant=True, testable=True
+    )
+    (text,) = _verdict("coverage", None, conditions, [pair])
     assert text.startswith("SDS larger coverage than Water")
-    assert "little power: Water and SDS have fewer than 3 replicates" in text
-    assert "Water has the same value in every replicate" in text
+    assert "little power: Water has the same value in every replicate" in text
 
 
 def test_a_test_with_three_varying_replicates_has_no_power_warning() -> None:
@@ -368,7 +384,7 @@ def test_a_test_with_three_varying_replicates_has_no_power_warning() -> None:
 
 
 def test_a_single_replicate_is_not_said_to_have_the_same_value_in_every_replicate() -> None:
-    """At n 1 the power note names only the replicate count."""
+    """At n 1 the verdict names only the replicate count."""
     from polyzymd.analyses.protocols import _verdict
 
     conditions = [
@@ -377,7 +393,7 @@ def test_a_single_replicate_is_not_said_to_have_the_same_value_in_every_replicat
     ]
     pair = PairwiseReport(a="Water", b="SDS", delta=0.4, p=0.03, p_adjusted=0.03, testable=True)
     (text,) = _verdict("coverage", None, conditions, [pair])
-    assert "little power: Water has fewer than 3 replicates" in text
+    assert text.startswith("not testable (n < 3)") and "n 1 vs 3" in text
     assert "same value in every replicate" not in text
 
 
@@ -479,3 +495,12 @@ def test_a_null_group_not_named_after_a_role_is_refused(tmp_path: Path) -> None:
     settings = {"groups": {"sds": None}, "summaries": {"s": {"within": "sds"}}}
     with pytest.raises(ProtocolError, match="groups.sds is null.*role 'sds'.*protein, ligand"):
         analyze("hydrogen_bonds", [config], equilibration="0ns", settings=settings, plots=False)
+
+
+def test_a_two_replicate_summary_gives_no_interval() -> None:
+    from polyzymd.analyses.protocols import _verdict
+
+    two = ConditionReport(label="A", n_replicates=2, mean=1.0, replicate_values=[0.9, 1.1])
+    two.ci95 = (-3.0, 5.0)
+    (text,) = _verdict("rmsd", "A", [two], [])
+    assert text == "A rmsd 1 A (n 2; no interval below 3 replicates)"

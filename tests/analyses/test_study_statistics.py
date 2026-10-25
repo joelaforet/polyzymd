@@ -29,7 +29,9 @@ def _hbond_study(tmp_path: Path, analyses: str, never_egm: bool = False) -> Path
     from tests.analyses.test_hydrogen_bonds_analyze import _schedule, _write
 
     schedules = {
-        (label, r): _schedule(10 * r + offset) for label, offset in (("A", 1), ("B", 5)) for r in (1, 2, 3)
+        (label, r): _schedule(10 * r + offset)
+        for label, offset in (("A", 1), ("B", 5))
+        for r in (1, 2, 3)
     }
     if never_egm:
         schedules[("A", 3)] = _schedule(31, never_egm=True)
@@ -72,13 +74,22 @@ def test_replicate_table_fills_missing_labels_as_the_report(tmp_path: Path) -> N
     )
     report = _json(
         _analyze(
-            "hbonds", "--study", str(root), "--no-plots", "--no-eq-check",
-            "--run", "protein_polymer_pairs", "--format", "json",
+            "hbonds",
+            "--study",
+            str(root),
+            "--no-plots",
+            "--no-eq-check",
+            "--run",
+            "protein_polymer_pairs",
+            "--format",
+            "json",
         )
     )
     table = pz.Study(root).replicate_table("hbonds")
     for row in report["conditions"]:
-        sub = table[(table.condition == row["label"]) & (table.label.astype(str) == str(row["entry"]))]
+        sub = table[
+            (table.condition == row["label"]) & (table.label.astype(str) == str(row["entry"]))
+        ]
         assert len(sub) == row["n_replicates"], row["entry"]
         assert sub.value.mean() == pytest.approx(row["mean"]), row["entry"]
 
@@ -91,7 +102,7 @@ def test_equal_condition_means_read_as_no_trend() -> None:
     from polyzymd.analyses.study_statistics import trend_sentence, trend_tests
 
     conditions = [
-        ConditionReport(label=f"c{i}", n_replicates=2, mean=1.0, replicate_values=[0.9, 1.1])
+        ConditionReport(label=f"c{i}", n_replicates=3, mean=1.0, replicate_values=[0.9, 1.0, 1.1])
         for i in range(3)
     ]
     factors = {"c0": {"x": 0.1}, "c1": {"x": 0.5}, "c2": {"x": 0.9}}
@@ -103,13 +114,13 @@ def test_equal_condition_means_read_as_no_trend() -> None:
 
 
 class _ThreeConditions:
-    """A report of three conditions a, b and c with two replicates each."""
+    """A report of three conditions a, b and c with three replicates each."""
 
     def __init__(self) -> None:
         from polyzymd.analyses.protocols import ConditionReport
 
         self.conditions = [
-            ConditionReport(label=label, n_replicates=2, mean=0.0, replicate_values=[1.0, 2.0])
+            ConditionReport(label=label, n_replicates=3, mean=0.0, replicate_values=[1.0, 2.0, 3.0])
             for label in ("a", "b", "c")
         ]
 
@@ -131,7 +142,7 @@ def test_a_trend_leaves_out_a_condition_without_partner() -> None:
 
     report = _ThreeConditions()
     report.conditions.append(
-        ConditionReport(label="d", n_replicates=2, mean=0.0, replicate_values=[3.0, 4.0])
+        ConditionReport(label="d", n_replicates=3, mean=0.0, replicate_values=[3.0, 4.0, 5.0])
     )
     report.conditions[0].no_partner = "polymer_selection 'resname SDS' matched no atoms"
     factors = {"a": {"sds": 0}, "b": {"sds": 4}, "c": {"sds": 8}, "d": {"sds": 12}}
@@ -152,3 +163,20 @@ def test_a_factor_that_is_not_numeric_gets_no_trend(levels: tuple) -> None:
     factors = {label: {"polymer": level} for label, level in zip("abc", levels, strict=True)}
     factors["a"]["temperature"] = 300
     assert [t.factor for t in trend_tests(_ThreeConditions(), factors)] == ["temperature"]
+
+
+def test_a_trend_over_conditions_of_two_replicates_is_not_testable() -> None:
+    """A trend, like a comparison, needs three replicates in every condition."""
+    from types import SimpleNamespace
+
+    from polyzymd.analyses.protocols import ConditionReport
+    from polyzymd.analyses.study_statistics import trend_tests
+
+    conditions = [
+        ConditionReport(label=f"c{i}", n_replicates=2, mean=i, replicate_values=[i, i + 0.1])
+        for i in range(3)
+    ]
+    factors = {"c0": {"x": 0.1}, "c1": {"x": 0.5}, "c2": {"x": 0.9}}
+    (trend,) = trend_tests(SimpleNamespace(conditions=conditions), factors)
+    assert not trend.testable and trend.p is None
+    assert "needs at least 3 per condition" in trend.reason
