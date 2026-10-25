@@ -3698,8 +3698,7 @@ def cancel(
         if dry_run:
             queued = ", ".join(job_ids) if job_ids else "none"
             colored_echo(
-                f"[dry-run] replicate {replicate}: would write {marker} "
-                f"and cancel job(s) {queued}",
+                f"[dry-run] replicate {replicate}: would write {marker} and cancel job(s) {queued}",
                 phase="simulation",
             )
             continue

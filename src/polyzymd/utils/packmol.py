@@ -500,7 +500,7 @@ def build_packmol_input(
         if sphere.shape != (4,):
             raise ValueError(f"inside_sphere_angstrom must have shape (4,), got {sphere.shape}")
         _sphere_line = (
-            f"  inside sphere" f" {sphere[0]:.6f} {sphere[1]:.6f} {sphere[2]:.6f} {sphere[3]:.6f}"
+            f"  inside sphere {sphere[0]:.6f} {sphere[1]:.6f} {sphere[2]:.6f} {sphere[3]:.6f}"
         )
 
     lines: list[str] = [

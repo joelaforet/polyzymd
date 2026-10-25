@@ -670,7 +670,7 @@ def _input_paths(value: Any, key: str | None = None) -> list[tuple[Any, Any, str
     pairs = (
         value.items()
         if isinstance(value, dict)
-        else enumerate(value) if isinstance(value, list) else ()
+        else (enumerate(value) if isinstance(value, list) else ())
     )
     found = []
     for index, item in list(pairs):
@@ -1012,9 +1012,11 @@ def _replicates(
     in_deposit = Path(protocol.project_label or "")
     for label, path in protocol.conditions.items():
         record: dict[str, Any] = {
-            "config": str(path.relative_to(protocol.root))
-            if path.is_relative_to(protocol.root)
-            else str(path)
+            "config": (
+                str(path.relative_to(protocol.root))
+                if path.is_relative_to(protocol.root)
+                else str(path)
+            )
         }
         try:
             condition = Condition(
@@ -1505,6 +1507,7 @@ def deposited_folders() -> tuple[str, ...]:
 
     return tuple(dict.fromkeys([*FOLDERS, *PROJECT_FOLDERS]))
 
+
 #: Files at the top of a study or project that freeze deposits, besides those it writes.
 DEPOSITED_FILES = ("study.yaml", "project.yaml", "data.example.yaml", ".gitignore")
 #: Prefixes of other top-level files that freeze deposits (README.md, LICENSE, ...).
@@ -1528,11 +1531,7 @@ def is_deposited_name(root: Path, path: str) -> bool:
     if len(parts) > 1:
         return parts[0] in deposited_folders()
     name = parts[0]
-    return (
-        name in DEPOSITED_FILES
-        or name in GENERATED
-        or name.startswith(DEPOSITED_PREFIXES)
-    )
+    return name in DEPOSITED_FILES or name in GENERATED or name.startswith(DEPOSITED_PREFIXES)
 
 
 #: Untracked paths that freeze lists in a git repository; it commits them.
@@ -1551,8 +1550,7 @@ def _candidate_files(root: Path, state: dict[str, Any] | None) -> list[str]:
     if state is not None:
         # -z: names separated by NUL and not quoted, as git quotes non-ASCII names.
         listed = (_git(root, "ls-files", "-z") or "").split("\0") + (
-            _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", *_UNTRACKED)
-            or ""
+            _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", *_UNTRACKED) or ""
         ).split("\0")
     else:
         listed = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
@@ -1898,9 +1896,11 @@ def freeze(
             run: {
                 "analysis": entry.analysis,
                 # A project's shared function lies outside the study: ../analyses/f.py.
-                "function": f"{os.path.relpath(entry.function.file, root)}:{entry.function.qualname}"
-                if entry.function
-                else None,
+                "function": (
+                    f"{os.path.relpath(entry.function.file, root)}:{entry.function.qualname}"
+                    if entry.function
+                    else None
+                ),
                 "settings": portable(
                     entry.settings or (entry.function.settings if entry.function else {}),
                     root,

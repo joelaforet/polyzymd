@@ -122,7 +122,10 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         folder = study.root.relative_to(root)
         studies[label] = {
             "folder": str(folder),
-            "manifest": {"path": f"{folder}/{MANIFEST}", "sha256": file_sha256(study.root / MANIFEST)},
+            "manifest": {
+                "path": f"{folder}/{MANIFEST}",
+                "sha256": file_sha256(study.root / MANIFEST),
+            },
             "description": study.protocol.description,
         }
         for name, condition in result.manifest["conditions"].items():

@@ -644,9 +644,11 @@ def _named(value: Any, key: str, file: Path) -> dict[str, Any]:
     ):
         raise ProtocolError(
             f"{file}: {key} must map names (letters, digits, _ and -) to values.",
-            hint=f"For example '{key}: {{core: resid 5-120}}'."
-            if key == "regions"
-            else f"For example '{key}: {{reference: structures/ref.pdb}}'.",
+            hint=(
+                f"For example '{key}: {{core: resid 5-120}}'."
+                if key == "regions"
+                else f"For example '{key}: {{reference: structures/ref.pdb}}'."
+            ),
         )
     return dict(value)
 

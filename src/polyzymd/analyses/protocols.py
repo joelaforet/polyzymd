@@ -608,8 +608,7 @@ def _empty_selections(study: Any, selections: dict[str, str]) -> dict[tuple[str,
                     raise ProtocolError(
                         f"Cannot select {name} {selection!r} in {condition.label} replicate "
                         f"{replicate.index}: {exc}.",
-                        hint="Select by an attribute the topology has, such as resname "
-                        "or resid.",
+                        hint="Select by an attribute the topology has, such as resname or resid.",
                     ) from exc
                 if len(atoms) == 0:
                     missing.append(f"{name} {selection!r}")

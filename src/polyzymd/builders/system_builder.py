@@ -774,8 +774,7 @@ class SystemBuilder:
         # 1. Protein molecules always use chain A with continuous unique residues
         if self._n_enzyme_molecules > 0:
             LOGGER.debug(
-                f"Assigning chain {PROTEIN_CHAIN} to "
-                f"{self._n_enzyme_molecules} protein molecule(s)"
+                f"Assigning chain {PROTEIN_CHAIN} to {self._n_enzyme_molecules} protein molecule(s)"
             )
 
             protein_residue_num = 1

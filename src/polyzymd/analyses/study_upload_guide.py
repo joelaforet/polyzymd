@@ -171,10 +171,12 @@ def _form_rows(
         ("Description", zenodo.get("description", "").replace("\n", " ")),
         (
             "Licenses",
-            f"{licenses['data']} (data, results and figures) and {licenses['code']} (code in "
-            "analyses/ and figures/); add both"
-            if licenses
-            else zenodo.get("license", "").upper(),
+            (
+                f"{licenses['data']} (data, results and figures) and {licenses['code']} (code in "
+                "analyses/ and figures/); add both"
+                if licenses
+                else zenodo.get("license", "").upper()
+            ),
         ),
         ("Keywords and subjects", ", ".join(zenodo.get("keywords", []))),
         ("Version", zenodo.get("version", "")),
@@ -475,9 +477,11 @@ def deposit_readme(
         + ("`project.yaml`:" if project else "`study.yaml`:"),
         "",
         "1. **Figures, without trajectories:** run the scripts in `figures/`, which read",
-        '   `pz.Project(".").results(run)`.'
-        if project
-        else '   `pz.Study("study.yaml").results(run)`.',
+        (
+            '   `pz.Project(".").results(run)`.'
+            if project
+            else '   `pz.Study("study.yaml").results(run)`.'
+        ),
         "2. **Analyses, from the trajectories:** download them. DOWNLOAD_DIR is the folder that holds",
         (
             "   the condition folders of one study. For each study, run\n"

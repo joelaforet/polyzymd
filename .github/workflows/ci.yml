@@ -123,7 +123,7 @@ jobs:
       - name: Test basic imports
         run: |
           python -c "from polyzymd.config import SimulationConfig"
-          python -c "from polyzymd.config.schema import EnzymeConfig, PolymerConfig"
+          python -c "from polyzymd.config.schema import PolymerSolute, ProteinSolute, SolventConfig"
           python -c "import polyzymd; print(f'PolyzyMD version: {polyzymd.__version__}')"
       
       - name: Test CLI exists

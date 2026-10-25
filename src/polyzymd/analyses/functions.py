@@ -1301,9 +1301,10 @@ def hbond_atoms(atoms: Any) -> tuple[Any, Any]:
         if str(atom.element).strip().upper() == "O" or (bonded and len(atom.bonded_atoms) <= 2)
     ]
     universe = atoms.universe
-    return universe.atoms[np.asarray(donated, dtype=int)], universe.atoms[
-        np.asarray(acceptors, dtype=int)
-    ]
+    return (
+        universe.atoms[np.asarray(donated, dtype=int)],
+        universe.atoms[np.asarray(acceptors, dtype=int)],
+    )
 
 
 def _index_selection(atoms: Any) -> str:
@@ -1361,9 +1362,9 @@ def _hbond_events(
             donors_sel=None if donors is None else _index_selection(donors),
             hydrogens_sel=_index_selection(hydrogens),
             acceptors_sel=_index_selection(acceptors),
-            between=None
-            if group_b is None
-            else [_index_selection(group_a), _index_selection(group_b)],
+            between=(
+                None if group_b is None else [_index_selection(group_a), _index_selection(group_b)]
+            ),
             d_a_cutoff=d_a_cutoff,
             d_h_a_angle_cutoff=d_h_a_angle_cutoff,
             update_selections=False,
