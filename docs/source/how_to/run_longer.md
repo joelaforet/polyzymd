@@ -17,14 +17,16 @@ length makes every replicate of the condition, and every replicate you run
 later, run to the new length.
 
 1. Open the condition's `config.yaml`.
-2. Look at `output.naming_template`. The default,
+2. Look at `output.naming_template`. Configs that `polyzymd study
+   add-condition --new` writes leave the length out of the folder name; skip
+   this step for them. A template with `{duration}`, such as the default of
+   a config that sets no template,
    `{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}`,
-   puts the production length in the replicate's folder name. A new
-   `duration` would then point PolyzyMD at a new, empty folder. Write the
-   current length into the template in place of `{duration}`, for example
+   puts the production length in the replicate's folder name, and a new
+   `duration` would point PolyzyMD at a new, empty folder. Write the current
+   length into the template in place of `{duration}`, for example
    `{enzyme}_{substrate}_{polymer_type}_1000ns_{temperature}K_run{replicate}`.
-   The replicate keeps its folder, and PolyzyMD accepts this change. Skip
-   this step if the template has no `{duration}`.
+   The replicate keeps its folder, and PolyzyMD accepts this change.
 3. Raise `simulation_phases.production.duration` to the new total, for
    example from `1000.0` to `2000.0` (ns).
 4. Raise `simulation_phases.production.samples` by the same factor, for

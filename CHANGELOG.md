@@ -5,11 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.0rc5] - 2026-10-23
+## [1.3.0] - 2026-10-24
 
-### rc.5 in brief (read this first)
+### 1.3.0 in brief (read this first)
 
-1.3.0rc5 changes the config layout once and checks every build against its
+1.3.0 changes the config layout once and checks every build against its
 config. Configs written for 1.3.0rc4 or earlier stop with an error that links to
 the rewrite guide (`docs/source/how_to/rewrite_config_rc5.md`); later 1.3
 releases only add keys, and a test holds them to that.
@@ -29,8 +29,10 @@ releases only add keys, and a test holds them to that.
   under `modeling_exceptions` with a reason.
 - **The build record.** `build_provenance.json` and `build_provenance.md`
   replace `build_manifest.json`: versions, seeds, file hashes, every component
-  with its force field and charges, the audit, and the methods to cite
-  (Packmol, and Machado and Pantano when `ionic_strength` sets the ions).
+  with its force field and charges, the audit, and the methods to cite: every
+  reference the build used, with the DOI of each OpenFF release it ran
+  (OpenFF's citation guidelines), the engine, the water and ion parameters,
+  the charge models, Packmol, mBuild and Machado and Pantano where used.
 - **Gates.** A failed audit stops the build. `run` and `submit` refuse a
   replicate that has not started unless a passing audit vouches for its files;
   GROMACS jobs check `audited_files.sha256` before `grompp`. Each OpenMM
@@ -44,15 +46,37 @@ releases only add keys, and a test holds them to that.
   resumes from the restart state saved every minute.
 - **Analysis identity.** The config hash of an analysis now includes the force
   fields, charges, water model, ions, box and restraints, so stored results are
-  recomputed once after upgrading.
+  recomputed once after upgrading. `analyze` warns about a replicate built from
+  another config.
+- **Polymers from SMILES, built with mBuild.** Each monomer is its repeat unit
+  with `*` on the two linking atoms; each chain end draws a cap from options
+  with probabilities; `length` counts the ends; tacticity and E/Z follow the
+  stereo marks you write. The chains PolyzyMD built before 1.3.0 (the Paper 1
+  SBMA-EGMA chemistry) build again from SMILES. The notebook
+  `star_sited_monomers.ipynb` writes the SMILES from a PubChem structure.
+- **Run, stop, continue, run longer.** An interrupted run continues with
+  `polyzymd run` on a workstation (OpenMM and GROMACS) or `submit` on a
+  cluster; raising `production.duration` continues a finished OpenMM run.
+  `polyzymd status` names local runs, `interrupted` and `extendable`
+  replicates and what to do with each.
+- **Analysis you can rely on.** Verdicts and bounded intervals need at least
+  three replicates per condition; a condition with an unfinished replicate
+  makes the report partial (exit code 3); `--format json` always prints one
+  JSON document. The notebook `load_replicates.ipynb` and the page "Analyze
+  the trajectories with your own tools" cover MDAnalysis and `gmx` scripts of
+  your own.
+- **New projects.** `polyzymd project init` puts the notebooks in
+  `notebooks/`; configs that `study add-condition --new` writes leave the
+  production length and temperature out of the run folder's name.
 
-The entries below describe changes made before rc.5 and use the key names of
-1.3.0rc4; the rewrite guide maps each to its rc.5 name.
+The entries below describe changes made before 1.3.0rc5 and use the key names
+of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
 
 
 ### Added
 
 - **Dynamic polymers from star-sited SMILES.**  A `generation_mode: dynamic` polymer gives each monomer as its repeat unit with `*` on its two linking atoms (`[*]CC([*])(C)C(=O)OC` for methyl methacrylate) and, in the required `end_groups: {head: [...], tail: [...]}`, the caps each chain end can get: SMILES with one `*` (`[*][H]`, or a whole monomer that kept its C=C, `[*]C=C(C)C(=O)OC`, as at the ends of the Paper 1 chains) with probabilities that sum to 1 per end, drawn per chain. `length` counts the two ends (`length: 5` is an end, three repeat units and an end); a chain's sequence is its head cap's label, its repeat units' labels and its tail cap's label, so the Paper 1 SBMA-EGMA chemistry builds the same 5-mers and file names as the Paper 1 library. A cap with a `residue_name` is its own residue. Stereoisomers of one monomer may share a residue name, so tacticity is set by giving each backbone configuration its own label. Chains are built with mBuild (github.com/joelaforet/mbuild, tag `biopolymers-v0.1.0`), charged, relaxed in vacuum with the polymer's force field, and checked for pierced rings and atoms closer than 1.0 Å. Methacrylates such as MMA, HEMA and methoxyethyl methacrylate now build. `validate` reads every monomer and cap SMILES and checks the number of `*`; `reactions:` is refused with a link to the rewrite guide. A dynamic chain keeps the direction of its drawn sequence; cached libraries keep their canonical names, cached mode also finds a chain named in the other direction, and it checks a config's monomer SMILES and caps against the build metadata of cached chains that dynamic generation made. Monomer labels and names must be unique. The notebook `star_sited_monomers.ipynb`, which `polyzymd project init` puts in the project's `notebooks/` folder, draws a monomer with its atom indices and writes its repeat unit and chain-end form. The build record names the mBuild version and commit, records the seed of the sequence draw (`polymer_sequence_seed`), and lists mBuild under "Methods to cite". Chains cached by earlier releases are built again.
+- **Each OpenFF release cited by its own DOI.**  "Methods to cite" gives the OpenFF Toolkit, Interchange and openff-forcefields releases a build used with the Zenodo DOI of that release, from a table PolyzyMD ships (`polyzymd/data/openff_release_dois.json`, written by `scripts/update_openff_release_dois.py`). A version newer than the table is given with the DOI of every release, as before. The build record now also records `openff_forcefields_version`.
 - **Analyze the trajectories with your own tools.**  A docs page says which files of an OpenMM or GROMACS replicate to read, the residue, atom, segment and chain names of a built system and the selections that match them, how production segments join and how their frame times are laid out, how to load a replicate in MDAnalysis and use `gmx` tools, and how to bring the results back into a project as a `function:` analysis or a `stats/` script. The notebook `load_replicates.ipynb`, which `polyzymd project init` puts in the project's `notebooks/` folder, loads a replicate of the project with PolyzyMD's loader and by hand from its files, and measures a quantity over its frames.
 - **`force_field.nagl_model`.**  Names the NAGL model for every molecule charged with `charge_method: nagl`: the substrate, co-solvents generated from SMILES and dynamically generated polymers. The default is the production model `openff-gnn-am1bcc-1.0.0.pt`, the one OpenFF Sage 2.3.0 names; the release candidates used `openff-gnn-am1bcc-0.1.0-rc.3.pt`, which a config can name to rebuild as they did. A config without the key keeps its build hash. Co-solvent charge caches are keyed by the model, and dynamic polymers are charged by PolyzyMD's own NAGL charger, because Polymerist's always used rc.3. `validate` refuses a model that is not installed, the build manifest records the model, its file SHA-256 and the openff-nagl-models version, and molecules charged with NAGL carry the model name into their SDFs. With openff-nagl-models 2025.9.0 the 1.0.0 and rc.3 models give the same charges to within 1e-7 e on the molecules tested, so a rebuild with the new default matches an rc build.
 - **`solvent.ions.ionic_strength`.**  Sets the ionic strength of the whole box, counter-ions included, in place of `nacl_concentration`. Na+ and Cl- split the solute charge, (N - Q)/2 and (N + Q)/2 (Machado and Pantano, J. Chem. Theory Comput. 2020), so the box is neutral and a buffer can be matched by its ionic strength; `nacl_concentration` still adds neutralizing ions on top of the pairs. The build logs the ionic strength it reached and warns when counter-ions and charged co-solvents alone exceed the target. A config without the key keeps its build hash. Charged co-solvents such as surfactants, and counter-ions in their SMILES, count toward the ionic strength with their charge squared; NaCl fills the rest. It needs `neutralize: true`.
@@ -227,6 +251,7 @@ The entries below describe changes made before rc.5 and use the key names of
 
 ### Fixed
 
+- **Counter-ions of a charged co-solvent counted as salt.**  The `ions.salt` row of the build record counted the Na+ that come with SDS as NaCl pairs ("6 NaCl pairs ... expected 5"). It now counts them separately ("5 NaCl pairs (7 Na+, 6 Cl-: 2 counter-ions of charged co-solvents, 1 neutralizing)"). The ions built do not change.
 - **Running a simulation longer.**  Raising `production.duration` (and `samples` by the same factor) of a finished OpenMM replicate continues it to the new total, with `polyzymd run` on a workstation or `polyzymd submit` on a cluster. `run` checks the build against the config with the production length the chain started with, which `progress.json` now records as `started_total_steps` and `started_total_samples` (and `production_0_parameters.json` for runs started before). A change that would alter the frame spacing is refused with the `samples` value that keeps it. With `{duration}` in `output.naming_template` (the default), the old length written into the template keeps the replicate's folder, and `run` accepts that change too. Stored analysis results are measured again, since the trajectory files they record changed. OpenMM only. New how-to page "Run a simulation longer". The exit-code table of the CLI reference is per command: 3 is an error for `check-progress` and a partial report for `analyze`.
 
 - **Continuation segments under OpenMM 8.2 and later have the right frame times.**  From OpenMM 8.2 on, `DCDReporter` writes the frame interval as the first step of every new DCD, whatever step the simulation is at. Every production segment after the first, written by `run-segment` after a finished or an interrupted segment, then read in MDAnalysis as if its times started again at the first frame interval, and `analyze` refused the replicate with `TrajectoryLineageError`. Production segments now write the step of their first frame, as OpenMM 8.1 did. The coordinates were always right; only the header times were wrong. The analysis loader reads the times of segments already written this way from the `production_N_state_data.csv` beside them, with a warning, and still refuses a segment without that CSV. Chains run with OpenMM 8.1.2 (the `sim-cuda-12-0` and `sim-cuda-12-4` environments) were not affected. A lineage error no longer suggests checking the topology.
@@ -612,6 +637,8 @@ The entries below describe changes made before rc.5 and use the key names of
 
 ### Changed
 
+- **Run folder names of new configs.**  The config template that `polyzymd study add-condition --new` writes names run folders `{enzyme}_{substrate}_{polymer_type}_run{replicate}`, without `{duration}` and `{temperature}`: each condition has its own runs folder, and with them in the name, running longer or changing the temperature pointed the config at a new, empty folder. A config that sets no `naming_template` keeps the old default, so existing runs keep their folders.
+- **What PolyzyMD vouches for.**  The docs now say it plainly: PolyzyMD checks and vouches for the files it generates (builds, runs, results of its analyses and your `function:` analyses). Files you bring, such as scripts and their outputs in `stats/`, are deposited by `freeze` as you wrote them, unchecked. The freeze page also lists `notebooks/` among the project folders it deposits.
 - **Comparisons and trends need three replicates per condition.**  A comparison with fewer than three replicates in a condition is `not testable`: it has no p value, interval or effect size, and its verdict reads `not testable (n < 3)` with both condition means. A trend needs three replicates in every condition. Two replicates gave a t test with about one degree of freedom, and `analyze` called such a difference significant. A one-condition summary of fewer than three replicates gives the mean without an interval. Figures draw no error bar or band for a condition of fewer than three replicates, and clip drawn intervals to the metric's bounds (an RMSD band no longer goes below 0, a fraction's error bar no longer passes 1); the footnote says so. `study check` and `project check` name a stored report made before this rule (one with a p value for a condition of fewer than three replicates).
 - **One-off `--set` runs are printed, not saved.**  With `--study` or `--project`, a `--set` that changes the settings the study file gives the run printed its answer and replaced the stored `results/<run>/report.json`, and `study check` and `project check` still called it the study's settings. Such a run now writes nothing to the study's results; `--output-dir` keeps it elsewhere, and a named analysis keeps it in the study; with `--submit` or `--dry-run` such a run needs `--output-dir`. A file named relative to the folder and the study's absolute path to the same file count as the same setting. `study check` names a stored report made with other settings.
 - **`analyze` exits 3 for a partial report.**  A report that left a condition or a replicate folder out exited 0. It now exits 3; 0 means every report is complete. The `--submit` report job treats 3 as success and logs that the report is partial.

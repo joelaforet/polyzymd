@@ -870,7 +870,7 @@ def _missing_build_files(working_dir: Path) -> list[str]:
 def simulated_with(working_dir: Path) -> dict[str, Any]:
     """Return the software versions that built and ran a replicate, as the run recorded them.
 
-    ``build`` comes from the replicate's build record (``build_provenance.json``, or ``build_manifest.json`` before 1.3.0rc5), and
+    ``build`` comes from the replicate's build record (``build_provenance.json``, or ``build_manifest.json`` before 1.3.0), and
     ``segments`` lists each distinct (PolyzyMD, OpenMM, pixi environment,
     OpenMM platform and properties) combination that ``progress.json``
     records for its production segments,
@@ -902,6 +902,7 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
                 "openmm_version",
                 "openff_toolkit_version",
                 "openff_interchange_version",
+                "openff_forcefields_version",
             )
         }
     except (OSError, ValueError):

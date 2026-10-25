@@ -85,7 +85,7 @@ Add this entry to the `solutes:` list, after the protein entry:
 The entry asks for two chains of three SBMA monomers. `dynamic` builds each
 chain with mBuild from the repeat unit of the monomer: its SMILES has `*` on
 the two carbons that bond to the neighbouring units. `end_groups` puts an
-SBMA unit that kept its C=C double bond at each end, as in the chains PolyzyMD built before 1.3.0rc5,
+SBMA unit that kept its C=C double bond at each end, as in the chains PolyzyMD built before 1.3.0,
 so a 3-mer is an end, one repeat unit and an end. `residue_name: SBM` names the
 monomers in the topology.
 `force_field` is the same file as `solvent.force_field`. `charges` charges

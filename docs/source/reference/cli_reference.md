@@ -196,7 +196,7 @@ The build command creates:
   any accepted `modeling_exceptions`
 - `build_provenance.md` - the same record, for people to read
 
-The record replaced `build_manifest.json` in 1.3.0rc5. PolyzyMD still reads
+The record replaced `build_manifest.json` in 1.3.0. PolyzyMD still reads
 the old name in older run folders. If the physics audit fails, the build
 writes `build_provenance.failed.json` and `build_provenance.failed.md` and
 keeps no other file. For the checks, see {doc}`physics_checks`. For why they
@@ -334,7 +334,7 @@ A replicate whose production has started is not run from its start again:
   `gmx mdrun -cpi prod.cpt -append`, after the same audit checks as a new
   run. Without a checkpoint it is refused, and the message says how to run
   production again. A run that stopped before production runs again from
-  minimization, after the same audit checks as a new run. A build made before PolyzyMD 1.3.0rc5 has no
+  minimization, after the same audit checks as a new run. A build made before PolyzyMD 1.3.0 has no
   audit record, so it must be built again.
 
 A replicate that has no usable build stops before it writes anything when the

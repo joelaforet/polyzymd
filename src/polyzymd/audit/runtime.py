@@ -132,7 +132,7 @@ def record_system_check(
     System that differs from the audited build stops the segment before its
     first step (:class:`SystemDivergedError`). When no comparison could run
     (no passing build record vouches for ``system.xml``, as for a run started
-    before 1.3.0rc5), the record says so and the run goes on.
+    before 1.3.0), the record says so and the run goes on.
     """
     import json
     import logging

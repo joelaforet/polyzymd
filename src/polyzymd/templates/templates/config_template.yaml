@@ -355,7 +355,10 @@ output:
   #   {solvent_composition}. See the configuration reference.
   # polymer_type format: {type_prefix}_{label1}{pct1}_{label2}{pct2} (e.g., SBMA-EGMA_A75_B25),
   #   or "none" without polymers
-  naming_template: "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}"
+  # Leave {duration} and {temperature} out: each condition has its own runs
+  # folder, and with them in the name, running longer or changing the
+  # temperature would point the config at a new, empty folder.
+  naming_template: "{enzyme}_{substrate}_{polymer_type}_run{replicate}"
 
 # ============================================================================
 # OpenMM Platform (REQUIRED for the OpenMM engine; not read by GROMACS)

@@ -157,7 +157,7 @@ The entry is one item of `solutes:`; all its keys are indented under the `-`.
 To build chains from monomer SMILES (without pre-built SDF files), give each
 monomer as its repeat unit with `*` on the two linking atoms, and the caps
 each chain end can get, with one `*` each and their probabilities. This
-example builds the SBMA-EGMA chains PolyzyMD built with its ATRP templates before 1.3.0rc5: each end is a whole monomer
+example builds the SBMA-EGMA chains PolyzyMD built with its ATRP templates before 1.3.0: each end is a whole monomer
 that kept its C=C double bond:
 
 ```yaml

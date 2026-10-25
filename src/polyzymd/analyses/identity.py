@@ -36,7 +36,7 @@ def _new_charges(cosolvent: Any) -> dict[str, Any]:
 
     Releases up to 1.3.0rc4 always gave a bundled co-solvent its shipped charges,
     so only a computed method on a bundled molecule is new physics; leaving every
-    other case out keeps the identity of runs built before 1.3.0rc5.
+    other case out keeps the identity of runs built before 1.3.0.
     """
     from polyzymd.data.solvent_molecules import is_bundled_solvent
 

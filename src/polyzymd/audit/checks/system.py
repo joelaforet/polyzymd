@@ -325,6 +325,16 @@ def _water_equivalents(context: AuditContext) -> float:
     return (volume * density * DALTON_PER_NM3_AT_1G_PER_ML - solute) / WATER_MASS
 
 
+def _co_solvent_charge(context: AuditContext) -> int:
+    """Net charge of the charged co-solvent molecules, such as SDS anions."""
+    return sum(
+        round(_charge_of(context, domain.atoms[0])) * len(domain.atoms)
+        for component in _of_type(context, "solvent")
+        for domain in component.domains
+        if domain.name.startswith("co_solvent:") and domain.atoms
+    )
+
+
 def _ion_census(context: AuditContext) -> tuple[int, int, float, float, float]:
     """(Na+, Cl-, water-equivalents, sum n z^2 of charged co-solvents, charge of all but ions)."""
     ions = _of_type(context, "ions")
@@ -398,12 +408,16 @@ def salt(context: AuditContext) -> list[Finding]:
     target = config.solvent.ions.nacl_concentration
     na, cl, water_eq, _, others = _ion_census(context)
     expected = round(water_eq * target / WATER_MOLARITY)
-    # Salt pairs: the ions beyond those that neutralize everything else.
-    neutralizing = abs(round(others)) if config.solvent.ions.neutralize else 0
-    pairs = (na + cl - neutralizing) // 2
+    # A charged co-solvent (SDS) comes with its own counter-ions; they are not salt.
+    co_solvent = _co_solvent_charge(context)
+    counter = abs(co_solvent)
+    # Salt pairs: the ions beyond those counter-ions and those that neutralize the rest.
+    neutralizing = abs(round(others - co_solvent)) if config.solvent.ions.neutralize else 0
+    pairs = (na + cl - counter - neutralizing) // 2
+    of_co_solvents = f"{counter} counter-ions of charged co-solvents, " if counter else ""
     detail = (
-        f"{pairs} NaCl pairs ({na} Na+, {cl} Cl-, {neutralizing} neutralizing) for {target} M "
-        f"in {water_eq:.0f} water-equivalents; expected {expected}"
+        f"{pairs} NaCl pairs ({na} Na+, {cl} Cl-: {of_co_solvents}{neutralizing} neutralizing) "
+        f"for {target} M in {water_eq:.0f} water-equivalents; expected {expected}"
     )
     status = "PASS" if abs(pairs - expected) <= 1 else "FAIL"
     return [Finding("ions.salt", "system", status, detail)]

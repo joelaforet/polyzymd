@@ -68,12 +68,14 @@ def package_version(module: str) -> str | None:
 def build_versions() -> dict[str, str | None]:
     """Return the versions of the OpenFF packages that parameterize a system, for either engine.
 
-    ``openff_toolkit_version`` and ``openff_interchange_version``
-    (:func:`package_version`), as ``build_provenance.json`` records them.
+    ``openff_toolkit_version``, ``openff_interchange_version`` and
+    ``openff_forcefields_version`` (:func:`package_version`), as
+    ``build_provenance.json`` records them.
     """
     return {
         "openff_toolkit_version": package_version("openff.toolkit"),
         "openff_interchange_version": package_version("openff.interchange"),
+        "openff_forcefields_version": package_version("openforcefields"),
     }
 
 

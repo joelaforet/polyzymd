@@ -373,3 +373,53 @@ def test_polymer_sequences_without_end_groups_counts_every_label() -> None:
     detail = _sequence_finding({"AABAB": 2, "BAAAA": 1}, end_groups=None)
     assert "monomer fractions A 0.667, B 0.333" in detail
     assert "caps" not in detail
+
+
+def test_counter_ions_of_a_charged_co_solvent_are_not_counted_as_salt() -> None:
+    """Two SDS anions bring their own Na+; a +1 protein takes one Cl-; 0.15 M is 5 pairs."""
+    from types import SimpleNamespace
+
+    from polyzymd.audit.checks.system import WATER_MASS, salt
+    from polyzymd.core.components import AtomRange, ChargeSource, Domain
+
+    charges = [1.0] + [-1.0] * 2 + [1.0] * 7 + [-1.0] * 6  # protein, 2 SDS, 7 Na+, 6 Cl-
+    system = openmm.System()
+    for _ in charges:
+        system.addParticle(0.0)
+    side = (1850 * WATER_MASS / 602.214076) ** (1 / 3)  # 1850 water-equivalents
+    realized = SimpleNamespace(
+        system=system,
+        index=SimpleNamespace(particle=[(q,) for q in charges]),
+        box_nm=np.eye(3) * side,
+    )
+
+    def component(type_, domains):
+        atoms = [i for d in domains for i in d.atom_indices()]
+        return SimpleNamespace(type=type_, domains=domains, atom_indices=lambda: atoms)
+
+    def domain(name, ranges):
+        return Domain(
+            name, tuple(AtomRange(a, b) for a, b in ranges), ("ff",), ChargeSource("library")
+        )
+
+    components = [
+        component("protein", [domain("protein", [(0, 1)])]),
+        component("solvent", [domain("co_solvent:sds", [(1, 2), (2, 3)])]),
+        component(
+            "ions",
+            [
+                domain("Na+", [(i, i + 1) for i in range(3, 10)]),
+                domain("Cl-", [(i, i + 1) for i in range(10, 16)]),
+            ],
+        ),
+    ]
+    ions = SimpleNamespace(ionic_strength=None, nacl_concentration=0.15, neutralize=True)
+    config = SimpleNamespace(
+        solvent=SimpleNamespace(ions=ions, box=SimpleNamespace(target_density=1.0))
+    )
+    (finding,) = salt(SimpleNamespace(config=config, realized=realized, components=components))
+    assert finding.status == "PASS"
+    assert finding.detail.startswith(
+        "5 NaCl pairs (7 Na+, 6 Cl-: 2 counter-ions of charged co-solvents, 1 neutralizing)"
+    )
+    assert finding.detail.endswith("expected 5")

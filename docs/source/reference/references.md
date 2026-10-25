@@ -49,11 +49,18 @@ more method, add an entry there and the reference here.
   Wang, Y., Wagner, J. R., Cole, D. J., Gilson, M. K., Shirts, M. R. and
   Mobley, D. L. (2024). The Open Force Field Initiative: open software and
   open science for molecular modeling. *Journal of Physical Chemistry B*,
-  128(29), 7043-7067. doi:10.1021/acs.jpcb.4c01558. `build_provenance.json`
-  records the versions (`openff_toolkit_version`,
-  `openff_interchange_version`), and "Methods to cite" names them. An OpenFF
-  Sage or Parsley file is cited with its paper and the openff-forcefields
-  release, doi:10.5281/zenodo.3473553.
+  128(29), 7043-7067. doi:10.1021/acs.jpcb.4c01558. An OpenFF Sage or
+  Parsley file is cited with its paper and the openff-forcefields release,
+  doi:10.5281/zenodo.3473553.
+
+  The three Zenodo DOIs above stand for every release of each package.
+  `build_provenance.json` records the versions a build used
+  (`openff_toolkit_version`, `openff_interchange_version`,
+  `openff_forcefields_version`), and "Methods to cite" gives each with the
+  DOI of that release, from a table PolyzyMD ships
+  (`polyzymd/data/openff_release_dois.json`, refreshed from Zenodo before
+  each PolyzyMD release). A version newer than the table is given with the
+  DOI of every release.
 
 - Martínez, L., Andrade, R., Birgin, E. G. and Martínez, J. M. (2009).
   PACKMOL: a package for building initial configurations for molecular
