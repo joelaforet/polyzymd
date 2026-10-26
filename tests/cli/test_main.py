@@ -2409,10 +2409,13 @@ class TestSubmitDryRunHardwareWarnings:
                 "l40s",
                 "--memory",
                 "8G",
+                "--reservation",
+                "a100_test",
             ],
         )
 
         assert result.exit_code == 0, result.output
+        assert "reservation a100_test" in result.output
         assert "memory 8G" in result.output
         assert "GPU type l40s" in result.output
         assert "auto (resolved per node at run time" in result.output

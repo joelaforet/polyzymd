@@ -414,6 +414,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
 | `--exclude` | - | No | from preset | SLURM `--exclude` override (e.g., "node01,node02"). Replaces the preset list; pass `""` to exclude nothing |
+| `--reservation` | - | No | from preset | SLURM `--reservation` (e.g. `a100_test` for Alpine's GPU test slices); `""` removes the preset's |
 | `--pixi-env` | - | No | engine-specific | Runtime for generated Slurm jobs; OpenMM `auto` uses a fixed environment for known-site presets, and GROMACS uses `build` |
 | `--force` | - | No | false | Skip duplicate-job check |
 | `--openff-logs` | - | No | false | Enable verbose OpenFF logs in job scripts |
@@ -802,6 +803,7 @@ replaces that one recorded value. A replicate without the record uses
 | `--time-limit` | - | No | recorded or preset | Override SLURM time limit |
 | `--gpu-type` | - | No | recorded or preset | GPU type for GRES |
 | `--exclude` | - | No | recorded or preset | SLURM `--exclude` override; replaces the preset list |
+| `--reservation` | - | No | recorded or preset | SLURM `--reservation`; `""` removes it |
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
 | `--pixi-env` | - | No | engine-specific | Runtime for the recovery job; OpenMM `auto` uses a fixed environment for known-site presets, and GROMACS uses `build` |

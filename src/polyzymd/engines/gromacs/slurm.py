@@ -430,6 +430,8 @@ class GromacsSlurmScriptGenerator:
             _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:
             _validate_gpu_type_value(self._config.gpu_type, "gpu_type")
+        if self._config.reservation:
+            _validate_gpu_type_value(self._config.reservation, "reservation")
         for mdp_name in equilibration_mdps:
             _validate_script_value(mdp_name, "equilibration_mdp")
 

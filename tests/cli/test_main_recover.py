@@ -2209,6 +2209,12 @@ class TestRecoverReusesSubmitSettings:
         assert "account otherlab" in result.output
         assert "qos (none)" in result.output
 
+    def test_dry_run_shows_a_given_reservation(self):
+        result = self._recover("--submit", "--dry-run", "--reservation", "a100_test")
+
+        assert result.exit_code == 0, result.output
+        assert "reservation a100_test" in result.output
+
     def test_dry_run_says_auto_is_resolved_on_the_node(self):
         result = self._recover("--submit", "--dry-run", "--pixi-env", "auto")
 

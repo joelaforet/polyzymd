@@ -886,6 +886,7 @@ def submit_daisy_chain(
     constraint: str | None = None,
     nodelist: str | None = None,
     exclude: str | None = None,
+    reservation: str | None = None,
     openff_logs: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
     """Submit daisy-chain simulation jobs from a YAML config.
@@ -938,6 +939,8 @@ def submit_daisy_chain(
     exclude : str or None
         Optional SLURM ``--exclude`` override.  Replaces (never appends to)
         the preset's excluded-node list.
+    reservation : str or None
+        Optional SLURM ``--reservation``; ``""`` removes the preset's.
     openff_logs : bool
         Enable verbose OpenFF logs in generated scripts.
 
@@ -982,6 +985,7 @@ def submit_daisy_chain(
         constraint=constraint,
         nodelist=nodelist,
         exclude=exclude,
+        reservation=reservation,
         email=email or None,
     )
     slurm_config = settings.slurm_config()

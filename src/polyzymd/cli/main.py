@@ -2059,7 +2059,8 @@ def _slurm_summary(slurm: "SlurmConfig") -> str:
         f"partition {slurm.partition}, qos {slurm.qos or '(none)'}, "
         f"time {slurm.time_limit}, account {slurm.account or '(none)'}, "
         f"memory {slurm.memory or '(site default)'}, GPUs {slurm.gpus}, "
-        f"GPU type {slurm.gpu_type or '(any)'}, exclude {slurm.exclude or '(none)'}"
+        f"GPU type {slurm.gpu_type or '(any)'}, exclude {slurm.exclude or '(none)'}, "
+        f"reservation {slurm.reservation or '(none)'}"
     )
 
 
@@ -2162,6 +2163,8 @@ def _print_gromacs_dry_run_details(
         colored_echo(f"    Nodelist:       {effective.nodelist}", phase=phase)
     if effective.exclude:
         colored_echo(f"    Exclude:        {effective.exclude}", phase=phase)
+    if getattr(effective, "reservation", None):
+        colored_echo(f"    Reservation:    {effective.reservation}", phase=phase)
     if effective.qos:
         colored_echo(f"    QoS:            {effective.qos}", phase=phase)
     colored_echo(phase=phase)
@@ -2305,6 +2308,11 @@ def _print_gromacs_dry_run_details(
     ),
 )
 @click.option(
+    "--reservation",
+    default=None,
+    help="SLURM reservation to run in (e.g. a100_test on Alpine); '' removes the preset's.",
+)
+@click.option(
     "--openff-logs",
     "submit_openff_logs",
     is_flag=True,
@@ -2355,6 +2363,7 @@ def submit(
     constraint: str | None,
     nodelist: str | None,
     exclude_nodes: str | None,
+    reservation: str | None,
     submit_openff_logs: bool,
     skip_build: bool,
     pixi_env: str | None,
@@ -2416,6 +2425,7 @@ def submit(
             constraint=constraint,
             nodelist=nodelist,
             exclude=exclude_nodes,
+            reservation=reservation,
             email=email or None,
         )
     except ValueError as exc:
@@ -2447,6 +2457,8 @@ def submit(
             f"Excluded nodes override: {exclude_nodes or '(none)'}",
             phase="workflow",
         )
+    if reservation is not None:
+        colored_echo(f"Reservation: {reservation or '(none)'}", phase="workflow")
     _ = skip_build
 
     if dry_run:
@@ -2620,6 +2632,7 @@ def submit(
             constraint=constraint,
             nodelist=nodelist,
             exclude=exclude_nodes,
+            reservation=reservation,
             openff_logs=submit_openff_logs,
         )
 
@@ -4391,6 +4404,11 @@ def _print_recover_dry_run(script_path: Path, slurm_config, pixi_env: str) -> No
     help="SLURM --exclude override; replaces the preset's list, '' excludes nothing.",
 )
 @click.option(
+    "--reservation",
+    default=None,
+    help="SLURM reservation to run in (e.g. a100_test on Alpine); '' removes the preset's.",
+)
+@click.option(
     "--constraint",
     default=None,
     help=(
@@ -4438,6 +4456,7 @@ def recover(
     time_limit: str | None,
     gpu_type: str | None,
     exclude_nodes: str | None,
+    reservation: str | None,
     constraint: str | None,
     nodelist: str | None,
     pixi_env: str | None,
@@ -4565,6 +4584,7 @@ def recover(
         "constraint": constraint,
         "nodelist": nodelist,
         "exclude": exclude_nodes,
+        "reservation": reservation,
         "email": email or None,
     }
     recorded = read_submit_settings(replicate_dir)

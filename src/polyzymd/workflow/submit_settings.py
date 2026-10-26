@@ -34,6 +34,7 @@ OVERRIDE_FIELDS = (
     "constraint",
     "nodelist",
     "exclude",
+    "reservation",
     "email",
 )
 # Fields whose empty value removes the ``#SBATCH`` line. A job always needs a
@@ -47,6 +48,7 @@ _REMOVABLE = {
     "constraint": None,
     "nodelist": None,
     "exclude": None,
+    "reservation": None,
 }
 
 

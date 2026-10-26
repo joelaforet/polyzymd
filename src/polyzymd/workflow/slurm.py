@@ -353,6 +353,8 @@ class SlurmConfig:
         constraint: Optional SLURM ``--constraint`` expression. Supports
             boolean expressions with ``|`` (OR) and ``&`` (AND), such as
             ``"A40|A100"``.
+        reservation: Optional SLURM ``--reservation`` name, for nodes a site
+            reserves (Alpine's GPU test slices need ``a100_test``).
     """
 
     partition: str = "aa100"
@@ -371,6 +373,7 @@ class SlurmConfig:
     gpu_type: Optional[str] = None
     gpu_directive_style: str = "gres"
     constraint: Optional[str] = None
+    reservation: Optional[str] = None
 
     @classmethod
     def from_preset(cls, preset: PresetType, email: str = "") -> "SlurmConfig":
@@ -502,6 +505,7 @@ def sbatch_lines(config: SlurmConfig, mail_type: str = "FAIL") -> dict[str, str]
         "exclude_line": line("exclude", config.exclude),
         "nodelist_line": line("nodelist", config.nodelist),
         "constraint_line": line("constraint", config.constraint),
+        "reservation_line": line("reservation", config.reservation),
     }
 
 
@@ -675,6 +679,8 @@ class SlurmScriptGenerator:
             _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:
             _validate_gpu_type_value(self._config.gpu_type, "gpu_type")
+        if self._config.reservation:
+            _validate_gpu_type_value(self._config.reservation, "reservation")
 
         return render_package_template(
             _WORKFLOW_TEMPLATE_PACKAGE,
