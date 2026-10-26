@@ -28,12 +28,6 @@ PolyzyMD
 
             Run your first simulation
 
-         .. button-ref:: get_started/evaluate
-            :color: primary
-            :outline:
-
-            Evaluating PolyzyMD?
-
 How PolyzyMD works
 ------------------
 

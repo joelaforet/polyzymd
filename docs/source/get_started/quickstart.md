@@ -327,8 +327,11 @@ and the hardware change.
 
 ## Next steps
 
-- **Evaluating PolyzyMD?** {doc}`evaluate` lists, in order, what to look at
-  next: the build record, the physics audit, the tests and the statistics.
+- **What PolyzyMD checked.** The physics audit table in
+  `build_provenance.md` compared every term of the build with the force
+  fields and charges the config names. {doc}`../explanation/physics_audit`
+  explains how, and {doc}`../reference/validation` compares the energies of
+  one build on OpenMM and GROMACS.
 - **Your own protein.** Follow {doc}`../tutorials/own_system`. It starts
   from `polyzymd study add-condition --new`, which writes a template config.
 - **Your NVIDIA GPU.** Set `openmm.platform: CUDA` before the first run of

@@ -134,12 +134,12 @@ Run more replicates of the quickstart and measure their RMSF.
 Add a condition with a polymer and compare it with water.
 :::
 
-:::{grid-item-card} Evaluate PolyzyMD
-:link: evaluate
+:::{grid-item-card} Extend PolyzyMD
+:link: ../contributor_guide/architecture
 :link-type: doc
 
-For reviewers: one run, the build record, the audit and the statistics, in
-order.
+How the code is organized, and how to add your own analysis, co-solvent or
+check, with the tests that cover each part.
 :::
 
 :::{grid-item-card} Start from an example
@@ -167,5 +167,4 @@ Find how-to guides for polymers, restraints, GROMACS, SLURM and more.
 Install PolyzyMD with pixi <installation>
 Run your first simulation <quickstart>
 examples
-evaluate
 ```

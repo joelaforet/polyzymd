@@ -35,6 +35,32 @@ pixi run -e build make -C docs clean html
 Run the narrowest useful subset for small changes, then run the broader set
 before opening a PR if your change touches core workflows.
 
+## What the tests check
+
+Know which tests guard the part you change, and add to them:
+
+| Guarantee | Tests |
+|---|---|
+| Each physics audit check fails on a build broken in that way | `tests/audit/` (see {ref}`the table on the audit page <physics-audit-tests>`) |
+| OpenMM and GROMACS exports hold the same parameters and settings | `tests/audit/test_components_and_engines.py`, `tests/audit/test_engine_parity.py` |
+| GROMACS applies the staged position restraints PolyzyMD writes | `tests/exporters/test_gromacs_staged_restraints.py` |
+| The quickstart runs end to end on both engines | `tests/test_quickstart_example.py` |
+| Every shipped example config validates (and, with `POLYZYMD_RUN_EXAMPLES=1`, runs) | `tests/test_examples.py` |
+| Seeds depend only on the replicate and the phase | `tests/simulation/test_seeds.py` |
+| Statistics give known answers (statistical inefficiency, intervals, tests) | `tests/analyses/scientific/`, `tests/analyses/shared/test_inferential_statistics.py` |
+| Freezing a study or project | `tests/analyses/test_study_freeze.py`, `tests/analyses/test_project_freeze.py` |
+
+The GitHub Actions workflows run them
+([all runs](https://github.com/joelaforet/polyzymd/actions)):
+
+- `.github/workflows/engine-parity.yml`: the audit and engine parity tests,
+  with GROMACS installed, on every pull request.
+- `.github/workflows/full-test.yml`: the whole test suite on Linux and macOS,
+  for pull requests to `main` and `dev` and once a week.
+- `.github/workflows/ci.yml`: lint, type check, package build, install test
+  and a docs build with warnings as errors, for pull requests to `main` and
+  `dev`.
+
 ## A concrete example: add a new co-solvent
 
 One common contribution is extending the built-in co-solvent library.

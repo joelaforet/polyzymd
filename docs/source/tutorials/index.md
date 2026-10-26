@@ -27,16 +27,16 @@ Run GROMACS simulations and the GROMACS and OpenMM reference.
 :link: ../get_started/installation
 :link-type: doc
 
-Read the HPC part of the installation, do tutorial 1 on a laptop or the
-login node, then read Run on a SLURM cluster.
+Read the HPC part of the installation, do tutorial 1 on a laptop or in a
+compute job, then read Run on a SLURM cluster.
 :::
 
-:::{grid-item-card} Evaluating PolyzyMD for review
-:link: ../get_started/evaluate
+:::{grid-item-card} Extending PolyzyMD
+:link: ../contributor_guide/index
 :link-type: doc
 
-A short path through one run, the build record, the physics audit and the
-statistics.
+Do tutorials 1 to 3, then read the architecture and add your own analysis,
+co-solvent or check, as the contributor guide shows.
 :::
 
 ::::

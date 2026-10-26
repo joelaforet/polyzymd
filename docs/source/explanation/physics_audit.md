@@ -210,7 +210,7 @@ person makes, faster and at a larger scale. The audit gives an agent and the
 person who supervises it the same guarantee: what ran is what the config says,
 or the run did not start. Each refusal names the check, the component and the
 fix, so an agent can act on it. A deliberate departure must be written into
-the config with a reason, where a reviewer sees it. `polyzymd status
+the config with a reason, where anyone who reads the config sees it. `polyzymd status
 --format agent` reports a run that diverged from its build.
 
 ## Related pages
