@@ -3242,6 +3242,8 @@ class TestRunWithoutBuildEnvironment:
         monkeypatch.setattr("polyzymd.cli.main._missing_build_modules", lambda: ["rdkit"])
         config = TestRunReusesBuild._config(tmp_path)
 
+        # Outside `pixi run` the command names the environment only.
+        monkeypatch.delenv("PIXI_PROJECT_MANIFEST", raising=False)
         with pytest.raises(ArtifactIntegrityError) as raised:
             _run_openmm_impl(config, replicate=3, config_path="/p/config.yaml")
 
@@ -3251,6 +3253,15 @@ class TestRunWithoutBuildEnvironment:
         assert "pixi run -e build polyzymd build -c /p/config.yaml -r 3" in message
         assert not (tmp_path / "run_3").exists()
         run_initial_segment.assert_not_called()
+
+        # Under `pixi run` it also names the workspace, so it works from any folder.
+        monkeypatch.setenv("PIXI_PROJECT_MANIFEST", "/w/pixi.toml")
+        with pytest.raises(ArtifactIntegrityError) as raised:
+            _run_openmm_impl(config, replicate=3, config_path="/p/config.yaml")
+        assert (
+            "pixi run --manifest-path /w/pixi.toml -e build polyzymd build -c /p/config.yaml -r 3"
+            in str(raised.value)
+        )
 
     @patch("polyzymd.cli.main._run_initial_segment")
     def test_changed_build_says_restore_or_rebuild(
