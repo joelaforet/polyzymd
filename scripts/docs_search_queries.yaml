@@ -217,3 +217,7 @@
   expect: [how_to/plot_stored_results]
 - query: results as numpy array
   expect: [how_to/plot_stored_results, how_to/study_yaml]
+
+# GROMACS
+- query: gromacs limitations
+  expect: [how_to/run_gromacs, reference/gromacs_openmm]
