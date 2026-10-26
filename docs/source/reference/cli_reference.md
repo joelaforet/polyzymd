@@ -399,7 +399,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 |--------|-------|----------|---------|-------------|
 | `--config` | `-c` | Yes | - | Path to YAML configuration file |
 | `--replicates` | `-r` | No | "1" | Replicate range (e.g., "1-5", "1,3,5") |
-| `--preset` | - | No | aa100 | SLURM partition preset; `generic-gpu` sets no account or QoS, for any cluster |
+| `--preset` | - | No | aa100 | SLURM partition preset; `generic-gpu` is a starting point for other clusters (partition `gpu`, no account or QoS): give your site's `--partition` and `--account` |
 | `--engine` | - | No | from config or openmm | Simulation engine: `gromacs` or `openmm` |
 | `--email` | - | No | "" | Email for job notifications |
 | `--scratch-dir` | - | No | from config | Override scratch directory |

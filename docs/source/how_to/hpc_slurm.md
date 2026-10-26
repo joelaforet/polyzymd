@@ -174,7 +174,7 @@ A preset sets the partition, QoS, account and time limit of each job.
 | `blanca-shirts` | `blanca,blanca-shirts` | `preemptable` | 23:59:59 | CU Boulder Blanca condo nodes |
 | `blanca-chbe-rdi` | `blanca,blanca-chbe-rdi` | `preemptable` | 23:59:59 | CU Boulder Blanca condo nodes |
 | `bridges2` | `GPU-shared` | none | 24:00:00 | PSC Bridges-2 GPU nodes |
-| `generic-gpu` | `gpu` | none | 23:59:59 | Any SLURM cluster with NVIDIA GPUs; no account |
+| `generic-gpu` | `gpu` | none | 23:59:59 | A starting point for any other cluster with NVIDIA GPUs: no account, 3G memory, 1 GPU of any type. Give your site's `--partition` and `--account` (and `--qos` or `--gpu-type` if it needs them) |
 | `testing` | `aa100` | `gpu-testing` | 0:05:59 | Short tests on an A100 slice (`a100_3g.20gb`, reservation `a100_test`) of CU Boulder Alpine |
 
 The Alpine presets (`aa100`, `al40` and `testing`) set the account
