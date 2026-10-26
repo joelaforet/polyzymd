@@ -132,8 +132,9 @@ warning: the runs go into runs/trpcage/water unless you set scratch_directory in
 next: commit, and run polyzymd study check
 ```
 
-`add-condition` copies the config and `trpcage.pdb` into
-`trpcage/conditions/water/`, and lists the condition in `trpcage/study.yaml`.
+`add-condition` copies the config into `trpcage/conditions/water/` and
+`trpcage.pdb` into `trpcage/conditions/water/structures/`, and lists the
+condition in `trpcage/study.yaml`.
 The copy writes its simulations into `runs/trpcage/water/` of the project.
 
 :::{warning}

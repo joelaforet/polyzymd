@@ -129,7 +129,9 @@ The builder does these steps:
 
 1. It computes the periodic cell from the protein and substrate. The edge is
    their diameter plus 2 x (`packing.padding` of the polymer solute +
-   `solvent.box.padding`).
+   `solvent.box.padding`). Expect a much larger box than without polymers:
+   with the default 2 nm polymer padding, the quickstart's Trp-cage in water
+   (6,138 atoms) became 42,323 atoms with two SBMA-EGMA 5-mers.
 2. It centers the bounding box of the protein and substrate in the rectangular
    brick of that cell. It holds them fixed.
 3. It packs the chains inside the brick and inside a sphere around the solute.

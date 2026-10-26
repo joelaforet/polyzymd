@@ -8,6 +8,9 @@ without manual job dependencies.
 ## Before you start
 
 - Validate your config with `polyzymd validate -c config.yaml`.
+- Set `openmm.platform: CUDA` in the config (the quickstart example ships
+  with `CPU`). The OpenMM job scripts need an NVIDIA GPU; `submit --dry-run`
+  warns when the config still says `CPU`.
 - Choose a SLURM preset (see Step 3).
 
 If you do not have a config yet, do {doc}`../get_started/quickstart` first.

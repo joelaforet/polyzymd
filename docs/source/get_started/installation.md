@@ -127,15 +127,24 @@ Before you submit, on a cluster:
 - **You do not need a CUDA module.** Each `sim-cuda-*` environment brings its
   own CUDA runtime. The GPU node needs only an NVIDIA driver new enough for
   it.
-- **Install the environment your jobs use on the login node first.** The job
+- **Install the environment your jobs use before you submit.** The job
   script activates it with `pixi shell-hook`, which would install a missing
   environment on the compute node, and compute nodes often have no internet.
   With `--pixi-env auto`, install all three `sim-cuda-*` environments.
+  Installing downloads and unpacks several GB: run `pixi install` in a
+  compile or compute job if your site asks for that (on CU Boulder Alpine,
+  the `acompile` partition; see {doc}`../how_to/site_cu_boulder`).
 - **Mind your disk quota.** The `build` environment takes about 4 GB, and the
-  pixi package cache several GB more. The environments live in `.pixi/envs/`
-  of the clone, so clone PolyzyMD to project storage if your home quota is
-  small, and point the cache there too, for example with
-  `export PIXI_CACHE_DIR=/projects/$USER/pixi-cache` in `~/.bashrc`.
+  pixi package cache several GB more (a `build` environment, the three
+  `sim-cuda-*` environments and the cache took 11 GB on Alpine). The
+  environments live in `.pixi/envs/` of the clone, so clone PolyzyMD to
+  project storage if your home quota is small, and point the cache there too.
+- **Set cache locations in `~/.bashrc`, not only in your shell.** Jobs start
+  from your login profile (`--export=NONE`), not from the shell you submit
+  from, so a `PIXI_CACHE_DIR` you exported by hand does not reach them. Put
+  `export PIXI_CACHE_DIR=/projects/$USER/pixi-cache` (your project storage)
+  in `~/.bashrc`. A job also writes into `XDG_CACHE_HOME` if your profile
+  sets it.
 - **Make `pixi` available to job shells.** `polyzymd submit` starts each job
   with `sbatch --export=NONE`, and the job script calls `pixi` by name. Put
   `export PATH="$HOME/.pixi/bin:$PATH"` in `~/.bashrc` *above* any line that
