@@ -37,26 +37,10 @@ jobs:
           name: dist
           path: dist/
 
-  publish-pypi:
-    name: Publish to PyPI
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ !contains(github.ref_name, '-') }}
-    environment:
-      name: pypi
-      url: https://pypi.org/p/polyzymd
-    permissions:
-      id-token: write  # Required for trusted publishing
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        # Uses trusted publishing - configure at pypi.org/manage/project/polyzymd/settings/publishing/
+  # No PyPI upload: PolyzyMD builds polymers with a fork of mBuild that PyPI
+  # cannot depend on, so a pip install would build no polymer. PolyzyMD is
+  # installed with pixi (docs: get_started/installation). PyPI keeps 1.2.1 and
+  # earlier.
 
   create-release:
     name: Create GitHub Release
