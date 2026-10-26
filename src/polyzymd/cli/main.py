@@ -145,6 +145,39 @@ def suppress_openff_logs() -> None:
     root_logger.addFilter(OpenFFFilter())
 
 
+class _PintRedefinitionFilter(logging.Filter):
+    """Drop pint's notice that OpenFF Units redefines ``[electric_potential]``."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.getMessage().startswith("Redefining '[electric_potential]'")
+
+
+def silence_known_library_warnings() -> None:
+    """Hide two known, harmless notices that every command printed.
+
+    - pint logs ``Redefining '[electric_potential]'`` at WARNING when
+      OpenFF Units adds its own definition of that dimension to the unit
+      registry; the definition is the one OpenFF intends.
+    - Interchange's ``_clear_caches`` walks every live object and reads its
+      ``__module__``; on ``torch.distributed.reduce_op`` that raises torch's
+      deprecation ``FutureWarning``. PolyzyMD never uses that torch name.
+
+    Each filter matches that one message only; other pint and torch warnings
+    still show.
+    """
+    import warnings
+
+    pint_logger = logging.getLogger("pint.util")
+    if not any(isinstance(f, _PintRedefinitionFilter) for f in pint_logger.filters):
+        pint_logger.addFilter(_PintRedefinitionFilter())
+    warnings.filterwarnings(
+        "ignore",
+        message=r"`torch\.distributed\.reduce_op` is deprecated",
+        category=FutureWarning,
+        module=r"openff\.interchange",
+    )
+
+
 def enable_openff_logs() -> None:
     """Re-enable OpenFF log messages for debugging.
 
@@ -162,6 +195,7 @@ def enable_openff_logs() -> None:
 
 # Suppress OpenFF logs by default
 suppress_openff_logs()
+silence_known_library_warnings()
 
 
 def _resolve_replicates_option(

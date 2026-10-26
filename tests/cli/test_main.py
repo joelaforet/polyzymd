@@ -3481,3 +3481,31 @@ class TestGromacsStopMessages:
             "Running energy minimization (mdrun)", tmp_path
         )
 
+
+def test_known_library_notices_are_silenced_and_others_are_not(caplog) -> None:
+    """pint's electric_potential redefinition and Interchange's torch FutureWarning are hidden."""
+    import logging
+    import warnings
+
+    from polyzymd.cli.main import silence_known_library_warnings
+
+    torch_message = (
+        "`torch.distributed.reduce_op` is deprecated, please use `torch.distributed.ReduceOp` "
+        "instead"
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        silence_known_library_warnings()
+        for module in ("openff.interchange.components.interchange", "mypackage"):
+            warnings.warn_explicit(torch_message, FutureWarning, "x.py", 1, module=module)
+        warnings.warn_explicit("other", FutureWarning, "x.py", 1, module="openff.interchange")
+    assert [(str(w.message)[:5], w.filename) for w in caught] == [
+        ("`torc", "x.py"),
+        ("other", "x.py"),
+    ]
+
+    pint = logging.getLogger("pint.util")
+    with caplog.at_level(logging.WARNING):
+        pint.warning("Redefining '[electric_potential]' (<class 'X'>)")
+        pint.warning("Redefining '[length]' (<class 'X'>)")
+    assert [r.getMessage() for r in caplog.records] == ["Redefining '[length]' (<class 'X'>)"]
