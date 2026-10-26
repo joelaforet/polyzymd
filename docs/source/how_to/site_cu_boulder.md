@@ -41,9 +41,9 @@ yourself, use these values:
 
 | Flag | Alpine | Blanca |
 |------|--------|--------|
-| `--partition` | `amilan` (CPU), `aa100` or `ami100` (GPU) | `blanca-<group>`, for example `blanca-shirts` |
-| `--account` | Your allocation | The same as the partition |
-| `--qos` | `normal` | The same as the partition, or `preemptable` |
+| `--partition` | `acpu` (CPU), `aa100` or `al40` (GPU) | `blanca-<group>`, for example `blanca-shirts` |
+| `--account` | `ucb-general`, or your lab allocation | The same as the partition |
+| `--qos` | `cpu-normal` (CPU), `gpu-normal` (GPU) | The same as the partition, or `preemptable` |
 
 The simulation presets `blanca-shirts` and `blanca-chbe-rdi` use the
 `preemptable` QoS. The owner's jobs can then preempt a job at any moment.
@@ -305,7 +305,8 @@ pixi run -e build polyzymd submit \
     -c config.yaml \
     --engine gromacs \
     --preset aa100 \
-    --partition amilan \
+    --partition acpu \
+    --qos cpu-normal \
     --time-limit 24:00:00 \
     --replicates 1-3
 ```

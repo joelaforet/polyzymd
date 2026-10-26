@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 import polyzymd as pz
@@ -110,8 +111,8 @@ class TestInit:
         self, tmp_path: Path, sources: dict[str, Path]
     ) -> None:
         root = _study(tmp_path, sources, git=False)
-        text = (root / "conditions/polymer/config.yaml").read_text()
-        assert "pdb_path: structures/" in text
+        copied_config = yaml.safe_load((root / "conditions/polymer/config.yaml").read_text())
+        assert copied_config["solutes"][0]["pdb_path"].startswith("structures/")
         copied = list((root / "conditions/polymer/structures").iterdir())
         assert len(copied) == 1 and copied[0].suffix == ".pdb"
         # The copy must still load after the original inputs are gone.

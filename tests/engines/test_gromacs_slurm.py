@@ -625,6 +625,30 @@ def test_nodelist_bracket_hostlist_rendered(monkeypatch) -> None:
     assert "#SBATCH --nodelist=node[01-04]" in script
 
 
+def test_reservation_is_rendered_and_validated(monkeypatch) -> None:
+    """A reservation (Alpine's GPU test slices) is written as #SBATCH --reservation."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    def script(reservation: str | None) -> str:
+        return GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(reservation=reservation), gmx_binary="gmx"
+        ).generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+    assert "#SBATCH --reservation=a100_test" in script("a100_test")
+    assert "--reservation" not in script(None)
+    with pytest.raises(ValueError, match="reservation"):
+        script("a100;rm")
+
+
 def test_mail_line_uses_fail_end(monkeypatch) -> None:
     """GROMACS SLURM mail line should use FAIL,END notifications."""
     monkeypatch.setattr(

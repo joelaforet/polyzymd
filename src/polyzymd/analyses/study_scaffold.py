@@ -205,9 +205,11 @@ def copy_condition(
     ``runs``; where the existing runs are goes into ``data.local.yaml``
     instead (:func:`record_data_location`). A polymer ``cache_directory`` is
     left out so the default is used. The config hash leaves these out, so
-    stored results still match. When nothing but the output directories
-    changes, as in a copy of another condition of the study, the text is
-    kept with its comments; otherwise the config is written without them.
+    stored results still match. The text is kept with its comments and
+    indentation, and only the lines of the copied paths, the output
+    directories and the name change. A config whose changed lines cannot be
+    found (a path written in flow style) is written again, with list items
+    indented under their key and without comments.
     With ``name``, the top-level ``name:`` of the copy is set to it, as
     :func:`new_condition` sets the template's name from the folder.
 
@@ -265,6 +267,7 @@ def copy_condition(
 
     rewritten = walk(None, data)
     polymers = rewritten.get("polymers")
+    dropped_cache = isinstance(polymers, dict) and "cache_directory" in polymers
     if isinstance(polymers, dict):
         polymers.pop("cache_directory", None)
     output = rewritten.setdefault("output", {})
@@ -274,15 +277,23 @@ def copy_condition(
     if name is not None:
         rewritten["name"] = name
     target = folder / "config.yaml"
-    # Keep the original text, comments included, when only the output lines change.
+    # Keep the original text, comments and indentation included: change only
+    # the lines of the copied paths, the output folders and the name.
     lines = config.read_text().splitlines(keepends=True)
     while lines and lines[0].startswith(("# Copied by polyzymd", "#   ")):
         lines.pop(0)  # the header of an earlier copy
-    kept = _with_output_lines("".join(lines), rewritten.get("output"))
+    kept = _with_path_lines("".join(lines), _changed_paths(raw, rewritten, PATH_KEYS))
+    if dropped_cache:
+        kept = re.sub(r"^[ \t]+cache_directory:[^\n]*\n", "", kept, count=1, flags=re.MULTILINE)
+    kept = _with_output_lines(kept, rewritten.get("output"))
     if name is not None:
         kept = _with_name_line(kept, name)
-    if yaml.safe_load(kept) != rewritten:
-        kept = yaml.safe_dump(rewritten, sort_keys=False)
+    try:
+        same = yaml.safe_load(kept) == rewritten
+    except yaml.YAMLError:
+        same = False
+    if not same:
+        kept = yaml.dump(rewritten, Dumper=_indented_list_dumper(), sort_keys=False)
     where = f"{os.path.relpath(runs, folder.resolve())} (relative to this file)"
     note = textwrap.wrap(RUNS_WARNING.format(runs=where) + ".", 74)
     target.write_text(
@@ -298,6 +309,49 @@ def copy_condition(
             hint="Check that the original config loads with polyzymd validate.",
         ) from exc
     return copied, missing
+
+
+def _changed_paths(old: Any, new: Any, keys: frozenset[str], key: str | None = None) -> list:
+    """List ``(key, old, new)`` for each path value of ``keys`` that differs, in file order."""
+    if isinstance(old, dict) and isinstance(new, dict):
+        return [c for k, v in old.items() if k in new for c in _changed_paths(v, new[k], keys, k)]
+    if isinstance(old, list) and isinstance(new, list):
+        return [c for a, b in zip(old, new) for c in _changed_paths(a, b, keys, key)]
+    if key in keys and isinstance(old, str) and isinstance(new, str) and old != new:
+        return [(key, old, new)]
+    return []
+
+
+def _with_path_lines(text: str, changes: list) -> str:
+    """Return ``text`` with each ``key: old`` line of ``changes`` set to the new path.
+
+    A value written in flow style (``{pdb_path: x}``) is not found; the caller
+    then writes the whole config instead.
+    """
+    import json
+
+    for key, old, new in changes:
+        quoted = "|".join(re.escape(form) for form in (json.dumps(old), f"'{old}'", old))
+        text = re.sub(
+            rf"^([ \t]*(?:-[ \t]+)?{re.escape(key)}:[ \t]*)(?:{quoted})([ \t]+#.*)?[ \t]*$",
+            lambda match, new=new: f"{match.group(1)}{json.dumps(new)}{match.group(2) or ''}",
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    return text
+
+
+def _indented_list_dumper() -> type:
+    import yaml
+
+    class Dumper(yaml.SafeDumper):
+        """Indent list items under their key, as the examples and tutorials do."""
+
+        def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
+            return super().increase_indent(flow, False)
+
+    return Dumper
 
 
 def _with_name_line(text: str, name: str) -> str:
@@ -332,12 +386,34 @@ def _with_output_lines(text: str, output: Any) -> str:
             comment = ""
         return f"{match.group(1)}{match.group(2)}: {written}{comment}"
 
-    return re.sub(
+    text = re.sub(
         r"^(\s+)(projects_directory|scratch_directory):[^#\n]*?(\s+#.*)?$",
         value,
         text,
         flags=re.MULTILINE,
     )
+    # A key the config leaves out (scratch_directory, usually) goes under output:.
+    missing = [
+        key
+        for key in ("projects_directory", "scratch_directory")
+        if key in output and not re.search(rf"^\s+{key}:", text, flags=re.MULTILINE)
+    ]
+    if not missing:
+        return text
+    block = re.search(r"^output:[ \t]*(#.*)?\n(?:([ \t]+)\S)?", text, flags=re.MULTILINE)
+    if block is None:
+        text = text if text.endswith("\n") or not text else text + "\n"
+        text += "output:\n"
+        at, indent = len(text), "  "
+    else:
+        at, indent = text.index("\n", block.start(0)) + 1, block.group(2) or "  "
+    added = "".join(
+        f"{indent}{key}: "
+        + ("null" if output[key] is None else json.dumps(str(output[key])))
+        + "\n"
+        for key in missing
+    )
+    return text[:at] + added + text[at:]
 
 
 def record_data_location(study_root: Path, label: str, config: Path) -> None:

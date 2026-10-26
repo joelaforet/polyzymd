@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
 from polyzymd.cli.env_warnings import (
@@ -27,6 +28,7 @@ def _make_submission_config(engine: str = "openmm") -> SimpleNamespace:
             get_slurm_logs_directory=lambda: Path("/tmp/polyzymd-slurm-logs"),
         ),
         require_buildable=lambda engine=None, inputs=True: None,
+        get_working_directory=lambda replicate: Path("/nonexistent/polyzymd-run") / str(replicate),
     )
 
 
@@ -301,3 +303,20 @@ def test_no_warning_when_the_user_site_packages_is_disabled(monkeypatch, tmp_pat
 
     assert result.exit_code == 0, result.output
     assert "user install" not in result.stderr
+
+
+@pytest.mark.parametrize(("env", "expected"), [("build", 0), ("sim-cuda-12-6", 1)])
+def test_analyze_warns_at_most_once_and_not_in_build(
+    monkeypatch, tmp_path, env: str, expected: int
+) -> None:
+    """build holds the analysis tools; --project runs analyze once per study but warns once."""
+    from polyzymd.analyses.project_scaffold import create_project
+
+    project = create_project(tmp_path / "paper", ["first", "second"], git=False).root
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", env)
+    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
+
+    result = CliRunner().invoke(cli, ["analyze", "--project", str(project)])
+
+    assert "== study second" in result.output
+    assert result.stderr.count("Warning: polyzymd analyze") == expected

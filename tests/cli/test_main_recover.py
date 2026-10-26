@@ -183,6 +183,32 @@ class TestRecoverStatusReport:
     @patch("polyzymd.simulation.progress.save_progress")
     @patch("polyzymd.simulation.progress.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_a_finished_run_whose_config_asks_for_more_is_extendable(
+        self, mock_from_yaml, mock_load, mock_save, tmp_path
+    ):
+        """Production completed 10000 steps; the config now asks for 25000: as status says."""
+        from polyzymd.simulation.progress import SimulationStatus
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        mock_from_yaml.return_value = _mock_sim_config(working_dir)
+        progress = _mock_progress(total_steps=25000, completed_steps=10000, n_segments=1)
+        progress.status = SimulationStatus.COMPLETED
+        mock_load.return_value = progress
+
+        result = CliRunner().invoke(cli, ["recover", "-c", str(config_file), "-r", "1"])
+
+        assert result.exit_code == 0, result.output
+        assert "Status: extendable" in result.output
+        assert "Status: completed" not in result.output
+        assert f"polyzymd run -c {config_file} -r 1" in result.output
+        assert f"polyzymd recover -c {config_file} -r 1 --submit" in result.output
+
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_submit_refused_while_stop_file_present(
         self, mock_from_yaml, mock_load, mock_save, tmp_path
     ):
@@ -401,7 +427,10 @@ class TestRecoverSkipBuild:
     @pytest.fixture(autouse=True)
     def _sbatch(self):
         submitted = MagicMock(returncode=0, stdout="Submitted batch job 1", stderr="")
-        with patch("subprocess.run", return_value=submitted) as run:
+        with (
+            patch("subprocess.run", return_value=submitted) as run,
+            patch("polyzymd.workflow.slurm_submit.shutil.which", return_value="/bin/sbatch"),
+        ):
             yield run
 
     @patch("polyzymd.workflow.slurm._discover_manifest_path", return_value="/fake/pixi.toml")
@@ -2140,3 +2169,111 @@ def test_a_continuation_with_other_dynamics_than_the_config_warns(tmp_path, monk
     err = capsys.readouterr().err
     assert "segment 1 continues the dynamics the chain started with (NPT, LangevinMiddle" in err
     assert "not the config's production (NVT, Langevin, friction 0.5/ps)" in err
+
+
+class TestRecoverReusesSubmitSettings:
+    """recover --submit replays the preset and overrides that submit recorded."""
+
+    @pytest.fixture(autouse=True)
+    def _patches(self, tmp_path):
+        from polyzymd.workflow.submit_settings import SubmitSettings, write_submit_settings
+
+        self.config_file = tmp_path / "config.yaml"
+        self.config_file.write_text("name: test")
+        self.working_dir = tmp_path / "work"
+        self.working_dir.mkdir()
+        write_submit_settings(
+            self.working_dir,
+            SubmitSettings.from_options(
+                "aa100", pixi_env="sim-cuda-12-0", account="smithlab", qos="", gpu_type="l40s"
+            ),
+        )
+        with (
+            patch(
+                "polyzymd.config.schema.SimulationConfig.from_yaml",
+                return_value=_mock_sim_config_for_submit(self.working_dir),
+            ),
+            patch(
+                "polyzymd.simulation.progress.load_or_scan_progress",
+                return_value=_mock_progress(total_steps=10000000, completed_steps=5000000),
+            ),
+            patch("polyzymd.simulation.progress.save_progress"),
+            patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[]),
+            patch(
+                "polyzymd.workflow.slurm._discover_manifest_path", return_value="/fake/pixi.toml"
+            ),
+        ):
+            yield
+
+    def _recover(self, *extra):
+        return CliRunner().invoke(cli, ["recover", "-c", str(self.config_file), "-r", "1", *extra])
+
+    def test_resume_hint_needs_no_preset(self):
+        result = self._recover()
+
+        assert result.exit_code == 0, result.output
+        assert f"polyzymd recover -c {self.config_file} -r 1 --submit\n" in result.output
+        assert "--account smithlab --qos ''" in result.output
+        assert "PRESET" not in result.output
+
+    def test_dry_run_uses_the_recorded_account_qos_and_gpu_type(self):
+        result = self._recover("--submit", "--dry-run")
+
+        assert result.exit_code == 0, result.output
+        assert "memory 3G" in result.output
+        assert "Pixi env: sim-cuda-12-0" in result.output
+        assert "sbatch --export=NONE" in result.output
+        assert "account smithlab" in result.output
+        assert "qos (none)" in result.output
+        assert "GPU type l40s" in result.output
+        assert "ucb-general" not in result.output
+
+    def test_a_given_flag_replaces_one_recorded_value(self):
+        result = self._recover("--submit", "--dry-run", "--account", "otherlab")
+
+        assert result.exit_code == 0, result.output
+        assert "account otherlab" in result.output
+        assert "qos (none)" in result.output
+
+    def test_dry_run_shows_a_given_reservation(self):
+        result = self._recover("--submit", "--dry-run", "--reservation", "a100_test")
+
+        assert result.exit_code == 0, result.output
+        assert "reservation a100_test" in result.output
+
+    def test_dry_run_says_auto_is_resolved_on_the_node(self):
+        result = self._recover("--submit", "--dry-run", "--pixi-env", "auto")
+
+        assert result.exit_code == 0, result.output
+        assert "Pixi env: auto (resolved per node at run time" in result.output
+
+    def test_another_preset_drops_the_record(self):
+        result = self._recover("--submit", "--dry-run", "--preset", "bridges2")
+
+        assert result.exit_code == 0, result.output
+        assert "are not used" in result.output
+        assert "smithlab" not in result.output.split("are not used", 1)[1]
+
+    def test_the_submitted_job_uses_and_keeps_the_settings(self):
+        submitted = MagicMock(returncode=0, stdout="Submitted batch job 7", stderr="")
+        with (
+            patch("subprocess.run", return_value=submitted) as run,
+            patch("polyzymd.workflow.slurm_submit.shutil.which", return_value="/bin/sbatch"),
+        ):
+            result = self._recover("--submit", "--exclude", "n1,n2")
+
+        assert result.exit_code == 0, result.output
+        script_path = self.working_dir / "recovery_scripts" / "recover_rep1.sh"
+        # Submitted as polyzymd submit submits: a clean environment, the excluded nodes.
+        assert run.call_args[0][0] == [
+            "sbatch",
+            "--export=NONE",
+            "--exclude",
+            "n1,n2",
+            str(script_path),
+        ]
+        script = (self.working_dir / "recovery_scripts" / "recover_rep1.sh").read_text()
+        assert "#SBATCH --account=smithlab" in script
+        assert "--qos" not in script
+        assert "REQUESTED_PIXI_ENV=sim-cuda-12-0" in script
+        assert (self.working_dir / "submit_settings.json").is_file()

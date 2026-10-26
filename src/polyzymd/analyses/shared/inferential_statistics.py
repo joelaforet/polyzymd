@@ -388,8 +388,10 @@ def cohens_d(
         # Undefined: can't compute pooled std with < 2 samples
         return undefined
 
-    var1 = np.var(g1, ddof=1)
-    var2 = np.var(g2, ddof=1)
+    from polyzymd.analyses.shared.statistics import sample_variance
+
+    var1 = sample_variance(g1)
+    var2 = sample_variance(g2)
 
     # Pooled standard deviation
     pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))

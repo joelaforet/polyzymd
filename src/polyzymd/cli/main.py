@@ -36,6 +36,7 @@ from polyzymd.cli.env_warnings import (
     warn_if_wrong_pixi_env,
 )
 from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+from polyzymd.workflow.slurm import PRESET_NAMES
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
 # time.  setup_colored_logging() replaces this handler when the CLI runs.
@@ -144,6 +145,39 @@ def suppress_openff_logs() -> None:
     root_logger.addFilter(OpenFFFilter())
 
 
+class _PintRedefinitionFilter(logging.Filter):
+    """Drop pint's notice that OpenFF Units redefines ``[electric_potential]``."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.getMessage().startswith("Redefining '[electric_potential]'")
+
+
+def silence_known_library_warnings() -> None:
+    """Hide two known, harmless notices that every command printed.
+
+    - pint logs ``Redefining '[electric_potential]'`` at WARNING when
+      OpenFF Units adds its own definition of that dimension to the unit
+      registry; the definition is the one OpenFF intends.
+    - Interchange's ``_clear_caches`` walks every live object and reads its
+      ``__module__``; on ``torch.distributed.reduce_op`` that raises torch's
+      deprecation ``FutureWarning``. PolyzyMD never uses that torch name.
+
+    Each filter matches that one message only; other pint and torch warnings
+    still show.
+    """
+    import warnings
+
+    pint_logger = logging.getLogger("pint.util")
+    if not any(isinstance(f, _PintRedefinitionFilter) for f in pint_logger.filters):
+        pint_logger.addFilter(_PintRedefinitionFilter())
+    warnings.filterwarnings(
+        "ignore",
+        message=r"`torch\.distributed\.reduce_op` is deprecated",
+        category=FutureWarning,
+        module=r"openff\.interchange",
+    )
+
+
 def enable_openff_logs() -> None:
     """Re-enable OpenFF log messages for debugging.
 
@@ -161,6 +195,7 @@ def enable_openff_logs() -> None:
 
 # Suppress OpenFF logs by default
 suppress_openff_logs()
+silence_known_library_warnings()
 
 
 def _resolve_replicates_option(
@@ -2018,6 +2053,24 @@ def _echo_resume_hint(config_path: str, replicate: int) -> None:
 # =============================================================================
 
 
+def _slurm_summary(slurm: "SlurmConfig") -> str:
+    """One line of what a job asks SLURM for, as the dry runs print it."""
+    return (
+        f"partition {slurm.partition}, qos {slurm.qos or '(none)'}, "
+        f"time {slurm.time_limit}, account {slurm.account or '(none)'}, "
+        f"memory {slurm.memory or '(site default)'}, GPUs {slurm.gpus}, "
+        f"GPU type {slurm.gpu_type or '(any)'}, exclude {slurm.exclude or '(none)'}, "
+        f"reservation {slurm.reservation or '(none)'}"
+    )
+
+
+def _shown_pixi_env(pixi_env: str) -> str:
+    """The job's pixi environment; ``auto`` is chosen on each node when the job starts."""
+    if pixi_env == "auto":
+        return "auto (resolved per node at run time from the NVIDIA driver)"
+    return pixi_env
+
+
 def _warn_job_hardware(
     sim_config: "SimulationConfig",
     engine_name: str,
@@ -2064,16 +2117,8 @@ def _print_gromacs_dry_run_details(
     sim_config: "SimulationConfig",
     preset: str,
     replicate_list: list[int],
-    time_limit: str | None,
-    memory: str | None,
-    account: str | None,
-    gpu_type: str | None,
-    constraint: str | None,
-    nodelist: str | None,
-    exclude: str | None = None,
+    base_slurm: "SlurmConfig",
     partition: str | None = None,
-    qos: str | None = None,
-    email: str = "",
 ) -> None:
     """Print GROMACS-specific dry-run details with effective SLURM configuration.
 
@@ -2085,55 +2130,16 @@ def _print_gromacs_dry_run_details(
         SLURM partition preset name.
     replicate_list : list[int]
         Replicates that would be submitted.
-    time_limit : str or None
-        CLI time-limit override.
-    memory : str or None
-        CLI memory override.
-    account : str or None
-        CLI account override.
-    gpu_type : str or None
-        CLI GPU type override.
-    constraint : str or None
-        CLI constraint override.
-    nodelist : str or None
-        CLI nodelist override.
-    exclude : str or None, optional
-        CLI excluded-node override (replaces the preset value).
+    base_slurm : SlurmConfig
+        The preset with the command-line overrides applied.
     partition : str or None, optional
         CLI partition override.
-    qos : str or None, optional
-        CLI QoS override.
-    email : str, optional
-        CLI email override.
     """
     from polyzymd.engines import create_engine
-    from polyzymd.workflow.slurm import SlurmConfig
 
     phase = "workflow"
     engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
     gromacs_cfg = sim_config.gromacs
-
-    base_slurm = SlurmConfig.from_preset(preset)
-    if time_limit:
-        base_slurm.time_limit = time_limit
-    if memory:
-        base_slurm.memory = memory
-    if account:
-        base_slurm.account = account
-    if partition:
-        base_slurm.partition = partition
-    if qos:
-        base_slurm.qos = qos
-    if email:
-        base_slurm.email = email
-    if gpu_type:
-        base_slurm.gpu_type = gpu_type
-    if constraint:
-        base_slurm.constraint = constraint
-    if nodelist:
-        base_slurm.nodelist = nodelist
-    if exclude is not None:
-        base_slurm.exclude = exclude or None
 
     effective = engine_impl._resolve_slurm_config(base_slurm)
     effective_flags = engine_impl._resolve_mdrun_flags(effective)
@@ -2141,19 +2147,24 @@ def _print_gromacs_dry_run_details(
     colored_echo("  SLURM configuration (effective):", phase=phase)
     colored_echo(f"    Partition:      {effective.partition}", phase=phase)
     colored_echo(f"    Time limit:     {effective.time_limit}", phase=phase)
-    colored_echo(f"    Memory:         {effective.memory}", phase=phase)
+    colored_echo(f"    Memory:         {effective.memory or '(site default)'}", phase=phase)
     colored_echo(f"    Account:        {effective.account or '(none)'}", phase=phase)
     colored_echo(f"    Email:          {effective.email or '(none)'}", phase=phase)
     colored_echo(f"    Nodes:          {effective.nodes}", phase=phase)
     colored_echo(f"    Tasks:          {effective.ntasks}", phase=phase)
     colored_echo(f"    CPUs/task:      {effective.cpus_per_task}", phase=phase)
     colored_echo(f"    GPUs:           {effective.gpus}", phase=phase)
+    if effective.gpus:
+        gpu_type = getattr(effective, "gpu_type", None) or "(any)"
+        colored_echo(f"    GPU type:       {gpu_type}", phase=phase)
     if effective.constraint:
         colored_echo(f"    Constraint:     {effective.constraint}", phase=phase)
     if effective.nodelist:
         colored_echo(f"    Nodelist:       {effective.nodelist}", phase=phase)
     if effective.exclude:
         colored_echo(f"    Exclude:        {effective.exclude}", phase=phase)
+    if getattr(effective, "reservation", None):
+        colored_echo(f"    Reservation:    {effective.reservation}", phase=phase)
     if effective.qos:
         colored_echo(f"    QoS:            {effective.qos}", phase=phase)
     colored_echo(phase=phase)
@@ -2212,9 +2223,12 @@ def _print_gromacs_dry_run_details(
 )
 @click.option(
     "--preset",
-    type=click.Choice(["aa100", "al40", "blanca-shirts", "blanca-chbe-rdi", "bridges2", "testing"]),
+    type=click.Choice(PRESET_NAMES),
     default="aa100",
-    help="SLURM partition preset (default: aa100)",
+    help=(
+        "SLURM partition preset (default: aa100, CU Boulder Alpine). On another "
+        "cluster use generic-gpu, which sets no account or QoS, with --partition."
+    ),
 )
 @click.option(
     "--email",
@@ -2251,8 +2265,8 @@ def _print_gromacs_dry_run_details(
     "--account",
     default=None,
     help=(
-        "Override SLURM account / allocation ID. On bridges2, omit it to charge the "
-        "login's default allocation."
+        "Override SLURM account / allocation ID; '' removes the preset's. On bridges2, "
+        "omit it to charge the login's default allocation."
     ),
 )
 @click.option(
@@ -2263,7 +2277,7 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--qos",
     default=None,
-    help="Override SLURM QoS",
+    help="Override SLURM QoS; '' writes no QoS line (a site without QoS).",
 )
 @click.option(
     "--gpu-type",
@@ -2292,6 +2306,11 @@ def _print_gromacs_dry_run_details(
         "Replaces the preset's excluded-node list; pass an empty string to "
         "exclude nothing. Omit to keep the preset default."
     ),
+)
+@click.option(
+    "--reservation",
+    default=None,
+    help="SLURM reservation to run in (e.g. a100_test on Alpine); '' removes the preset's.",
 )
 @click.option(
     "--openff-logs",
@@ -2344,6 +2363,7 @@ def submit(
     constraint: str | None,
     nodelist: str | None,
     exclude_nodes: str | None,
+    reservation: str | None,
     submit_openff_logs: bool,
     skip_build: bool,
     pixi_env: str | None,
@@ -2390,6 +2410,26 @@ def submit(
     _warn_for_submission_pixi_env(
         f"submit --engine {engine_name}", engine_name, resolved_pixi_env, pixi_env
     )
+    from polyzymd.workflow.submit_settings import SubmitSettings, write_submit_settings
+
+    try:
+        settings = SubmitSettings.from_options(
+            preset,
+            pixi_env=resolved_pixi_env,
+            time_limit=time_limit,
+            memory=memory,
+            account=account,
+            partition=partition,
+            qos=qos,
+            gpu_type=gpu_type,
+            constraint=constraint,
+            nodelist=nodelist,
+            exclude=exclude_nodes,
+            reservation=reservation,
+            email=email or None,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
 
     _echo_branding()
     colored_echo(f"Loading configuration from: {config}", phase="workflow")
@@ -2400,14 +2440,14 @@ def submit(
         colored_echo(f"Scratch directory: {scratch_dir}", phase="workflow")
     if projects_dir:
         colored_echo(f"Projects directory: {projects_dir}", phase="workflow")
-    if account:
-        colored_echo(f"Account: {account}", phase="workflow")
+    if account is not None:
+        colored_echo(f"Account: {account or '(none)'}", phase="workflow")
     if partition:
         colored_echo(f"Partition override: {partition}", phase="workflow")
-    if qos:
-        colored_echo(f"QoS override: {qos}", phase="workflow")
-    if memory:
-        colored_echo(f"Memory allocation: {memory}", phase="workflow")
+    if qos is not None:
+        colored_echo(f"QoS override: {qos or '(none)'}", phase="workflow")
+    if memory is not None:
+        colored_echo(f"Memory allocation: {memory or '(none)'}", phase="workflow")
     if gpu_type:
         colored_echo(f"GPU type override: {gpu_type}", phase="workflow")
     if constraint:
@@ -2417,6 +2457,8 @@ def submit(
             f"Excluded nodes override: {exclude_nodes or '(none)'}",
             phase="workflow",
         )
+    if reservation is not None:
+        colored_echo(f"Reservation: {reservation or '(none)'}", phase="workflow")
     _ = skip_build
 
     if dry_run:
@@ -2440,57 +2482,50 @@ def submit(
         colored_echo(f"  Simulation:  {sim_config.name}", phase="workflow")
         colored_echo(f"  Engine:      {engine_name}", phase="workflow")
         colored_echo(f"  Preset:      {preset}", phase="workflow")
-        colored_echo(f"  Pixi env:    {resolved_pixi_env}", phase="workflow")
+        colored_echo(f"  Pixi env:    {_shown_pixi_env(resolved_pixi_env)}", phase="workflow")
         colored_echo(f"  Replicates:  {replicate_list}", phase="workflow")
         colored_echo(phase="workflow")
+        from polyzymd.cli.status_report import _stop_file_present
+
+        # A replicate that polyzymd cancel stopped: a job would exit at its
+        # first STOP check, and a real submit refuses it.
+        stopped = {
+            rep
+            for rep in replicate_list
+            if _stop_file_present(Path(sim_config.get_working_directory(rep)))
+        }
+        for rep in sorted(stopped):
+            colored_echo(
+                f"  Rep {rep}:       STOP present: the job would exit at its first check; run "
+                f"polyzymd cancel -c {config} -r {rep} --resume first",
+                phase="workflow",
+            )
 
         if engine_name == "gromacs":
             _print_gromacs_dry_run_details(
                 sim_config=sim_config,
                 preset=preset,
                 replicate_list=replicate_list,
-                time_limit=time_limit,
-                memory=memory,
-                account=account,
-                gpu_type=gpu_type,
-                constraint=constraint,
-                nodelist=nodelist,
-                exclude=exclude_nodes,
+                base_slurm=settings.slurm_config(),
                 partition=partition,
-                qos=qos,
-                email=email,
             )
         else:
-            from polyzymd.workflow.slurm import SlurmConfig
-
             script_dir = (
                 Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
             )
-            colored_echo(f"  Script dir:  {script_dir}", phase="workflow")
+            colored_echo(f"  Script dir:  {_shown(script_dir)}", phase="workflow")
             from polyzymd.workflow.daisy_chain import replicate_chain_state
 
             for rep in replicate_list:
+                if rep in stopped:
+                    continue
                 try:
                     _, text = replicate_chain_state(sim_config, rep)
                 except Exception as exc:  # noqa: BLE001 - a preview line, never fatal
                     text = f"state unknown ({exc})"
                 colored_echo(f"  Rep {rep}:       {' '.join(text.split())}", phase="workflow")
-            slurm = SlurmConfig.from_preset(preset)
-            for key, value in (
-                ("time_limit", time_limit),
-                ("memory", memory),
-                ("account", account),
-                ("partition", partition),
-                ("qos", qos),
-            ):
-                if value:
-                    setattr(slurm, key, value)
-            colored_echo(
-                f"  SLURM:       partition {slurm.partition}, qos {slurm.qos or '(none)'}, "
-                f"time {slurm.time_limit}, account {slurm.account or '(none)'}, "
-                f"GPUs {slurm.gpus}",
-                phase="workflow",
-            )
+            slurm = settings.slurm_config()
+            colored_echo(f"  SLURM:       {_slurm_summary(slurm)}", phase="workflow")
             _warn_job_hardware(sim_config, engine_name, preset, partition, slurm.gpus)
 
         colored_echo(phase="workflow")
@@ -2503,21 +2538,29 @@ def submit(
     if projects_dir:
         sim_config.output.projects_directory = Path(projects_dir)
 
+    run_dirs = {
+        rep: Path(sim_config.get_working_directory(rep))
+        for rep in _resolve_replicates_option(replicates)
+    }
     if not generate_only:
-        _refuse_if_stopped(
-            {
-                rep: Path(sim_config.get_working_directory(rep))
-                for rep in _resolve_replicates_option(replicates)
-            },
-            config,
-            "submit",
-        )
+        _refuse_if_stopped(run_dirs, config, "submit")
+    else:
+        from polyzymd.cli.status_report import _stop_file_present
+
+        for rep, run_dir in run_dirs.items():
+            if _stop_file_present(run_dir):
+                colored_echo(
+                    f"Warning: replicate {rep} has the STOP file of polyzymd cancel; its script "
+                    f"would exit at its first check. Run polyzymd cancel -c {config} -r {rep} "
+                    "--resume before you submit it.",
+                    phase="workflow",
+                    level=logging.WARNING,
+                )
 
     if engine_name == "gromacs":
         from polyzymd.engines import create_engine
         from polyzymd.engines.base import EngineSubmitRequest
         from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs, create_job_name
-        from polyzymd.workflow.slurm import SlurmConfig
 
         if submit_openff_logs:
             colored_echo(
@@ -2534,27 +2577,7 @@ def submit(
 
         requests = []
         for rep in replicate_list:
-            slurm_config = SlurmConfig.from_preset(preset)
-            if email:
-                slurm_config.email = email
-            if time_limit:
-                slurm_config.time_limit = time_limit
-            if memory:
-                slurm_config.memory = memory
-            if account:
-                slurm_config.account = account
-            if partition:
-                slurm_config.partition = partition
-            if qos:
-                slurm_config.qos = qos
-            if gpu_type:
-                slurm_config.gpu_type = gpu_type
-            if constraint:
-                slurm_config.constraint = constraint
-            if nodelist:
-                slurm_config.nodelist = nodelist
-            if exclude_nodes is not None:
-                slurm_config.exclude = exclude_nodes or None
+            slurm_config = settings.slurm_config()
 
             working_dir = sim_config.get_working_directory(rep) / "gromacs"
             job_name = create_job_name(sim_config, rep)
@@ -2593,11 +2616,13 @@ def submit(
                 if generate_only:
                     script_path = engine_impl.prepare_submission(request)
                     colored_echo(
-                        f"  Rep {request.replicate}: script at {script_path}", phase="workflow"
+                        f"  Rep {request.replicate}: script at {_shown(script_path)}",
+                        phase="workflow",
                     )
                 else:
                     result = engine_impl.submit(request)
                     colored_echo(f"  Rep {request.replicate}: {result['stdout']}", phase="workflow")
+                write_submit_settings(request.working_dir.parent, settings)
         except (FileNotFoundError, ValueError, RuntimeError) as e:
             colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
             sys.exit(1)
@@ -2634,6 +2659,7 @@ def submit(
             constraint=constraint,
             nodelist=nodelist,
             exclude=exclude_nodes,
+            reservation=reservation,
             openff_logs=submit_openff_logs,
         )
 
@@ -3651,6 +3677,8 @@ def cancel(
             working_dir = Path(scratch_dir)
         else:
             working_dir = Path(sim_config.get_working_directory(replicate))
+        # The same folder, named without the ``..`` of a study's runs/ path.
+        working_dir = Path(_shown(working_dir))
         marker = stop_file_path(working_dir)
         # A GROMACS job works in <replicate>/gromacs. Job scripts written
         # before they also checked the replicate folder look only there.
@@ -3669,9 +3697,15 @@ def cancel(
             for path in removed:
                 path.unlink()
             if removed:
+                from polyzymd.workflow.submit_settings import read_submit_settings
+
+                # The settings submit recorded, as status prints them.
+                recorded = read_submit_settings(working_dir)
+                flags = recorded.command_flags() if recorded else "--preset <preset>"
                 colored_echo(
                     f"Replicate {replicate}: removed {', '.join(map(str, removed))} — "
-                    f"resubmit with `polyzymd submit -c {config} -r {replicate}`",
+                    f"resubmit with `polyzymd submit -c {config} -r {replicate} {flags}`"
+                    + ("" if recorded else " and the overrides you first submitted with"),
                     phase="simulation",
                 )
             else:
@@ -3785,7 +3819,10 @@ def cancel(
     "--preset",
     "preset_hint",
     default=None,
-    help="Preset name to print in the resubmit hint for dead chains (agent format)",
+    help=(
+        "Preset name for the resubmit commands (agent format) of replicates whose "
+        "polyzymd submit recorded no settings; the others reuse their recorded settings"
+    ),
 )
 @click.option(
     "--unfinished",
@@ -3949,6 +3986,11 @@ def _status_table(config: str) -> None:
     # (format with replicate=1, then strip the trailing "_run1")
     dir_name = sim_config._format_run_directory_name(1)
     system_name = dir_name.rsplit("_run", 1)[0] if "_run" in dir_name else dir_name
+    # Conditions copied from one config share that name; the config tells them apart.
+    condition = getattr(sim_config, "name", None)
+    if isinstance(condition, str) and condition and condition != system_name:
+        system_name = f"{system_name} [{condition}]"
+    system_name = f"{system_name}  ({config})"
 
     # Discover replicate directories (scratch-based, works for both engines)
     replicates = sim_config.discover_replicate_dirs()
@@ -4306,15 +4348,12 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 # =============================================================================
 
 
-def _print_recover_dry_run(script_path: Path, slurm_config) -> None:
+def _print_recover_dry_run(script_path: Path, slurm_config, pixi_env: str) -> None:
     """Print what ``recover --submit`` would write and submit, writing nothing."""
     colored_echo("\n[DRY RUN] Would write and submit:", phase="workflow")
-    colored_echo(f"  sbatch {script_path}", phase="workflow")
-    colored_echo(
-        f"  SLURM: partition {slurm_config.partition}, qos {slurm_config.qos or '(none)'}, "
-        f"time {slurm_config.time_limit}, account {slurm_config.account or '(none)'}",
-        phase="workflow",
-    )
+    colored_echo(f"  sbatch --export=NONE {_shown(script_path)}", phase="workflow")
+    colored_echo(f"  SLURM: {_slurm_summary(slurm_config)}", phase="workflow")
+    colored_echo(f"  Pixi env: {_shown_pixi_env(pixi_env)}", phase="workflow")
 
 
 @cli.command()
@@ -4340,9 +4379,12 @@ def _print_recover_dry_run(script_path: Path, slurm_config) -> None:
 )
 @click.option(
     "--preset",
-    type=click.Choice(["aa100", "al40", "blanca-shirts", "blanca-chbe-rdi", "bridges2", "testing"]),
+    type=click.Choice(PRESET_NAMES),
     default="aa100",
-    help="SLURM partition preset (default: aa100)",
+    help=(
+        "SLURM partition preset (default: the one recorded by submit, else aa100). "
+        "A preset other than the recorded one drops the recorded overrides."
+    ),
 )
 @click.option(
     "--submit/--no-submit",
@@ -4372,7 +4414,34 @@ def _print_recover_dry_run(script_path: Path, slurm_config) -> None:
 @click.option(
     "--qos",
     default=None,
-    help="Override SLURM QoS",
+    help="Override SLURM QoS; '' writes no QoS line (a site without QoS).",
+)
+@click.option(
+    "--account",
+    default=None,
+    help="Override SLURM account / allocation ID; '' removes the preset's.",
+)
+@click.option(
+    "--time-limit",
+    default=None,
+    callback=lambda ctx, param, value: _check_time_limit(value),
+    help="Override SLURM time limit (format: HH:MM:SS or M:SS)",
+)
+@click.option(
+    "--gpu-type",
+    default=None,
+    help="GPU type for GRES (e.g., 'a100', 'l40s', 'v100-32').",
+)
+@click.option(
+    "--exclude",
+    "exclude_nodes",
+    default=None,
+    help="SLURM --exclude override; replaces the preset's list, '' excludes nothing.",
+)
+@click.option(
+    "--reservation",
+    default=None,
+    help="SLURM reservation to run in (e.g. a100_test on Alpine); '' removes the preset's.",
 )
 @click.option(
     "--constraint",
@@ -4418,6 +4487,11 @@ def recover(
     memory: str | None,
     partition: str | None,
     qos: str | None,
+    account: str | None,
+    time_limit: str | None,
+    gpu_type: str | None,
+    exclude_nodes: str | None,
+    reservation: str | None,
     constraint: str | None,
     nodelist: str | None,
     pixi_env: str | None,
@@ -4430,6 +4504,11 @@ def recover(
     much work remains. With ``--submit``, generates and submits a
     self-resubmitting SLURM job that will automatically continue from
     the last completed segment.
+
+    The job uses the preset and overrides that ``polyzymd submit`` recorded
+    for the replicate (``submit_settings.json`` in its run folder); flags
+    given here replace single recorded values. Without a record, the preset
+    and the flags given here are used.
 
     \b
     Examples:
@@ -4499,7 +4578,24 @@ def recover(
         f"({pct:.1f}%)",
         phase="workflow",
     )
-    colored_echo(f"Status: {progress.status.value}", phase="workflow")
+    from polyzymd.cli.status_report import VERDICT_EXTENDABLE
+    from polyzymd.simulation.progress import SimulationStatus
+
+    # Production finished the length it started with, but the config now asks
+    # for more: status calls this extendable, and the chain continues it.
+    extendable = (
+        progress.status == SimulationStatus.COMPLETED
+        and progress.total_steps_requested
+        and progress.total_steps_completed < progress.total_steps_requested
+    )
+    if extendable:
+        colored_echo(
+            f"Status: {VERDICT_EXTENDABLE} (production finished the length it started with; "
+            "the config now asks for more)",
+            phase="workflow",
+        )
+    else:
+        colored_echo(f"Status: {progress.status.value}", phase="workflow")
     colored_echo(f"Segments: {len(progress.segments)}", phase="workflow")
 
     for seg in progress.segments:
@@ -4518,12 +4614,64 @@ def recover(
         phase="workflow",
     )
 
-    if not submit:
-        preset_given = (
-            click.get_current_context().get_parameter_source("preset")
-            != click.core.ParameterSource.DEFAULT
+    replicate_dir = working_dir.parent if engine_name == "gromacs" else working_dir
+    from polyzymd.workflow.submit_settings import (
+        SUBMIT_SETTINGS_FILENAME,
+        SubmitSettings,
+        read_submit_settings,
+        write_submit_settings,
+    )
+
+    preset_given = (
+        click.get_current_context().get_parameter_source("preset")
+        != click.core.ParameterSource.DEFAULT
+    )
+    options = {
+        "time_limit": time_limit,
+        "memory": memory,
+        "account": account,
+        "partition": partition,
+        "qos": qos,
+        "gpu_type": gpu_type,
+        "constraint": constraint,
+        "nodelist": nodelist,
+        "exclude": exclude_nodes,
+        "reservation": reservation,
+        "email": email or None,
+    }
+    recorded = read_submit_settings(replicate_dir)
+    if recorded is not None and preset_given and preset != recorded.preset:
+        colored_echo(
+            f"Note: --preset {preset} differs from the recorded preset {recorded.preset}; "
+            f"the settings recorded in {SUBMIT_SETTINGS_FILENAME} are not used.",
+            phase="workflow",
         )
+        recorded = None
+    try:
+        if recorded is not None:
+            settings = recorded.with_options(pixi_env=pixi_env, **options)
+        else:
+            settings = SubmitSettings.from_options(preset, pixi_env=pixi_env, **options)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    preset = settings.preset
+
+    if not submit:
         engine_flag = f" --engine {engine_name}" if engine else ""
+        if extendable and engine_name == "openmm":
+            colored_echo(
+                f"\nTo continue it on this machine: polyzymd run -c {config} -r {replicate}",
+                phase="workflow",
+            )
+        if recorded is not None:
+            colored_echo(
+                "\nTo resume, run:\n"
+                f"  polyzymd recover -c {config} -r {replicate} --submit{engine_flag}\n"
+                f"(uses the settings polyzymd submit recorded in "
+                f"{_shown(replicate_dir / SUBMIT_SETTINGS_FILENAME)}: {recorded.command_flags()})",
+                phase="workflow",
+            )
+            return
         colored_echo(
             "\nTo resume, run:\n"
             f"  polyzymd recover -c {config} -r {replicate} --submit "
@@ -4533,18 +4681,26 @@ def recover(
         )
         return
 
-    replicate_dir = working_dir.parent if engine_name == "gromacs" else working_dir
     _refuse_if_stopped({replicate: replicate_dir}, config, "recover")
 
     # Generate and submit a self-resubmitting SLURM job
     from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs, create_job_name
-    from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
+    from polyzymd.workflow.slurm import SlurmScriptGenerator
 
-    resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
-    _warn_for_site_pixi_override(preset, engine_name, resolved_pixi_env, pixi_env)
+    resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, settings.pixi_env)
+    _warn_for_site_pixi_override(preset, engine_name, resolved_pixi_env, settings.pixi_env)
     _warn_for_submission_pixi_env(
-        f"recover --submit --engine {engine_name}", engine_name, resolved_pixi_env, pixi_env
+        f"recover --submit --engine {engine_name}",
+        engine_name,
+        resolved_pixi_env,
+        settings.pixi_env,
     )
+    settings.pixi_env = resolved_pixi_env
+    if recorded is not None:
+        colored_echo(
+            f"Using the settings recorded by polyzymd submit: {settings.command_flags()}",
+            phase="workflow",
+        )
 
     colored_echo(
         f"\nGenerating recovery job (preset: {preset}, engine: {engine_name}, "
@@ -4574,19 +4730,7 @@ def recover(
         from polyzymd.engines import create_engine
         from polyzymd.engines.base import EngineSubmitRequest
 
-        slurm_config = SlurmConfig.from_preset(preset)
-        if email:
-            slurm_config.email = email
-        if memory:
-            slurm_config.memory = memory
-        if partition:
-            slurm_config.partition = partition
-        if qos:
-            slurm_config.qos = qos
-        if constraint:
-            slurm_config.constraint = constraint
-        if nodelist:
-            slurm_config.nodelist = nodelist
+        slurm_config = settings.slurm_config()
 
         from polyzymd.analyses.shared.gromacs import system_prefix
 
@@ -4611,7 +4755,7 @@ def recover(
 
         recovery_path = working_dir / "recovery_scripts" / f"recover_rep{replicate}.sh"
         if dry_run:
-            _print_recover_dry_run(recovery_path, slurm_config)
+            _print_recover_dry_run(recovery_path, slurm_config, resolved_pixi_env)
             return
 
         config_path_abs = str(Path(config).resolve())
@@ -4635,7 +4779,7 @@ def recover(
             colored_echo(f"Recovery failed: {e}", err=True, level=logging.ERROR)
             sys.exit(1)
 
-        colored_echo(f"Script: {recovery_path}", phase="workflow")
+        colored_echo(f"Script: {_shown(recovery_path)}", phase="workflow")
 
         from polyzymd.workflow.slurm_submit import run_sbatch
 
@@ -4646,6 +4790,7 @@ def recover(
             sys.exit(1)
         if result.returncode == 0:
             colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
+            write_submit_settings(replicate_dir, settings)
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")
         else:
             colored_echo(
@@ -4657,19 +4802,7 @@ def recover(
             sys.exit(1)
     else:
         # OpenMM recovery path
-        slurm_config = SlurmConfig.from_preset(preset)
-        if email:
-            slurm_config.email = email
-        if memory:
-            slurm_config.memory = memory
-        if partition:
-            slurm_config.partition = partition
-        if qos:
-            slurm_config.qos = qos
-        if constraint:
-            slurm_config.constraint = constraint
-        if nodelist:
-            slurm_config.nodelist = nodelist
+        slurm_config = settings.slurm_config()
 
         # Detect pre-built system files so the recovery job loads the existing
         # topology instead of rebuilding (non-deterministic packing would produce
@@ -4702,29 +4835,28 @@ def recover(
         script_dir = working_dir / "recovery_scripts"
         script_path = script_dir / f"recover_rep{replicate}.sh"
         if dry_run:
-            _print_recover_dry_run(script_path, slurm_config)
+            _print_recover_dry_run(script_path, slurm_config, resolved_pixi_env)
             return
 
         script_dir.mkdir(exist_ok=True)
         script_path.write_text(script_content)
         script_path.chmod(0o755)
 
-        colored_echo(f"Script: {script_path}", phase="workflow")
+        colored_echo(f"Script: {_shown(script_path)}", phase="workflow")
 
-        # Submit
-        import subprocess
+        # Submit as polyzymd submit does: a clean environment (--export=NONE),
+        # so the job does not inherit this shell's.
+        from polyzymd.workflow.slurm_submit import run_sbatch
 
-        from polyzymd.workflow.slurm_submit import make_log_folder
-
-        make_log_folder(script_path)
-        result = subprocess.run(
-            ["sbatch", str(script_path)],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = run_sbatch(script_path, exclude=slurm_config.exclude)
+        except RuntimeError as e:
+            colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
 
         if result.returncode == 0:
             colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
+            write_submit_settings(replicate_dir, settings)
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")
         else:
             colored_echo(
@@ -4765,19 +4897,24 @@ def info() -> None:
     except ImportError:
         colored_echo("  OpenMM: NOT INSTALLED", phase="cli")
 
-    try:
-        from openff.toolkit import __version__ as off_version
+    import importlib.util
 
-        colored_echo(f"  OpenFF Toolkit: {off_version}", phase="cli")
-    except ImportError:
-        colored_echo("  OpenFF Toolkit: NOT INSTALLED", phase="cli")
+    from polyzymd.utils.version import package_version
 
-    try:
-        from openff.interchange import __version__ as int_version
-
-        colored_echo(f"  OpenFF Interchange: {int_version}", phase="cli")
-    except ImportError:
-        colored_echo("  OpenFF Interchange: NOT INSTALLED", phase="cli")
+    # The conda build of Interchange reports 0.0.0; package_version reads the
+    # version of its conda package record instead, as the build record does.
+    for label, module in (
+        ("OpenFF Toolkit", "openff.toolkit"),
+        ("OpenFF Interchange", "openff.interchange"),
+    ):
+        try:
+            installed = importlib.util.find_spec(module) is not None
+        except ImportError:
+            installed = False
+        if installed:
+            colored_echo(f"  {label}: {package_version(module) or 'unknown'}", phase="cli")
+        else:
+            colored_echo(f"  {label}: NOT INSTALLED", phase="cli")
 
     try:
         import pydantic

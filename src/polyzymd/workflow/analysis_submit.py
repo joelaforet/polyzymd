@@ -21,9 +21,10 @@ from typing import Sequence
 
 #: SLURM settings of each analysis preset. Analysis runs on CPUs, so these are
 #: CPU partitions; a value of ``None`` leaves the directive out. Add a preset
-#: here for another cluster.
+#: here for another cluster. CURC renames Alpine's partitions and QoS values
+#: from time to time; see the note on the presets in ``workflow/slurm.py``.
 ANALYSIS_PRESETS: dict[str, dict[str, str | None]] = {
-    "alpine-cpu": {"partition": "acpu", "qos": "cpu-normal", "account": None},
+    "alpine-cpu": {"partition": "acpu", "qos": "cpu-normal", "account": "ucb-general"},
     "blanca-shirts": {
         "partition": "blanca-shirts",
         "qos": "blanca-shirts",

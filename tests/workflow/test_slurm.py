@@ -39,14 +39,32 @@ def _make_generator(config: SlurmConfig) -> SlurmScriptGenerator:
 # ---------------------------------------------------------------------------
 
 
+def test_job_script_paths_have_no_dot_dot(tmp_path, monkeypatch):
+    """A study's runs/ folder is reached through conditions/x/../../..; the script names it plainly."""
+    monkeypatch.setattr(slurm_module, "_discover_manifest_path", lambda: "/ws/pixi.toml")
+    (tmp_path / "conditions" / "water").mkdir(parents=True)
+    up = tmp_path / "conditions" / "water" / ".." / ".."
+    script = SlurmScriptGenerator(SlurmConfig()).generate_job_script(
+        config_path="/ws/config.yaml",
+        replicate=1,
+        working_dir=str(up / "runs" / "run_1"),
+        output_file=str(up / "runs" / "slurm_logs" / "job.%j.out"),
+    )
+
+    runs = (tmp_path / "runs").resolve()
+    assert f"#SBATCH --output={runs}/slurm_logs/job.%j.out" in script
+    assert f'#SBATCH --chdir="{runs}/run_1"' in script
+    assert "/../" not in script
+
+
 class TestPresetLoading:
     """SlurmConfig.from_preset() creates valid configs for every named preset."""
 
     def test_aa100_preset(self):
         cfg = SlurmConfig.from_preset("aa100")
         assert cfg.partition == "aa100"
-        assert cfg.qos == "normal"
-        assert cfg.account == "ucb625_asc1"
+        assert cfg.qos == "gpu-normal"
+        assert cfg.account == "ucb-general"
         assert cfg.time_limit == "23:59:59"
         assert cfg.memory == "3G"
         assert cfg.gpu_directive_style == "gres"
@@ -55,8 +73,8 @@ class TestPresetLoading:
     def test_al40_preset(self):
         cfg = SlurmConfig.from_preset("al40")
         assert cfg.partition == "al40"
-        assert cfg.qos == "normal"
-        assert cfg.account == "ucb625_asc1"
+        assert cfg.qos == "gpu-normal"
+        assert cfg.account == "ucb-general"
         assert cfg.gpu_directive_style == "gres"
 
     def test_blanca_shirts_preset(self):
@@ -68,9 +86,21 @@ class TestPresetLoading:
 
     def test_testing_preset(self):
         cfg = SlurmConfig.from_preset("testing")
-        assert cfg.partition == "atesting_a100"
-        assert cfg.qos == "testing"
+        assert cfg.partition == "aa100"
+        assert cfg.qos == "gpu-testing"
+        assert cfg.account == "ucb-general"
         assert cfg.time_limit == "0:05:59"
+        lines = sbatch_lines(cfg)
+        assert lines["gpu_line"] == "#SBATCH --gres=gpu:a100_3g.20gb:1"
+        assert lines["reservation_line"] == "#SBATCH --reservation=a100_test"
+
+    def test_no_alpine_preset_uses_a_retired_value(self):
+        """CURC retired QoS normal on the GPU partitions, amilan, atesting_a100 and ucb625_asc1."""
+        for name in ("aa100", "al40", "testing"):
+            cfg = SlurmConfig.from_preset(name)
+            assert cfg.qos.startswith("gpu-")
+            assert cfg.partition not in ("amilan", "atesting_a100")
+            assert cfg.account == "ucb-general"
 
     def test_bridges2_preset(self):
         cfg = SlurmConfig.from_preset("bridges2")

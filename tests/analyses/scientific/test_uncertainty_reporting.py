@@ -152,3 +152,16 @@ class TestFunctionPathUncertainty:
         assert (row.n_replicates, row.mean) == (1, 12.0)
         assert row.sem is None and row.ci95 is None and row.ci_method is None
         assert any("one replicate" in text for text in report.warnings)
+
+
+@pytest.mark.parametrize("value", [0.05, 0.1, 0.35, 0.7])
+def test_identical_replicates_have_a_standard_error_of_exactly_zero(value: float) -> None:
+    """np.std of identical floats leaves rounding noise (about 5e-18); the SEM is 0."""
+    from polyzymd.analyses.shared.statistics import sample_variance
+
+    result = mean_sem_ci([value] * 3)
+
+    assert result.sem == 0.0
+    assert result.ci_low == result.ci_high == result.mean
+    assert sample_variance([value] * 3) == 0.0
+    assert sample_variance([1.0, 2.0, 3.0]) == pytest.approx(1.0)
