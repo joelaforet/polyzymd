@@ -72,15 +72,38 @@ def trajectory_batches(manifest: dict[str, Any]) -> tuple[list[Batch], list[str]
     :data:`RECORD_FILES`. A replicate too large for one record is a batch of
     its own, and every file larger than :data:`FILE_BYTES` is named in the
     returned notes.
+
+    A replicate that several conditions share, such as a condition one
+    study reuses from another, is listed once: under the first condition
+    that names it, with every condition that uses it in its ``condition``
+    field, and a note for each other condition. Replicates are the same when
+    their files have the same SHA-256 hashes.
     """
     batches: list[Batch] = []
     notes: list[str] = []
+    users: dict[tuple[str, ...], list[tuple[str, str]]] = {}
+    for label, condition in manifest.get("conditions", {}).items():
+        for index, replicate in condition.get("replicates", {}).items():
+            key = _replicate_key(replicate)
+            if key:
+                users.setdefault(key, []).append((label, str(index)))
     for label, condition in manifest.get("conditions", {}).items():
         current: list[tuple[str, list[dict[str, Any]]]] = []
         for index, replicate in sorted(
             condition.get("replicates", {}).items(), key=lambda kv: int(kv[0])
         ):
-            files = [dict(f, condition=label, replicate=index) for f in replicate.get("files", [])]
+            shared = users.get(_replicate_key(replicate), [(label, str(index))])
+            if shared[0] != (label, str(index)):
+                first, at = shared[0]
+                notes.append(
+                    f"{label} replicate {index} has the files of {first} replicate {at}, so they "
+                    "are listed once, under that condition"
+                )
+                continue
+            users_of = "; ".join(dict.fromkeys(name for name, _ in shared))
+            files = [
+                dict(f, condition=users_of, replicate=index) for f in replicate.get("files", [])
+            ]
             for item in files:
                 if int(item["size"]) > FILE_BYTES:
                     notes.append(
@@ -107,10 +130,18 @@ def trajectory_batches(manifest: dict[str, Any]) -> tuple[list[Batch], list[str]
     return batches, notes
 
 
+def _replicate_key(replicate: dict[str, Any]) -> tuple[str, ...]:
+    """Return the sorted SHA-256 hashes of a replicate's files; empty when any is missing."""
+    hashes = [f.get("sha256") for f in replicate.get("files", [])]
+    return tuple(sorted(hashes)) if hashes and all(hashes) else ()
+
+
 def _batch(number: int, label: str, group: list[tuple[str, list[dict[str, Any]]]]) -> Batch:
-    return Batch(
-        number, label, tuple(i for i, _ in group), tuple(f for _, files in group for f in files)
-    )
+    files = tuple(f for _, items in group for f in items)
+    # A shared replicate names every condition that uses it.
+    names = (n for f in files for n in str(f["condition"]).split("; "))
+    named = "; ".join(dict.fromkeys(names)) if files else label
+    return Batch(number, named, tuple(i for i, _ in group), files)
 
 
 def _zip(source: Path, target: Path) -> Path | None:

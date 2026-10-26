@@ -143,6 +143,16 @@ On a cluster, set `scratch_directory` to scratch storage. Git ignores
 `runs/`, and freeze never publishes it.
 :::
 
+A condition that another study of the project already lists does not need
+its own runs. Reuse it, with its replicates:
+
+```bash
+polyzymd study add-condition "No polymer 363 K" --reuse "lipa363:No polymer" --study Paper_1/lipa_temperatures
+```
+
+Both studies then analyze the same trajectories, each with its own
+equilibration window and control. See {doc}`reuse_condition`.
+
 ## Write the `study.yaml` of each study
 
 Name the structures and the residue regions of the study. The analyses of

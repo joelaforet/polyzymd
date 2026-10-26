@@ -138,6 +138,12 @@ Common tasks
 
       Compare conditions
 
+   .. button-ref:: how_to/reuse_condition
+      :color: primary
+      :outline:
+
+      Reuse runs in another study
+
    .. button-ref:: how_to/own_analysis
       :color: primary
       :outline:
@@ -170,7 +176,7 @@ Coming from PolyzyMD 1.2? These pages cover what changed for you.
       :link-type: doc
 
       A project holds the studies of a paper; a study, the conditions you
-      compare; a condition, its replicates.
+      compare; a condition, its replicates, which several studies can reuse.
 
    .. grid-item-card:: Run and compare analyses
       :link: how_to/analysis_compare_conditions

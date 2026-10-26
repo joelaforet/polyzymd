@@ -19,6 +19,12 @@ from polyzymd.analyses.study_upload_guide import (
 GB = 1_000_000_000
 
 
+def _sha(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 def _manifest(conditions: dict[str, dict[str, list[int]]]) -> dict:
     """A manifest whose replicates hold files of the given sizes."""
     return {
@@ -28,7 +34,11 @@ def _manifest(conditions: dict[str, dict[str, list[int]]]) -> dict:
                 "replicates": {
                     str(index): {
                         "files": [
-                            {"path": f"run{index}/part{k}.dcd", "size": size, "sha256": "0" * 64}
+                            {
+                                "path": f"run{index}/part{k}.dcd",
+                                "size": size,
+                                "sha256": _sha(f"{label}/{index}/{k}"),
+                            }
                             for k, size in enumerate(sizes)
                         ]
                     }
@@ -70,6 +80,23 @@ class TestBatches:
     def test_conditions_never_share_a_batch(self) -> None:
         batches, _ = trajectory_batches(_manifest({"A": {1: [GB]}, "B": {1: [GB]}}))
         assert [b.condition for b in batches] == ["A", "B"]
+
+    def test_a_replicate_two_studies_share_is_listed_once(self) -> None:
+        """A condition one study reuses from another is uploaded once, named for both."""
+        manifest = _manifest({"a / Half": {1: [GB], 2: [GB]}, "b / Half 300 K": {1: [GB]}})
+        shared = manifest["conditions"]["a / Half"]["replicates"]["1"]
+        manifest["conditions"]["b / Half 300 K"]["replicates"]["1"] = shared
+        batches, notes = trajectory_batches(manifest)
+        assert [b.condition for b in batches] == ["a / Half; b / Half 300 K"]
+        assert [b.replicates for b in batches] == [("1", "2")]
+        assert {f["condition"] for f in batches[0].files} == {
+            "a / Half; b / Half 300 K",
+            "a / Half",
+        }
+        assert notes == [
+            "b / Half 300 K replicate 1 has the files of a / Half replicate 1, so they are "
+            "listed once, under that condition"
+        ]
 
     def test_file_count_limit(self) -> None:
         batches, _ = trajectory_batches(_manifest({"A": {1: [1] * 60, 2: [1] * 60}}))

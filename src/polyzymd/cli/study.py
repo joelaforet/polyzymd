@@ -765,6 +765,14 @@ def freeze_command(path: Path, tag: str | None) -> None:
     "--new", is_flag=True, help="Create conditions/<label>/ with a template config.yaml to fill in."
 )
 @click.option(
+    "--reuse",
+    "reuse",
+    default=None,
+    metavar="STUDY[:CONDITION]",
+    help="Reuse a condition of another study of the project, with its runs: nothing is "
+    "copied or run again. CONDITION defaults to LABEL.",
+)
+@click.option(
     "--study",
     "study_path",
     type=click.Path(path_type=Path),
@@ -773,21 +781,31 @@ def freeze_command(path: Path, tag: str | None) -> None:
     help="study.yaml, or the folder holding it.",
 )
 def add_condition_command(
-    label: str, config: Path | None, source: str | None, new: bool, study_path: Path
+    label: str,
+    config: Path | None,
+    source: str | None,
+    new: bool,
+    reuse: str | None,
+    study_path: Path,
 ) -> None:
     """Add the condition LABEL to an existing study and list it in study.yaml.
 
-    Give one of --config, --from and --new. The new config.yaml writes its
-    runs into the git-ignored runs/ folder of the project (of the study, for
-    a study in no project) unless you set its scratch_directory. With
-    --config, when the config's scratch_directory holds its runs, that
-    folder is written to data.local.yaml.
+    Give one of --config, --from, --new and --reuse. The new config.yaml
+    writes its runs into the git-ignored runs/ folder of the project (of the
+    study, for a study in no project) unless you set its scratch_directory.
+    With --config, when the config's scratch_directory holds its runs, that
+    folder is written to data.local.yaml. With --reuse, the study lists the
+    config of a condition of another study of the same project: both studies
+    analyze the same replicates, each with its own equilibration window,
+    regions and control, and a replicate run from either goes to the same
+    folder.
 
     \b
     Examples:
         polyzymd study add-condition "No polymer" --new
         polyzymd study add-condition "SBMA 100%" --from "No polymer"
         polyzymd study add-condition "SBMA 100%" --config sims/SBMA100/config.yaml
+        polyzymd study add-condition "SBMA 300 K" --reuse "solvents:SBMA water" --study temperatures
     """
     import os
 
@@ -795,23 +813,51 @@ def add_condition_command(
 
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.study_file import DATA_FILE, find_study_file
-    from polyzymd.analyses.study_scaffold import RUNS_WARNING, add_condition, runs_folder
+    from polyzymd.analyses.study_scaffold import (
+        RUNS_WARNING,
+        add_condition,
+        condition_owner,
+        runs_folder,
+    )
 
     try:
-        path = add_condition(study_path, label, config=config, new=new, source=source)
+        owner = condition_owner(find_study_file(study_path).parent, config) if config else None
+        path = add_condition(study_path, label, config=config, new=new, source=source, reuse=reuse)
     except ProtocolError as exc:
         click.echo(f"error: {' '.join(str(exc).split())}", err=True)
         if exc.hint:
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_STUDY_ERROR)
+    root = find_study_file(study_path).parent
+    if reuse is not None:
+        click.echo(
+            f"condition {label}: reuses {os.path.relpath(path)}, listed in study.yaml; nothing "
+            "was copied"
+        )
+        click.echo(
+            "runs: shared with the other study. Both analyze the same replicates, each with "
+            "its own equilibration window and control; a replicate run or submitted from either "
+            "goes into the same folder"
+        )
+        click.echo(
+            "next: add factors: to the entry in study.yaml if the study compares by them, "
+            "commit, and run polyzymd study check"
+        )
+        return
     click.echo(f"condition {label}: {path}, listed in study.yaml")
+    if owner is not None:
+        click.echo(
+            f"note: {config} is the config of condition {owner[1]!r} of study {owner[0]}; this "
+            f"copy is a new condition whose replicates are run again. To analyze that "
+            f"condition's runs in this study instead, remove this one and use "
+            f'--reuse "{owner[0]}:{owner[1]}"'
+        )
     if source is not None:
         name = (yaml.safe_load(path.read_text()) or {}).get("name")
         click.echo(
             f"name: set to {name!r} in the copy; change description: and the settings "
             f"in which {label} differs from {source}"
         )
-    root = find_study_file(study_path).parent
     data = root / DATA_FILE
     where = (yaml.safe_load(data.read_text()) or {}).get(label) if data.is_file() else None
     if config is not None and where is not None:

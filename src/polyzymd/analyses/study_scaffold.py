@@ -439,14 +439,121 @@ def record_data_location(study_root: Path, label: str, config: Path) -> None:
     where = Path(where).expanduser()
     if not where.is_absolute():
         where = Path(config).resolve().parent / where
+    write_data_location(study_root, label, where)
+
+
+def write_data_location(study_root: Path, label: str, where: Path) -> None:
+    """Set ``label``'s runs folder in the study's ``data.local.yaml``, keeping the other entries."""
+    import yaml
+
+    from polyzymd.analyses.study_file import DATA_FILE
+
     file = Path(study_root) / DATA_FILE
     current = yaml.safe_load(file.read_text()) if file.is_file() else None
     current = dict(current or {})
-    current[label] = str(where.resolve())
+    current[label] = str(Path(where).resolve())
     file.write_text(
         "# Where this machine keeps each condition's runs; never committed or published.\n"
         + yaml.safe_dump(current, sort_keys=False)
     )
+
+
+def project_conditions(study_root: Path) -> tuple[Any, str, dict[str, dict[str, Path]]]:
+    """Return the project of the study in ``study_root``, its label, and every study's condition configs.
+
+    The configs are by study label, then condition label, resolved as
+    ``study.yaml`` gives them.
+
+    Raises
+    ------
+    ProtocolError
+        If the study is in no project.
+    """
+    from polyzymd.analyses.project_file import find_project
+    from polyzymd.analyses.study_file import STUDY_FILE, _condition
+
+    found = find_project(Path(study_root))
+    if found is None:
+        raise ProtocolError(
+            f"{study_root} is in no project, so it has no other study to reuse a condition from.",
+            hint="Make a project with polyzymd project init and move the studies into it "
+            "(see the how-to 'Move existing studies into a project').",
+        )
+    project, own = found
+    configs: dict[str, dict[str, Path]] = {}
+    for name, folder in project.studies.items():
+        file = Path(folder) / STUDY_FILE
+        if not file.is_file():
+            continue
+        listed = _read_yaml(file).get("conditions") or {}
+        configs[name] = {str(c): _condition(str(c), v, file)[0] for c, v in listed.items()}
+    return project, own, configs
+
+
+def condition_owner(study_root: Path, config: Path) -> tuple[str, str] | None:
+    """Return (study, condition) of another study of the project whose config is ``config``.
+
+    ``None`` when the study is in no project or no other study lists that config.
+    """
+    try:
+        _, own, configs = project_conditions(study_root)
+    except ProtocolError:
+        return None
+    target = Path(config).resolve()
+    for name, conditions in configs.items():
+        for label, path in conditions.items():
+            if name != own and path == target:
+                return name, label
+    return None
+
+
+def reuse_condition(file: Path, label: str, reuse: str) -> Path:
+    """List under ``label`` the config of a condition of another study of the project.
+
+    ``reuse`` is ``"STUDY:CONDITION"``, or ``"STUDY"`` for its condition
+    named ``label``. Nothing is copied: ``study.yaml`` gets the path of that
+    config relative to the study, so both studies read the same runs, and a
+    replicate run or submitted from either goes into the same folder. When
+    the other study's ``data.local.yaml`` says where those runs are on this
+    machine, that folder is written to this study's too. Returns the config.
+
+    Raises
+    ------
+    ProtocolError
+        If the study is in no project, ``reuse`` names this study, a study
+        the project does not list, or a condition that study does not have.
+    """
+    import yaml
+
+    from polyzymd.analyses.study_file import DATA_FILE
+
+    root = file.parent
+    project, own, configs = project_conditions(root)
+    study, _, condition = reuse.partition(":")
+    study, condition = study.strip(), (condition.strip() or label)
+    if study == own:
+        raise ProtocolError(
+            f"{reuse!r} names this study, {own}; a condition is listed once per study.",
+            hint="To copy one of this study's conditions and change it, use --from OTHER_LABEL.",
+        )
+    if study not in configs:
+        raise ProtocolError(
+            f"The project {project.path} has no study {study!r} with a study.yaml.",
+            hint=f"Use one of: {', '.join(n for n in configs if n != own) or 'none yet'}.",
+        )
+    if condition not in configs[study]:
+        raise ProtocolError(
+            f"Study {study} has no condition {condition!r}.",
+            hint=f"Use one of: {', '.join(configs[study]) or 'none yet'}, as {study}:LABEL.",
+        )
+    config = configs[study][condition]
+    _list_entry(file, "conditions", label, Path(os.path.relpath(config, root)).as_posix())
+    data = Path(project.studies[study]) / DATA_FILE
+    where = (yaml.safe_load(data.read_text()) or {}).get(condition) if data.is_file() else None
+    if where is not None:
+        where = Path(str(where)).expanduser()
+        write_data_location(root, label, where if where.is_absolute() else data.parent / where)
+    return config
 
 
 def _study_yaml(conditions: dict[str, str], equilibration: str | None) -> str:
@@ -653,6 +760,7 @@ def add_condition(
     config: Path | None = None,
     new: bool = False,
     source: str | None = None,
+    reuse: str | None = None,
 ) -> Path:
     """Add a condition to an existing study folder and list it in ``study.yaml``.
 
@@ -662,7 +770,11 @@ def add_condition(
     new condition's folder name; with ``new``,
     ``conditions/<name>/`` gets a template config to fill in
     (:func:`new_condition`). The new config writes its runs into
-    :func:`runs_folder`. The condition is added as one line under
+    :func:`runs_folder`. With ``reuse``, ``"STUDY:CONDITION"`` (or
+    ``"STUDY"`` for the condition of the same label), nothing is copied: the
+    condition is listed with the path of that condition's config in another
+    study of the same project, so both studies read, and add, the same runs
+    (:func:`reuse_condition`). The condition is added as one line under
     ``conditions:``, so the rest of ``study.yaml``, comments included, is kept
     as written, and ``runs/`` is added to the ``.gitignore`` beside the
     ``runs/`` folder if it lacks it (:func:`ignore_runs`). Returns the new
@@ -671,17 +783,20 @@ def add_condition(
     Raises
     ------
     ProtocolError
-        If not exactly one of ``config``, ``source`` and ``new`` is given,
-        the label or its folder is taken or reserved (:func:`check_label`), ``source`` is not a condition of
-        the study, or the config cannot be copied.
+        If not exactly one of ``config``, ``source``, ``new`` and ``reuse``
+        is given, the label or its folder is taken or reserved
+        (:func:`check_label`), ``source`` is not a condition of the study,
+        ``reuse`` names no condition of another study of the project, or the
+        config cannot be copied.
     """
     from polyzymd.analyses.study_file import _condition, find_study_file
 
-    if [config is not None, new, source is not None].count(True) != 1:
+    if [config is not None, new, source is not None, reuse is not None].count(True) != 1:
         raise ProtocolError(
-            "Give one of a config to copy, a condition to copy (from) or new.",
+            "Give one of a config to copy, a condition to copy (from), new, or a condition "
+            "to reuse.",
             hint="polyzymd study add-condition LABEL --config path/to/config.yaml, "
-            "--from OTHER_LABEL, or --new.",
+            "--from OTHER_LABEL, --new, or --reuse OTHER_STUDY:CONDITION.",
         )
     check_label(label, "condition")
     file = find_study_file(study)
@@ -690,11 +805,14 @@ def add_condition(
     conditions = _read_yaml(file).get("conditions") or {}
     root = file.parent
     folder = root / "conditions" / condition_folder(label)
-    if label in conditions or folder.exists():
+    # A reused condition makes no folder, so only its label must be free.
+    if label in conditions or (folder.exists() and reuse is None):
         raise ProtocolError(
             f"{file} already has a condition {label!r} or a folder {folder}.",
             hint="Choose another label.",
         )
+    if reuse is not None:
+        return reuse_condition(file, label, reuse)
     if source is not None:
         if source not in conditions:
             raise ProtocolError(

@@ -181,9 +181,11 @@ def graded(tmp_path: Path) -> Path:
                 config, replicate, [base + 0.01 * replicate + 0.001 * k for k in range(5)]
             )
     conditions = "".join(
-        f"  {name}: conditions/{name}\n"
-        if level is None
-        else f"  {name}: {{config: conditions/{name}, factors: {{sbma_fraction: {level}}}}}\n"
+        (
+            f"  {name}: conditions/{name}\n"
+            if level is None
+            else f"  {name}: {{config: conditions/{name}, factors: {{sbma_fraction: {level}}}}}\n"
+        )
         for name, level in levels.items()
     )
     (folder / "study.yaml").write_text(f"equilibration: 0ns\nconditions:\n{conditions}")
@@ -294,6 +296,110 @@ class TestProjectFreeze:
             ["git", "-C", str(project), "tag", "--list"], capture_output=True, text=True
         ).stdout
         assert "project-v1" in log and "study-v" not in log
+
+
+class TestReusedConditions:
+    """A condition of one study listed in another: one config, one set of runs, two analyses."""
+
+    def _reuse(self, project: Path, *arguments: str):
+        return CliRunner().invoke(
+            cli, ["study", "add-condition", *arguments, "--study", str(project / "rml")]
+        )
+
+    def test_reuse_lists_the_other_studys_config_and_copies_nothing(self, project: Path) -> None:
+        result = self._reuse(project, "Lipa half", "--reuse", "lipa:Half")
+        assert result.exit_code == 0, result.output
+        assert "nothing was copied" in result.output and "shared" in result.output
+        assert (
+            '"Lipa half": "../lipa/conditions/half/config.yaml"'
+            in (project / "rml" / "study.yaml").read_text()
+        )
+        assert not (project / "rml" / "conditions" / "lipa_half").exists()
+        rml, lipa = load_study_file(project / "rml"), load_study_file(project / "lipa")
+        assert rml.conditions["Lipa half"] == lipa.conditions["Half"]
+
+    def test_without_a_condition_label_the_same_label_is_reused(self, project: Path) -> None:
+        text = (project / "rml" / "study.yaml").read_text()
+        text = text.replace(
+            "  Half: {config: conditions/half, factors: {sbma_fraction: 0.5}}\n", ""
+        )
+        (project / "rml" / "study.yaml").write_text(text)
+        assert self._reuse(project, "Half", "--reuse", "lipa").exit_code == 0
+        rml, lipa = load_study_file(project / "rml"), load_study_file(project / "lipa")
+        assert rml.conditions["Half"] == lipa.conditions["Half"]
+
+    def test_each_study_reads_the_same_replicates_with_its_own_window(self, project: Path) -> None:
+        assert self._reuse(project, "Lipa half", "--reuse", "lipa:Half").exit_code == 0
+        text = (project / "rml" / "study.yaml").read_text()
+        (project / "rml" / "study.yaml").write_text(
+            text.replace("equilibration: 0ns", "equilibration: 0.002ns")
+        )
+        ours = {c.label: c for c in pz.Study(project / "rml").conditions}["Lipa half"]
+        theirs = {c.label: c for c in pz.Study(project / "lipa").conditions}["Half"]
+        assert ours.config_path == theirs.config_path
+        assert [r.index for r in ours.replicates] == [r.index for r in theirs.replicates] == [1, 2]
+        assert ours.equilibration != theirs.equilibration
+
+    def test_reuse_carries_the_other_studys_data_location(self, project: Path, tmp_path) -> None:
+        moved = tmp_path / "petalibrary" / "half"
+        (project / "lipa" / "data.local.yaml").write_text(f"Half: {moved}\n")
+        assert self._reuse(project, "Lipa half", "--reuse", "lipa:Half").exit_code == 0
+        assert str(moved.resolve()) in (project / "rml" / "data.local.yaml").read_text()
+
+    @pytest.mark.parametrize(
+        "reuse, message",
+        [
+            ("lipa:Quarter", "Study lipa has no condition 'Quarter'"),
+            ("calb:Half", "has no study 'calb'"),
+            ("rml:Half", "names this study, rml"),
+        ],
+    )
+    def test_reuse_names_a_condition_of_another_study(
+        self, project: Path, reuse: str, message: str
+    ) -> None:
+        before = (project / "rml" / "study.yaml").read_text()
+        result = self._reuse(project, "Half 2", "--reuse", reuse)
+        assert result.exit_code == 2 and message in result.output
+        assert (project / "rml" / "study.yaml").read_text() == before
+
+    def test_a_study_in_no_project_has_nothing_to_reuse(self, tmp_path: Path) -> None:
+        from polyzymd.analyses.study_scaffold import add_condition, create_study
+
+        config = write_simulation_config(tmp_path / "c", scratch=tmp_path / "data")
+        create_study(tmp_path / "alone", conditions={"A": config}, equilibration="0ns")
+        with pytest.raises(ProtocolError, match="is in no project"):
+            add_condition(tmp_path / "alone", "B", reuse="other:A")
+
+    def test_copying_a_condition_of_the_project_points_to_reuse(self, project: Path) -> None:
+        config = project / "lipa" / "conditions" / "half" / "config.yaml"
+        result = self._reuse(project, "Copy", "--config", str(config))
+        assert result.exit_code == 0, result.output
+        assert '--reuse "lipa:Half"' in result.output
+
+    def test_freeze_lists_a_shared_replicate_once_and_its_config_relatively(
+        self, project: Path
+    ) -> None:
+        import csv
+        import json
+
+        from polyzymd.analyses.project_freeze import freeze_project
+
+        assert self._reuse(project, "Lipa half", "--reuse", "lipa:Half").exit_code == 0
+        assert _analyze("--project", str(project)).exit_code == 0
+        result = freeze_project(project)  # no git: the copy is made file by file
+        manifest = json.loads((project / "manifest.json").read_text())
+        assert manifest["conditions"]["rml / Lipa half"]["config"] == (
+            "../lipa/conditions/half/config.yaml"
+        )
+        assert str(project) not in (project / "manifest.json").read_text()
+        with (result.deposit / "trajectories.csv").open() as handle:
+            rows = list(csv.DictReader(handle))
+        # The reused condition shares the rows of lipa / Half (rml / Half writes the
+        # same synthetic files, so it is listed there too); no file is listed twice.
+        shared = {r["condition"] for r in rows if "Lipa half" in r["condition"]}
+        assert len(shared) == 1 and next(iter(shared)).startswith("lipa / Half; ")
+        assert not any(r["condition"] == "rml / Lipa half" for r in rows)
+        assert "listed once" in (result.deposit / "UPLOAD.md").read_text()
 
 
 def test_names_may_start_with_a_digit_and_unknown_ones_are_errors(project: Path) -> None:

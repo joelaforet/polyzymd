@@ -952,21 +952,31 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
     return found
 
 
-def _portable(value: Any, root: Path, key: str | None = None) -> Any:
+def _portable(
+    value: Any, root: Path, key: str | None = None, project_root: Path | None = None
+) -> Any:
     """Return ``value`` with every config path made relative to ``root``, or reduced to its name.
 
-    A path outside the study folder is a fact about one machine, so only its
-    file name is kept.
+    A path in the study folder, or elsewhere in its project (the inputs of a
+    condition reused from another study), is made relative to ``root``. A
+    path outside both is a fact about one machine, so only its file name is
+    kept.
     """
+    import os
+
     from polyzymd.config.loader import PATH_KEYS
 
     if isinstance(value, dict):
-        return {k: _portable(v, root, k) for k, v in value.items()}
+        return {k: _portable(v, root, k, project_root) for k, v in value.items()}
     if isinstance(value, list):
-        return [_portable(v, root, key) for v in value]
+        return [_portable(v, root, key, project_root) for v in value]
     if key in PATH_KEYS and isinstance(value, str) and Path(value).is_absolute():
         path = Path(value)
-        return str(path.relative_to(root)) if path.is_relative_to(root) else path.name
+        if path.is_relative_to(root):
+            return str(path.relative_to(root))
+        if project_root is not None and path.is_relative_to(project_root):
+            return Path(os.path.relpath(path, root)).as_posix()
+        return path.name
     return value
 
 
@@ -1004,20 +1014,19 @@ def _replicates(
     import warnings as python_warnings
 
     from polyzymd.analyses.study import Condition
+    from polyzymd.analyses.study_file import portable
 
     conditions: dict[str, Any] = {}
     rows: list[dict[str, Any]] = []
     # Engine inputs and final frames are recorded by their path in the deposit
     # and its zips, where a project puts each study's in a folder of its own.
     in_deposit = Path(protocol.project_label or "")
+    # A condition reused from another study of the project has its config in
+    # that study's folder: it is recorded relative to this study, as
+    # study.yaml lists it, never by this machine's path.
+    project_root = protocol.project.root.resolve() if protocol.project is not None else None
     for label, path in protocol.conditions.items():
-        record: dict[str, Any] = {
-            "config": (
-                str(path.relative_to(protocol.root))
-                if path.is_relative_to(protocol.root)
-                else str(path)
-            )
-        }
+        record: dict[str, Any] = {"config": portable(str(path), protocol.root, project_root)}
         try:
             condition = Condition(
                 label,
@@ -1041,7 +1050,7 @@ def _replicates(
         settings = condition.config.model_dump(mode="json")
         settings.get("output", {}).pop("projects_directory", None)
         settings.get("output", {}).pop("scratch_directory", None)
-        record["resolved_config"] = _portable(settings, protocol.root)
+        record["resolved_config"] = _portable(settings, protocol.root, project_root=project_root)
         replicates: dict[str, Any] = {}
         for replicate in condition.replicates:
             with python_warnings.catch_warnings():
