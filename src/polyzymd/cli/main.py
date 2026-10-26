@@ -4543,7 +4543,24 @@ def recover(
         f"({pct:.1f}%)",
         phase="workflow",
     )
-    colored_echo(f"Status: {progress.status.value}", phase="workflow")
+    from polyzymd.cli.status_report import VERDICT_EXTENDABLE
+    from polyzymd.simulation.progress import SimulationStatus
+
+    # Production finished the length it started with, but the config now asks
+    # for more: status calls this extendable, and the chain continues it.
+    extendable = (
+        progress.status == SimulationStatus.COMPLETED
+        and progress.total_steps_requested
+        and progress.total_steps_completed < progress.total_steps_requested
+    )
+    if extendable:
+        colored_echo(
+            f"Status: {VERDICT_EXTENDABLE} (production finished the length it started with; "
+            "the config now asks for more)",
+            phase="workflow",
+        )
+    else:
+        colored_echo(f"Status: {progress.status.value}", phase="workflow")
     colored_echo(f"Segments: {len(progress.segments)}", phase="workflow")
 
     for seg in progress.segments:
@@ -4606,6 +4623,11 @@ def recover(
 
     if not submit:
         engine_flag = f" --engine {engine_name}" if engine else ""
+        if extendable and engine_name == "openmm":
+            colored_echo(
+                f"\nTo continue it on this machine: polyzymd run -c {config} -r {replicate}",
+                phase="workflow",
+            )
         if recorded is not None:
             colored_echo(
                 "\nTo resume, run:\n"
