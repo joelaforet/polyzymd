@@ -706,7 +706,7 @@ run4     0.0/1000ns    0%  NOT_STARTED  no job  last: Validation error: 354 poly
 polyzymd submit -c RML/noPoly_RML_water_333K/config.yaml -r 3 --preset blanca-shirts --exclude <preset nodes>,bgpu-curc1
 ```
 
-Each system header ends with `done/total completed`, which answers "does every condition have enough finished replicates" without reading the rows. When a `DEAD` replicate's newest log holds no error line, as after a node failure or power loss, its `last:` field shows the SLURM end state from one `sacct` call, for example `slurm: NODE_FAIL exit 0:0`.
+When two conditions share a run-folder name (a config copied with `study add-condition --from`), each header adds the condition's `name:` in brackets, for example `## trpcage_300K [sbma]`. Each system header ends with `done/total completed`, which answers "does every condition have enough finished replicates" without reading the rows. When a `DEAD` replicate's newest log holds no error line, as after a node failure or power loss, its `last:` field shows the SLURM end state from one `sacct` call, for example `slurm: NODE_FAIL exit 0:0`.
 
 Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 
@@ -734,7 +734,7 @@ that case.
 ### Table format
 
 ```
-  polyzymd status — fnIII_apo_OEGMA-SBMA_A50_B50_100ns_310K
+  polyzymd status — fnIII_apo_OEGMA-SBMA_A50_B50_100ns_310K  (config.yaml)
   ──────────────────────────────────────────────────────
 
   run1  ██████████████████████████████████████████  100.0%  100.0/100.0 ns  completed

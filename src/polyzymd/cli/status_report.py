@@ -979,6 +979,31 @@ def _with_preset_exclude(nodes: str, preset: str | None) -> str:
     return ",".join(dict.fromkeys(names))
 
 
+def system_labels(reports: Sequence[SystemReport]) -> list[str]:
+    """Header label of each report: its run-folder name, plus the condition where it repeats.
+
+    Two conditions copied from one config share the run-folder template (and
+    so the name, e.g. ``trpcage_300K``). Such a name gets the config's
+    ``name:`` in brackets, or the config's folder when that repeats too.
+    """
+    counts: dict[str, int] = {}
+    for report in reports:
+        counts[report.name] = counts.get(report.name, 0) + 1
+    config_names: dict[str | None, int] = {}
+    for report in reports:
+        config_names[report.config_name] = config_names.get(report.config_name, 0) + 1
+    labels = []
+    for report in reports:
+        if counts[report.name] < 2:
+            labels.append(report.name)
+            continue
+        tag = report.config_name
+        if not tag or config_names[tag] > 1 or tag == report.name:
+            tag = Path(report.config_path).parent.name
+        labels.append(f"{report.name} [{tag}]")
+    return labels
+
+
 def render_agent(
     reports: Sequence[SystemReport],
     *,
@@ -1019,16 +1044,16 @@ def render_agent(
             "verdicts below fall back to progress.json only"
         )
 
-    for report in reports:
+    for report, label in zip(reports, system_labels(reports)):
         reps = report.replicates
         done = sum(r.verdict == VERDICT_COMPLETED for r in reps)
         shown = [r for r in reps if r.verdict not in VERDICTS_FINISHED] if unfinished else reps
         if unfinished and reps and not shown and not report.error:
-            lines.append(f"## {report.name}  ({report.config_path})  {done}/{len(reps)} completed")
+            lines.append(f"## {label}  ({report.config_path})  {done}/{len(reps)} completed")
             continue
         lines.append("")
         state = f"{done}/{len(reps)} completed" if reps else "not started: no replicate folders"
-        lines.append(f"## {report.name}  ({report.config_path})  {state}")
+        lines.append(f"## {label}  ({report.config_path})  {state}")
         if report.error:
             lines.append(f"ERROR {report.error}")
             continue

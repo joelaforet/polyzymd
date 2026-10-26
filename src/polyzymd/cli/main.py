@@ -3889,6 +3889,11 @@ def _status_table(config: str) -> None:
     # (format with replicate=1, then strip the trailing "_run1")
     dir_name = sim_config._format_run_directory_name(1)
     system_name = dir_name.rsplit("_run", 1)[0] if "_run" in dir_name else dir_name
+    # Conditions copied from one config share that name; the config tells them apart.
+    condition = getattr(sim_config, "name", None)
+    if isinstance(condition, str) and condition and condition != system_name:
+        system_name = f"{system_name} [{condition}]"
+    system_name = f"{system_name}  ({config})"
 
     # Discover replicate directories (scratch-based, works for both engines)
     replicates = sim_config.discover_replicate_dirs()

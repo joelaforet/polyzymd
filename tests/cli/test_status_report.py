@@ -990,3 +990,19 @@ def test_resubmit_commands_reuse_the_recorded_submit_settings():
     ) in text
     assert "polyzymd submit -c c.yaml -r 2 --preset <preset>" in text
 
+
+def test_conditions_sharing_a_run_folder_name_get_distinct_headers():
+    from polyzymd.cli.status_report import system_labels
+
+    reports = [
+        SystemReport("trp_300K", "s/water/config.yaml", "/s", [], config_name="water"),
+        SystemReport("trp_300K", "s/sbma/config.yaml", "/s", [], config_name="sbma"),
+        SystemReport("other", "s/o/config.yaml", "/s", [], config_name="o"),
+    ]
+
+    assert system_labels(reports) == ["trp_300K [water]", "trp_300K [sbma]", "other"]
+    same = [
+        SystemReport("trp", "s/a/config.yaml", "/s", [], config_name="x"),
+        SystemReport("trp", "s/b/config.yaml", "/s", [], config_name="x"),
+    ]
+    assert system_labels(same) == ["trp [a]", "trp [b]"]
