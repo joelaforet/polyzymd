@@ -401,7 +401,10 @@ class TestRecoverSkipBuild:
     @pytest.fixture(autouse=True)
     def _sbatch(self):
         submitted = MagicMock(returncode=0, stdout="Submitted batch job 1", stderr="")
-        with patch("subprocess.run", return_value=submitted) as run:
+        with (
+            patch("subprocess.run", return_value=submitted) as run,
+            patch("polyzymd.workflow.slurm_submit.shutil.which", return_value="/bin/sbatch"),
+        ):
             yield run
 
     @patch("polyzymd.workflow.slurm._discover_manifest_path", return_value="/fake/pixi.toml")
@@ -2212,10 +2215,22 @@ class TestRecoverReusesSubmitSettings:
 
     def test_the_submitted_job_uses_and_keeps_the_settings(self):
         submitted = MagicMock(returncode=0, stdout="Submitted batch job 7", stderr="")
-        with patch("subprocess.run", return_value=submitted):
-            result = self._recover("--submit")
+        with (
+            patch("subprocess.run", return_value=submitted) as run,
+            patch("polyzymd.workflow.slurm_submit.shutil.which", return_value="/bin/sbatch"),
+        ):
+            result = self._recover("--submit", "--exclude", "n1,n2")
 
         assert result.exit_code == 0, result.output
+        script_path = self.working_dir / "recovery_scripts" / "recover_rep1.sh"
+        # Submitted as polyzymd submit submits: a clean environment, the excluded nodes.
+        assert run.call_args[0][0] == [
+            "sbatch",
+            "--export=NONE",
+            "--exclude",
+            "n1,n2",
+            str(script_path),
+        ]
         script = (self.working_dir / "recovery_scripts" / "recover_rep1.sh").read_text()
         assert "#SBATCH --account=smithlab" in script
         assert "--qos" not in script

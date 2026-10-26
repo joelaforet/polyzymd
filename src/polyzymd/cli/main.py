@@ -4757,17 +4757,15 @@ def recover(
 
         colored_echo(f"Script: {script_path}", phase="workflow")
 
-        # Submit
-        import subprocess
+        # Submit as polyzymd submit does: a clean environment (--export=NONE),
+        # so the job does not inherit this shell's.
+        from polyzymd.workflow.slurm_submit import run_sbatch
 
-        from polyzymd.workflow.slurm_submit import make_log_folder
-
-        make_log_folder(script_path)
-        result = subprocess.run(
-            ["sbatch", str(script_path)],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = run_sbatch(script_path, exclude=slurm_config.exclude)
+        except RuntimeError as e:
+            colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
 
         if result.returncode == 0:
             colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")

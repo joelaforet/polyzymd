@@ -31,7 +31,7 @@ from polyzymd.workflow.slurm import (
     SlurmConfig,
     SlurmScriptGenerator,
 )
-from polyzymd.workflow.slurm_submit import make_log_folder, require_sbatch
+from polyzymd.workflow.slurm_submit import make_log_folder, require_sbatch, sbatch_command
 from polyzymd.workflow.submit_settings import SubmitSettings, write_submit_settings
 
 LOGGER = logging.getLogger(__name__)
@@ -592,15 +592,9 @@ class DaisyChainSubmitter:
         Path(self._get_scratch_dir(replicate)).mkdir(parents=True, exist_ok=True)
         make_log_folder(script_path)
 
-        # Use --export=NONE to start with clean environment, letting the
-        # script's pixi shell-hook initialization work properly regardless
-        # of submission context
-        cmd = ["sbatch", "--export=NONE"]
-
-        if self._dc_config.slurm_config.exclude:
-            cmd.extend(["--exclude", self._dc_config.slurm_config.exclude])
-
-        cmd.append(str(script_path))
+        # A clean environment (--export=NONE), so the script's pixi
+        # shell-hook works regardless of the submitting shell.
+        cmd = sbatch_command(script_path, self._dc_config.slurm_config.exclude)
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
