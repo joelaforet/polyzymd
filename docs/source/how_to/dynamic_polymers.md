@@ -5,6 +5,18 @@ In this mode you do not need an SDF file for each sequence. PolyzyMD builds
 each chain with mBuild from the repeat unit of each monomer and the two caps,
 and assigns partial charges with the method in `charges`.
 
+```{figure} ../_static/renders/polymer_system.webp
+:figclass: pz-render
+:class: dark-light
+:alt: Two coiled polymer chains drawn as thick blue sticks with red, blue and yellow sulfonate and ammonium groups, beside a small protein drawn as a gray cartoon, in water shown as small light spheres with a few purple sodium and yellow chloride ions.
+
+The shipped example `examples/polymer`: two SBMA 5-mers built from star-sited
+SMILES (carbons blue; the sulfonate S yellow and O red, the ammonium N blue)
+beside Trp-cage (gray), in water with Na⁺ (purple) and Cl⁻ (yellow). These are
+the coordinates as built, before any simulation; water and ions in front of
+the chains and the protein are cut away.
+```
+
 For the keys that both modes share, such as `monomers`, `length`, `count` and
 `packing`, see {doc}`polymers`.
 
