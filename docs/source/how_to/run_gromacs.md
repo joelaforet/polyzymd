@@ -17,6 +17,33 @@ All commands below assume you prefix with `pixi run -e build` or have
 activated the environment with `pixi shell -e build`.
 :::
 
+(gromacs-limits)=
+## Limits on GROMACS
+
+```{index} !gromacs limits, !gromacs restraints, !gromacs not supported
+```
+
+Check these before you choose GROMACS for a study. `polyzymd validate`
+refuses the first two with `engine: gromacs`, so a config that needs them runs
+on OpenMM:
+
+- **Distance restraints** (`restraints:`) are not applied. To hold a ligand in
+  its site, use OpenMM, or a position restraint in the equilibration stages.
+- **Position restraints** work for `protein_heavy`, `protein_backbone`,
+  `protein_calpha`, `ligand_heavy` and `polymer_heavy`. Each group has one
+  `force_constant` in every stage, and all stages use the same protein group,
+  so a gradual release ({doc}`equilibration`) runs on OpenMM only.
+- **A finished replicate cannot run longer.** Run new replicates with the
+  longer `duration` instead ({doc}`run_longer`). An interrupted run does
+  continue (see below).
+- **The `openmm:` block** (platform, precision) is not read.
+
+The dynamics also differ in two places. GROMACS has no Monte Carlo barostat, so
+NPT runs stochastic cell rescaling and does not use `barostat_frequency`. The
+Nosé-Hoover and Andersen thermostats and the anisotropic barostat `MCA` run on
+GROMACS only. For every setting on both engines, see
+{doc}`../reference/gromacs_openmm`.
+
 ---
 
 ## Run locally
