@@ -9,7 +9,7 @@ share it and publish it. To write `study.yaml` and run the analyses, see
 {doc}`study_yaml`. For the reasons behind the layout, see
 {doc}`../explanation/study_folders`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 The commands on this page assume you have activated the PolyzyMD analysis

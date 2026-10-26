@@ -1,5 +1,14 @@
 # Analyze the replicates of a study
 
+:::{admonition} At a glance
+:class: note
+
+- **You will learn:** why a mean needs replicates, and how a study-level
+  analysis reports it with an interval and stores what produced it.
+- **You need:** the project of {doc}`../get_started/quickstart`.
+- **Time:** about 10 minutes on a laptop CPU, 3 of them simulating.
+:::
+
 In this tutorial you run two more replicates of the quickstart simulation and
 measure how much each residue of Trp-cage fluctuates (RMSF). You run the
 analysis on the {term}`study`, read the report, and find the stored results
@@ -18,7 +27,7 @@ You learn these steps:
 Do {doc}`../get_started/quickstart` first. This tutorial continues in its
 project folder, `~/pz_quickstart`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run every command of this tutorial in the `build` environment. It includes
@@ -27,6 +36,11 @@ the analysis tools. From the repository root, activate it once:
 ```bash
 pixi shell -e build
 ```
+
+**On the NVIDIA GPU of this machine:** in step 1, run
+`polyzymd build -c trpcage/conditions/water/config.yaml -r 2-3` in `build`,
+then `polyzymd run -c trpcage/conditions/water/config.yaml -r 2-3` in your
+`sim-cuda-*` shell, as in the quickstart. The analyses run in `build`.
 :::
 
 ## Step 1: Run two more replicates

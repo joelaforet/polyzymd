@@ -7,67 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.0] - 2026-10-24
 
-### 1.3.0 in brief (read this first)
+### What changed for you (read this first)
 
-1.3.0 changes the config layout once and checks every build against its
-config. Configs written for 1.3.0rc4 or earlier stop with an error that links to
-the rewrite guide (`docs/source/how_to/rewrite_config_rc5.md`); later 1.3
-releases only add keys, and a test holds them to that.
+Coming from 1.2? These are the changes you will notice. The documentation's
+"New in 1.3" cards link to each; the sections below give every detail.
 
-- **Breaking: the config layout.** `enzyme:`, `substrate:` and `polymers:` become
-  entries of a `solutes:` list (each with `type`, optional `name` and `segid`),
-  and `solvent:` holds the water, co-solvents, ions and box. There are no
-  scientific defaults: every solute and the solvent name their `force_field`
-  files and `charges` (`library`, `preset`, `nagl` with its `model`, `am1bcc`,
-  `espaloma`), and `solvent.water.model` is required. Restraint atoms name the
-  solute they belong to (`component:`) and are selected inside it.
-- **The physics audit.** Every build is compared, term by term, with references
-  rebuilt from the force fields and charges the config names, and checked for
-  composition, ions and salt, constraints, nonbonded settings, clashes, periodic
-  images, restraints and, on GROMACS, every `.mdp` setting. The check catalog is
-  `docs/source/reference/physics_checks.md`. A deliberate departure is accepted
-  under `modeling_exceptions` with a reason.
-- **The build record.** `build_provenance.json` and `build_provenance.md`
-  replace `build_manifest.json`: versions, seeds, file hashes, every component
-  with its force field and charges, the audit, and the methods to cite: every
-  reference the build used, with the DOI of each OpenFF release it ran
-  (OpenFF's citation guidelines), the engine, the water and ion parameters,
-  the charge models, Packmol, mBuild and Machado and Pantano where used.
-- **Gates.** A failed audit stops the build. `run` and `submit` refuse a
-  replicate that has not started unless a passing audit vouches for its files;
-  GROMACS jobs check `audited_files.sha256` before `grompp`. Each OpenMM
-  production segment compares its System with the audited build and stops
-  before its first step if they differ (`polyzymd status` shows the diverged
-  terms). Runs started before rc.5 continue from their own files.
+- **Rewrite your config once.** Each component (protein, ligand, polymers,
+  solvent) names its own force field and charges, with no hidden defaults.
+  A 1.2 config stops with an error that links to the rewrite guide
+  (`docs/source/how_to/rewrite_config_rc5.md`). Later 1.3 releases only add keys.
+- **Every build is checked against its config.** The physics audit compares the
+  built system, term by term, with what the config names, and a failed audit
+  stops the build. `build_provenance.md` lists what each build used and what to
+  cite.
+- **Projects, studies and conditions.** `polyzymd project init` makes a folder
+  for a paper; `study add-condition` adds conditions to a study.
+- **Analysis by study.** `polyzymd analyze NAME --study ...` runs an analysis on
+  every replicate and compares the conditions, one value per replicate; verdicts
+  need three replicates per condition, and a report with an unfinished replicate
+  is partial (exit code 3). Your own Python function runs the same way
+  (`Study.timeseries`).
 - **Your own protocol.** A build can be run outside PolyzyMD (PLUMED, your own
-  `.mdp` or OpenMM script) and brought back for analysis: put the inputs that
-  ran in `protocol/` (`docs/source/how_to/own_protocol.md`).
-- **Preemption.** Job scripts allow SLURM to requeue a preempted job, which
-  resumes from the restart state saved every minute.
-- **Analysis identity.** The config hash of an analysis now includes the force
-  fields, charges, water model, ions, box and restraints, so stored results are
-  recomputed once after upgrading. `analyze` warns about a replicate built from
-  another config.
-- **Polymers from SMILES, built with mBuild.** Each monomer is its repeat unit
-  with `*` on the two linking atoms; each chain end draws a cap from options
-  with probabilities; `length` counts the ends; tacticity and E/Z follow the
-  stereo marks you write. The chains PolyzyMD built before 1.3.0 (the Paper 1
-  SBMA-EGMA chemistry) build again from SMILES. The notebook
-  `star_sited_monomers.ipynb` writes the SMILES from a PubChem structure.
-- **Run, stop, continue, run longer.** An interrupted run continues with
-  `polyzymd run` on a workstation (OpenMM and GROMACS) or `submit` on a
-  cluster; raising `production.duration` continues a finished OpenMM run.
-  `polyzymd status` names local runs, `interrupted` and `extendable`
-  replicates and what to do with each.
-- **Analysis you can rely on.** Verdicts and bounded intervals need at least
-  three replicates per condition; a condition with an unfinished replicate
-  makes the report partial (exit code 3); `--format json` always prints one
-  JSON document. The notebook `load_replicates.ipynb` and the page "Analyze
-  the trajectories with your own tools" cover MDAnalysis and `gmx` scripts of
-  your own.
-- **New projects.** `polyzymd project init` puts the notebooks in
-  `notebooks/`; configs that `study add-condition --new` writes leave the
-  production length and temperature out of the run folder's name.
+  `.mdp` or OpenMM script) and brought back for analysis
+  (`docs/source/how_to/own_protocol.md`).
+- **Publish.** `polyzymd project freeze` writes a deposit from which a reader can
+  redraw the figures and rerun the analyses.
+- **Polymers from SMILES.** Each monomer is written as a star-sited SMILES and
+  built with mBuild; caps and tacticity are part of the config.
+- **Stop, continue, run longer.** An interrupted run continues with the same
+  command; a finished OpenMM run can be extended. `polyzymd status` says what to
+  do with each replicate.
+- **Reproducible runs.** The replicate number seeds the starting structure, the
+  velocities and the thermostat noise.
 
 The entries below describe changes made before 1.3.0rc5 and use the key names
 of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.

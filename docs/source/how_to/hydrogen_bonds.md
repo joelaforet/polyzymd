@@ -1,5 +1,8 @@
 # Run hydrogen bonds analysis
 
+```{index} !hbonds, !h-bonds, !hydrogen bond
+```
+
 Count the hydrogen bonds between named groups of atoms, or within one group,
 on the production frames of every replicate, and compare how many form, how
 long they last, and which residues and residue pairs form them, with the
@@ -9,11 +12,11 @@ replicate as the sampling unit.
 **Want to understand the measurement?** For what each shipped function
 measures, see {doc}`../reference/analysis_functions`; for how the donors and
 acceptors are chosen and the values checked, see
-{doc}`../explanation/analysis_hydrogen_bonds_verification`; for how lifetimes
+{doc}`../reference/analysis_hydrogen_bonds_verification`; for how lifetimes
 are estimated, see {doc}`../explanation/analysis_contact_lifetimes`.
 ```
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis
@@ -34,7 +37,7 @@ On every frame, the analysis counts the hydrogen bonds with MDAnalysis
 `HydrogenBondAnalysis`: a donor within 3.5 Å of an acceptor and a
 donor-hydrogen-acceptor angle of at least 150°. It chooses the donors and
 acceptors from the covalent bonds of the force field. For the rule and the
-files it reads, see {doc}`../explanation/analysis_hydrogen_bonds_verification`.
+files it reads, see {doc}`../reference/analysis_hydrogen_bonds_verification`.
 
 ```{important}
 Keep these files beside the trajectory in any copy of a run you analyse, such
@@ -117,7 +120,7 @@ residue 149 with any SBM monomer. A pair that never forms in a replicate has
 the value 0 there. A per-residue or per-pair comparison is corrected over
 every entry of every compared condition, and the JSON report keeps every row.
 For why pairs are named this way, see
-{doc}`../explanation/analysis_hydrogen_bonds_verification`.
+{doc}`../reference/analysis_hydrogen_bonds_verification`.
 
 Settings, passed with `--set`:
 
@@ -216,6 +219,6 @@ pass explicit atoms: {doc}`analysis_triad_quickstart` shows how.
 ## Next steps
 
 - **What each function measures**: {doc}`../reference/analysis_functions`
-- **How donors and acceptors are chosen**: {doc}`../explanation/analysis_hydrogen_bonds_verification`
+- **How donors and acceptors are chosen**: {doc}`../reference/analysis_hydrogen_bonds_verification`
 - **How lifetimes are estimated**: {doc}`../explanation/analysis_contact_lifetimes`
 - **Contacts analysis**: {doc}`analysis_contacts_quickstart`

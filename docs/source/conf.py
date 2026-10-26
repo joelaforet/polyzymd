@@ -131,31 +131,49 @@ source_suffix = {
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = "sphinx_rtd_theme"
+html_theme = "pydata_sphinx_theme"
 html_static_path = ["_static"]
-# Redirect pages for addresses that the CLI and the init template print.
 html_extra_path = ["_extra"]
-
-# Logo configuration
-html_logo = "_static/logo.png"
-html_favicon = "_static/logo.png"
-
-# Theme options
+html_title = "PolyzyMD"
+html_favicon = "_static/favicon.png"
+# The badge has a transparent background, so it sits on the header in light and dark mode.
+html_logo = "_static/polyzymd_badge_256.png"
 html_theme_options = {
-    "logo_only": True,
-    "prev_next_buttons_location": "bottom",
-    "style_external_links": True,
-    "collapse_navigation": False,
-    "sticky_navigation": True,
-    "navigation_depth": 4,
-    "includehidden": True,
-    "titles_only": False,
+    "logo": {"text": "PolyzyMD", "alt_text": "PolyzyMD home"},
+    # The top-level toctree (Get started, Tutorials, How-to, Explanation,
+    # Reference, Contributing) becomes the header tabs: one per Diataxis section.
+    "header_links_before_dropdown": 6,
+    "navbar_align": "left",
+    "navbar_end": ["theme-switcher", "navbar-icon-links"],
+    "icon_links": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/joelaforet/polyzymd",
+            "icon": "fa-brands fa-github",
+        },
+    ],
+    "show_toc_level": 2,
+    "navigation_with_keys": False,
+    "show_prev_next": True,
+    "footer_start": ["copyright"],
+    "footer_end": ["sphinx-version"],
+    "pygments_light_style": "tango",
+    "pygments_dark_style": "monokai",
 }
-
-# Custom CSS
+# The landing page has no left sidebar: its cards are the navigation.
+html_sidebars = {"index": []}
+html_show_sourcelink = False
 html_css_files = [
     "custom.css",
 ]
+# Looping molecular movies pause for readers who ask for reduced motion.
+html_js_files = [
+    "pz-movie.js",
+]
+# Rank task pages (get started, tutorials, how-to) above API pages, and pages
+# with the query words in their title above pages that mention them once.
+# scripts/check_docs_search.py measures the ranking on the queries users type.
+html_search_scorer = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_scorer.js")
 
 # -- Options for TODO extension ----------------------------------------------
 todo_include_todos = True

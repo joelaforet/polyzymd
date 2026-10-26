@@ -1,4 +1,4 @@
-# Create Custom Plots from Study Results
+# Create custom plots from study results
 
 Use this guide when you want a figure that PolyzyMD does not draw, from values
 measured with the study API. The example measures, for each protein residue,
@@ -175,6 +175,8 @@ first selection passed to `study.per_replicate`.
 
 ## See also
 
+- {doc}`plot_stored_results` to plot the values that `polyzymd analyze`
+  already stored, without measuring again.
 - {doc}`hydrogen_bonds` for the hydrogen-bond functions and the
   `polyzymd analyze hydrogen_bonds` command.
 - {doc}`publication_plots` for settings that control PolyzyMD's standard

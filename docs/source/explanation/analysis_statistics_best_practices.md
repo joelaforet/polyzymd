@@ -1,4 +1,4 @@
-# Statistics Best Practices for MD Analysis
+# Statistics best practices for MD analysis
 
 This page explains how to interpret statistical uncertainty in PolyzyMD
 analysis results. It follows the spirit of the LiveCoMS best-practices

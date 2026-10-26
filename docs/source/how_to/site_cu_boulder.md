@@ -41,9 +41,21 @@ yourself, use these values:
 
 | Flag | Alpine | Blanca |
 |------|--------|--------|
-| `--partition` | `acpu` (CPU), `aa100` or `al40` (GPU) | `blanca-<group>`, for example `blanca-shirts` |
-| `--account` | `ucb-general`, or your lab allocation | The same as the partition |
-| `--qos` | `cpu-normal` (CPU), `gpu-normal` (GPU) | The same as the partition, or `preemptable` |
+| `--partition` | `acpu` (CPU); `aa100`, `al40` or `ami100` (GPU); `acompile` (installs and builds) | `blanca-<group>`, for example `blanca-shirts` |
+| `--account` | Your allocation; `ucb-general` is open to every CU Boulder user | The same as the partition |
+| `--qos` | `cpu-normal` (CPU), `gpu-normal` (GPU), `compile` (`acompile`) | The same as the partition, or `preemptable` |
+
+These are the Alpine values of October 2026. CURC renames partitions and QoS
+values from time to time; if `sbatch` refuses one, list what you may use with
+the `sacctmgr` command below and check a job with `sbatch --test-only`. A job
+that stays pending with the reason `AssocMaxJobsLimit` was given an account
+that cannot run jobs: use another account.
+
+Alpine GPU partitions are often full. `sbatch --test-only` with your flags
+and `--wrap true` prints an estimated start time without submitting; `al40`
+is an alternative when `aa100` is busy. For a short GPU test, Alpine has a
+test reservation with A100 slices: QoS `gpu-testing`, GPU type
+`a100_3g.20gb` and `--reservation=a100_test` (the `testing` preset sets them).
 
 The simulation presets `blanca-shirts` and `blanca-chbe-rdi` use the
 `preemptable` QoS. The owner's jobs can then preempt a job at any moment.
@@ -78,8 +90,19 @@ sacctmgr show association user=$USER format=account,partition,qos
 ## Build the systems on a compute node
 
 `polyzymd submit` does not build. Build each replicate first, in a compute
-job, not on a login node. On Blanca, this command builds three replicates on a
-CPU node of the condo:
+job, not on a login node. On Alpine, use the `acompile` partition, which
+usually starts at once; install the environments there too:
+
+```bash
+ml slurm/alpine
+sbatch --partition=acompile --qos=compile --account=ucb-general \
+    --ntasks=1 --cpus-per-task=4 --time=01:00:00 \
+    --wrap "pixi run -e build polyzymd build -c config.yaml -r 1-3"
+```
+
+In October 2026 this built Trp-cage in water (6,138 atoms) in 4 minutes, and
+a `pixi install -e build` in the same kind of job took 9 minutes. On Blanca,
+this command builds three replicates on a CPU node of the condo:
 
 ```bash
 ml slurm/blanca
@@ -108,6 +131,34 @@ pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset aa100 \
     --account <account> \
+    --replicates 1-5
+```
+
+Try a new system with a short job first. The `testing` preset asks for an
+A100 slice in Alpine's test reservation: partition `aa100`, QoS
+`gpu-testing`, GPU type `a100_3g.20gb`, `--reservation=a100_test` and a 5:59
+time limit:
+
+```bash
+ml slurm/alpine
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --preset testing \
+    --account <account> \
+    --pixi-env auto \
+    --replicates 1
+```
+
+On Alpine, keep the trajectories in scratch and the scripts and logs in
+project storage:
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --preset aa100 \
+    --account <account> \
+    --projects-dir /projects/$USER/polyzymd \
+    --scratch-dir /scratch/alpine/$USER/polyzymd_sims \
     --replicates 1-5
 ```
 

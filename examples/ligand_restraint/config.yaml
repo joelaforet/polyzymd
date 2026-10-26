@@ -1,0 +1,84 @@
+# A protein with a bound ligand and a distance restraint. T4 lysozyme L99A
+# (PDB 181L) with benzene in its buried cavity, in TIP3P water with 0.15 M
+# NaCl, run for a few picoseconds on the CPU. A flat-bottom restraint keeps the
+# benzene in the cavity. Change the durations (ns) for a real study; see the
+# configuration reference. README.md says how the two input files were made.
+name: "t4l_benzene"
+engine: "openmm"
+description: "T4 lysozyme L99A with benzene and a flat-bottom restraint"
+
+solutes:
+  - type: protein
+    name: "t4l_l99a"
+    pdb_path: "structures/t4l_clean.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+  # The benzene at its crystal pose (residue BNZ 400 of 181L), with hydrogens.
+  - type: small_molecule
+    name: "benzene"
+    sdf_path: "structures/benzene.sdf"
+    residue_name: "BNZ"
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+
+solvent:
+  force_field: ["openff-2.3.0.offxml"]
+  water:
+    model: "tip3p"
+  ions:
+    neutralize: true
+    nacl_concentration: 0.15
+  box:
+    padding: 1.0
+    shape: "rhombic_dodecahedron"
+
+# No force while the first benzene carbon is within 6.5 A of the Ala 99 CB
+# (3.8 A in the crystal); harmonic beyond. The SDF has no atom names, so the
+# first carbon is C1x (see the restraints how-to). distance is in A,
+# force_constant in kJ/mol/nm^2 (4184 = 10 kcal/mol/A^2).
+restraints:
+  - type: "flat_bottom"
+    name: "benzene_in_cavity"
+    atom1:
+      component: "t4l_l99a"
+      selection: "resid 99 and name CB"
+      description: "Ala 99 CB, the cavity made by the L99A mutation"
+    atom2:
+      component: "benzene"
+      selection: "name C1x"
+      description: "First benzene carbon"
+    distance: 6.5
+    force_constant: 4184.0
+    enabled: true
+
+thermodynamics:
+  temperature: 300.0
+  pressure: 1.0
+
+simulation_phases:
+  equilibration_stages:
+    # Hold the protein and benzene heavy atoms while the water relaxes.
+    - name: "restrained"
+      duration: 0.002
+      samples: 2
+      ensemble: "NVT"
+      temperature: 300.0
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+        - group: "ligand_heavy"
+          force_constant: 4184.0
+  production:
+    ensemble: "NPT"
+    duration: 0.01
+    samples: 10
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    barostat: "MC"
+
+openmm:
+  platform: "CPU"
+
+output:
+  projects_directory: "."
+  naming_template: "{enzyme}_{temperature}K_run{replicate}"

@@ -71,7 +71,7 @@ example with a Cα-only selection.
 GROMACS writes the RMSF with `gmx rmsf -o` and the deviation with
 `gmx rmsf -od` ("root mean square deviation with respect to the reference
 structure"). PolyzyMD's values agree with `gmx rmsf` to the 4 decimals in nm
-that GROMACS writes; see {doc}`analysis_rmsf_verification`. The "per-residue
+that GROMACS writes; see {doc}`../reference/analysis_rmsf_verification`. The "per-residue
 RMSD" of other tools, such as cpptraj's `rmsd perres`, is a different
 quantity: one value per residue and per frame, a timeseries.
 
@@ -336,5 +336,5 @@ thermostability in variants of lipase A from *Bacillus subtilis*." *PLoS ONE*
 
 - [RMSF quickstart](../how_to/analysis_rmsf_quickstart.md) — commands and minimal setup
 - [Reference structure selection](analysis_reference_selection.md) — choose the reference and fitted atoms
-- [RMSF implementation verification](analysis_rmsf_verification.md) — what the implementation is checked against
+- [RMSF implementation verification](../reference/analysis_rmsf_verification.md) — what the implementation is checked against
 - [Statistics best practices](analysis_statistics_best_practices.md) — foundational statistics for MD

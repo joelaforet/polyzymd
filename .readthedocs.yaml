@@ -26,3 +26,25 @@ python:
 # Optionally build your docs in additional formats such as PDF and ePub
 formats:
   - pdf
+
+# Server-side search on the hosted site. Task pages (get started, tutorials,
+# how-to) rank above API and contributor pages, as html_search_scorer does for
+# the built-in search (docs/source/search_scorer.js). The last matching
+# pattern sets a page's rank (-10 to 10, default 0).
+search:
+  ranking:
+    api/*: -4
+    contributor_guide/*: -2
+    how_to/*: 3
+    tutorials/*: 3
+    get_started/*: 4
+  ignore:
+    # Read the Docs defaults
+    - search.html
+    - search/index.html
+    - 404.html
+    - 404/index.html
+    # Generated indexes and highlighted source pages (sphinx.ext.viewcode)
+    - genindex.html
+    - py-modindex.html
+    - _modules/*

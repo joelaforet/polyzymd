@@ -1,8 +1,11 @@
 # Troubleshooting
 
+```{index} !error, !errors, !fix an error
+```
+
 Find the error message or the symptom below, and do the steps that follow it.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 PolyzyMD has one pixi environment for each kind of work. Use the environment
@@ -54,10 +57,10 @@ fix: start from the complete commented config that polyzymd study add-condition 
 A required key or a whole section is missing. Add it. For the required keys
 of each section, see {doc}`../reference/configuration`.
 
-### `this config uses the layout of PolyzyMD 1.3.0rc4 and earlier`
+### `this config uses the layout of PolyzyMD 1.2 and 1.3.0rc4 and earlier`
 
 ```
-error: config: this config uses the layout of PolyzyMD 1.3.0rc4 and earlier (enzyme -> a solutes entry with type: protein). Rewrite it from the template (polyzymd study add-condition LABEL --new writes one) or see https://polyzymd.readthedocs.io/en/latest/how_to/rewrite_config_rc5.html
+error: config: this config uses the layout of PolyzyMD 1.2 and 1.3.0rc4 and earlier (enzyme -> a solutes entry with type: protein). Rewrite it from the template (polyzymd study add-condition LABEL --new writes one) or see https://polyzymd.readthedocs.io/en/latest/how_to/rewrite_config_rc5.html
 ```
 
 The config has an `enzyme:`, `substrate:`, `polymers:` or top-level

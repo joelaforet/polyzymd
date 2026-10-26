@@ -1,10 +1,10 @@
-# Which Analysis Should I Run?
+# Which analysis should I run?
 
 You already have trajectories. This page helps you choose the analyses that match the question you want to answer.
 To read the trajectories with MDAnalysis or `gmx` tools of your own instead,
 see {doc}`own_analysis`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis
@@ -72,6 +72,11 @@ polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --eq 10ns
 Give every command the same `--output-dir`, or run them from the same
 directory, so that each one reads back the replicate results the others
 stored.
+
+In a study, give the study instead: `polyzymd analyze rmsf --study my_study`.
+It reads the conditions and the equilibration window from `study.yaml`. With
+`-c`, `--eq` defaults to `10ns`; for shorter runs, give `--eq 0ns` or the window
+you want.
 
 ## See Also
 

@@ -1,4 +1,4 @@
-# Establishing Convergence in MD Simulations
+# Establishing convergence in MD simulations
 
 Understanding when a molecular dynamics simulation has converged, and what
 convergence means in practice, is essential for drawing reliable conclusions.

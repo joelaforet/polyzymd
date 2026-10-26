@@ -1,5 +1,18 @@
 # Run your first simulation
 
+```{index} !quickstart, !first simulation, !run the example
+```
+
+:::{admonition} At a glance
+:class: note
+
+- **You will learn:** how a PolyzyMD study is organized (project, study,
+  condition) and the loop every study repeats: validate, run, analyze.
+- **You need:** PolyzyMD installed, with the clone of the repository. For
+  GROMACS, also `gmx`.
+- **Time:** about 10 minutes on a laptop CPU, 1 to 2 of them simulating.
+:::
+
 In this tutorial you simulate the small protein Trp-cage in water, and then
 measure its radius of gyration. You start the way every PolyzyMD study
 starts: you make a {term}`project`, add a {term}`study` to it, and add a
@@ -20,7 +33,7 @@ You learn these steps:
 Install PolyzyMD as {doc}`installation` describes. You need the clone of the
 repository, because the example files are in it.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run every command of this tutorial in the `build` environment. It holds
@@ -32,6 +45,24 @@ pixi shell -e build
 ```
 
 The commands then work in any folder of this shell.
+
+**On the NVIDIA GPU of this machine:** in step 2, after `add-condition`, set
+`openmm.platform: CUDA` and `openmm.precision: mixed` in the copied config.
+Choose the platform before the first build of a condition. Changing it later
+is safe for replicates that have already run: the platform does not change the
+built system. A replicate that is built but has not started must be built
+again. In step 4, build in `build` and run in the `sim-cuda-*` environment
+that matches your driver (the newest whose CUDA version does not exceed the
+`CUDA Version` that `nvidia-smi` prints):
+
+```bash
+polyzymd build -c trpcage/conditions/water/config.yaml -r 1    # in the build shell
+polyzymd run -c trpcage/conditions/water/config.yaml -r 1      # in a sim-cuda-12-6 shell
+```
+
+Open the second shell with `pixi shell -e sim-cuda-12-6` in the clone, after
+`pixi install -e sim-cuda-12-6`. See
+{ref}`the local GPU recipe <local-nvidia-gpu>`.
 :::
 
 ## Step 1: Make the project
@@ -71,6 +102,25 @@ The example folder `examples/quickstart/` holds these files:
 with 0.15 M NaCl, at 300 K and 1 atm. It has one equilibration stage of
 0.002 ns (NVT) and a production of 0.004 ns (NPT) that saves 4 frames.
 
+:::{admonition} Use GROMACS?
+:class: tip
+
+Add `config_gromacs.yaml` in place of `config.yaml` in the command below,
+still as the condition `Water`. It needs `gmx` on `PATH`; PolyzyMD does not
+install GROMACS (see {ref}`install-gromacs`). Every step of this tutorial is
+then the same, with these differences:
+
+- `validate` prints `Engine: gromacs`.
+- The run writes the GROMACS files (`.top`, `.mdp`, `.tpr`, `.xtc`) into
+  `gromacs/` of the replicate folder. See
+  {ref}`Output files <gromacs-output-files>`.
+- The run warns that GROMACS has no Monte Carlo barostat and runs `MC` as
+  c-rescale. This is expected. {doc}`../reference/gromacs_openmm` lists what
+  each setting becomes in the `.mdp`.
+
+For GROMACS on a cluster, see {doc}`../how_to/run_gromacs`.
+:::
+
 Add it to the study as the condition `Water`. Change `~/polyzymd` to the
 folder where you cloned the repository:
 
@@ -86,8 +136,9 @@ warning: the runs go into runs/trpcage/water unless you set scratch_directory in
 next: commit, and run polyzymd study check
 ```
 
-`add-condition` copies the config and `trpcage.pdb` into
-`trpcage/conditions/water/`, and lists the condition in `trpcage/study.yaml`.
+`add-condition` copies the config into `trpcage/conditions/water/` and
+`trpcage.pdb` into `trpcage/conditions/water/structures/`, and lists the
+condition in `trpcage/study.yaml`.
 The copy writes its simulations into `runs/trpcage/water/` of the project.
 
 :::{warning}
@@ -142,8 +193,8 @@ polyzymd run -c trpcage/conditions/water/config.yaml -r 1
 3. It runs the equilibration stage.
 4. It runs production.
 
-The command prints a log of each step. It takes about one to two minutes. The
-last lines are:
+The command prints a log of each step. It takes about one to two minutes on
+a laptop CPU. The last lines are:
 
 ```
 OpenMM simulation completed successfully.
@@ -166,6 +217,51 @@ runs/trpcage/water/trpcage_300K_run1/
     ├── production_0_trajectory.dcd
     └── ...
 ```
+
+```{figure} ../_static/renders/quickstart_system.webp
+:figclass: pz-render
+:class: dark-light
+:alt: Trp-cage, a 20-residue protein drawn as a gray cartoon with its side chains, inside a box of water molecules shown as small gray spheres, with a few sodium and chloride ions as larger purple and yellow spheres.
+
+The system you just built (`solvated_system.pdb`): Trp-cage (gray) in its
+rhombic dodecahedron of TIP3P water, with Na⁺ (purple) and Cl⁻ (yellow) at
+0.15 M plus the ions that neutralize the protein. Water is drawn as its
+oxygens; the water in front of the protein is cut away.
+```
+
+Open `build_provenance.md`. It records what was built and the result of the
+physics audit, which compared every force-field term, charge and
+setting of the built system with the config. It starts like this:
+
+```text
+# Build provenance
+
+- engine: openmm
+- PolyzyMD <version>; OpenMM <version>
+- config hash `c5fb3836...`; 6138 atoms
+
+## Components
+
+| Component | Type | Segment | Molecules | Force field | Charges |
+|---|---|---|---|---|---|
+| trpcage | protein | PROT | 1 | ff14sb_off_impropers_0.0.4.offxml | library |
+| solvent | solvent | SOL | 1941 | openff-2.3.0.offxml | water_model (tip3p) |
+| ions | ions | ION | 11 | openff-2.3.0.offxml | library |
+
+## Physics audit: PASSED
+
+25 pass, 2 info
+...
+| PASS | `nonbonded.settings` | system | nonbonded_method pme, cutoff_nm 0.9, switch_nm 0.8, dispersion_correction True |
+...
+## Methods to cite
+...
+```
+
+Below the audit table, `Methods to cite` lists the software, force fields
+and methods of this build, with DOIs, and `Inputs and seeds` lists the box
+and the seeds. For what the audit checks and what it does not, see
+{doc}`../explanation/physics_audit`.
 
 ## Step 5: Measure the radius of gyration
 
@@ -198,24 +294,25 @@ production frame, because its `study.yaml` sets `equilibration: 0ns`. A real
 study removes the first part of production. The output is:
 
 ```
-log: /home/me/pz_quickstart/logs/polyzymd-analyze-20261006-171142-pid18811.log
+log: /home/me/pz_quickstart/logs/polyzymd-analyze-20261025-215542-pid2435292.log
 == study trpcage
 == rg
 # polyzymd analyze rg  metric mean_rg  unit A  eq 0ns  conditions 1  replicates 1  protocol rg/2
-Water  n 1  mean 7.138  sem na  ci95 na  values 7.138  replicates 1  g 1  n_eff 4  eq_detected 0.001 ns
+Water  n 1  mean 7.344  sem na  ci95 na  values 7.344  replicates 1  g 1  n_eff 4  eq_detected 0.001 ns
 warning: condition Water: replicates 1 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected
 warning: condition Water has one replicate, so it has no interval
-verdict: Water mean_rg 7.138 A (no interval, n 1)
+verdict: Water mean_rg 7.344 A (n 1; no interval below 3 replicates)
 ```
 
 Read the lines in this order:
 
-1. `verdict:` gives the result: a mean radius of gyration of about 7.1 Å.
+1. `verdict:` gives the result: a mean radius of gyration of about 7.3 Å.
    Your value differs a little. The replicate number fixes the starting
    structure and the random seeds, but the CPU threads add up forces in a
    different order on each run, so runs agree statistically, not exactly.
 2. The `Water` line gives `n 1`, one replicate. With one replicate there is
-   no confidence interval, so `sem` and `ci95` are `na`.
+   no confidence interval, so `sem` and `ci95` are `na`. The verdict gives an
+   interval from three replicates on, as in the next tutorial.
 3. The two `warning:` lines come from the short test: one replicate of 4
    frames. A real study has several replicates and many frames.
 
@@ -245,16 +342,25 @@ and the hardware change.
 
 ## Next steps
 
+- **What PolyzyMD checked.** The physics audit table in
+  `build_provenance.md` compared every term of the build with the force
+  fields and charges the config names. {doc}`../explanation/physics_audit`
+  explains how, and {ref}`the engine parity check <engine-parity>` compares the energies of
+  one build on OpenMM and GROMACS.
 - **Your own protein.** Follow {doc}`../tutorials/own_system`. It starts
   from `polyzymd study add-condition --new`, which writes a template config.
+- **Your NVIDIA GPU.** Set `openmm.platform: CUDA` before the first run of
+  a condition, then build in `build` and run in a `sim-cuda-*` environment.
+  See {ref}`the local GPU recipe <local-nvidia-gpu>`.
 - **GROMACS.** If `gmx` is installed, add `config_gromacs.yaml` as a
   condition and run it. See {doc}`../how_to/run_gromacs`.
 - **A cluster.** Run long simulations on GPUs with `polyzymd submit`. See
   {doc}`../how_to/hpc_slurm` and {doc}`../how_to/monitor_simulations`.
 - **More conditions.** Copy a condition with
   `polyzymd study add-condition NAME --from Water`, and change what differs,
-  such as a polymer or a co-solvent. See {doc}`../how_to/study_folder` and
-  {doc}`../how_to/polymers`.
+  such as a polymer or a co-solvent. See {doc}`../how_to/study_folder`,
+  {doc}`../how_to/dynamic_polymers` and {doc}`../how_to/cosolvents`. For
+  shipped configs of these systems, see {ref}`shipped-examples`.
 - **More studies.** Add a study for another protein with
   `polyzymd project add-study LABEL`. See {doc}`../how_to/project`.
 - **More analyses.** The next lesson, {doc}`../tutorials/first_analysis`,

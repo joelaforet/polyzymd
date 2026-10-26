@@ -18,6 +18,7 @@ Read these pages in this order to understand an analysis result:
 ## Studies and projects
 
 ```{toctree}
+:caption: Studies and projects
 :maxdepth: 1
 
 projects
@@ -27,6 +28,7 @@ study_folders
 ## Analysis
 
 ```{toctree}
+:caption: Analysis
 :maxdepth: 1
 
 analysis_concepts
@@ -39,6 +41,7 @@ convergence_detection
 ## Metrics
 
 ```{toctree}
+:caption: Metrics
 :maxdepth: 1
 
 analysis_rmsd_best_practices
@@ -49,21 +52,10 @@ analysis_contact_lifetimes
 analysis_triad_best_practices
 ```
 
-## Verification records
-
-```{toctree}
-:maxdepth: 1
-
-analysis_rmsf_verification
-analysis_sasa_verification
-analysis_contacts_verification
-analysis_native_contacts_verification
-analysis_hydrogen_bonds_verification
-```
-
 ## Simulation design
 
 ```{toctree}
+:caption: Simulation design
 :maxdepth: 1
 
 simulation_safeguards

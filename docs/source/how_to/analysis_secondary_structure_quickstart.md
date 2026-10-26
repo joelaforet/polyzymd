@@ -5,7 +5,7 @@ frame of each replicate. Then compare how much of the protein is helix, strand
 or coil, for the whole protein or residue by residue, with one value per
 replicate.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis

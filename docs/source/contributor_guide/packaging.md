@@ -1,4 +1,4 @@
-# Package Structure and Release Guide
+# Package structure and release guide
 
 Use this page when you need to understand how PolyzyMD is packaged, why the
 project is pixi-first, and what release automation expects from contributors.

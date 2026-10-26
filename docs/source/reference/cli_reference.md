@@ -1,4 +1,4 @@
-# CLI Reference
+# CLI reference
 
 Complete reference for all PolyzyMD command-line interface commands.
 

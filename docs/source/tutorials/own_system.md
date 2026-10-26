@@ -1,5 +1,17 @@
 # Set up your own system
 
+:::{admonition} At a glance
+:class: note
+
+- **You will learn:** how to start a study of your own protein from a
+  template config, check it before you spend compute, and derive a second
+  condition (here a co-solvent) from the first.
+- **You need:** {doc}`../get_started/quickstart` done, and your protein as a
+  PDB file cleaned for OpenFF ({doc}`prepare_pdb_for_openff`).
+- **Time:** about 30 minutes to set up. The simulations take as long as your
+  protein, durations and hardware need.
+:::
+
 In this tutorial you set up simulations of your own protein. You make a
 {term}`project`, write a template config for a first condition, fill it in
 and check it. Then you copy the condition to make a second one, run both and
@@ -14,7 +26,7 @@ conditions are Trp-cage in water and in 2 M urea.
 - Do {doc}`../get_started/quickstart` first.
 - Clean your structure for OpenFF, as {doc}`prepare_pdb_for_openff` shows.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run every command of this tutorial in the `build` environment. From the
@@ -27,6 +39,10 @@ pixi shell -e build
 The commands then work in any folder of this shell. A `pixi run -e ...`
 command outside the clone needs the clone's `pixi.toml`:
 `pixi run --manifest-path ~/polyzymd/pixi.toml -e build polyzymd ...`.
+
+On the NVIDIA GPU of this machine, keep `openmm.platform: CUDA` (the
+template's value), build in `build` and run in a `sim-cuda-*` environment;
+step 6 shows how.
 :::
 
 ## Step 1: Make the project
@@ -169,14 +185,24 @@ next: commit, and run polyzymd study check
 config, set it again in the copy.
 
 The copy's `name:` is `urea_2_m`, the folder name, as for `--new`. In the
-copy, change `description:` and replace `co_solvents: []` with the urea:
+copy, change `description:`. Then find the line `co_solvents: []` in the
+`solvent:` section and replace it with the urea. A config without that line,
+such as one copied from the quickstart, gets the entry under `solvent:`, at
+the same indent as `water:`:
 
 ```yaml
+solvent:
+  force_field: ["openff-2.3.0.offxml"]
+  water:
+    model: "tip3p"
   co_solvents:
     - name: "urea"
       concentration: 2.0                # molar
       charges: {method: preset}         # the charges PolyzyMD ships for urea
 ```
+
+The lines above `co_solvents:` are there to show the indent; keep them as
+they are. For other co-solvents and amounts, see {doc}`../how_to/cosolvents`.
 
 Check the copy with `validate` and `build --dry-run`, as in step 4. The
 summary of `validate` now gives `Co-solvents: urea`.
@@ -193,10 +219,14 @@ git commit -m "Add the Water and Urea 2 M conditions"
 Run three replicates of each condition. The replicate number is the random
 seed.
 
-On a cluster with GPUs, submit them to SLURM. Choose the preset of your
-cluster:
+On a cluster with GPUs, build the replicates first, then submit them to SLURM.
+`submit` does not build: it checks each replicate's build and stops if one is
+missing. On a cluster, run the builds in an interactive job, as
+{doc}`../how_to/hpc_slurm` shows. Choose the preset of your cluster:
 
 ```bash
+polyzymd build -c trpcage/conditions/water/config.yaml -r 1-3
+polyzymd build -c trpcage/conditions/urea_2_m/config.yaml -r 1-3
 polyzymd submit -c trpcage/conditions/water/config.yaml -r 1-3 --preset aa100
 polyzymd submit -c trpcage/conditions/urea_2_m/config.yaml -r 1-3 --preset aa100
 ```
@@ -249,6 +279,14 @@ To read the reports, see {doc}`first_analysis`.
 ## What you did
 
 You made a project for your own protein, filled in a template config, checked
-it, copied it to make a second condition, and ran and analyzed both. To add a
-polymer, see {doc}`../how_to/polymers`. To publish the project, see
-{doc}`../how_to/project`.
+it, copied it to make a second condition, and ran and analyzed both.
+
+- **To add a polymer,** copy a condition as in
+  {doc}`analysis_complete_workflow`, and write the polymer from monomer SMILES
+  as in {doc}`../how_to/dynamic_polymers`. No SDF files are needed. For your
+  own monomers, see {doc}`star_sited_monomers`.
+- **For other co-solvents,** such as DMSO by mole fraction or a molecule
+  PolyzyMD does not ship, see {doc}`../how_to/cosolvents`.
+- **For a ligand with a restraint,** see {doc}`../how_to/restraints`, and the
+  shipped configs in {ref}`the shipped examples <shipped-examples>`.
+- **To publish the project,** see {doc}`../how_to/project`.

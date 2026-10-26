@@ -13,7 +13,7 @@ For what RMSF can and cannot show, see
 {doc}`../explanation/analysis_rmsf_best_practices`. For the choice of
 reference, see {doc}`../explanation/analysis_reference_selection`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis
@@ -44,7 +44,7 @@ For each residue, `rmsd_per_residue² = rmsf² + offset²`. PolyzyMD gives each
 atom of a residue equal weight. GROMACS weights atoms by mass. The two give the
 same result for Cα-only selections. The values agree with `gmx rmsf` to the
 4 decimals in nm that GROMACS writes. See
-{doc}`../explanation/analysis_rmsf_verification`.
+{doc}`../reference/analysis_rmsf_verification`.
 
 `rmsd_per_residue` is one number per residue. `rmsd` is one number per frame.
 For the definitions, and for which quantity answers which question, see

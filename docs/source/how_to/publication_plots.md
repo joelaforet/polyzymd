@@ -1,4 +1,4 @@
-# Customizing Plots for Publication
+# Customize plots for publication
 
 `polyzymd analyze` draws each analysis's figures with the default plot
 settings, 300 dpi PNG files in the `compact` style. This guide shows you how
@@ -6,7 +6,7 @@ to redraw them with another output format, resolution, PolyzyMD theme preset
 or condition colors, by passing a `PlotSettings` to the `plot` methods of the
 study API.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All plotting commands below assume you have activated the PolyzyMD analysis
@@ -275,6 +275,9 @@ Common ranges:
 - `72-150`: screen and draft output
 - `300`: print/publication output
 - `600`: high-resolution print output
+
+To draw a figure of your own from the stored values instead, with your own
+plotting code, see {doc}`plot_stored_results`.
 
 ## Figure options of `polyzymd analyze`
 

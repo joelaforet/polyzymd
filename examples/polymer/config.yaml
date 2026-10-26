@@ -1,0 +1,76 @@
+# A protein with polymer chains built from SMILES. Trp-cage (20 residues)
+# with two SBMA 5-mers in TIP3P water with 0.15 M NaCl, run for a few
+# picoseconds on the CPU. Change the durations (ns) for a real study; see the
+# configuration reference.
+name: "trpcage_sbma"
+engine: "openmm"
+description: "Trp-cage with two SBMA 5-mers in water with NaCl"
+
+solutes:
+  - type: protein
+    name: "trpcage"
+    pdb_path: "../quickstart/trpcage.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+
+  # Two chains of sulfobetaine methacrylate (SBMA), built with mBuild from the
+  # repeat unit: "*" marks the two carbons that bond to the neighbouring units.
+  # Each end is an SBMA unit that kept its C=C double bond, so a 5-mer is an
+  # end, three repeat units and an end.
+  - type: polymer
+    generation_mode: "dynamic"
+    type_prefix: "SBMA"
+    monomers:
+      - label: "A"
+        probability: 1.0
+        name: "SBMA"
+        residue_name: "SBM"
+        smiles: "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+    end_groups:
+      head: [{label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 1.0}]
+      tail: [{label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 1.0}]
+    length: 5
+    count: 2
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+    # Place the chains within 0.5 nm of the protein so they touch it within
+    # this short run. A real study uses the default, 2.0 nm.
+    packing:
+      padding: 0.5
+
+solvent:
+  force_field: ["openff-2.3.0.offxml"]
+  water:
+    model: "tip3p"
+  ions:
+    neutralize: true
+    nacl_concentration: 0.15
+  box:
+    padding: 1.0
+    shape: "rhombic_dodecahedron"
+
+thermodynamics:
+  temperature: 300.0
+  pressure: 1.0
+
+simulation_phases:
+  equilibration_stages:
+    - name: "equil"
+      duration: 0.002
+      samples: 2
+      ensemble: "NVT"
+      temperature: 300.0
+  production:
+    ensemble: "NPT"
+    duration: 0.01
+    samples: 10
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    barostat: "MC"
+
+openmm:
+  platform: "CPU"
+
+output:
+  projects_directory: "."
+  naming_template: "{enzyme}_{temperature}K_run{replicate}"

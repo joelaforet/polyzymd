@@ -11,7 +11,7 @@ measures, see {doc}`../reference/analysis_functions`; for the statistics, see
 {doc}`../explanation/analysis_statistics_best_practices`.
 ```
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis

@@ -46,7 +46,7 @@ equal masses, giving one value per residue in the order of `atoms.residues`.
 | `contact_lifetimes` | `protein` and `polymer`, `AtomGroup`s; the production frames; `method` (`occlusion`), `types` (none), `tolerance_ps` (0) and the method's options | rows `LIFETIME_PARTS = ("mean_lifetime", "n_events", "censored_fraction")`; one column for the polymer, then one per residue name in `types` | Each frame's contacts by `residue_occlusion`'s or `residue_contacts`'s rule; `contact_events` finds each residue's runs of frames in contact, after filling absences of at most `tolerance_ps` with MDAnalysis `lib.correlations.correct_intermittency`, a run including the first or last frame being censored; a run of `k` frames lasts `k` frame spacings; `mean_lifetime` is the Kaplan-Meier restricted mean in ns (`scipy.stats.ecdf` on `CensoredData`, area under the survival function up to the time the frames span), `nan` without events | `polyzymd analyze contacts --run mean_lifetime` |
 
 The comparison with `gmx rmsf` on real trajectories, and the script that reruns
-it, are in {doc}`../explanation/analysis_rmsf_verification`.
+it, are in {doc}`analysis_rmsf_verification`.
 
 `polyzymd analyze rg` measures `radius_of_gyration` of `--set selection=...`
 (default `protein`) on every production frame, reduces each replicate to its
@@ -99,7 +99,7 @@ target alone, named `isolated`), with `probe_radius_nm` and `n_sphere_points`.
 chosen result is measured. The default is the first context's total. See
 {doc}`../how_to/analysis_sasa_quickstart`. MDTraj is given one frame per call
 because MDTraj 1.11.1 returns about 0.1 percent too much area for the later
-frames each thread computes in a call; see {doc}`../explanation/analysis_sasa_verification`.
+frames each thread computes in a call; see {doc}`analysis_sasa_verification`.
 
 `polyzymd analyze native_contacts` measures `native_contacts` of `--set
 selection=...` (default `protein and not element H`) against
@@ -112,7 +112,7 @@ counts every native pair, and `--run <region>_q` for each entry of `--set
 regions='{name: selection}'` only the pairs with an atom in the region. Only
 the chosen result is measured. See
 {doc}`../how_to/analysis_native_contacts_quickstart` and
-{doc}`../explanation/analysis_native_contacts_verification`.
+{doc}`analysis_native_contacts_verification`.
 
 `polyzymd analyze secondary_structure` runs `dssp_occupancy` once per
 replicate on `--set selection=...` (default `protein`, whole residues), in the
@@ -162,7 +162,7 @@ selections, the types found, the residues without a maximum ASA and the
 residues of each class and region are recorded under `provenance.settings`.
 `--run mean_lifetime`, `<type>_mean_lifetime`, `lifetime_events` and `censored_fraction` run `contact_lifetimes` with the same method and `tolerance_ps`, and are measured only when chosen; see {doc}`../explanation/analysis_contact_lifetimes`. See
 {doc}`../how_to/analysis_contacts_quickstart` and
-{doc}`../explanation/analysis_contacts_verification`.
+{doc}`analysis_contacts_verification`.
 
 `polyzymd analyze hydrogen_bonds` counts hydrogen bonds for the summaries of
 `--set summaries=...`, each `{between: [a, b]}` or `{within: a}` over the named
@@ -184,7 +184,7 @@ and acceptors used are recorded under `provenance.settings.hbond_atoms`, as
 counts per residue name and atom name. A replicate with no hydrogen bond in
 the summary gets `nan` for a lifetime result and a warning. See
 {doc}`../how_to/hydrogen_bonds` and
-{doc}`../explanation/analysis_hydrogen_bonds_verification`.
+{doc}`analysis_hydrogen_bonds_verification`.
 
 ## Figures
 

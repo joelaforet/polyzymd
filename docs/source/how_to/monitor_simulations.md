@@ -1,9 +1,13 @@
-# Monitor a Simulation Campaign
+# Check the status of simulations
+
+```{index} !monitor, !monitor simulations, !status, !job status, !simulation status, !progress, !squeue
+```
 
 This guide shows how to answer three questions about a set of running
 PolyzyMD chains with one command: which replicates have finished, which have
-died and will not restart on their own, and how long the rest will take. It
-also shows how to hand that command to an AI coding agent as a reusable skill.
+died (crashed or stopped) and will not restart on their own, and how long the
+rest will take. It also shows how to hand that command to an AI coding agent
+as a reusable skill.
 
 ## Prerequisites
 
@@ -73,6 +77,14 @@ directory that holds the config, with the correct scheduler module loaded.
 `submit` calls `sbatch` directly, so if the wrong scheduler is active the
 submission fails with `invalid partition specified`. Resubmission resumes from
 the last checkpoint; it never rebuilds the system.
+
+The footer's command carries the preset and the site overrides (account,
+QoS, partition, GPU type, pixi environment) that `polyzymd submit` recorded
+for the replicate, so it works on a cluster without a built-in preset.
+
+A replicate submitted by an older PolyzyMD has no such record: its footer
+names only `--preset`, and you add the overrides you first submitted with
+(see {ref}`hpc-slurm-other-cluster`).
 
 Each `DEAD` row ends with `action: resubmit` or `action: inspect`. Only
 `resubmit` chains get a submit line; `inspect` chains are listed under "dead

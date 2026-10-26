@@ -5,7 +5,7 @@ replicate. For each pair, PolyzyMD reports the mean distance and the fraction
 of frames below a threshold. Then it compares the conditions, with one value
 per replicate.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis

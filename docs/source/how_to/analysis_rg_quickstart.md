@@ -1,4 +1,7 @@
-# Run Rg analysis
+# Run radius of gyration (Rg) analysis
+
+```{index} !rg, !radius of gyration
+```
 
 Measure the radius of gyration (Rg) of a selection on each production frame of
 each replicate. Then compare the conditions, with one value per replicate.
@@ -6,7 +9,7 @@ each replicate. Then compare the conditions, with one value per replicate.
 Rg measures how compact a selection is. It does not change when the selection
 moves or rotates, so it needs no alignment and no reference structure.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis

@@ -1,4 +1,4 @@
-# Analysis System Concepts
+# Analysis system concepts
 
 PolyzyMD analyzes finished trajectories in four steps, for its shipped
 analyses and for your own functions. This page explains the steps, the terms
@@ -157,7 +157,7 @@ most two atoms, which keeps a lone pair. The practical reason matters as much
 as the formal one: the share of short C-H...O geometries depends on polymer
 chemistry, so counting them biases one condition relative to another instead of
 shifting every condition by the same amount. How the rule was checked is in
-{doc}`analysis_hydrogen_bonds_verification`.
+{doc}`../reference/analysis_hydrogen_bonds_verification`.
 
 Arunan, E., et al. (2011). Definition of the hydrogen bond (IUPAC
 Recommendations 2011). Pure and Applied Chemistry, 83(8), 1637-1641.

@@ -3,9 +3,11 @@
 Add random co-polymer chains around the protein with a `type: polymer` entry
 in the `solutes:` list of `config.yaml`. The builder draws a monomer sequence for each chain, places
 the chains around the protein with {term}`PACKMOL`, and then adds water and
-ions.
+ions. No SDF files of your chains? Use `generation_mode: dynamic`, which
+builds each chain from monomer SMILES: see {doc}`dynamic_polymers`. This page
+covers the `cached` mode, which reads pre-built SDF files.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run the commands on this page in the `build` environment:
@@ -127,7 +129,9 @@ The builder does these steps:
 
 1. It computes the periodic cell from the protein and substrate. The edge is
    their diameter plus 2 x (`packing.padding` of the polymer solute +
-   `solvent.box.padding`).
+   `solvent.box.padding`). Expect a much larger box than without polymers:
+   with the default 2 nm polymer padding, the quickstart's Trp-cage in water
+   (6,138 atoms) became 42,323 atoms with two SBMA-EGMA 5-mers.
 2. It centers the bounding box of the protein and substrate in the rectangular
    brick of that cell. It holds them fixed.
 3. It packs the chains inside the brick and inside a sphere around the solute.

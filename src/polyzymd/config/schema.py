@@ -2178,7 +2178,7 @@ class SimulationConfig(_ConfigModel):
         ['LipA', 'substrate', 'polymer']
     """
 
-    #: Sections of 1.3.0rc4 and earlier configs, and where they went.
+    #: Sections of 1.2 and 1.3.0rc4-and-earlier configs, and where they went.
     REMOVED_SECTIONS: ClassVar[dict[str, str]] = {
         "enzyme": "a solutes entry with type: protein",
         "substrate": "a solutes entry with type: small_molecule",
@@ -2219,7 +2219,7 @@ class SimulationConfig(_ConfigModel):
         if removed:
             moves = "; ".join(f"{key} -> {cls.REMOVED_SECTIONS[key]}" for key in removed)
             raise ValueError(
-                f"this config uses the layout of PolyzyMD 1.3.0rc4 and earlier ({moves}). "
+                f"this config uses the layout of PolyzyMD 1.2 and 1.3.0rc4 and earlier ({moves}). "
                 "Rewrite it from the template (polyzymd study add-condition LABEL --new "
                 f"writes one) or see {REWRITE_GUIDE}"
             )

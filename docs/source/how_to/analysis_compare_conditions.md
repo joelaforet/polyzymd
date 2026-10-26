@@ -1,5 +1,8 @@
 # Compare simulation conditions
 
+```{index} !compare conditions, !compare two conditions
+```
+
 Find out whether the conditions of a study differ, for example an enzyme with
 and without a polymer. You need finished simulations of each condition.
 
@@ -13,7 +16,7 @@ The steps are:
 For a guided lesson, see {doc}`../tutorials/analysis_complete_workflow`. For
 the settings of each analysis, see its how-to under {doc}`index`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis
@@ -156,7 +159,12 @@ polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --eq 10ns \
 ## Step 4: Run the other analyses
 
 Every analysis takes the same `-c`, `--label`, `--replicates` and `--eq`
-options. Run each analysis on the same conditions:
+options. Without `--eq`, a command given configs with `-c` discards the first 10 ns of
+every replicate. A study replaces this default with its own `equilibration:`.
+For runs shorter than 10 ns, such as a test run, give `--eq 0ns` or the window
+you want; otherwise the command stops and says that no frame is left.
+
+Run each analysis on the same conditions:
 
 ```bash
 polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml --eq 10ns

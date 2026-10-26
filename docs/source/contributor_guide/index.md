@@ -1,4 +1,4 @@
-# Contributor Guide
+# Contributor guide
 
 This section is for developers and scientific contributors who want to extend
 PolyzyMD, understand the codebase, or add new capabilities.
@@ -29,6 +29,7 @@ or project maintenance patterns. For command lookup, switch to
 config -> builders -> simulation -> workflow -> analyses. -->
 
 ```{toctree}
+:caption: Contributor Mindset
 :hidden:
 :maxdepth: 1
 

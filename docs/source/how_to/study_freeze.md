@@ -1,4 +1,7 @@
-# Publish a study with `polyzymd study freeze`
+# Publish a study or a project with `freeze`
+
+```{index} !zenodo, !doi, !freeze, !publish a study, !deposit
+```
 
 Freeze a {term}`study` when its analyses are done and you want to deposit it
 with a paper. A reader can then make its figures from the deposit, and run
@@ -6,11 +9,27 @@ its analyses again from the trajectories. To create the folder, see
 {doc}`study_folder`. For what the deposit contains and why, see
 {doc}`../explanation/study_folders`.
 
-A study that is part of a {term}`project` is frozen with the project. In that
-case, use `polyzymd project freeze` (see {doc}`project`). `polyzymd study
-freeze` refuses such a study.
+:::{important}
+**Is your study in a project?** If you made it with `polyzymd project init`,
+as the quickstart does, freeze the whole project: `polyzymd study freeze`
+refuses a study that is part of a project. The steps are the same, with
+these commands:
 
-:::{admonition} Environment Setup
+```bash
+polyzymd analyze --project Paper_1
+polyzymd hash-trajectories --study Paper_1/lipa363   # once for each study
+git -C Paper_1 add -A
+git -C Paper_1 commit -m "Analyses for the paper"
+polyzymd project freeze Paper_1
+```
+
+Write the metadata of step 1 in `project.yaml` instead of `study.yaml`. The
+paper gets one deposit and one DOI. Steps 4 to 6 (upload, trajectories,
+freeze again) are the same. For what `project freeze` writes, see
+{ref}`the project how-to <project-publish>`.
+:::
+
+:::{admonition} Environment setup
 :class: tip
 
 The commands on this page assume you have activated the PolyzyMD analysis
@@ -256,6 +275,9 @@ When a freeze has written `UPLOAD.md`, `polyzymd study check` prints
 
 ## 5. Deposit the trajectories
 
+```{index} !deposit trajectories, !upload trajectories
+```
+
 PolyzyMD does not upload trajectories. `deposit/trajectories.csv` puts the
 files of each condition into batches that fit one Zenodo record:
 
@@ -318,6 +340,9 @@ needs the trajectories of every study. With the trajectories of one study only,
 run `polyzymd analyze --study <study> --recompute`.
 
 ## Cite PolyzyMD
+
+```{index} !cite, !cite polyzymd, !citation, !citations, !how to cite
+```
 
 Each frozen study cites PolyzyMD in `CITATION.cff` and `.zenodo.json`. Its
 generated README says how to cite PolyzyMD. Keep these citations when you

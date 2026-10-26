@@ -104,10 +104,10 @@ formats. They are not a guarantee for every topology, periodic-boundary
 treatment or external-reference atom mapping. In particular, an external
 reference is checked only for its atom count; whether its atoms correspond to
 the trajectory's is up to the structure preparation (see
-{doc}`analysis_reference_selection`).
+{doc}`../explanation/analysis_reference_selection`).
 
 ## See Also
 
 - [RMSF Quick Start](../how_to/analysis_rmsf_quickstart.md) — commands and minimal setup
-- [RMSF Best Practices](analysis_rmsf_best_practices.md) — interpretation and pitfalls
-- [Reference Structure Selection](analysis_reference_selection.md) — what each reference measures against
+- [RMSF Best Practices](../explanation/analysis_rmsf_best_practices.md) — interpretation and pitfalls
+- [Reference Structure Selection](../explanation/analysis_reference_selection.md) — what each reference measures against

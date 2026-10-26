@@ -5,7 +5,7 @@ the protein or an active site, on each production frame of each replicate. You
 can include neighbor atoms, such as the polymer, in the calculation. Then
 compare the conditions, with one value per replicate.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis
@@ -32,7 +32,7 @@ selections control the calculation:
 
 The calculation does not use periodic images. Values are in Å². For the steps
 of the calculation and the checks, see
-{doc}`../explanation/analysis_sasa_verification`.
+{doc}`../reference/analysis_sasa_verification`.
 
 ## From the command line
 
@@ -134,7 +134,7 @@ production frame. Or run the command in a SLURM job, not on a login node.
 `--stride` applies to every result of the command. PolyzyMD gives MDTraj one
 frame per call because of a defect in MDTraj 1.11.1. In one call, MDTraj
 returns about 0.1 % too much area for each frame after the first frame of each
-thread. See {doc}`../explanation/analysis_sasa_verification`.
+thread. See {doc}`../reference/analysis_sasa_verification`.
 ```
 
 ## Figures
@@ -186,6 +186,6 @@ measure your own quantity, see {doc}`study_api`.
 ## Next steps
 
 - **What each function measures**: {doc}`../reference/analysis_functions`
-- **How the values were checked**: {doc}`../explanation/analysis_sasa_verification`
+- **How the values were checked**: {doc}`../reference/analysis_sasa_verification`
 - **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
 - **Contact analysis**: {doc}`analysis_contacts_quickstart`

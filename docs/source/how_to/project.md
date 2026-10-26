@@ -6,7 +6,7 @@ two or more studies, such as three lipases under the same polymer conditions,
 one study for each lipase. For the reasons behind
 this design, see {doc}`../explanation/projects`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 The commands on this page assume you have activated the PolyzyMD analysis
@@ -384,6 +384,7 @@ A different model, such as a dose response that is not a straight line,
 belongs in such a script. The script and its output files are project files.
 `project freeze` hashes them and publishes them with the paper.
 
+(project-publish)=
 ## Publish
 
 1. Fill in `metadata:` in `project.yaml`. The keys are the same as the keys of

@@ -13,7 +13,7 @@ study for each protein, put them in a {doc}`project <project>`. For the
 design of study folders and how they are published, see
 {doc}`../explanation/study_folders`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 The commands on this page assume you have activated the PolyzyMD analysis
@@ -355,6 +355,9 @@ results.report                 # the ProtocolReport, as polyzymd analyze printed
 results.table                  # one row per stored value
 study.replicate_table("lid_opening").groupby("condition")["value"].mean()
 ```
+
+To draw your own figures from these values, see
+{doc}`plot_stored_results`.
 
 `study.results` reads `results/<run>` in the study folder. To read results
 that `polyzymd analyze --output-dir` wrote elsewhere, use

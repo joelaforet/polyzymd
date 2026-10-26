@@ -1,15 +1,16 @@
-# Rewrite a config for 1.3.0
+# Rewrite a 1.2 config for 1.3
 
 PolyzyMD 1.3.0 changes the layout of `config.yaml` once, so that every
 component of the system states its own force field and charges. A config
-written for 1.3.0rc4 or earlier stops with an error that links here. Rewrite
+written for PolyzyMD 1.2 (such as 1.2.1), or for a 1.3.0 release candidate up
+to rc4, stops with an error that links here. Rewrite
 it by hand, or write a new template with
 `polyzymd study add-condition LABEL --new` and copy your values in.
 Later 1.3 releases only add keys; a 1.3.0 config keeps working.
 
 ## What moved
 
-| 1.3.0rc4 and earlier | 1.3.0 |
+| 1.2 (and 1.3.0rc4 and earlier) | 1.3.0 |
 |---|---|
 | `enzyme:` | an entry of `solutes:` with `type: protein` |
 | `substrate:` | an entry of `solutes:` with `type: small_molecule` |
@@ -17,7 +18,7 @@ Later 1.3 releases only add keys; a 1.3.0 config keeps working.
 | `polymers: {enabled: false}` or `polymers: null` | leave the polymer entry out |
 | `force_field.protein` | `force_field:` on the protein entry, as a list |
 | `force_field.small_molecule` | `force_field:` on `solvent:` and on every other solute (the same file) |
-| `force_field.nagl_model` (or nothing: 1.3.0rc4 and earlier charged with `openff-gnn-am1bcc-0.1.0-rc.3.pt`) | `model:` in each `charges: {method: nagl}` |
+| `force_field.nagl_model` (or nothing: 1.2 and 1.3.0rc4 and earlier charged with `openff-gnn-am1bcc-0.1.0-rc.3.pt`) | `model:` in each `charges: {method: nagl}` |
 | `substrate.charge_method: nagl` | `charges: {method: nagl, model: ...}` (see below for which model) |
 | `polymers.charger` (dynamic polymers) | `charges: {method: nagl, model: ...}` (or `am1bcc`, `espaloma`) |
 | `polymers.reactions` and monomer SMILES with their C=C double bond (dynamic polymers) | each monomer's repeat unit with `*` on its two linking atoms (`C=C(C)C(=O)OC` becomes `[*]CC([*])(C)C(=O)OC`), and `end_groups: {head: [...], tail: [...]}`, the caps each end can get with one `*` each and their probabilities; see {doc}`dynamic_polymers` |
@@ -148,8 +149,8 @@ something else.
 - **A replicate that has started** (it has minimization, equilibration or
   production output) continues from its own files. `submit` and the job
   scripts do not hold it to the new checks.
-- **A replicate that has not started**, built by 1.3.0rc4 or earlier, must
-  be rebuilt. Its `build_manifest.json` records no physics audit, and `run`
+- **A replicate that has not started**, built by 1.2 or by 1.3.0rc4 or
+  earlier, must be rebuilt. Its build records no physics audit, and `run`
   and `submit` refuse files that no passing audit vouches for. The error
   gives the command. Rebuild after you rewrite the config:
   `polyzymd build -c config.yaml -r 1`.
@@ -202,5 +203,5 @@ modeling_exceptions:
 ```
 
 The build record keeps the accepted finding and its reason. Please report any
-failure you think is wrong, with the `build_provenance.failed.md` file, so we
-can correct the check before 1.3.0.
+failure you think is wrong, with the `build_provenance.failed.md` file, in an
+issue on GitHub.

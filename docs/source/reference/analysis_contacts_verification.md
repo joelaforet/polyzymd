@@ -70,4 +70,4 @@ whole in the trajectory; the protein is used as loaded.
 
 - [Contacts Quick Start](../how_to/analysis_contacts_quickstart.md) — commands and settings
 - [SASA implementation verification](analysis_sasa_verification.md) — the MDTraj batching defect
-- [Shipped analysis functions](../reference/analysis_functions.md) — what each function measures
+- [Shipped analysis functions](analysis_functions.md) — what each function measures

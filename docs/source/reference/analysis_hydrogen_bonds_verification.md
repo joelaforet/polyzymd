@@ -89,5 +89,5 @@ polymer, the default 3.5 Å counted 13.4 protein-polymer bonds per frame and
 ## See Also
 
 - [Hydrogen Bonds Quick Start](../how_to/hydrogen_bonds.md) — commands and settings
-- [How long polymer contacts last](analysis_contact_lifetimes.md) — the lifetime estimator
-- [Shipped analysis functions](../reference/analysis_functions.md) — what each function measures
+- [How long polymer contacts last](../explanation/analysis_contact_lifetimes.md) — the lifetime estimator
+- [Shipped analysis functions](analysis_functions.md) — what each function measures

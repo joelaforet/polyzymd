@@ -7,11 +7,11 @@ If you are new to PolyzyMD, do the {doc}`../get_started/quickstart` first.
 :gutter: 3
 
 :::{grid-item-card} Set up a simulation
-:link: polymers
-:link-type: doc
+:link: howto-set-up
+:link-type: ref
 
-Add polymers, restraints and equilibration stages. Fix a PDB that OpenFF
-refuses.
+Add polymers, co-solvents, a ligand, restraints and equilibration stages. Fix a
+PDB that OpenFF refuses.
 :::
 
 :::{grid-item-card} Run on a cluster
@@ -22,8 +22,8 @@ Submit simulations and analysis jobs with SLURM, and monitor them.
 :::
 
 :::{grid-item-card} Organize and publish studies
-:link: study_folder
-:link-type: doc
+:link: howto-organize
+:link-type: ref
 
 Make a study folder for each set of compared conditions, group studies into
 a project, and freeze them for publication.
@@ -38,14 +38,18 @@ Choose an analysis, run it on a study, and measure your own quantity.
 
 ::::
 
+(howto-set-up)=
 ## Set up a simulation
 
 ```{toctree}
+:caption: Set up a simulation
 :maxdepth: 1
 
 rewrite_config_rc5
 polymers
 dynamic_polymers
+cosolvents
+ligand
 restraints
 equilibration
 troubleshoot_openff_pdb_ingestion
@@ -54,6 +58,7 @@ troubleshoot_openff_pdb_ingestion
 ## Run simulations
 
 ```{toctree}
+:caption: Run simulations
 :maxdepth: 1
 
 hpc_slurm
@@ -65,9 +70,11 @@ own_protocol
 site_cu_boulder
 ```
 
+(howto-organize)=
 ## Organize and publish studies
 
 ```{toctree}
+:caption: Organize and publish studies
 :maxdepth: 1
 
 study_folder
@@ -80,6 +87,7 @@ study_freeze
 ## Analyze trajectories
 
 ```{toctree}
+:caption: Analyze trajectories
 :maxdepth: 1
 
 analysis_chooser
@@ -93,6 +101,7 @@ hpc_execution
 ## Analyses
 
 ```{toctree}
+:caption: Analyses
 :maxdepth: 1
 
 analysis_rmsd_quickstart
@@ -110,8 +119,10 @@ analysis_triad_quickstart
 ## Figures
 
 ```{toctree}
+:caption: Figures
 :maxdepth: 1
 
+plot_stored_results
 publication_plots
 custom_artifact_plotting
 ```
@@ -119,6 +130,7 @@ custom_artifact_plotting
 ## Fix problems
 
 ```{toctree}
+:caption: Fix problems
 :maxdepth: 1
 
 troubleshooting

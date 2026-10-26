@@ -1,5 +1,8 @@
 # Run a simulation longer
 
+```{index} !extend, !extend a simulation, !continue, !continue a simulation, !longer simulation
+```
+
 Use this page to continue a finished OpenMM replicate for more nanoseconds.
 The longer run is the same simulation: it continues from the saved state of
 the last segment, with the same build, thermostat and frame spacing. Its new
@@ -9,6 +12,13 @@ This works for OpenMM runs only. PolyzyMD cannot run a GROMACS replicate
 longer. For GROMACS, run new replicates with the longer `duration`. You can
 also extend a run yourself with `gmx convert-tpr -extend` and
 `gmx mdrun -cpi`, but PolyzyMD does not record or check such a run.
+
+An interrupted run, which stopped before the end of its production,
+continues on both engines when you run the same command again. See
+[Stop and continue a local run](hardware_platforms.md#stop-and-continue-a-local-run)
+for OpenMM and
+[Stop and continue a local run](run_gromacs.md#stop-and-continue-a-local-run)
+for GROMACS.
 
 ## Change the config
 
@@ -57,8 +67,11 @@ and why. `polyzymd status` shows a replicate that finished its old length as
 Submit the replicate again:
 
 ```bash
-polyzymd submit -c config.yaml -r 1 --preset <preset> --pixi-env sim-cuda-12-4
+polyzymd submit -c config.yaml -r 1 --preset <preset> --pixi-env <environment>
 ```
+
+Give the `sim-cuda-*` environment that the replicate ran with, as
+{doc}`hpc_slurm` explains: the newest one that the nodes' driver supports.
 
 Each job continues from the last segment and resubmits itself until the new
 total is reached. `submit` skips complete replicates, and refuses one whose
