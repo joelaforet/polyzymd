@@ -3671,9 +3671,15 @@ def cancel(
             for path in removed:
                 path.unlink()
             if removed:
+                from polyzymd.workflow.submit_settings import read_submit_settings
+
+                # The settings submit recorded, as status prints them.
+                recorded = read_submit_settings(working_dir)
+                flags = recorded.command_flags() if recorded else "--preset <preset>"
                 colored_echo(
                     f"Replicate {replicate}: removed {', '.join(map(str, removed))} — "
-                    f"resubmit with `polyzymd submit -c {config} -r {replicate}`",
+                    f"resubmit with `polyzymd submit -c {config} -r {replicate} {flags}`"
+                    + ("" if recorded else " and the overrides you first submitted with"),
                     phase="simulation",
                 )
             else:

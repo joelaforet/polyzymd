@@ -189,6 +189,34 @@ class TestCancelCommand:
         cancel_jobs.assert_not_called()
         assert "polyzymd submit" in result.output
 
+    def test_resume_prints_the_submit_command_with_the_recorded_settings(self, tmp_path):
+        from polyzymd.workflow.submit_settings import SubmitSettings, write_submit_settings
+
+        working_dir = tmp_path / "run_1"
+        config_path, sim_config = _config_and_mock(tmp_path, lambda r: working_dir)
+        write_stop_file(working_dir, str(config_path), 1)
+        write_submit_settings(
+            working_dir, SubmitSettings.from_options("aa100", account="smithlab", qos="")
+        )
+
+        result, _, _ = _invoke(config_path, sim_config, ["-r", "1", "--resume"])
+
+        assert result.exit_code == 0, result.output
+        assert (
+            f"polyzymd submit -c {config_path} -r 1 --preset aa100 --account smithlab --qos ''"
+            in result.output
+        )
+
+    def test_resume_without_a_record_names_the_preset_to_give(self, tmp_path):
+        working_dir = tmp_path / "run_1"
+        config_path, sim_config = _config_and_mock(tmp_path, lambda r: working_dir)
+        write_stop_file(working_dir, str(config_path), 1)
+
+        result, _, _ = _invoke(config_path, sim_config, ["-r", "1", "--resume"])
+
+        assert f"polyzymd submit -c {config_path} -r 1 --preset <preset>" in result.output
+        assert "overrides you first submitted with" in result.output
+
     def test_paths_are_printed_without_dot_dot(self, tmp_path):
         """A study's runs are at conditions/x/../../runs; cancel names them plainly."""
         (tmp_path / "conditions" / "water").mkdir(parents=True)
