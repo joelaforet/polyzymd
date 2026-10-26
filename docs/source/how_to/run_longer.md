@@ -1,5 +1,8 @@
 # Run a simulation longer
 
+```{index} !extend, !extend a simulation, !continue, !continue a simulation, !longer simulation
+```
+
 Use this page to continue a finished OpenMM replicate for more nanoseconds.
 The longer run is the same simulation: it continues from the saved state of
 the last segment, with the same build, thermostat and frame spacing. Its new

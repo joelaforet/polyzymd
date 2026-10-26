@@ -1,4 +1,7 @@
-# Run Rg analysis
+# Run radius of gyration (Rg) analysis
+
+```{index} !rg, !radius of gyration
+```
 
 Measure the radius of gyration (Rg) of a selection on each production frame of
 each replicate. Then compare the conditions, with one value per replicate.

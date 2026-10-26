@@ -1,5 +1,8 @@
 # Run hydrogen bonds analysis
 
+```{index} !hbonds, !h-bonds, !hydrogen bond
+```
+
 Count the hydrogen bonds between named groups of atoms, or within one group,
 on the production frames of every replicate, and compare how many form, how
 long they last, and which residues and residue pairs form them, with the

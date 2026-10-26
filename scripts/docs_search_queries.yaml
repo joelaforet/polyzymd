@@ -1,0 +1,201 @@
+# Queries a PolyzyMD user types into the docs search box, and the pages that
+# answer them. `scripts/check_docs_search.py` runs each query through the
+# Sphinx search of a built site and reports the rank of the best expected page.
+#
+# - query: the words as a user would type them.
+# - expect: docnames (paths under docs/source, without `.md`) that answer the
+#   query; the first is the best answer. A hit at any of them counts.
+#
+# Add a query when a user could not find a page; keep the expected pages to
+# the ones that answer the task, not every page that mentions it.
+
+# Install and first steps
+- query: install
+  expect: [get_started/installation, get_started/index]
+- query: install polyzymd
+  expect: [get_started/installation, get_started/index]
+- query: quickstart
+  expect: [get_started/quickstart]
+- query: first simulation
+  expect: [get_started/quickstart]
+- query: examples
+  expect: [get_started/index]
+
+# Run simulations
+- query: run openmm locally
+  expect: [how_to/hardware_platforms, get_started/quickstart]
+- query: run on cpu
+  expect: [how_to/hardware_platforms]
+- query: run on gpu
+  expect: [how_to/hardware_platforms]
+- query: run on my laptop
+  expect: [how_to/hardware_platforms, get_started/quickstart]
+- query: cuda
+  expect: [how_to/hardware_platforms, get_started/installation]
+- query: run with gromacs
+  expect: [how_to/run_gromacs]
+- query: submit to cluster
+  expect: [how_to/hpc_slurm]
+- query: slurm
+  expect: [how_to/hpc_slurm]
+- query: sbatch
+  expect: [how_to/hpc_slurm]
+- query: other cluster
+  expect: [how_to/hardware_platforms, how_to/hpc_slurm]
+- query: generic preset
+  expect: [how_to/hpc_slurm, how_to/hardware_platforms]
+- query: monitor simulations
+  expect: [how_to/monitor_simulations]
+- query: job status
+  expect: [how_to/monitor_simulations]
+- query: resume a simulation
+  expect: [how_to/hpc_slurm, how_to/monitor_simulations, how_to/run_longer]
+- query: restart simulation
+  expect: [how_to/hpc_slurm, how_to/monitor_simulations, how_to/run_longer]
+- query: continue a simulation
+  expect: [how_to/run_longer, how_to/hpc_slurm, how_to/monitor_simulations]
+- query: preempted job
+  expect: [how_to/hpc_slurm, how_to/monitor_simulations]
+- query: run longer
+  expect: [how_to/run_longer]
+- query: extend simulation
+  expect: [how_to/run_longer]
+- query: cancel simulation
+  expect: [how_to/hpc_slurm]
+- query: stop a job
+  expect: [how_to/hpc_slurm]
+
+# Set up a system
+- query: add a polymer
+  expect: [how_to/polymers, how_to/dynamic_polymers]
+- query: polymer from smiles
+  expect: [how_to/dynamic_polymers]
+- query: star-sited smiles
+  expect: [tutorials/star_sited_monomers, how_to/dynamic_polymers]
+- query: co-solvent
+  expect: [how_to/cosolvents]
+- query: urea
+  expect: [how_to/cosolvents]
+- query: dmso
+  expect: [how_to/cosolvents]
+- query: ligand
+  expect: [reference/configuration, tutorials/prepare_pdb_for_openff]
+- query: small molecule
+  expect: [reference/configuration, tutorials/prepare_pdb_for_openff]
+- query: restraint
+  expect: [how_to/restraints]
+- query: prepare a pdb
+  expect: [tutorials/prepare_pdb_for_openff]
+- query: missing atoms
+  expect: [how_to/troubleshoot_openff_pdb_ingestion, tutorials/prepare_pdb_for_openff]
+- query: config keys
+  expect: [reference/configuration]
+- query: equilibration stages
+  expect: [how_to/equilibration]
+- query: replicates
+  expect: [how_to/hpc_slurm, tutorials/first_analysis, explanation/analysis_concepts]
+- query: own system
+  expect: [tutorials/own_system]
+
+# Analyze
+- query: rmsd
+  expect: [how_to/analysis_rmsd_quickstart]
+- query: rmsf
+  expect: [how_to/analysis_rmsf_quickstart]
+- query: radius of gyration
+  expect: [how_to/analysis_rg_quickstart]
+- query: contacts
+  expect: [how_to/analysis_contacts_quickstart]
+- query: sasa
+  expect: [how_to/analysis_sasa_quickstart, tutorials/sasa_analysis]
+- query: hydrogen bonds
+  expect: [how_to/hydrogen_bonds]
+- query: secondary structure
+  expect: [how_to/analysis_secondary_structure_quickstart]
+- query: which analysis
+  expect: [how_to/analysis_chooser]
+- query: compare conditions
+  expect: [how_to/analysis_compare_conditions]
+- query: statistical significance
+  expect: [reference/posthoc_testing, explanation/analysis_statistics_best_practices]
+- query: own analysis
+  expect: [how_to/own_analysis, how_to/study_api]
+- query: mdanalysis
+  expect: [how_to/own_analysis]
+- query: own script
+  expect: [how_to/own_analysis, how_to/study_api]
+- query: plots for publication
+  expect: [how_to/publication_plots]
+
+# Publish and cite
+- query: freeze study
+  expect: [how_to/study_freeze]
+- query: zenodo
+  expect: [how_to/study_freeze]
+- query: deposit trajectories
+  expect: [how_to/study_freeze]
+- query: cite
+  expect: [how_to/study_freeze, reference/references]
+- query: citations
+  expect: [reference/references, how_to/study_freeze]
+
+# Understand and fix
+- query: physics audit
+  expect: [explanation/physics_audit, reference/physics_checks]
+- query: gromacs vs openmm
+  expect: [reference/gromacs_openmm]
+- query: troubleshooting
+  expect: [how_to/troubleshooting]
+- query: error
+  expect: [how_to/troubleshooting]
+- query: cli commands
+  expect: [reference/cli_reference]
+
+# Paraphrases. These were not used to choose the index entries; they check
+# that the ranking holds for wording the docs were not tuned to.
+- query: how do i install
+  expect: [get_started/installation, get_started/index]
+- query: gpu simulation
+  expect: [how_to/hardware_platforms]
+- query: openmm on cpu
+  expect: [how_to/hardware_platforms]
+- query: nvidia
+  expect: [how_to/hardware_platforms]
+- query: run simulation on hpc
+  expect: [how_to/hpc_slurm]
+- query: submit replicates
+  expect: [how_to/hpc_slurm]
+- query: cluster without a preset
+  expect: [how_to/hpc_slurm, how_to/hardware_platforms]
+- query: check if jobs are running
+  expect: [how_to/monitor_simulations]
+- query: my job died
+  expect: [how_to/monitor_simulations, how_to/hpc_slurm]
+- query: continue from checkpoint
+  expect: [how_to/hpc_slurm, how_to/monitor_simulations, how_to/run_longer]
+- query: restart a crashed job
+  expect: [how_to/hpc_slurm, how_to/monitor_simulations]
+- query: kill a job
+  expect: [how_to/hpc_slurm]
+- query: change simulation length
+  expect: [how_to/run_longer]
+- query: add urea
+  expect: [how_to/cosolvents]
+- query: polymer smiles
+  expect: [how_to/dynamic_polymers, tutorials/star_sited_monomers]
+- query: add a ligand
+  expect: [reference/configuration, tutorials/prepare_pdb_for_openff]
+- query: protonate pdb
+  expect: [tutorials/prepare_pdb_for_openff]
+- query: hbonds
+  expect: [how_to/hydrogen_bonds]
+- query: statistics
+  expect: [explanation/analysis_statistics_best_practices, reference/posthoc_testing]
+- query: p-value
+  expect: [reference/posthoc_testing]
+- query: how to cite polyzymd
+  expect: [how_to/study_freeze, reference/references]
+- query: upload to zenodo
+  expect: [how_to/study_freeze]
+- query: publish data
+  expect: [how_to/study_freeze]

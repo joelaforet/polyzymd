@@ -1,5 +1,8 @@
 # Publish a study with `polyzymd study freeze`
 
+```{index} !zenodo, !doi, !freeze, !publish a study, !deposit
+```
+
 Freeze a {term}`study` when its analyses are done and you want to deposit it
 with a paper. A reader can then make its figures from the deposit, and run
 its analyses again from the trajectories. To create the folder, see
@@ -256,6 +259,9 @@ When a freeze has written `UPLOAD.md`, `polyzymd study check` prints
 
 ## 5. Deposit the trajectories
 
+```{index} !deposit trajectories, !upload trajectories
+```
+
 PolyzyMD does not upload trajectories. `deposit/trajectories.csv` puts the
 files of each condition into batches that fit one Zenodo record:
 
@@ -318,6 +324,9 @@ needs the trajectories of every study. With the trajectories of one study only,
 run `polyzymd analyze --study <study> --recompute`.
 
 ## Cite PolyzyMD
+
+```{index} !cite, !cite polyzymd, !citation, !citations, !how to cite
+```
 
 Each frozen study cites PolyzyMD in `CITATION.cff` and `.zenodo.json`. Its
 generated README says how to cite PolyzyMD. Keep these citations when you

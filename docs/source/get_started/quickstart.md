@@ -1,5 +1,8 @@
 # Run your first simulation
 
+```{index} !quickstart, !first simulation, !run the example
+```
+
 :::{admonition} At a glance
 :class: note
 

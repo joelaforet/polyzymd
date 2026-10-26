@@ -93,6 +93,9 @@ grep -v " HOH " structures/1UBQ.pdb > structures/1UBQ_protein.pdb
 
 ## Step 4: Add hydrogens
 
+```{index} !protonate, !protonation, !add hydrogens
+```
+
 `polyzymd clean-pdb` replaces nonstandard residues with standard residues and
 adds the missing hydrogens at the pH that you give. It keeps the chain IDs and
 residue numbers.

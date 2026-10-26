@@ -1,5 +1,8 @@
 # Troubleshooting
 
+```{index} !error, !errors, !fix an error
+```
+
 Find the error message or the symptom below, and do the steps that follow it.
 
 :::{admonition} Environment setup

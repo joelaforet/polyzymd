@@ -1,5 +1,8 @@
 # Configuration reference
 
+```{index} !config keys, !config.yaml, !configuration keys, !yaml keys
+```
+
 This document describes all configuration options for PolyzyMD YAML files.
 
 ## Configuration Structure
@@ -97,6 +100,9 @@ solutes:
 | `description` | string | No | Human-readable description |
 
 ### Small molecule (`type: small_molecule`)
+
+```{index} !ligand, !small molecule, !substrate
+```
 
 A ligand placed as given, such as a docked substrate. Leave the entry out for
 an apo simulation.

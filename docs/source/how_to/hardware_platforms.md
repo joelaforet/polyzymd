@@ -110,6 +110,9 @@ driver does not cause PolyzyMD to select another environment.
 (local-nvidia-gpu)=
 ## Run on a local NVIDIA GPU
 
+```{index} !gpu, !run on gpu, !run on a gpu, !local gpu, !nvidia gpu, !workstation
+```
+
 Run on the GPU of a workstation or a laptop in two steps. Build in the `build`
 environment, then run in a `sim-cuda-*` environment.
 
@@ -181,6 +184,9 @@ note `local run`.
 To run a finished replicate longer, see {doc}`run_longer`.
 
 ## Run on a CPU
+
+```{index} !cpu, !run on cpu, !run on a cpu, !laptop, !run locally, !local run
+```
 
 Set the platform in the simulation configuration:
 

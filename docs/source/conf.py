@@ -166,6 +166,10 @@ html_show_sourcelink = False
 html_css_files = [
     "custom.css",
 ]
+# Rank task pages (get started, tutorials, how-to) above API pages, and pages
+# with the query words in their title above pages that mention them once.
+# scripts/check_docs_search.py measures the ranking on the queries users type.
+html_search_scorer = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_scorer.js")
 
 # -- Options for TODO extension ----------------------------------------------
 todo_include_todos = True

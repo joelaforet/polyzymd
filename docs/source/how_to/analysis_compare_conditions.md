@@ -1,5 +1,8 @@
 # Compare simulation conditions
 
+```{index} !compare conditions, !compare two conditions
+```
+
 Find out whether the conditions of a study differ, for example an enzyme with
 and without a polymer. You need finished simulations of each condition.
 

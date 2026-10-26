@@ -1,9 +1,13 @@
-# Monitor a simulation campaign
+# Check the status of simulations
+
+```{index} !monitor, !monitor simulations, !status, !job status, !simulation status, !progress, !squeue
+```
 
 This guide shows how to answer three questions about a set of running
 PolyzyMD chains with one command: which replicates have finished, which have
-died and will not restart on their own, and how long the rest will take. It
-also shows how to hand that command to an AI coding agent as a reusable skill.
+died (crashed or stopped) and will not restart on their own, and how long the
+rest will take. It also shows how to hand that command to an AI coding agent
+as a reusable skill.
 
 ## Prerequisites
 

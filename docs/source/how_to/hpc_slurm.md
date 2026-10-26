@@ -1,8 +1,11 @@
 # Run simulations on SLURM clusters
 
-Submit each replicate as a chain of SLURM jobs. Each job runs one
-{term}`segment` of the simulation. It then checks whether work remains, and
-submits its successor if it does. The chain continues across wall-time limits
+```{index} !slurm, !sbatch, !hpc, !cluster, !submit to cluster, !submit to a cluster, !submit jobs
+```
+
+On an HPC cluster, submit each replicate as a chain of SLURM jobs. Each job
+runs one {term}`segment` of the simulation. It then checks whether work
+remains, and submits its successor if it does. The chain continues across wall-time limits
 without manual job dependencies.
 
 ## Before you start
@@ -37,6 +40,9 @@ Boulder clusters, see {doc}`site_cu_boulder`.
 
 (hpc-slurm-other-cluster)=
 ## If your cluster is not listed
+
+```{index} !other cluster, !generic preset, !custom preset, !preset
+```
 
 The built-in presets are for CU Boulder Alpine and Blanca and for PSC
 Bridges-2 (see Step 3). On any other SLURM cluster with NVIDIA GPUs, start
@@ -104,7 +110,7 @@ memory line.
 
 **Resume a replicate.** `polyzymd recover -c config.yaml -r 1 --submit`
 reuses the preset and overrides that `submit` recorded for the replicate (see
-[Recover a stalled replicate](#hpc-slurm-recover)).
+[Resume a stalled replicate](#hpc-slurm-recover)).
 
 With a PolyzyMD that has no such record, run the same `polyzymd submit`
 command again instead: it continues each replicate from its last checkpoint.
@@ -258,7 +264,10 @@ time to completion and the reason a chain stopped, for many configs at once.
 See {doc}`monitor_simulations`.
 
 (hpc-slurm-recover)=
-## Recover a stalled replicate
+## Resume a stalled replicate
+
+```{index} !resume, !resume a simulation, !resume a job, !restart, !restart a simulation, !recover, !preempted, !preempted job, !preemption, !requeue, !dead chain
+```
 
 Show what remains of replicate 1:
 
@@ -282,7 +291,10 @@ the same `polyzymd submit` command again, which continues each replicate from
 its last checkpoint.
 
 (hpc-slurm-stop-a-chain)=
-## Stop a chain
+## Stop a chain with `polyzymd cancel`
+
+```{index} !cancel, !cancel a simulation, !cancel a job, !stop a simulation, !stop a job, !scancel
+```
 
 `scancel` alone does not stop an OpenMM chain. SLURM sends `SIGTERM` to the
 job. `run-segment` then exits with code 99. The job script reads code 99 as

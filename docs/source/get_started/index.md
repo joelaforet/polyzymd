@@ -110,6 +110,9 @@ and bitwise-reproducible reruns.
 (shipped-examples)=
 ## Shipped examples
 
+```{index} !examples, !example configs
+```
+
 The `examples/` folder of the PolyzyMD repository holds one small system for
 each thing PolyzyMD builds: a protein in water, a protein with polymer chains,
 a protein in a co-solvent, and a protein with a ligand and a distance

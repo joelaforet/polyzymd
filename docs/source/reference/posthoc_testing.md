@@ -1,5 +1,8 @@
 # Comparison tests reference
 
+```{index} !significance, !statistical significance, !p-value, !multiple comparisons
+```
+
 ```{contents}
 :local:
 :depth: 2
