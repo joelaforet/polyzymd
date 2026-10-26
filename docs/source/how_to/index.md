@@ -123,6 +123,7 @@ analysis_triad_quickstart
 :caption: Figures
 :maxdepth: 1
 
+plot_stored_results
 publication_plots
 custom_artifact_plotting
 ```

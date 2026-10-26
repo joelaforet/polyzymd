@@ -211,3 +211,9 @@
 # Ligands
 - query: docked substrate
   expect: [how_to/ligand, how_to/restraints]
+
+# Your own figures
+- query: plot results with matplotlib
+  expect: [how_to/plot_stored_results]
+- query: results as numpy array
+  expect: [how_to/plot_stored_results, how_to/study_yaml]

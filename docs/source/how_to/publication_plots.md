@@ -276,6 +276,9 @@ Common ranges:
 - `300`: print/publication output
 - `600`: high-resolution print output
 
+To draw a figure of your own from the stored values instead, with your own
+plotting code, see {doc}`plot_stored_results`.
+
 ## Figure options of `polyzymd analyze`
 
 `polyzymd analyze` draws with the default settings. `--no-plots` turns its

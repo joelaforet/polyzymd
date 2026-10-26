@@ -175,6 +175,8 @@ first selection passed to `study.per_replicate`.
 
 ## See also
 
+- {doc}`plot_stored_results` to plot the values that `polyzymd analyze`
+  already stored, without measuring again.
 - {doc}`hydrogen_bonds` for the hydrogen-bond functions and the
   `polyzymd analyze hydrogen_bonds` command.
 - {doc}`publication_plots` for settings that control PolyzyMD's standard
