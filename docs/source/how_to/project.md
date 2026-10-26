@@ -395,6 +395,7 @@ A different model, such as a dose response that is not a straight line,
 belongs in such a script. The script and its output files are project files.
 `project freeze` hashes them and publishes them with the paper.
 
+(project-publish)=
 ## Publish
 
 1. Fill in `metadata:` in `project.yaml`. The keys are the same as the keys of

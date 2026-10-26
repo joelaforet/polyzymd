@@ -37,7 +37,7 @@ PolyzyMD has one environment for each kind of work:
 | Task | Environment | Example command |
 |------|-------------|-----------------|
 | Validate configs, build systems, run a short simulation on this machine | `build` | `pixi run -e build polyzymd run -c config.yaml -r 1` |
-| Submit OpenMM simulations to SLURM | `build` | `pixi run -e build polyzymd submit -c config.yaml --preset aa100 --pixi-env auto` |
+| Submit OpenMM simulations to SLURM | `build` | Build first, in an interactive job: `pixi run -e build polyzymd build -c config.yaml -r 1-3`; then `pixi run -e build polyzymd submit -c config.yaml -r 1-3 --preset aa100 --pixi-env auto` |
 | Analyze trajectories and make plots | `build`, or the smaller `analysis` | `pixi run -e analysis polyzymd analyze rmsf --study my_study` |
 | Run OpenMM inside a SLURM job on an NVIDIA GPU | a `sim-cuda-*` environment | The job scripts of `polyzymd submit` select it |
 | Run OpenMM on the NVIDIA GPU of this machine, after `polyzymd build` in `build` | a `sim-cuda-*` environment | `pixi run -e sim-cuda-12-6 polyzymd run -c config.yaml -r 1` |
