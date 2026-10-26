@@ -50,18 +50,6 @@ same result for Cα-only selections. The values agree with `gmx rmsf` to the
 For the definitions, and for which quantity answers which question, see
 {ref}`Fluctuation, offset and deviation <rmsf-fluctuation-offset-deviation>`.
 
-```{figure} ../_static/renders/analysis_rmsf.webp
-:figclass: pz-render
-:class: dark-light
-:alt: Trp-cage drawn as a gray tube that is thin along its helix and thick at its two ends.
-
-The RMSF of each residue of Trp-cage over 2 ns at 300 K with two SBMA
-chains (`examples/polymer`), from `polyzymd analyze rmsf`, drawn as the
-radius of a tube: 2.5 Å of radius per Å of RMSF. The helix is the most
-rigid part (about 0.3 to 0.5 Å); the two terminal residues move most
-(0.8 and 1.0 Å).
-```
-
 ## From the command line
 
 In a {term}`study`, give the study folder. The study names the conditions,
