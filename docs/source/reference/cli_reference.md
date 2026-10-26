@@ -429,6 +429,11 @@ generate SLURM scripts for inspection without submitting them to the scheduler.
 so a script can be submitted by hand with `sbatch --export=NONE <script>`.
 :::
 
+A replicate that `polyzymd cancel` stopped (a `STOP` file in its run folder) is
+refused, since its job would exit at its first check; `--dry-run` shows
+`STOP present` for it and `--generate-only` warns. Run
+`polyzymd cancel -c config.yaml -r N --resume` first.
+
 `submit` records the preset and every override it was given in
 `submit_settings.json` in each replicate's run folder. `polyzymd recover --submit`
 and the resubmit commands of `polyzymd status --format agent` reuse them.

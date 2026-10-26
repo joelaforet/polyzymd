@@ -2485,6 +2485,21 @@ def submit(
         colored_echo(f"  Pixi env:    {_shown_pixi_env(resolved_pixi_env)}", phase="workflow")
         colored_echo(f"  Replicates:  {replicate_list}", phase="workflow")
         colored_echo(phase="workflow")
+        from polyzymd.cli.status_report import _stop_file_present
+
+        # A replicate that polyzymd cancel stopped: a job would exit at its
+        # first STOP check, and a real submit refuses it.
+        stopped = {
+            rep
+            for rep in replicate_list
+            if _stop_file_present(Path(sim_config.get_working_directory(rep)))
+        }
+        for rep in sorted(stopped):
+            colored_echo(
+                f"  Rep {rep}:       STOP present: the job would exit at its first check; run "
+                f"polyzymd cancel -c {config} -r {rep} --resume first",
+                phase="workflow",
+            )
 
         if engine_name == "gromacs":
             _print_gromacs_dry_run_details(
@@ -2502,6 +2517,8 @@ def submit(
             from polyzymd.workflow.daisy_chain import replicate_chain_state
 
             for rep in replicate_list:
+                if rep in stopped:
+                    continue
                 try:
                     _, text = replicate_chain_state(sim_config, rep)
                 except Exception as exc:  # noqa: BLE001 - a preview line, never fatal
@@ -2521,15 +2538,24 @@ def submit(
     if projects_dir:
         sim_config.output.projects_directory = Path(projects_dir)
 
+    run_dirs = {
+        rep: Path(sim_config.get_working_directory(rep))
+        for rep in _resolve_replicates_option(replicates)
+    }
     if not generate_only:
-        _refuse_if_stopped(
-            {
-                rep: Path(sim_config.get_working_directory(rep))
-                for rep in _resolve_replicates_option(replicates)
-            },
-            config,
-            "submit",
-        )
+        _refuse_if_stopped(run_dirs, config, "submit")
+    else:
+        from polyzymd.cli.status_report import _stop_file_present
+
+        for rep, run_dir in run_dirs.items():
+            if _stop_file_present(run_dir):
+                colored_echo(
+                    f"Warning: replicate {rep} has the STOP file of polyzymd cancel; its script "
+                    f"would exit at its first check. Run polyzymd cancel -c {config} -r {rep} "
+                    "--resume before you submit it.",
+                    phase="workflow",
+                    level=logging.WARNING,
+                )
 
     if engine_name == "gromacs":
         from polyzymd.engines import create_engine
