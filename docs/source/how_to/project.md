@@ -132,8 +132,9 @@ For each condition, `add-condition` does these steps:
    `conditions/<name>/structures/`.
 3. It points the config at `Paper_1/runs/<study>/<name>/` for new runs.
 4. With `--config`, if the config's `scratch_directory` holds its runs, it
-   writes that folder into the study's `data.local.yaml`. Git ignores this
-   file.
+   writes that folder into the study's `data.local.yaml`, which git ignores,
+   and keeps the copy's `scratch_directory` on it, so new replicates go
+   beside the existing ones.
 5. It adds one line under `conditions:` in `study.yaml`.
 
 :::{warning}
@@ -143,11 +144,11 @@ On a cluster, set `scratch_directory` to scratch storage. Git ignores
 `runs/`, and freeze never publishes it.
 :::
 
-A condition that another study of the project already lists does not need
-its own runs. Reuse it, with its replicates:
+A condition that another study of the project already simulated does not
+need runs of its own. Copy its config, and the copy reuses its runs:
 
 ```bash
-polyzymd study add-condition "No polymer 363 K" --reuse "lipa363:No polymer" --study Paper_1/lipa_temperatures
+polyzymd study add-condition "No polymer 363 K" --config Paper_1/lipa363/conditions/no_polymer/config.yaml --study Paper_1/lipa_temperatures
 ```
 
 Both studies then analyze the same trajectories, each with its own

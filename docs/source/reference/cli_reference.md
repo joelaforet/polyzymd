@@ -1253,7 +1253,7 @@ unreadable config.
 ### polyzymd study add-condition
 
 ```bash
-polyzymd study add-condition LABEL (--config CONFIG | --from OTHER_LABEL | --new | --reuse STUDY[:CONDITION]) [--study PATH]
+polyzymd study add-condition LABEL (--config CONFIG | --from OTHER_LABEL | --new) [--study PATH]
 ```
 
 Adds a condition to an existing study, in `conditions/<label>/`:
@@ -1261,34 +1261,29 @@ Adds a condition to an existing study, in `conditions/<label>/`:
 - `--new` writes a template `config.yaml` to fill in, and `structures/` with
   placeholder files.
 - `--from OTHER_LABEL` copies the config of that condition of the study, with
-  the input files it names. The copy's `name:` is set to the new condition's
-  folder name, as `--new` sets it, and the command prints it.
+  the input files it names, to make another condition: the copy gets runs of
+  its own. The copy's `name:` is set to the new condition's folder name, as
+  `--new` sets it, and the command prints it.
 - `--config CONFIG` copies `CONFIG`, with the input files it names, as
   `study init --condition` does. When the config's `scratch_directory` holds
   runs of the config, that folder is written to `data.local.yaml` and printed
-  as `data <label>: <path> (from the config's scratch_directory)`. When
-  `CONFIG` is the config of a condition of another study of the project, the
-  command also prints the `--reuse` command that would share that
-  condition's runs instead of copying it.
-- `--reuse STUDY[:CONDITION]` copies nothing: it lists the config of
-  condition `CONDITION` (default: `LABEL`) of study `STUDY` of the same
-  project, by its path relative to this study. Both studies then analyze the
-  same replicates, each with its own equilibration window, regions and
-  control, and a replicate run with that config goes into the one run folder.
-  The other study's `data.local.yaml` entry for the condition, if any, is
-  copied. See {doc}`../how_to/reuse_condition`.
+  as `data <label>: <path> (from the config's scratch_directory)`, and the
+  copy's `scratch_directory` points at it: the copy reuses those runs, and a
+  replicate run with either config goes there. So copying the config of
+  another study's condition analyzes that condition's runs in this study,
+  without running them again (see {doc}`../how_to/reuse_condition`).
+  `study check` warns when two conditions read the same runs but their
+  configs differ.
 
-The new config writes its runs into `runs/<study>/<label>/` of the project,
+Otherwise, the new config writes its runs into `runs/<study>/<label>/` of the project,
 or into `runs/<label>/` of a study in no project. Git ignores `runs/`, and
 freeze never publishes it. The command prints this as a warning, because
 trajectories can use a lot of disk space: on a cluster, set
 `scratch_directory` in the config to scratch storage. The condition is added
 as one line under `conditions:` in `study.yaml`, keeping the rest of the
-file. Exits 2 when not exactly one of `--config`, `--from`, `--new` and
-`--reuse` is given, `OTHER_LABEL` is not a condition of the study, `--reuse`
-names this study, a study the project does not list or a condition that
-study lacks, the study is in no project (with `--reuse`), or the label (or,
-except with `--reuse`, its folder) is taken.
+file. Exits 2 when not exactly one of `--config`, `--from` and `--new` is
+given, `OTHER_LABEL` is not a condition of the study, or the label or its
+folder is taken.
 
 ### polyzymd study locate
 

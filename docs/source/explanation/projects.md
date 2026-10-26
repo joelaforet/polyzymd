@@ -110,10 +110,9 @@ polymer in water at 300 K is a condition of a study of solvents at 300 K,
 and of a study of temperatures in water. Each study gives the condition its
 own analysis frame: its equilibration window, its control, its factors.
 
-So a study can list the condition of another study of the project, with
-`polyzymd study add-condition LABEL --reuse STUDY:CONDITION`. The two studies
-share one config and one set of replicates, which are simulated once, and
-freeze lists their trajectories once. See {doc}`../how_to/reuse_condition`.
+So a study can take the condition of another study by copying its config:
+the copy reads the same runs, which are simulated once, and freeze lists
+their trajectories once. See {doc}`../how_to/reuse_condition`.
 
 ## What the project adds
 
