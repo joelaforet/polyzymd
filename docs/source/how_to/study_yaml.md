@@ -356,6 +356,9 @@ results.table                  # one row per stored value
 study.replicate_table("lid_opening").groupby("condition")["value"].mean()
 ```
 
+To draw your own figures from these values, see
+{doc}`plot_stored_results`.
+
 `study.results` reads `results/<run>` in the study folder. To read results
 that `polyzymd analyze --output-dir` wrote elsewhere, use
 `study.results("lid_opening", folder="that/folder")`. `analyze` warns when
