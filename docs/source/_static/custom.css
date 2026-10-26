@@ -272,10 +272,20 @@ figure.pz-render {
     box-shadow: 0 2px 10px rgba(31, 92, 58, 0.08);
 }
 
-figure.pz-render img {
+figure.pz-render img,
+figure.pz-render video {
     width: 100%;
     height: auto;
     background: transparent !important;
+}
+
+figure.pz-render video {
+    display: block;
+}
+
+/* A looping movie is square: it stays a figure, not a banner. */
+figure.pz-render.pz-movie {
+    max-width: 36rem;
 }
 
 .bd-article figure.pz-render figcaption,

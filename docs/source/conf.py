@@ -166,6 +166,10 @@ html_show_sourcelink = False
 html_css_files = [
     "custom.css",
 ]
+# Looping molecular movies pause for readers who ask for reduced motion.
+html_js_files = [
+    "pz-movie.js",
+]
 # Rank task pages (get started, tutorials, how-to) above API pages, and pages
 # with the query words in their title above pages that mention them once.
 # scripts/check_docs_search.py measures the ranking on the queries users type.

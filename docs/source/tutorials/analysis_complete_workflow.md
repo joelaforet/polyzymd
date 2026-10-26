@@ -184,6 +184,19 @@ the simulation; water and ions in front of the chains and the protein are cut
 away. The shipped example `examples/polymer` builds the same system.
 ```
 
+```{raw} html
+<figure class="pz-render pz-movie">
+<video class="pz-loop" autoplay loop muted playsinline preload="metadata" poster="../_static/renders/polymer_loop_poster.webp" aria-label="Two short polymer chains drawn as blue sticks with red, blue and yellow sulfonate and ammonium groups writhe and drift beside a small protein drawn as a gray cartoon.">
+<source src="../_static/renders/polymer_loop.mp4" type="video/mp4">
+</video>
+<figcaption><p>The same system in motion: 2 ns of <code>examples/polymer</code> at 300 K on a GPU,
+longer than the runs of this tutorial. Each frame is an average over 50 ps, which smooths
+out the thermal jitter of the atoms and leaves the slower motion of the chains; water
+and ions are hidden. The protein is superposed on its first frame, and the end of the
+run fades into its start so that the movie loops.</p></figcaption>
+</figure>
+```
+
 Check that the study finds the runs of both conditions:
 
 ```bash

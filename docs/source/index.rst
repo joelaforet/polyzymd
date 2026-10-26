@@ -28,6 +28,16 @@ PolyzyMD
 
             Run your first simulation
 
+.. raw:: html
+
+   <figure class="pz-render pz-movie">
+   <video class="pz-loop" autoplay loop muted playsinline preload="metadata" poster="_static/renders/polymer_loop_poster.webp" aria-label="Two short polymer chains drawn as blue sticks with red, blue and yellow sulfonate and ammonium groups writhe and drift beside a small protein drawn as a gray cartoon.">
+   <source src="_static/renders/polymer_loop.mp4" type="video/mp4">
+   </video>
+   <figcaption><p>Two SBMA 5-mers beside Trp-cage over 2 ns at 300 K, from the shipped example
+   <code>examples/polymer</code> (50 ps averages; water and ions hidden).</p></figcaption>
+   </figure>
+
 How PolyzyMD works
 ------------------
 
