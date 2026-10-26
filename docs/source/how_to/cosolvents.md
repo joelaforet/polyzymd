@@ -109,6 +109,6 @@ co-solvent condition with the water control, as for a polymer condition.
 
 - {doc}`../tutorials/own_system`: a study with a water and a 2 M urea
   condition, from setup to analysis.
-- {doc}`../get_started/examples`: the shipped co-solvent example.
+- {ref}`the shipped examples <shipped-examples>`: the shipped co-solvent example.
 - [Co-solvents](../reference/configuration.md#co-solvents) in the configuration reference: every key,
   the library and the formulas.

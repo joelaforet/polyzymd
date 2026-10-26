@@ -284,5 +284,5 @@ it, copied it to make a second condition, and ran and analyzed both.
 - **For other co-solvents,** such as DMSO by mole fraction or a molecule
   PolyzyMD does not ship, see {doc}`../how_to/cosolvents`.
 - **For a ligand with a restraint,** see {doc}`../how_to/restraints`, and the
-  shipped configs in {doc}`../get_started/examples`.
+  shipped configs in {ref}`the shipped examples <shipped-examples>`.
 - **To publish the project,** see {doc}`../how_to/project`.

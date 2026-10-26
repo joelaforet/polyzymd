@@ -31,12 +31,12 @@ Read the HPC part of the installation, do tutorial 1 on a laptop or in a
 compute job, then read Run on a SLURM cluster.
 :::
 
-:::{grid-item-card} Extending PolyzyMD
-:link: ../contributor_guide/index
-:link-type: doc
+:::{grid-item-card} Your own analyses and molecules
 
-Do tutorials 1 to 3, then read the architecture and add your own analysis,
-co-solvent or check, as the contributor guide shows.
+Do tutorials 1 to 3, then measure your own quantity
+({doc}`../how_to/study_api`), build your own polymers and co-solvents
+({doc}`../how_to/dynamic_polymers`, {doc}`../how_to/cosolvents`) or run your
+own protocol ({doc}`../how_to/own_protocol`).
 :::
 
 ::::
@@ -103,7 +103,7 @@ For one task at a time, such as {doc}`co-solvents <../how_to/cosolvents>`,
 {doc}`restraints <../how_to/restraints>` or
 {doc}`polymers from SMILES <../how_to/dynamic_polymers>`, see the
 {doc}`../how_to/index`. For the shipped configs of each kind of system, see
-{doc}`../get_started/examples`.
+{ref}`the shipped examples <shipped-examples>`.
 
 ```{toctree}
 :hidden:

@@ -181,7 +181,7 @@ The whole test suite runs on Linux and macOS in
 [`full-test.yml`](https://github.com/joelaforet/polyzymd/actions/workflows/full-test.yml),
 for pushes and pull requests to `main` and `dev` and once a week.
 For what the engine tests compare, and a single-point energy of one build on
-both engines, see {doc}`../reference/validation`.
+both engines, see {ref}`the engine parity check <engine-parity>`.
 
 ## What the audit does not check
 
@@ -216,7 +216,7 @@ the config with a reason, where anyone who reads the config sees it. `polyzymd s
 ## Related pages
 
 - {doc}`../reference/physics_checks` — every check, its status and component
-- {doc}`../reference/validation` — engine parity tests and a single-point energy on both engines
+- {ref}`engine-parity` — engine parity tests and a single-point energy on both engines
 - {doc}`../reference/data_requirements` — the build record and run files
 - {doc}`../reference/configuration` — solutes, charges and `modeling_exceptions`
 - {doc}`../how_to/rewrite_config_rc5` — rewrite a config for 1.3.0

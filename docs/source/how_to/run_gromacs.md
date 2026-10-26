@@ -517,7 +517,7 @@ gmx mdrun -s sp.tpr -deffnm sp
 `disp-corr = Ener` differ from the run `.mdp` files (1e-5 and `EnerPres`).
 `ewald-rtol 1e-4` is the Ewald tolerance of the OpenMM system, and the
 pressure part of `EnerPres` does not change an energy. For such a comparison of the quickstart system,
-see {doc}`../reference/validation`.
+see {ref}`the engine parity check <engine-parity>`.
 
 ### Position restraints
 
@@ -599,7 +599,7 @@ polyzymd submit -c config.yaml --engine gromacs --memory 64G ...
 ## See Also
 
 - {doc}`../reference/gromacs_openmm` — What each config setting becomes on GROMACS and on OpenMM
-- {doc}`../reference/validation` — Engine parity tests and a single-point energy on both engines
+- {ref}`engine-parity` — engine parity tests and a single-point energy on both engines
 - {doc}`../reference/cli_reference` — CLI options for `run`, `submit` and `recover`
 - {doc}`../reference/configuration` — Full configuration reference including `gromacs:` block
 - {doc}`../explanation/gromacs_parallelism` — Thread-MPI, real MPI and OpenMP threads

@@ -94,7 +94,8 @@ Common tasks
 
 .. container:: pz-buttons
 
-   .. button-ref:: get_started/examples
+   .. button-ref:: shipped-examples
+      :ref-type: ref
       :color: primary
       :outline:
 

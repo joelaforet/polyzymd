@@ -330,7 +330,7 @@ and the hardware change.
 - **What PolyzyMD checked.** The physics audit table in
   `build_provenance.md` compared every term of the build with the force
   fields and charges the config names. {doc}`../explanation/physics_audit`
-  explains how, and {doc}`../reference/validation` compares the energies of
+  explains how, and {ref}`the engine parity check <engine-parity>` compares the energies of
   one build on OpenMM and GROMACS.
 - **Your own protein.** Follow {doc}`../tutorials/own_system`. It starts
   from `polyzymd study add-condition --new`, which writes a template config.
@@ -345,7 +345,7 @@ and the hardware change.
   `polyzymd study add-condition NAME --from Water`, and change what differs,
   such as a polymer or a co-solvent. See {doc}`../how_to/study_folder`,
   {doc}`../how_to/dynamic_polymers` and {doc}`../how_to/cosolvents`. For
-  shipped configs of these systems, see {doc}`examples`.
+  shipped configs of these systems, see {ref}`shipped-examples`.
 - **More studies.** Add a study for another protein with
   `polyzymd project add-study LABEL`. See {doc}`../how_to/project`.
 - **More analyses.** The next lesson, {doc}`../tutorials/first_analysis`,
