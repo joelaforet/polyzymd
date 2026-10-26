@@ -5,7 +5,7 @@ small, reviewable change to PolyzyMD and submit it cleanly.
 
 ## Start with the contributor environment
 
-Set up the project as described in {doc}`../contributor_guide/setup`.
+Set up the project as described in {doc}`setup`.
 
 For most changes, your loop is:
 
@@ -114,7 +114,31 @@ Call out:
 - packaging and release automation
 
 For extension-specific guidance, use the pages in
-{doc}`../contributor_guide/index`.
+{doc}`index`.
+
+## Writing documentation
+
+The docs follow [Diataxis](https://diataxis.fr/): put a new page in the
+section that matches what its reader is doing.
+
+| Section | The reader wants to | A page here |
+|---|---|---|
+| Tutorials | learn, by doing a whole lesson with a known result | starts from nothing, says what it teaches and how long it takes |
+| How-to guides | do one task they already understand | starts from the task, gives the steps, links to the reference |
+| Reference | look up a fact | lists every key, command, file or check, and the evidence behind them |
+| Explanation | understand why | discusses design and reasoning; has no steps to follow |
+
+- Titles are in sentence case ("Run a simulation longer"); proper names keep
+  their capitals (PolyzyMD, OpenMM, GROMACS, OpenFF, SLURM).
+- Admonitions, one purpose each: `note` for context, `tip` for a shortcut or
+  the environment to use ("Environment setup"), `important` for a step that
+  must not be skipped, `warning` for anything that loses data or time.
+- Add each new page to the toctree of its section's `index.md`, under the
+  group (`:caption:`) it belongs to; the caption labels the group in the
+  sidebar.
+- Colours, the logo and the landing page live in `docs/source/_static/custom.css`
+  and `docs/source/index.rst`; use the `--pz-*` colour variables rather than
+  new colours.
 
 ## Before opening a PR
 
@@ -127,7 +151,7 @@ Check that your change:
 
 ## Related pages
 
-- contributor environment: {doc}`../contributor_guide/setup`
+- contributor environment: {doc}`setup`
 - architecture overview: {doc}`architecture`
 - packaging notes: {doc}`packaging`
 

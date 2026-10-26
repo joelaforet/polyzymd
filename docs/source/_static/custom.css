@@ -185,6 +185,83 @@ div.pz-buttons p {
     font-weight: 600;
 }
 
+/* The workflow strip on the landing page: six linked steps. */
+.pz-flow {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.5rem;
+    margin: 0.5rem 0 2rem 0;
+}
+
+a.pz-step {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.7rem 0.75rem 0.8rem 0.75rem;
+    border: 1px solid var(--pz-tan);
+    border-radius: 0.6rem;
+    background: var(--pz-cream);
+    color: var(--pst-color-text-base);
+    text-decoration: none;
+}
+
+a.pz-step:hover {
+    border-color: var(--pz-green);
+    box-shadow: 0 4px 12px rgba(31, 92, 58, 0.15);
+}
+
+/* An arrow between steps, on wide screens only. */
+a.pz-step:not(:last-child)::after {
+    content: "\203A";
+    position: absolute;
+    right: -0.55rem;
+    top: 50%;
+    transform: translateY(-55%);
+    color: var(--pz-green);
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+.pz-step-n {
+    display: inline-flex;
+    width: 1.5rem;
+    height: 1.5rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--pz-green);
+    color: var(--pst-color-background);
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.pz-step-t {
+    font-weight: 700;
+    color: var(--pz-green-text);
+}
+
+.pz-step-d {
+    font-size: 0.82rem;
+    line-height: 1.3;
+}
+
+@media (max-width: 960px) {
+    .pz-flow {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    a.pz-step::after {
+        display: none;
+    }
+}
+
+@media (max-width: 520px) {
+    .pz-flow {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
 /* Section pages ---------------------------------------------------------- */
 
 /* The captions of a section's toctrees label the groups in the left

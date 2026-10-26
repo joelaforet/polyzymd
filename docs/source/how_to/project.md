@@ -6,7 +6,7 @@ two or more studies, such as three lipases under the same polymer conditions,
 one study for each lipase. For the reasons behind
 this design, see {doc}`../explanation/projects`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 The commands on this page assume you have activated the PolyzyMD analysis

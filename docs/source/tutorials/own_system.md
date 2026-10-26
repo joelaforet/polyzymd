@@ -14,7 +14,7 @@ conditions are Trp-cage in water and in 2 M urea.
 - Do {doc}`../get_started/quickstart` first.
 - Clean your structure for OpenFF, as {doc}`prepare_pdb_for_openff` shows.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run every command of this tutorial in the `build` environment. From the

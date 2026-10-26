@@ -20,7 +20,7 @@ this tutorial shows two of these steps on PDB entry 181L: a chain that ends
 early, and a crystal ligand. For the other cases, see
 {doc}`../how_to/troubleshoot_openff_pdb_ingestion` after this tutorial.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run every command of this tutorial in the `build` environment. It holds

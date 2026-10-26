@@ -45,4 +45,4 @@ different chains are always far enough apart to form a native pair.
 ## See Also
 
 - [Native Contacts Quick Start](../how_to/analysis_native_contacts_quickstart.md) — commands and settings
-- [Shipped analysis functions](../reference/analysis_functions.md) — what each function measures
+- [Shipped analysis functions](analysis_functions.md) — what each function measures

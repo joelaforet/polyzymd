@@ -20,7 +20,7 @@ You learn these steps:
 Install PolyzyMD as {doc}`installation` describes. You need the clone of the
 repository, because the example files are in it.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run every command of this tutorial in the `build` environment. It holds

@@ -5,7 +5,7 @@ in the `solutes:` list of `config.yaml`. The builder draws a monomer sequence fo
 the chains around the protein with {term}`PACKMOL`, and then adds water and
 ions.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run the commands on this page in the `build` environment:

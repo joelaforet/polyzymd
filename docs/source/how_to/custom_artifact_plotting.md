@@ -1,4 +1,4 @@
-# Create Custom Plots from Study Results
+# Create custom plots from study results
 
 Use this guide when you want a figure that PolyzyMD does not draw, from values
 measured with the study API. The example measures, for each protein residue,

@@ -9,7 +9,7 @@ For how to read RMSD curves and choose a reference, see
 frame. For the per-residue quantities `rmsd_per_residue`, `rmsf` and `offset`,
 see {ref}`Fluctuation, offset and deviation <rmsf-fluctuation-offset-deviation>`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis

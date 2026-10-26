@@ -8,7 +8,7 @@ and assigns partial charges with the method in `charges`.
 For the keys that both modes share, such as `monomers`, `length`, `count` and
 `packing`, see {doc}`polymers`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run the build commands on this page in the `build` environment:

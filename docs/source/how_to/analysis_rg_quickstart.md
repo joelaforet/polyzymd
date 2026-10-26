@@ -6,7 +6,7 @@ each replicate. Then compare the conditions, with one value per replicate.
 Rg measures how compact a selection is. It does not change when the selection
 moves or rotates, so it needs no alignment and no reference structure.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis

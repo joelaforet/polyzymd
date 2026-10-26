@@ -1,4 +1,4 @@
-# Monitor a Simulation Campaign
+# Monitor a simulation campaign
 
 This guide shows how to answer three questions about a set of running
 PolyzyMD chains with one command: which replicates have finished, which have

@@ -1,4 +1,4 @@
-# Set Up a Contributor Environment
+# Set up a contributor environment
 
 Use this page when you want to modify PolyzyMD, run tests, build the docs, or
 add an analysis.

@@ -14,7 +14,7 @@ compare with a reference structure, turn a replicate into one value, compare
 conditions and draw figures. {doc}`../reference/study_api` gives every
 signature.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run the examples and tests below in the PolyzyMD analysis pixi environment:

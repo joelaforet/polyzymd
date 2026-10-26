@@ -5,7 +5,7 @@ replicate. Then compare the conditions, with one value per replicate. You can
 compare the whole protein, each monomer type, each amino-acid class, each
 region or each residue.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis
@@ -38,7 +38,7 @@ name, such as each monomer type. A residue can touch several types on one
 frame, so the per-type fractions do not add up to the total.
 
 For the steps of each method and the checks against an independent script,
-see {doc}`../explanation/analysis_contacts_verification`. For the arguments of
+see {doc}`../reference/analysis_contacts_verification`. For the arguments of
 each function, see {doc}`../reference/analysis_functions`.
 
 Before you run the analysis, check these points:
@@ -252,7 +252,7 @@ allowed solvent accessibilities of residues in proteins." *PLoS ONE*
 ## Next steps
 
 - **What each function measures**: {doc}`../reference/analysis_functions`
-- **How the occlusion values were checked**: {doc}`../explanation/analysis_contacts_verification`
+- **How the occlusion values were checked**: {doc}`../reference/analysis_contacts_verification`
 - **How long contacts last**: {doc}`../explanation/analysis_contact_lifetimes`
 - **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
 - **SASA analysis**: {doc}`analysis_sasa_quickstart`

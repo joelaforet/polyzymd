@@ -1,4 +1,4 @@
-# Comparison Tests Reference
+# Comparison tests reference
 
 ```{contents}
 :local:

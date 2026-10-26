@@ -9,7 +9,7 @@ For the full signatures, see {doc}`../reference/study_api`. For how the
 statistics work and why, see {doc}`../explanation/analysis_api`. To run your
 function from `study.yaml` instead of Python, see {doc}`study_yaml`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 The examples on this page assume you have activated the PolyzyMD analysis

@@ -13,7 +13,7 @@ study for each protein, put them in a {doc}`project <project>`. For the
 design of study folders and how they are published, see
 {doc}`../explanation/study_folders`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 The commands on this page assume you have activated the PolyzyMD analysis

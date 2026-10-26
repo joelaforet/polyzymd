@@ -1,4 +1,4 @@
-# Add Distance Restraints
+# Add distance restraints
 
 Use this guide when you want to keep two atoms near a target distance during a
 simulation, such as holding a substrate near an active site.

@@ -92,4 +92,4 @@ considered, so atoms occlude each other only within the coordinates as loaded.
 ## See Also
 
 - [SASA Quick Start](../how_to/analysis_sasa_quickstart.md) — commands and settings
-- [Shipped analysis functions](../reference/analysis_functions.md) — what each function measures
+- [Shipped analysis functions](analysis_functions.md) — what each function measures

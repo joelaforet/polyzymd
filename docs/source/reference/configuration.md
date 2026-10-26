@@ -1,4 +1,4 @@
-# Configuration Reference
+# Configuration reference
 
 This document describes all configuration options for PolyzyMD YAML files.
 

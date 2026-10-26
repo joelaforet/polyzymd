@@ -18,7 +18,7 @@ You learn these steps:
 Do {doc}`analysis_complete_workflow` first. This tutorial continues in its
 project folder, `~/pz_quickstart`, with the conditions `Water` and `SBMA`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run every command of this tutorial in the `build` environment. From the

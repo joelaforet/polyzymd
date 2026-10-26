@@ -25,7 +25,7 @@ as `temperature_K` and `sbma_fraction`. See {doc}`../explanation/projects`.
 Each old `study.yaml` lists its conditions by absolute config path and names
 its reference structure by absolute path. Nothing in `old/` is changed.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 The commands on this page assume you have activated the PolyzyMD analysis
@@ -243,7 +243,7 @@ are measured once more.
 - Fill `metadata:` in `project.yaml` (title, authors with `family-names`,
   `given-names` and ORCID, licenses).
 - Move any standalone statistics script into `stats/`, reading results with
-  `pz.Project(".").replicate_table(run)` ({doc}`../how_to/project`).
+  `pz.Project(".").replicate_table(run)` ({doc}`project`).
 - Commit: `git -C Paper_1 add -A && git -C Paper_1 commit -m "Move the studies into a project"`.
 
 Read the results of every study in one table:
@@ -256,5 +256,5 @@ pz.Project("Paper_1").results("rmsf").table
 
 ## Next steps
 
-- {doc}`../how_to/project`: analyse, run statistics and publish a project.
+- {doc}`project`: analyse, run statistics and publish a project.
 - {doc}`../explanation/projects`: why the conditions of a study share one analysis frame.

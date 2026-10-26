@@ -1,4 +1,4 @@
-# Contributor Guide
+# Contributor guide
 
 This section is for developers and scientific contributors who want to extend
 PolyzyMD, understand the codebase, or add new capabilities.

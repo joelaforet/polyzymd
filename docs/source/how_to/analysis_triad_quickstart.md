@@ -13,7 +13,7 @@ For what each shipped function measures, see
 {doc}`../reference/analysis_functions`.
 ```
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis

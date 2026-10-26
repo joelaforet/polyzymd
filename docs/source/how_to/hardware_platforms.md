@@ -1,4 +1,4 @@
-# Run OpenMM on Other Hardware
+# Run OpenMM on other hardware
 
 PolyzyMD does not require a particular cluster. The molecular build files and the
 OpenMM simulation code are portable. The automatic SLURM routing in version

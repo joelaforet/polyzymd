@@ -25,6 +25,20 @@ PolyzyMD
 
          Run your first simulation
 
+How PolyzyMD works
+------------------
+
+.. raw:: html
+
+   <nav class="pz-flow" aria-label="The PolyzyMD workflow">
+     <a class="pz-step" href="tutorials/prepare_pdb_for_openff.html"><span class="pz-step-n">1</span><span class="pz-step-t">Prepare</span><span class="pz-step-d">a clean PDB, monomer SMILES</span></a>
+     <a class="pz-step" href="reference/configuration.html"><span class="pz-step-n">2</span><span class="pz-step-t">Configure</span><span class="pz-step-d">one config.yaml per condition</span></a>
+     <a class="pz-step" href="explanation/physics_audit.html"><span class="pz-step-n">3</span><span class="pz-step-t">Build &amp; audit</span><span class="pz-step-d">every term checked against the config</span></a>
+     <a class="pz-step" href="how_to/hpc_slurm.html"><span class="pz-step-n">4</span><span class="pz-step-t">Run</span><span class="pz-step-d">OpenMM or GROMACS, laptop or SLURM</span></a>
+     <a class="pz-step" href="how_to/analysis_chooser.html"><span class="pz-step-n">5</span><span class="pz-step-t">Analyze</span><span class="pz-step-d">per replicate, with uncertainty</span></a>
+     <a class="pz-step" href="how_to/study_freeze.html"><span class="pz-step-n">6</span><span class="pz-step-t">Compare &amp; publish</span><span class="pz-step-d">conditions, statistics, a frozen deposit</span></a>
+   </nav>
+
 Find what you need
 ------------------
 

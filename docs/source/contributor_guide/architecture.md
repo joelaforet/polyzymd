@@ -250,8 +250,8 @@ into module-level details or API reference pages.
 
 ## Related pages
 
-- contributor workflows: {doc}`../contributor_guide/contributing`
-- adding an analysis: {doc}`../contributor_guide/adding_an_analysis`
+- contributor workflows: {doc}`contributing`
+- adding an analysis: {doc}`adding_an_analysis`
 - chain conventions: {doc}`../explanation/residue_assignment`
 - SLURM usage: {doc}`../how_to/hpc_slurm`
 - API reference: {doc}`../api/index`

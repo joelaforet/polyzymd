@@ -18,7 +18,7 @@ You learn these steps:
 Do {doc}`../get_started/quickstart` first. This tutorial continues in its
 project folder, `~/pz_quickstart`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 Run every command of this tutorial in the `build` environment. It includes

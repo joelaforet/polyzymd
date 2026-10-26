@@ -10,7 +10,7 @@ A study that is part of a {term}`project` is frozen with the project. In that
 case, use `polyzymd project freeze` (see {doc}`project`). `polyzymd study
 freeze` refuses such a study.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 The commands on this page assume you have activated the PolyzyMD analysis

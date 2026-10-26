@@ -1,4 +1,4 @@
-# Get Started
+# Get started
 
 Install PolyzyMD, then run the first simulation tutorial. Together they take
 about 15 minutes.

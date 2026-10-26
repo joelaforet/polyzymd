@@ -2,7 +2,7 @@
 
 Find the error message or the symptom below, and do the steps that follow it.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 PolyzyMD has one pixi environment for each kind of work. Use the environment

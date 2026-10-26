@@ -52,19 +52,6 @@ analysis_contact_lifetimes
 analysis_triad_best_practices
 ```
 
-## Verification records
-
-```{toctree}
-:caption: Verification records
-:maxdepth: 1
-
-analysis_rmsf_verification
-analysis_sasa_verification
-analysis_contacts_verification
-analysis_native_contacts_verification
-analysis_hydrogen_bonds_verification
-```
-
 ## Simulation design
 
 ```{toctree}

@@ -1,4 +1,4 @@
-# Data Requirements & Directory Layout
+# Data requirements and directory layout
 
 This page documents the directory structures, file formats, and naming
 conventions that PolyzyMD uses for simulations and analysis. Use it as a

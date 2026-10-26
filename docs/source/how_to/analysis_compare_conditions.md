@@ -13,7 +13,7 @@ The steps are:
 For a guided lesson, see {doc}`../tutorials/analysis_complete_workflow`. For
 the settings of each analysis, see its how-to under {doc}`index`.
 
-:::{admonition} Environment Setup
+:::{admonition} Environment setup
 :class: tip
 
 All analysis commands below assume you have activated the PolyzyMD analysis

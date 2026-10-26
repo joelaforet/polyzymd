@@ -1,4 +1,4 @@
-# How To: Run Analysis Jobs on a SLURM Cluster
+# Run analysis jobs on a SLURM cluster
 
 This guide shows you how to run `polyzymd analyze` as a SLURM batch job, so
 that trajectory analysis runs on a compute node instead of a login node, and

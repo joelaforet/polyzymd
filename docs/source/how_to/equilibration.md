@@ -1,4 +1,4 @@
-# Set Up Equilibration Stages
+# Set up equilibration stages
 
 Use this guide to configure PolyzyMD's required staged equilibration workflow
 with heating, restrained relaxation, or a final unrestrained equilibration
