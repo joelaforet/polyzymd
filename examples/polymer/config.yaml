@@ -1,10 +1,10 @@
 # A protein with polymer chains built from SMILES. Trp-cage (20 residues)
-# with two SBMA 3-mers in TIP3P water with 0.15 M NaCl, run for a few
+# with two SBMA 5-mers in TIP3P water with 0.15 M NaCl, run for a few
 # picoseconds on the CPU. Change the durations (ns) for a real study; see the
 # configuration reference.
 name: "trpcage_sbma"
 engine: "openmm"
-description: "Trp-cage with two SBMA 3-mers in water with NaCl"
+description: "Trp-cage with two SBMA 5-mers in water with NaCl"
 
 solutes:
   - type: protein
@@ -15,8 +15,8 @@ solutes:
 
   # Two chains of sulfobetaine methacrylate (SBMA), built with mBuild from the
   # repeat unit: "*" marks the two carbons that bond to the neighbouring units.
-  # Each end is an SBMA unit that kept its C=C double bond, so a 3-mer is an
-  # end, one repeat unit and an end.
+  # Each end is an SBMA unit that kept its C=C double bond, so a 5-mer is an
+  # end, three repeat units and an end.
   - type: polymer
     generation_mode: "dynamic"
     type_prefix: "SBMA"
@@ -29,7 +29,7 @@ solutes:
     end_groups:
       head: [{label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 1.0}]
       tail: [{label: "A", name: "SBMA", residue_name: "SBM", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", probability: 1.0}]
-    length: 3
+    length: 5
     count: 2
     force_field: ["openff-2.3.0.offxml"]
     charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}

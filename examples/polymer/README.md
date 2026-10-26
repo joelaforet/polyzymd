@@ -1,13 +1,13 @@
 # Polymer example: a protein with polymer chains built from SMILES
 
 - **Shows:** Trp-cage (from `../quickstart/trpcage.pdb`) with two sulfobetaine
-  methacrylate (SBMA) 3-mers, built from star-sited SMILES by mBuild and
+  methacrylate (SBMA) 5-mers, built from star-sited SMILES by mBuild and
   charged with NAGL, in TIP3P water with 0.15 M NaCl. One config per engine.
 - **You learn:** how a `type: polymer` entry with `generation_mode: dynamic`
   turns a monomer SMILES into chains, and how the same system runs on OpenMM
   and on GROMACS.
 - **Time:** on a laptop CPU, build included: OpenMM about 1.5 minutes,
-  GROMACS (2 threads) under 1 minute. The system has 11,274 atoms; making
+  GROMACS (2 threads) under 1 minute. The system has 11,244 atoms; making
   the chain takes a few seconds of the build.
 - **Look at** `build_provenance.md` in the replicate folder: the `polymer`
   row of Components (NAGL model), `composition.polymer_sequences` and
