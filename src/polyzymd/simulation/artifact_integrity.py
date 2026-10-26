@@ -765,12 +765,51 @@ def length_variants(working_dir: Path, config: Any, replicate: int) -> list[Any]
     return variants
 
 
+#: OpenMM settings that choose where and how precisely a built system runs, not
+#: what it is: the values :func:`platform_variants` tries.
+_OPENMM_PLATFORMS = ("CUDA", "CPU", "OpenCL", "HIP", "Reference")
+_OPENMM_PRECISIONS = ("mixed", "single", "double")
+
+
+def platform_variants(config: Any) -> list[Any]:
+    """Return copies of ``config`` with another OpenMM platform, precision or device.
+
+    ``openmm.platform``, ``precision`` and ``device_index`` say where the
+    built system runs, not what it is; switching a condition from CPU to CUDA
+    after its first runs leaves those builds valid. The recorded hash covers
+    the whole config, so each copy puts back one combination of the OpenMM
+    platforms and precisions, with the config's device or none. The stored
+    hash itself is unchanged.
+    """
+    openmm = getattr(config, "openmm", None)
+    if openmm is None:
+        return []
+    platforms = dict.fromkeys((openmm.platform, *_OPENMM_PLATFORMS))
+    precisions = dict.fromkeys((openmm.precision, *_OPENMM_PRECISIONS))
+    devices = dict.fromkeys((openmm.device_index, None))
+    current = (openmm.platform, openmm.precision, openmm.device_index)
+    return [
+        config.model_copy(
+            update={
+                "openmm": openmm.model_copy(
+                    update={"platform": platform, "precision": precision, "device_index": device}
+                )
+            }
+        )
+        for platform in platforms
+        for precision in precisions
+        for device in devices
+        if (platform, precision, device) != current
+    ]
+
+
 def build_matches_config(working_dir: Path, config: Any, replicate: int) -> bool | None:
     """Whether the build record's config hash fits ``config``, without hashing build files.
 
     A changed production length of a started replicate fits (see
-    :func:`length_variants`). ``None`` when the folder has no readable build
-    record.
+    :func:`length_variants`), and so does a changed OpenMM platform,
+    precision or device (see :func:`platform_variants`). ``None`` when the
+    folder has no readable build record.
     """
     path = build_record_path(Path(working_dir))
     try:
@@ -779,7 +818,11 @@ def build_matches_config(working_dir: Path, config: Any, replicate: int) -> bool
         return None
     if expected is None:
         return None
-    for candidate in [config, *length_variants(working_dir, config, replicate)]:
+    lengths = [config, *length_variants(working_dir, config, replicate)]
+    for candidate in lengths:
+        if expected in (config_hash(candidate), _absolute_path_config_hash(candidate)):
+            return True
+    for candidate in (v for length in lengths for v in platform_variants(length)):
         if expected in (config_hash(candidate), _absolute_path_config_hash(candidate)):
             return True
     return False
