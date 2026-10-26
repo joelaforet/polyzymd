@@ -2418,6 +2418,23 @@ class TestNoPolymerWording:
         assert "gmx:" in result.output
         assert "Enzyme-Polymer" not in result.output
 
+    def test_info_reports_the_conda_version_of_a_package_that_says_0_0_0(self, monkeypatch) -> None:
+        """The conda build of OpenFF Interchange reports 0.0.0; info gives its real version."""
+        import importlib.util
+
+        monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+        monkeypatch.setattr(
+            "polyzymd.utils.version.package_version",
+            lambda module: {"openff.interchange": "0.5.2"}.get(module),
+        )
+
+        result = CliRunner().invoke(cli, ["info"])
+
+        assert result.exit_code == 0, result.output
+        assert "OpenFF Interchange: 0.5.2" in result.output
+        assert "OpenFF Toolkit: unknown" in result.output
+        assert "0.0.0" not in result.output
+
 
 @pytest.mark.parametrize("command", ["compare", "new-analysis"])
 def test_removed_commands_are_unknown(command: str) -> None:
@@ -3463,3 +3480,4 @@ class TestGromacsStopMessages:
         assert "starts them again" in _gromacs_stop_outcome(
             "Running energy minimization (mdrun)", tmp_path
         )
+

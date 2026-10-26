@@ -4778,19 +4778,24 @@ def info() -> None:
     except ImportError:
         colored_echo("  OpenMM: NOT INSTALLED", phase="cli")
 
-    try:
-        from openff.toolkit import __version__ as off_version
+    import importlib.util
 
-        colored_echo(f"  OpenFF Toolkit: {off_version}", phase="cli")
-    except ImportError:
-        colored_echo("  OpenFF Toolkit: NOT INSTALLED", phase="cli")
+    from polyzymd.utils.version import package_version
 
-    try:
-        from openff.interchange import __version__ as int_version
-
-        colored_echo(f"  OpenFF Interchange: {int_version}", phase="cli")
-    except ImportError:
-        colored_echo("  OpenFF Interchange: NOT INSTALLED", phase="cli")
+    # The conda build of Interchange reports 0.0.0; package_version reads the
+    # version of its conda package record instead, as the build record does.
+    for label, module in (
+        ("OpenFF Toolkit", "openff.toolkit"),
+        ("OpenFF Interchange", "openff.interchange"),
+    ):
+        try:
+            installed = importlib.util.find_spec(module) is not None
+        except ImportError:
+            installed = False
+        if installed:
+            colored_echo(f"  {label}: {package_version(module) or 'unknown'}", phase="cli")
+        else:
+            colored_echo(f"  {label}: NOT INSTALLED", phase="cli")
 
     try:
         import pydantic
