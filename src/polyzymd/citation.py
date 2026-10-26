@@ -25,6 +25,7 @@ PEOPLE: list[dict[str, str]] = [
         "family-names": "Laforet",
         "given-names": "Joseph R.",
         "name-suffix": "Jr.",
+        "orcid": "https://orcid.org/0009-0007-5771-1603",
         "affiliation": "Shirts group, Department of Chemical and Biological Engineering, "
         "University of Colorado Boulder",
     }
