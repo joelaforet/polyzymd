@@ -9,11 +9,11 @@ GROMACS.
 ```{figure} ../_static/renders/cosolvent.webp
 :figclass: pz-render
 :class: dark-light
-:alt: Trp-cage drawn as a gray cartoon, surrounded by urea molecules with green carbons and by sodium and chloride ions as purple and yellow spheres.
+:alt: Trp-cage drawn as a gray cartoon in a box of water, shown as small light spheres, with urea molecules with green carbons and sodium and chloride ions as purple and yellow spheres.
 
 The shipped example `examples/cosolvent`: Trp-cage (gray) in 2 M urea (green
-carbons), with Na⁺ (purple) and Cl⁻ (yellow). The water is hidden, and the
-urea in front of the protein is cut away.
+carbons) and water, with Na⁺ (purple) and Cl⁻ (yellow). Water is drawn as its
+oxygens; the water and urea in front of the protein are cut away.
 ```
 
 :::{admonition} Environment setup

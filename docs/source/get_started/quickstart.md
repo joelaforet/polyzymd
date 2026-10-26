@@ -220,9 +220,9 @@ runs/trpcage/water/trpcage_300K_run1/
 ```{figure} ../_static/renders/quickstart_system.webp
 :figclass: pz-render
 :class: dark-light
-:alt: Trp-cage, a 20-residue protein drawn as a blue cartoon with its side chains, inside a box of water molecules shown as small gray spheres, with a few sodium and chloride ions as larger purple and yellow spheres.
+:alt: Trp-cage, a 20-residue protein drawn as a gray cartoon with its side chains, inside a box of water molecules shown as small gray spheres, with a few sodium and chloride ions as larger purple and yellow spheres.
 
-The system you just built (`solvated_system.pdb`): Trp-cage (blue) in its
+The system you just built (`solvated_system.pdb`): Trp-cage (gray) in its
 rhombic dodecahedron of TIP3P water, with Na⁺ (purple) and Cl⁻ (yellow) at
 0.15 M plus the ions that neutralize the protein. Water is drawn as its
 oxygens; the water in front of the protein is cut away.
