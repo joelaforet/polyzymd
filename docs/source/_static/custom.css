@@ -262,6 +262,37 @@ a.pz-step:not(:last-child)::after {
     }
 }
 
+/* Molecular renders: a white card in light and dark mode (the renders are on white). */
+figure.pz-render {
+    margin: 1.5rem auto;
+    padding: 0.75rem 0.75rem 0.5rem 0.75rem;
+    background: #ffffff;
+    border: 1px solid var(--pz-tan);
+    border-radius: 0.75rem;
+    box-shadow: 0 2px 10px rgba(31, 92, 58, 0.08);
+}
+
+figure.pz-render img {
+    width: 100%;
+    height: auto;
+    background: transparent !important;
+}
+
+.bd-article figure.pz-render figcaption,
+.bd-article figure.pz-render figcaption p {
+    color: #3b3b3b;
+    font-size: 0.9rem;
+    font-weight: 400;
+    text-align: left;
+}
+
+/* Inline code in a caption keeps the light look on the white card, in dark mode too. */
+.bd-article figure.pz-render figcaption code {
+    background: #f6f1e4;
+    border-color: var(--pz-tan);
+    color: #8a3b12;
+}
+
 /* Section pages ---------------------------------------------------------- */
 
 /* The captions of a section's toctrees label the groups in the left

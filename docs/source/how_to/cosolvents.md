@@ -6,6 +6,16 @@ The usual way is to copy the water condition of a study and add a
 places the co-solvent with the water and the ions. This works on OpenMM and
 GROMACS.
 
+```{figure} ../_static/renders/cosolvent.webp
+:figclass: pz-render
+:class: dark-light
+:alt: Trp-cage drawn as a gray cartoon, surrounded by urea molecules with green carbons and by sodium and chloride ions as purple and yellow spheres.
+
+The shipped example `examples/cosolvent`: Trp-cage (gray) in 2 M urea (green
+carbons), with Na⁺ (purple) and Cl⁻ (yellow). The water is hidden, and the
+urea in front of the protein is cut away.
+```
+
 :::{admonition} Environment setup
 :class: tip
 

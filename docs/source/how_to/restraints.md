@@ -3,6 +3,18 @@
 Use this guide when you want to keep two atoms near a target distance during a
 simulation, such as holding a substrate near an active site.
 
+```{figure} ../_static/renders/ligand_restraint.webp
+:figclass: pz-render
+:class: dark-light
+:alt: T4 lysozyme drawn as a gray cartoon, with a benzene molecule in orange inside a buried cavity, alanine 99 in blue above it, a dashed line between the two restrained atoms, and a faint gray sphere around alanine 99.
+
+The restraint of the shipped example `examples/ligand_restraint`: benzene
+(orange) in the cavity of T4 lysozyme L99A. A flat-bottom restraint holds
+benzene's atom `C1x` within 6.5 Å of the Cβ of Ala 99 (blue); the dashed line
+joins the two atoms, and the shaded sphere marks the 6.5 Å inside which the
+restraint applies no force. Side chains within 5 Å of benzene are gray.
+```
+
 A distance restraint acts in every phase of the run, production included. It
 has no per-stage setting. To hold a substrate in one equilibration stage only,
 use a position restraint in that stage instead: see
