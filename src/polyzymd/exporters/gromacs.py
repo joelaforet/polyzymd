@@ -490,11 +490,13 @@ class MDPGenerator:
         return THERMOSTAT_MAP.get(thermostat, THERMOSTAT_MAP["LangevinMiddle"])
 
     def _barostat(self, barostat: str, frequency: int | None = None) -> tuple[str, str]:
-        """Return GROMACS's pcoupl and pcoupltype for a PolyzyMD barostat, warning once that it is approximate.
+        """Return GROMACS's pcoupl and pcoupltype for a PolyzyMD barostat, noting once that it is approximate.
 
+        The substitution is the expected one for every GROMACS run, so it is an
+        INFO note, not a warning: c-rescale samples the same NPT ensemble.
         ``barostat_frequency`` sets how often OpenMM's MC barostat tries a volume
         move; c-rescale keeps GROMACS's own coupling interval, so a value other
-        than the default 25 gives a warning once.
+        than the default 25 gives a warning once, since that setting is dropped.
         """
         if frequency not in (None, 25) and "barostat_frequency" not in self._warned:
             self._warned.add("barostat_frequency")
@@ -505,7 +507,7 @@ class MDPGenerator:
             )
         if "barostat" not in self._warned:
             self._warned.add("barostat")
-            logger.warning(
+            logger.info(
                 "GROMACS has no Monte Carlo barostat; barostat %s runs as c-rescale, which samples "
                 "the same NPT ensemble with a different algorithm. See the GROMACS and OpenMM "
                 "page of the PolyzyMD docs.",

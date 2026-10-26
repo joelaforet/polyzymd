@@ -1231,16 +1231,22 @@ class TestMDPThermostatAndBarostat:
         assert "integrator      = sd" in text and "tcoupl          = no" in text
         assert "ld_seed" in text
 
-    def test_approximate_mappings_are_warned_once(self, tmp_path: Path, monkeypatch) -> None:
-        """The Monte Carlo barostat maps to c-rescale, with a warning."""
+    def test_approximate_mappings_are_noted_once(self, tmp_path: Path, monkeypatch) -> None:
+        """The Monte Carlo barostat maps to c-rescale, with an INFO note, not a warning.
+
+        Every GROMACS run makes that substitution, the shipped GROMACS example
+        included, and c-rescale samples the same NPT ensemble.
+        """
         from polyzymd.exporters import gromacs
 
-        messages = []
-        monkeypatch.setattr(gromacs.logger, "warning", lambda text, *a: messages.append(text % a))
+        notes, warnings = [], []
+        monkeypatch.setattr(gromacs.logger, "info", lambda text, *a: notes.append(text % a))
+        monkeypatch.setattr(gromacs.logger, "warning", lambda text, *a: warnings.append(text % a))
         generator = self._generator(tmp_path, barostat="MC")
         generator.generate_production()
         generator.generate_production()
-        assert sum("no Monte Carlo barostat" in text for text in messages) == 1
+        assert sum("no Monte Carlo barostat" in text for text in notes) == 1
+        assert warnings == []
 
 
 def test_grompp_gets_no_blanket_maxwarn() -> None:
