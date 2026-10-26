@@ -1167,6 +1167,37 @@ class TestEnergyMinimizationHelpers:
         assert "prod_nojump.xtc" in script_content
         assert "prod_centered.xtc" in script_content
 
+    def test_run_script_names_itself_and_passes_the_mdrun_flags(self, tmp_path):
+        """The script's usage line names its own file, and each mdrun gets polyzymd run's flags."""
+        script_path = tmp_path / "run_trpcage_gromacs.sh"
+        generator = RunScriptGenerator(
+            prefix="trpcage",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+            mdrun_flags={
+                "em": "-ntmpi 1 -ntomp 4",
+                "eq": "-ntmpi 1 -ntomp 4 -nb gpu",
+                "prod": "-ntmpi 1 -ntomp 4 -nb gpu -pme gpu",
+            },
+        )
+
+        generator.generate(script_path)
+        text = script_path.read_text()
+
+        assert "# Usage: ./run_trpcage_gromacs.sh" in text
+        assert "run_gromacs.sh" not in text
+        assert "$GMX mdrun -deffnm em -v -ntmpi 1 -ntomp 4\n" in text
+        assert "$GMX mdrun -deffnm eq_01 -v -ntmpi 1 -ntomp 4 -nb gpu\n" in text
+        assert "$GMX mdrun -deffnm prod -v -ntmpi 1 -ntomp 4 -nb gpu -pme gpu\n" in text
+        assert text.count("=== Step 1: Energy Minimization ===") == 1
+
+    def test_run_script_refuses_unsafe_mdrun_flags(self, tmp_path):
+        generator = RunScriptGenerator(
+            prefix="system", equilibration_mdps=[], mdrun_flags={"prod": "-ntomp 4; rm x"}
+        )
+
+        with pytest.raises(ValueError, match="mdrun_flags"):
+            generator.generate(tmp_path / "run.sh")
+
     @pytest.mark.parametrize(
         ("field", "kwargs"),
         [

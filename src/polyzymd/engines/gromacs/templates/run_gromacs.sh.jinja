@@ -3,13 +3,17 @@
 # {{ branding }}
 # Generated on {{ generated_on }}
 #
-# Usage: ./run_gromacs.sh
+# Usage: ./{{ script_name }}
 #
 # This script runs the complete MD workflow:
 #   1. Energy minimization
 #   2. Equilibration (multiple stages if configured)
 #   3. Production MD
 #   4. Trajectory post-processing
+#
+# Each gmx mdrun gets the flags polyzymd run passes (gromacs: ntmpi, ntomp,
+# gpu, mdrun_flags). Unlike polyzymd run, it does not continue a stopped
+# stage from its checkpoint and records no progress; polyzymd run does both.
 
 set -e  # Exit on error
 
