@@ -41,6 +41,7 @@ Choose an analysis, run it on a study, and measure your own quantity.
 ## Set up a simulation
 
 ```{toctree}
+:caption: Set up a simulation
 :maxdepth: 1
 
 rewrite_config_rc5
@@ -54,6 +55,7 @@ troubleshoot_openff_pdb_ingestion
 ## Run simulations
 
 ```{toctree}
+:caption: Run simulations
 :maxdepth: 1
 
 hpc_slurm
@@ -68,6 +70,7 @@ site_cu_boulder
 ## Organize and publish studies
 
 ```{toctree}
+:caption: Organize and publish studies
 :maxdepth: 1
 
 study_folder
@@ -80,6 +83,7 @@ study_freeze
 ## Analyze trajectories
 
 ```{toctree}
+:caption: Analyze trajectories
 :maxdepth: 1
 
 analysis_chooser
@@ -93,6 +97,7 @@ hpc_execution
 ## Analyses
 
 ```{toctree}
+:caption: Analyses
 :maxdepth: 1
 
 analysis_rmsd_quickstart
@@ -110,6 +115,7 @@ analysis_triad_quickstart
 ## Figures
 
 ```{toctree}
+:caption: Figures
 :maxdepth: 1
 
 publication_plots
@@ -119,6 +125,7 @@ custom_artifact_plotting
 ## Fix problems
 
 ```{toctree}
+:caption: Fix problems
 :maxdepth: 1
 
 troubleshooting

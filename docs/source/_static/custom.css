@@ -1,44 +1,216 @@
-/* Custom CSS for PolyzyMD documentation */
+/* PolyzyMD documentation: brand colours and layout on pydata-sphinx-theme.
+ *
+ * The palette comes from the logo: the green of "MD" (#3b8e5d), the tan of
+ * "Polyzy" and the ring (#cdb792), and the cream of its background. Links use
+ * a darker green so that text keeps a 4.5:1 contrast on white (WCAG AA).
+ * The variables are set on :root, the light ones for every theme but dark
+ * (the page renders before its script sets data-theme), so that they win
+ * over the theme's own defaults whatever the order of the stylesheets.
+ */
 
-/* Make code blocks more readable */
-.highlight {
-    background: #f8f8f8;
-    border-radius: 4px;
+:root:not([data-theme="dark"]) {
+    --pz-green: #3b8e5d;
+    --pz-green-text: #2f7a4e;
+    --pz-green-deep: #1f5c3a;
+    --pz-tan: #cdb792;
+    --pz-tan-text: #7d6440;
+    --pz-cream: #f7f3e6;
+
+    --pst-color-primary: var(--pz-green-text);
+    --pst-color-primary-bg: #e3f0e7;
+    --pst-color-secondary: var(--pz-tan-text);
+    --pst-color-secondary-bg: var(--pz-cream);
+    --pst-color-accent: var(--pz-tan-text);
+    --pst-color-link: var(--pz-green-text);
+    --pst-color-link-hover: var(--pz-green-deep);
+    --pst-color-inline-code: #8a3b12;
+    --pst-color-inline-code-links: var(--pz-green-text);
+    --pst-color-target: #fbf3d5;
+
+    --sd-color-primary: var(--pz-green-text);
+    --sd-color-primary-highlight: var(--pz-green-deep);
+    --sd-color-primary-text: #ffffff;
+    --sd-color-card-border: var(--pz-tan);
 }
 
-/* Style admonitions */
-.admonition {
-    border-radius: 4px;
+:root[data-theme="dark"] {
+    --pz-green: #6cc48f;
+    --pz-green-text: #7fd19f;
+    --pz-green-deep: #a6e3bd;
+    --pz-tan: #cdb792;
+    --pz-tan-text: #dcc9a6;
+    --pz-cream: #23271f;
+
+    --pst-color-primary: var(--pz-green-text);
+    --pst-color-primary-bg: #1d3326;
+    --pst-color-secondary: var(--pz-tan-text);
+    --pst-color-secondary-bg: #2b2a22;
+    --pst-color-accent: var(--pz-tan-text);
+    --pst-color-link: var(--pz-green-text);
+    --pst-color-link-hover: var(--pz-green-deep);
+    --pst-color-inline-code: #f0b48a;
+    --pst-color-inline-code-links: var(--pz-green-text);
+    --pst-color-target: #3a3420;
+
+    --sd-color-primary: #6cc48f;
+    --sd-color-primary-highlight: #a6e3bd;
+    --sd-color-primary-text: #10221a;
+    --sd-color-card-border: var(--pz-tan);
 }
 
-/* Style for YAML code blocks */
-.highlight-yaml .highlight {
-    background: #f5f5f0;
+/* Before its script runs, the page follows the system setting, so a reader
+   in dark mode does not see a light first paint. */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --pz-green: #6cc48f;
+        --pz-green-text: #7fd19f;
+        --pz-green-deep: #a6e3bd;
+        --pz-tan: #cdb792;
+        --pz-tan-text: #dcc9a6;
+        --pz-cream: #23271f;
+
+        --pst-color-primary: var(--pz-green-text);
+        --pst-color-primary-bg: #1d3326;
+        --pst-color-secondary: var(--pz-tan-text);
+        --pst-color-secondary-bg: #2b2a22;
+        --pst-color-accent: var(--pz-tan-text);
+        --pst-color-link: var(--pz-green-text);
+        --pst-color-link-hover: var(--pz-green-deep);
+        --pst-color-inline-code: #f0b48a;
+        --pst-color-inline-code-links: var(--pz-green-text);
+        --pst-color-target: #3a3420;
+
+        --sd-color-primary: #6cc48f;
+        --sd-color-primary-highlight: #a6e3bd;
+        --sd-color-primary-text: #10221a;
+        --sd-color-card-border: var(--pz-tan);
+}
 }
 
-/* Make tables more readable */
+/* Header: the badge and the word "PolyzyMD" in the brand green. */
+.navbar-brand img {
+    height: 2.4rem;
+}
+
+.navbar-brand p.title {
+    font-weight: 700;
+    color: var(--pz-green-text);
+    letter-spacing: 0.01em;
+}
+
+/* The tab of the current Diataxis section is underlined in tan. */
+.bd-header ul.navbar-nav > li.nav-item.current > .nav-link {
+    border-bottom: 3px solid var(--pz-tan);
+}
+
+/* Landing page --------------------------------------------------------- */
+
+div.pz-hero.docutils.container {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    padding: 1.75rem 2rem !important;
+    margin: 0 0 2rem 0;
+    background: var(--pz-cream);
+    border: 1px solid var(--pz-tan);
+    border-radius: 0.75rem;
+}
+
+.pz-hero img {
+    width: 150px;
+    height: 150px;
+    flex: none;
+    margin: 0;
+    background: transparent !important;
+}
+
+/* A row of buttons that wraps on narrow screens. */
+div.pz-buttons.docutils.container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-bottom: 1.5rem;
+}
+
+div.pz-buttons p {
+    margin: 0;
+}
+
+.pz-hero h1 {
+    margin-top: 0;
+    color: var(--pz-green-text);
+}
+
+.pz-hero p {
+    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+}
+
+@media (max-width: 720px) {
+    .pz-hero {
+        flex-direction: column;
+        text-align: center;
+    }
+}
+
+/* Cards: tan outline, green top edge, lift on hover. */
+.sd-card.sd-card {
+    border: 1px solid var(--pz-tan) !important;
+    border-top: 4px solid var(--pz-green) !important;
+    border-radius: 0.6rem;
+    background: var(--pst-color-surface);
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.sd-card:hover {
+    box-shadow: 0 6px 18px rgba(31, 92, 58, 0.15);
+    transform: translateY(-2px);
+}
+
+.sd-card .sd-card-title {
+    color: var(--pz-green-text);
+    font-weight: 700;
+}
+
+.sd-card .sd-card-footer {
+    background: transparent;
+    border-top: 1px solid var(--pz-tan);
+    color: var(--pz-tan-text);
+    font-size: 0.9rem;
+}
+
+/* Buttons from sphinx-design take the brand green from --sd-color-primary. */
+.sd-btn {
+    border-radius: 0.5rem;
+    font-weight: 600;
+}
+
+/* Section pages ---------------------------------------------------------- */
+
+/* The captions of a section's toctrees label the groups in the left
+   sidebar; on the page, the section's own headings already name them. */
+.bd-article .toctree-wrapper p.caption {
+    display: none;
+}
+
+.bd-sidebar-primary .caption-text {
+    color: var(--pz-tan-text);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+}
+
+/* Tables and the general index (kept from the earlier stylesheet). */
 table.docutils {
     border-collapse: collapse;
     width: 100%;
 }
 
-table.docutils td, table.docutils th {
+table.docutils td,
+table.docutils th {
     padding: 8px 12px;
-    border: 1px solid #e1e4e5;
 }
 
-/* Style parameter lists */
-.field-list dt {
-    font-weight: bold;
-    color: #404040;
-}
-
-/* Improve sidebar navigation */
-.wy-nav-content {
-    max-width: 900px;
-}
-
-/* Prevent long genindex entries from spilling off the page */
 table.indextable {
     table-layout: fixed;
 }

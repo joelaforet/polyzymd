@@ -29,6 +29,7 @@ or project maintenance patterns. For command lookup, switch to
 config -> builders -> simulation -> workflow -> analyses. -->
 
 ```{toctree}
+:caption: Contributor Mindset
 :hidden:
 :maxdepth: 1
 

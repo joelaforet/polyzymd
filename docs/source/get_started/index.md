@@ -101,6 +101,7 @@ Find how-to guides for polymers, restraints, GROMACS, SLURM and more.
 ::::
 
 ```{toctree}
+:caption: Where to go next
 :hidden:
 :maxdepth: 1
 

@@ -41,6 +41,7 @@ n_eff.
 ## Commands and configuration
 
 ```{toctree}
+:caption: Commands and configuration
 :maxdepth: 1
 
 cli_reference
@@ -52,6 +53,7 @@ gromacs_openmm
 ## Input data
 
 ```{toctree}
+:caption: Input data
 :maxdepth: 1
 
 data_requirements
@@ -62,6 +64,7 @@ benchmarks
 ## Analysis
 
 ```{toctree}
+:caption: Analysis
 :maxdepth: 1
 
 study_api
@@ -73,6 +76,7 @@ posthoc_testing
 ## Terms and sources
 
 ```{toctree}
+:caption: Terms and sources
 :maxdepth: 1
 
 glossary
@@ -82,6 +86,7 @@ references
 ## Python API
 
 ```{toctree}
+:caption: Python API
 :maxdepth: 2
 
 ../api/index

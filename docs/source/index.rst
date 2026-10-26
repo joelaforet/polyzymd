@@ -1,85 +1,149 @@
-.. image:: _static/logo.png
-   :alt: PolyzyMD Logo
-   :align: center
-   :width: 320px
+PolyzyMD
+========
 
-PolyzyMD Documentation
-======================
+.. container:: pz-hero
 
-PolyzyMD is a molecular dynamics toolkit for building, running, and analyzing
-simulations of proteins, alone or with polymers, ligands and co-solvents.
+   .. image:: _static/polyzymd_badge_256.png
+      :alt: PolyzyMD logo: an enzyme surrounded by polymer chains
+      :class: dark-light
 
-Use this site by *need*:
+   .. container::
 
-- Start here if you need to install PolyzyMD or run a first simulation.
-- Use Tutorials for guided, end-to-end learning.
-- Use How-To Guides for specific tasks such as SLURM submission, restraints,
-  polymers, GROMACS simulations, or condition comparisons.
-- Use Reference for command lookup, configuration details, benchmarks, and API
-  docs.
-- Use Explanation for concepts, rationale, interpretation, and best practices.
-- Use Contributor Guide for development architecture and extension workflows.
+      **Build, run and analyze molecular dynamics of proteins** — alone or with
+      polymers, ligands and co-solvents — with every build checked against its
+      config and every analysis compared across replicates.
+
+      .. button-ref:: get_started/installation
+         :color: primary
+         :shadow:
+
+         Install PolyzyMD
+
+      .. button-ref:: get_started/quickstart
+         :color: primary
+         :outline:
+
+         Run your first simulation
+
+Find what you need
+------------------
+
+The documentation is organized by what you want to do right now.
+
+.. grid:: 1 1 2 2
+   :gutter: 3
+
+   .. grid-item-card:: :octicon:`mortar-board;1.2em` Tutorials
+      :link: tutorials/index
+      :link-type: doc
+
+      Learn by doing: guided lessons from a PDB file to a compared study.
+
+      +++
+      For when you are new to PolyzyMD
+
+   .. grid-item-card:: :octicon:`tools;1.2em` How-to guides
+      :link: how_to/index
+      :link-type: doc
+
+      Recipes for one task: polymers, restraints, SLURM, GROMACS, running
+      longer, analyses, publishing a study.
+
+      +++
+      For when you know what you want to do
+
+   .. grid-item-card:: :octicon:`light-bulb;1.2em` Explanation
+      :link: explanation/index
+      :link-type: doc
+
+      Why PolyzyMD works the way it does: the physics audit, replicates and
+      statistics, study design.
+
+      +++
+      For when you want to understand
+
+   .. grid-item-card:: :octicon:`book;1.2em` Reference
+      :link: reference/index
+      :link-type: doc
+
+      Every command, config key, file, check and analysis function, and the
+      papers behind them.
+
+      +++
+      For when you need a fact
+
+Common tasks
+------------
+
+.. container:: pz-buttons
+
+   .. button-ref:: how_to/dynamic_polymers
+      :color: primary
+      :outline:
+
+      Build polymers from SMILES
+
+   .. button-ref:: how_to/hpc_slurm
+      :color: primary
+      :outline:
+
+      Run on a SLURM cluster
+
+   .. button-ref:: how_to/analysis_compare_conditions
+      :color: primary
+      :outline:
+
+      Compare conditions
+
+   .. button-ref:: how_to/own_analysis
+      :color: primary
+      :outline:
+
+      Use your own MDAnalysis scripts
+
+   .. button-ref:: contributor_guide/index
+      :color: primary
+      :outline:
+
+      Contribute to PolyzyMD
+
+New in 1.3
+----------
+
+.. grid:: 1 1 3 3
+   :gutter: 2
+
+   .. grid-item-card:: Physics audit
+      :link: explanation/physics_audit
+      :link-type: doc
+
+      Every build is compared, term by term, with the force fields and charges
+      its config names.
+
+   .. grid-item-card:: Polymers from SMILES
+      :link: tutorials/star_sited_monomers
+      :link-type: doc
+
+      Star-sited monomers, drawn end caps and tacticity, built with mBuild.
+
+   .. grid-item-card:: Stop, continue, run longer
+      :link: how_to/run_longer
+      :link-type: doc
+
+      Interrupted runs continue; finished runs extend to a longer production.
 
 .. note::
 
-   PolyzyMD is under active development. If you encounter issues, please
-   `open an issue <https://github.com/joelaforet/polyzymd/issues>`_ on GitHub.
-
-.. note::
-
-   Stable analysis workflows for the `v1.3.0` release are RMSD, Rg, RMSF,
-   contacts, native contacts, distances, secondary structure, SASA, and
-   hydrogen bonds, which run through ``polyzymd analyze NAME -c config.yaml``
-   and the study API. The catalytic triad is a routine on the study API; see
-   :doc:`how_to/analysis_triad_quickstart`.
-
-Choose Your Path
-----------------
-
-- :doc:`Get Started <get_started/index>`
-  Install PolyzyMD with pixi and run your first simulation.
-- :doc:`Tutorials <tutorials/index>`
-  Follow guided, end-to-end workflows with clear success states.
-- :doc:`How-To Guides <how_to/index>`
-  Solve a specific task quickly without wading through background material.
-- :doc:`Reference <reference/index>`
-  Look up commands, config schema, API modules, and benchmark data.
-- :doc:`Explanation <explanation/index>`
-  Understand why workflows are structured the way they are and how to
-  interpret results.
-- :doc:`Contributor Guide <contributor_guide/index>`
-  Extend PolyzyMD, understand the architecture, and contribute safely.
-
-Common Workflows
-----------------
-
-- Install locally and validate the CLI:
-  :doc:`Install PolyzyMD with pixi <get_started/installation>`
-- Run a first simulation and analyze it:
-  :doc:`Run your first simulation <get_started/quickstart>`
-- Run a comparison study across multiple conditions:
-  :doc:`Compare Simulation Conditions <how_to/analysis_compare_conditions>`
-- Add a polymer condition and compare it with water:
-  :doc:`tutorials/analysis_complete_workflow`
-
-.. IMAGE OPPORTUNITY: Add a single workflow schematic showing Build -> Submit ->
-   Analyze -> Compare -> Plot, with stable and experimental analysis branches.
-..
+   PolyzyMD is under active development. Found a problem?
+   `Open an issue on GitHub <https://github.com/joelaforet/polyzymd/issues>`_.
 
 .. toctree::
    :hidden:
    :maxdepth: 2
 
-   Get Started <get_started/index>
+   Get started <get_started/index>
    Tutorials <tutorials/index>
-   How-To Guides <how_to/index>
+   How-to guides <how_to/index>
    Reference <reference/index>
    Explanation <explanation/index>
-   Contributor Guide <contributor_guide/index>
-
-Indices and Tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+   Contributing <contributor_guide/index>
