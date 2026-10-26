@@ -219,10 +219,14 @@ git commit -m "Add the Water and Urea 2 M conditions"
 Run three replicates of each condition. The replicate number is the random
 seed.
 
-On a cluster with GPUs, submit them to SLURM. Choose the preset of your
-cluster:
+On a cluster with GPUs, build the replicates first, then submit them to SLURM.
+`submit` does not build: it checks each replicate's build and stops if one is
+missing. On a cluster, run the builds in an interactive job, as
+{doc}`../how_to/hpc_slurm` shows. Choose the preset of your cluster:
 
 ```bash
+polyzymd build -c trpcage/conditions/water/config.yaml -r 1-3
+polyzymd build -c trpcage/conditions/urea_2_m/config.yaml -r 1-3
 polyzymd submit -c trpcage/conditions/water/config.yaml -r 1-3 --preset aa100
 polyzymd submit -c trpcage/conditions/urea_2_m/config.yaml -r 1-3 --preset aa100
 ```
