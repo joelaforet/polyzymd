@@ -142,7 +142,7 @@ condition and replicate, stores its result but never writes the run's
 
   | Preset | Partition | QoS | Account |
   |---|---|---|---|
-  | `alpine-cpu` | `acpu` | `cpu-normal` | none |
+  | `alpine-cpu` | `acpu` | `cpu-normal` | `ucb-general` |
   | `blanca-shirts` | `blanca-shirts` | `blanca-shirts` | `blanca-shirts` |
   | `blanca-chbe-rdi` | `blanca-chbe-rdi` | `blanca-chbe-rdi` | `blanca-chbe-rdi` |
   | `bridges2-rm` | `RM-shared` | none | none |

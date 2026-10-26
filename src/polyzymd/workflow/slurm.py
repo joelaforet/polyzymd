@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
 
 from polyzymd.core.branding import FULL_CREDIT_LINE
+from polyzymd.utils.paths import tidy_path
 from polyzymd.utils.templates import render_package_template
 
 LOGGER = logging.getLogger(__name__)
@@ -353,11 +354,13 @@ class SlurmConfig:
         constraint: Optional SLURM ``--constraint`` expression. Supports
             boolean expressions with ``|`` (OR) and ``&`` (AND), such as
             ``"A40|A100"``.
+        reservation: Optional SLURM ``--reservation`` name, for nodes a site
+            reserves (Alpine's GPU test slices need ``a100_test``).
     """
 
     partition: str = "aa100"
-    qos: str = "normal"
-    account: str = "ucb625_asc1"
+    qos: str = "gpu-normal"
+    account: str = "ucb-general"
     time_limit: str = "23:59:59"
     email: str = ""
     nodes: int = 1
@@ -371,6 +374,7 @@ class SlurmConfig:
     gpu_type: Optional[str] = None
     gpu_directive_style: str = "gres"
     constraint: Optional[str] = None
+    reservation: Optional[str] = None
 
     @classmethod
     def from_preset(cls, preset: PresetType, email: str = "") -> "SlurmConfig":
@@ -383,17 +387,23 @@ class SlurmConfig:
         Returns:
             SlurmConfig with preset values.
         """
+        # CU Boulder Alpine. CURC renames partitions and QoS values from time
+        # to time (amilan and atesting_a100 are gone, and the GPU partitions
+        # refuse QoS normal); check a change with `sbatch --test-only` and
+        # `sacctmgr show assoc user=$USER format=account,partition,qos`.
+        # Values checked in October 2026. ucb-general is the allocation every
+        # CU user has; a lab allocation goes in with --account.
         presets: Dict[str, Dict] = {
             "aa100": {
                 "partition": "aa100",
-                "qos": "normal",
-                "account": "ucb625_asc1",
+                "qos": "gpu-normal",
+                "account": "ucb-general",
                 "time_limit": "23:59:59",
             },
             "al40": {
                 "partition": "al40",
-                "qos": "normal",
-                "account": "ucb625_asc1",
+                "qos": "gpu-normal",
+                "account": "ucb-general",
                 "time_limit": "23:59:59",
             },
             # Blanca GPU nodes excluded from both shirts presets.  Each entry
@@ -444,11 +454,15 @@ class SlurmConfig:
                 "account": "",
                 "time_limit": "23:59:59",
             },
+            # Alpine's GPU test slices: one A100 MIG slice in the a100_test
+            # reservation, without which the job waits behind the reserved node.
             "testing": {
-                "partition": "atesting_a100",
-                "qos": "testing",
-                "account": "ucb625_asc1",
+                "partition": "aa100",
+                "qos": "gpu-testing",
+                "account": "ucb-general",
                 "time_limit": "0:05:59",
+                "gpu_type": "a100_3g.20gb",
+                "reservation": "a100_test",
             },
         }
 
@@ -502,6 +516,7 @@ def sbatch_lines(config: SlurmConfig, mail_type: str = "FAIL") -> dict[str, str]
         "exclude_line": line("exclude", config.exclude),
         "nodelist_line": line("nodelist", config.nodelist),
         "constraint_line": line("constraint", config.constraint),
+        "reservation_line": line("reservation", config.reservation),
     }
 
 
@@ -640,8 +655,8 @@ class SlurmScriptGenerator:
         # The job runs in its run directory (``--chdir``), which is how
         # ``squeue`` tells the jobs of two runs apart. Absolute paths keep the
         # log where ``sbatch`` was invoked and the run directory where it is.
-        output_file = str(Path(output_file).absolute())
-        working_dir = str(Path(working_dir).absolute())
+        output_file = str(tidy_path(output_file))
+        working_dir = str(tidy_path(working_dir))
 
         openff_logs_flag = " --openff-logs" if self._openff_logs else ""
         skip_build_flag = " \\\n    --skip-build" if self._skip_build else ""
@@ -675,6 +690,8 @@ class SlurmScriptGenerator:
             _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:
             _validate_gpu_type_value(self._config.gpu_type, "gpu_type")
+        if self._config.reservation:
+            _validate_gpu_type_value(self._config.reservation, "reservation")
 
         return render_package_template(
             _WORKFLOW_TEMPLATE_PACKAGE,

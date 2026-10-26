@@ -163,21 +163,22 @@ A preset sets the partition, QoS, account and time limit of each job.
 
 | Preset | Partition | QoS | Time limit | Use |
 |--------|-----------|-----|------------|-----|
-| `aa100` | `aa100` | `normal` | 23:59:59 | NVIDIA A100 nodes (CU Boulder Alpine) |
-| `al40` | `al40` | `normal` | 23:59:59 | NVIDIA L40 nodes (CU Boulder Alpine) |
+| `aa100` | `aa100` | `gpu-normal` | 23:59:59 | NVIDIA A100 nodes (CU Boulder Alpine) |
+| `al40` | `al40` | `gpu-normal` | 23:59:59 | NVIDIA L40 nodes (CU Boulder Alpine) |
 | `blanca-shirts` | `blanca,blanca-shirts` | `preemptable` | 23:59:59 | CU Boulder Blanca condo nodes |
 | `blanca-chbe-rdi` | `blanca,blanca-chbe-rdi` | `preemptable` | 23:59:59 | CU Boulder Blanca condo nodes |
 | `bridges2` | `GPU-shared` | none | 24:00:00 | PSC Bridges-2 GPU nodes |
-| `generic-gpu` | `gpu` | none | 23:59:59 | Any other SLURM cluster with NVIDIA GPUs; no account |
-| `testing` | `atesting_a100` | `testing` | 0:05:59 | Short tests on CU Boulder Alpine |
+| `generic-gpu` | `gpu` | none | 23:59:59 | Any SLURM cluster with NVIDIA GPUs; no account |
+| `testing` | `aa100` | `gpu-testing` | 0:05:59 | Short tests on an A100 slice (`a100_3g.20gb`, reservation `a100_test`) of CU Boulder Alpine |
 
 The Alpine presets (`aa100`, `al40` and `testing`) set the account
-`ucb625_asc1`, an allocation that only members of one CU Boulder lab can use.
-On another allocation, give your own with `--account <account>`. On another
-cluster, start from `generic-gpu` and set your site's values with
-`--partition`, `--account`, `--qos` and `--gpu-type`; an empty value, such as
-`--qos ""`, removes the preset's line (see
-[If your cluster is not listed](#hpc-slurm-other-cluster)).
+`ucb-general`, which every CU Boulder user has. For a lab allocation, give
+`--account <account>`. CURC renames partitions and QoS values from time to
+time; check the values with `sbatch --test-only` before a campaign. To use
+another cluster, start from `generic-gpu` and set the site's fields with `--partition`, `--account`, `--qos` and
+`--gpu-type`. An empty value, such as `--qos ""`, removes the preset's line (see
+[If your cluster is not listed](#hpc-slurm-other-cluster)). For the CU Boulder clusters, see
+{doc}`site_cu_boulder`.
 
 For the CU Boulder clusters, see {doc}`site_cu_boulder`.
 

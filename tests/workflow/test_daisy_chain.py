@@ -604,9 +604,11 @@ class TestSubmitNeedsABuild:
             account="smithlab",
             qos="",
             gpu_type="l40s",
+            reservation="a100_test",
         )
 
         script = results[1][0].script_path.read_text()
+        assert "#SBATCH --reservation=a100_test" in script
         output = next(line for line in script.splitlines() if line.startswith("#SBATCH --output"))
         assert Path(output.split("=", 1)[1]).parent.is_dir()
         assert "--qos" not in script
@@ -614,7 +616,12 @@ class TestSubmitNeedsABuild:
         assert "#SBATCH --gres=gpu:l40s:1" in script
         recorded = read_submit_settings(SimulationConfig.from_yaml(config).get_working_directory(1))
         assert recorded.preset == "aa100"
-        assert recorded.overrides == {"account": "smithlab", "qos": "", "gpu_type": "l40s"}
+        assert recorded.overrides == {
+            "account": "smithlab",
+            "qos": "",
+            "gpu_type": "l40s",
+            "reservation": "a100_test",
+        }
         assert recorded.pixi_env == "sim-cuda-12-0"
 
     def test_started_replicate_is_not_checked_against_the_edited_config(

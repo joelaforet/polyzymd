@@ -414,6 +414,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
 | `--exclude` | - | No | from preset | SLURM `--exclude` override (e.g., "node01,node02"). Replaces the preset list; pass `""` to exclude nothing |
+| `--reservation` | - | No | from preset | SLURM `--reservation` (e.g. `a100_test` for Alpine's GPU test slices); `""` removes the preset's |
 | `--pixi-env` | - | No | engine-specific | Runtime for generated Slurm jobs; OpenMM `auto` uses a fixed environment for known-site presets, and GROMACS uses `build` |
 | `--force` | - | No | false | Skip duplicate-job check |
 | `--openff-logs` | - | No | false | Enable verbose OpenFF logs in job scripts |
@@ -427,6 +428,11 @@ generate SLURM scripts for inspection without submitting them to the scheduler.
 `--generate-only` also creates the `slurm_logs/` folder the scripts write to,
 so a script can be submitted by hand with `sbatch --export=NONE <script>`.
 :::
+
+A replicate that `polyzymd cancel` stopped (a `STOP` file in its run folder) is
+refused, since its job would exit at its first check; `--dry-run` shows
+`STOP present` for it and `--generate-only` warns. Run
+`polyzymd cancel -c config.yaml -r N --resume` first.
 
 `submit` records the preset and every override it was given in
 `submit_settings.json` in each replicate's run folder. `polyzymd recover --submit`
@@ -802,6 +808,7 @@ replaces that one recorded value. A replicate without the record uses
 | `--time-limit` | - | No | recorded or preset | Override SLURM time limit |
 | `--gpu-type` | - | No | recorded or preset | GPU type for GRES |
 | `--exclude` | - | No | recorded or preset | SLURM `--exclude` override; replaces the preset list |
+| `--reservation` | - | No | recorded or preset | SLURM `--reservation`; `""` removes it |
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
 | `--pixi-env` | - | No | engine-specific | Runtime for the recovery job; OpenMM `auto` uses a fixed environment for known-site presets, and GROMACS uses `build` |

@@ -134,9 +134,10 @@ pixi run -e build polyzymd submit \
     --replicates 1-5
 ```
 
-Try a new system with a short job on the Alpine test partition first. The
-`testing` preset sets `atesting_a100`, the `testing` QoS and a 5:59 time
-limit:
+Try a new system with a short job first. The `testing` preset asks for an
+A100 slice in Alpine's test reservation: partition `aa100`, QoS
+`gpu-testing`, GPU type `a100_3g.20gb`, `--reservation=a100_test` and a 5:59
+time limit:
 
 ```bash
 ml slurm/alpine
@@ -355,7 +356,8 @@ pixi run -e build polyzymd submit \
     -c config.yaml \
     --engine gromacs \
     --preset aa100 \
-    --partition amilan \
+    --partition acpu \
+    --qos cpu-normal \
     --time-limit 24:00:00 \
     --replicates 1-3
 ```

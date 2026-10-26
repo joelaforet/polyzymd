@@ -1572,6 +1572,36 @@ class TestSubmitEngineAware:
         assert f"polyzymd cancel -c {config_path} -r 2 --resume" in result.output
         mock_submit.assert_not_called()
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_dry_run_and_generate_only_name_a_stop_file(
+        self, mock_submit, mock_from_yaml, tmp_path: Path
+    ) -> None:
+        """The dry run does not promise a continuation a STOP file would end at once."""
+        run_dir = tmp_path / "run_2"
+        run_dir.mkdir()
+        (run_dir / "STOP").write_text("stopped\n")
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_config.get_working_directory = lambda rep: tmp_path / f"run_{rep}"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        dry = CliRunner().invoke(cli, ["submit", "-c", str(config_path), "-r", "2", "--dry-run"])
+        generated = CliRunner().invoke(
+            cli, ["submit", "-c", str(config_path), "-r", "2", "--generate-only"]
+        )
+
+        assert dry.exit_code == 0, dry.output
+        assert (
+            "Rep 2:       STOP present: the job would exit at its first check; run "
+            f"polyzymd cancel -c {config_path} -r 2 --resume first"
+        ) in dry.output
+        assert generated.exit_code == 0, generated.output
+        assert "has the STOP file of polyzymd cancel" in generated.output
+        mock_submit.assert_called_once()
+
     @pytest.mark.parametrize("limit", ["0:05:00", "5", "0:04:30"])
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
@@ -2409,10 +2439,13 @@ class TestSubmitDryRunHardwareWarnings:
                 "l40s",
                 "--memory",
                 "8G",
+                "--reservation",
+                "a100_test",
             ],
         )
 
         assert result.exit_code == 0, result.output
+        assert "reservation a100_test" in result.output
         assert "memory 8G" in result.output
         assert "GPU type l40s" in result.output
         assert "auto (resolved per node at run time" in result.output

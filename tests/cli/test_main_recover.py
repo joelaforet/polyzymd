@@ -183,6 +183,32 @@ class TestRecoverStatusReport:
     @patch("polyzymd.simulation.progress.save_progress")
     @patch("polyzymd.simulation.progress.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_a_finished_run_whose_config_asks_for_more_is_extendable(
+        self, mock_from_yaml, mock_load, mock_save, tmp_path
+    ):
+        """Production completed 10000 steps; the config now asks for 25000: as status says."""
+        from polyzymd.simulation.progress import SimulationStatus
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        mock_from_yaml.return_value = _mock_sim_config(working_dir)
+        progress = _mock_progress(total_steps=25000, completed_steps=10000, n_segments=1)
+        progress.status = SimulationStatus.COMPLETED
+        mock_load.return_value = progress
+
+        result = CliRunner().invoke(cli, ["recover", "-c", str(config_file), "-r", "1"])
+
+        assert result.exit_code == 0, result.output
+        assert "Status: extendable" in result.output
+        assert "Status: completed" not in result.output
+        assert f"polyzymd run -c {config_file} -r 1" in result.output
+        assert f"polyzymd recover -c {config_file} -r 1 --submit" in result.output
+
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_submit_refused_while_stop_file_present(
         self, mock_from_yaml, mock_load, mock_save, tmp_path
     ):
@@ -2200,7 +2226,7 @@ class TestRecoverReusesSubmitSettings:
         assert "account smithlab" in result.output
         assert "qos (none)" in result.output
         assert "GPU type l40s" in result.output
-        assert "ucb625_asc1" not in result.output
+        assert "ucb-general" not in result.output
 
     def test_a_given_flag_replaces_one_recorded_value(self):
         result = self._recover("--submit", "--dry-run", "--account", "otherlab")
@@ -2208,6 +2234,12 @@ class TestRecoverReusesSubmitSettings:
         assert result.exit_code == 0, result.output
         assert "account otherlab" in result.output
         assert "qos (none)" in result.output
+
+    def test_dry_run_shows_a_given_reservation(self):
+        result = self._recover("--submit", "--dry-run", "--reservation", "a100_test")
+
+        assert result.exit_code == 0, result.output
+        assert "reservation a100_test" in result.output
 
     def test_dry_run_says_auto_is_resolved_on_the_node(self):
         result = self._recover("--submit", "--dry-run", "--pixi-env", "auto")

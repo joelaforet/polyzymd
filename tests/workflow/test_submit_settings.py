@@ -27,7 +27,7 @@ def test_none_keeps_the_preset_value_and_a_value_replaces_it():
         SlurmConfig.from_preset("aa100"), {"qos": None, "account": "smithlab"}
     )
 
-    assert config.qos == "normal"
+    assert config.qos == "gpu-normal"
     assert config.account == "smithlab"
 
 
@@ -97,3 +97,16 @@ def test_an_unusable_record_is_ignored(tmp_path, text):
 def test_no_record_gives_none(tmp_path):
     assert read_submit_settings(tmp_path) is None
     assert read_submit_settings(None) is None
+
+
+def test_a_reservation_is_written_recorded_and_removable(tmp_path):
+    settings = SubmitSettings.from_options("generic-gpu", reservation="a100_test")
+
+    assert sbatch_lines(settings.slurm_config())["reservation_line"] == (
+        "#SBATCH --reservation=a100_test"
+    )
+    assert "--reservation a100_test" in settings.command_flags()
+    write_submit_settings(tmp_path, settings)
+    assert read_submit_settings(tmp_path).slurm_config().reservation == "a100_test"
+    removed = settings.with_options(reservation="")
+    assert sbatch_lines(removed.slurm_config())["reservation_line"] == ""
