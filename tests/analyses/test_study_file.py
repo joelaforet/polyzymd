@@ -385,6 +385,9 @@ def test_citation_matches_citation_cff() -> None:
     assert cff["repository-code"] == REPOSITORY
     assert str(cff["version"]) == __version__
     assert cff["authors"][0]["family-names"] == "Laforet"
+    from polyzymd.citation import PEOPLE
+
+    assert [p.get("orcid") for p in PEOPLE] == [a.get("orcid") for a in cff["authors"]]
 
 
 def test_readme_bibtex_cites_the_citation_cff_title() -> None:
