@@ -2194,6 +2194,9 @@ class TestRecoverReusesSubmitSettings:
         result = self._recover("--submit", "--dry-run")
 
         assert result.exit_code == 0, result.output
+        assert "memory 3G" in result.output
+        assert "Pixi env: sim-cuda-12-0" in result.output
+        assert "sbatch --export=NONE" in result.output
         assert "account smithlab" in result.output
         assert "qos (none)" in result.output
         assert "GPU type l40s" in result.output
@@ -2205,6 +2208,12 @@ class TestRecoverReusesSubmitSettings:
         assert result.exit_code == 0, result.output
         assert "account otherlab" in result.output
         assert "qos (none)" in result.output
+
+    def test_dry_run_says_auto_is_resolved_on_the_node(self):
+        result = self._recover("--submit", "--dry-run", "--pixi-env", "auto")
+
+        assert result.exit_code == 0, result.output
+        assert "Pixi env: auto (resolved per node at run time" in result.output
 
     def test_another_preset_drops_the_record(self):
         result = self._recover("--submit", "--dry-run", "--preset", "bridges2")

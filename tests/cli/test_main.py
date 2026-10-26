@@ -2395,6 +2395,29 @@ class TestSubmitDryRunHardwareWarnings:
         assert "choose a CPU partition" not in output
         assert "neither gromacs.module_load nor gromacs.command_prefix is set" in output
 
+    def test_dry_run_shows_memory_gpu_type_and_how_auto_resolves(self) -> None:
+        result = CliRunner().invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(self.QUICKSTART / "config.yaml"),
+                "--dry-run",
+                "--preset",
+                "generic-gpu",
+                "--gpu-type",
+                "l40s",
+                "--memory",
+                "8G",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "memory 8G" in result.output
+        assert "GPU type l40s" in result.output
+        assert "auto (resolved per node at run time" in result.output
+        assert "qos (none)" in result.output and "account (none)" in result.output
+
 
 class TestNoPolymerWording:
     """Runs without polymers do not mention polymers; console text shows plain values."""

@@ -2053,6 +2053,23 @@ def _echo_resume_hint(config_path: str, replicate: int) -> None:
 # =============================================================================
 
 
+def _slurm_summary(slurm: "SlurmConfig") -> str:
+    """One line of what a job asks SLURM for, as the dry runs print it."""
+    return (
+        f"partition {slurm.partition}, qos {slurm.qos or '(none)'}, "
+        f"time {slurm.time_limit}, account {slurm.account or '(none)'}, "
+        f"memory {slurm.memory or '(site default)'}, GPUs {slurm.gpus}, "
+        f"GPU type {slurm.gpu_type or '(any)'}, exclude {slurm.exclude or '(none)'}"
+    )
+
+
+def _shown_pixi_env(pixi_env: str) -> str:
+    """The job's pixi environment; ``auto`` is chosen on each node when the job starts."""
+    if pixi_env == "auto":
+        return "auto (resolved per node at run time from the NVIDIA driver)"
+    return pixi_env
+
+
 def _warn_job_hardware(
     sim_config: "SimulationConfig",
     engine_name: str,
@@ -2129,13 +2146,16 @@ def _print_gromacs_dry_run_details(
     colored_echo("  SLURM configuration (effective):", phase=phase)
     colored_echo(f"    Partition:      {effective.partition}", phase=phase)
     colored_echo(f"    Time limit:     {effective.time_limit}", phase=phase)
-    colored_echo(f"    Memory:         {effective.memory}", phase=phase)
+    colored_echo(f"    Memory:         {effective.memory or '(site default)'}", phase=phase)
     colored_echo(f"    Account:        {effective.account or '(none)'}", phase=phase)
     colored_echo(f"    Email:          {effective.email or '(none)'}", phase=phase)
     colored_echo(f"    Nodes:          {effective.nodes}", phase=phase)
     colored_echo(f"    Tasks:          {effective.ntasks}", phase=phase)
     colored_echo(f"    CPUs/task:      {effective.cpus_per_task}", phase=phase)
     colored_echo(f"    GPUs:           {effective.gpus}", phase=phase)
+    if effective.gpus:
+        gpu_type = getattr(effective, "gpu_type", None) or "(any)"
+        colored_echo(f"    GPU type:       {gpu_type}", phase=phase)
     if effective.constraint:
         colored_echo(f"    Constraint:     {effective.constraint}", phase=phase)
     if effective.nodelist:
@@ -2450,7 +2470,7 @@ def submit(
         colored_echo(f"  Simulation:  {sim_config.name}", phase="workflow")
         colored_echo(f"  Engine:      {engine_name}", phase="workflow")
         colored_echo(f"  Preset:      {preset}", phase="workflow")
-        colored_echo(f"  Pixi env:    {resolved_pixi_env}", phase="workflow")
+        colored_echo(f"  Pixi env:    {_shown_pixi_env(resolved_pixi_env)}", phase="workflow")
         colored_echo(f"  Replicates:  {replicate_list}", phase="workflow")
         colored_echo(phase="workflow")
 
@@ -2476,12 +2496,7 @@ def submit(
                     text = f"state unknown ({exc})"
                 colored_echo(f"  Rep {rep}:       {' '.join(text.split())}", phase="workflow")
             slurm = settings.slurm_config()
-            colored_echo(
-                f"  SLURM:       partition {slurm.partition}, qos {slurm.qos or '(none)'}, "
-                f"time {slurm.time_limit}, account {slurm.account or '(none)'}, "
-                f"GPUs {slurm.gpus}",
-                phase="workflow",
-            )
+            colored_echo(f"  SLURM:       {_slurm_summary(slurm)}", phase="workflow")
             _warn_job_hardware(sim_config, engine_name, preset, partition, slurm.gpus)
 
         colored_echo(phase="workflow")
@@ -4285,17 +4300,12 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 # =============================================================================
 
 
-def _print_recover_dry_run(script_path: Path, slurm_config) -> None:
+def _print_recover_dry_run(script_path: Path, slurm_config, pixi_env: str) -> None:
     """Print what ``recover --submit`` would write and submit, writing nothing."""
     colored_echo("\n[DRY RUN] Would write and submit:", phase="workflow")
-    colored_echo(f"  sbatch {script_path}", phase="workflow")
-    colored_echo(
-        f"  SLURM: partition {slurm_config.partition}, qos {slurm_config.qos or '(none)'}, "
-        f"time {slurm_config.time_limit}, account {slurm_config.account or '(none)'}, "
-        f"GPU type {slurm_config.gpu_type or '(any)'}, "
-        f"exclude {slurm_config.exclude or '(none)'}",
-        phase="workflow",
-    )
+    colored_echo(f"  sbatch --export=NONE {script_path}", phase="workflow")
+    colored_echo(f"  SLURM: {_slurm_summary(slurm_config)}", phase="workflow")
+    colored_echo(f"  Pixi env: {_shown_pixi_env(pixi_env)}", phase="workflow")
 
 
 @cli.command()
@@ -4668,7 +4678,7 @@ def recover(
 
         recovery_path = working_dir / "recovery_scripts" / f"recover_rep{replicate}.sh"
         if dry_run:
-            _print_recover_dry_run(recovery_path, slurm_config)
+            _print_recover_dry_run(recovery_path, slurm_config, resolved_pixi_env)
             return
 
         config_path_abs = str(Path(config).resolve())
@@ -4748,7 +4758,7 @@ def recover(
         script_dir = working_dir / "recovery_scripts"
         script_path = script_dir / f"recover_rep{replicate}.sh"
         if dry_run:
-            _print_recover_dry_run(script_path, slurm_config)
+            _print_recover_dry_run(script_path, slurm_config, resolved_pixi_env)
             return
 
         script_dir.mkdir(exist_ok=True)
