@@ -181,9 +181,11 @@ def graded(tmp_path: Path) -> Path:
                 config, replicate, [base + 0.01 * replicate + 0.001 * k for k in range(5)]
             )
     conditions = "".join(
-        f"  {name}: conditions/{name}\n"
-        if level is None
-        else f"  {name}: {{config: conditions/{name}, factors: {{sbma_fraction: {level}}}}}\n"
+        (
+            f"  {name}: conditions/{name}\n"
+            if level is None
+            else f"  {name}: {{config: conditions/{name}, factors: {{sbma_fraction: {level}}}}}\n"
+        )
         for name, level in levels.items()
     )
     (folder / "study.yaml").write_text(f"equilibration: 0ns\nconditions:\n{conditions}")
@@ -294,6 +296,78 @@ class TestProjectFreeze:
             ["git", "-C", str(project), "tag", "--list"], capture_output=True, text=True
         ).stdout
         assert "project-v1" in log and "study-v" not in log
+
+
+class TestReusedConditions:
+    """A condition of one study copied into another with --config: two configs, one set of runs."""
+
+    def _copy(self, project: Path, label: str, *how: str):
+        return CliRunner().invoke(
+            cli, ["study", "add-condition", label, *how, "--study", str(project / "rml")]
+        )
+
+    def _lipa_half(self, project: Path) -> Path:
+        return project / "lipa" / "conditions" / "half" / "config.yaml"
+
+    def test_a_copy_reuses_the_runs_with_its_own_window(self, project: Path) -> None:
+        result = self._copy(project, "Lipa half", "--config", str(self._lipa_half(project)))
+        assert result.exit_code == 0, result.output
+        assert "the copy reuses the runs" in result.output and "warning:" not in result.output
+        text = (project / "rml" / "study.yaml").read_text()
+        (project / "rml" / "study.yaml").write_text(
+            text.replace("equilibration: 0ns", "equilibration: 0.002ns")
+        )
+        ours = {c.label: c for c in pz.Study(project / "rml").conditions}["Lipa half"]
+        theirs = {c.label: c for c in pz.Study(project / "lipa").conditions}["Half"]
+        assert ours.config_hash == theirs.config_hash
+        assert [r.index for r in ours.replicates] == [r.index for r in theirs.replicates] == [1, 2]
+        assert ours.equilibration != theirs.equilibration
+        # The copy itself points at the runs, so run, submit and status find them too.
+        from polyzymd.config.schema import SimulationConfig
+
+        copy = SimulationConfig.from_yaml(project / "rml/conditions/lipa_half/config.yaml")
+        assert [i for i, _ in copy.discover_replicate_dirs()] == [1, 2]
+
+    def test_a_copy_to_change_gets_runs_of_its_own(self, project: Path) -> None:
+        from polyzymd.config.schema import SimulationConfig
+
+        assert self._copy(project, "Half 2", "--from", "Half").exit_code == 0
+        copy = SimulationConfig.from_yaml(project / "rml/conditions/half_2/config.yaml")
+        assert copy.output.scratch_directory is None and copy.discover_replicate_dirs() == []
+
+    def test_study_check_warns_when_configs_sharing_runs_differ(self, project: Path) -> None:
+        assert (
+            self._copy(project, "Lipa half", "--config", str(self._lipa_half(project))).exit_code
+            == 0
+        )
+        check = CliRunner().invoke(cli, ["study", "check", str(project / "rml")])
+        assert check.exit_code == 0 and "config differs" not in check.output
+        copy = project / "rml/conditions/lipa_half/config.yaml"
+        text = copy.read_text()
+        assert "duration: 1.0" in text
+        copy.write_text(text.replace("duration: 1.0", "duration: 2.0", 1))
+        check = CliRunner().invoke(cli, ["study", "check", str(project / "rml")])
+        assert "Lipa half: its runs are also those of lipa / Half, whose config differs" in (
+            check.output
+        )
+
+    def test_freeze_lists_a_shared_replicate_once(self, project: Path) -> None:
+        import csv
+
+        from polyzymd.analyses.project_freeze import freeze_project
+
+        assert (
+            self._copy(project, "Lipa half", "--config", str(self._lipa_half(project))).exit_code
+            == 0
+        )
+        assert _analyze("--project", str(project)).exit_code == 0
+        result = freeze_project(project)  # no git: the copy is made file by file
+        with (result.deposit / "trajectories.csv").open() as handle:
+            rows = list(csv.DictReader(handle))
+        shared = {r["condition"] for r in rows if "Lipa half" in r["condition"]}
+        assert len(shared) == 1 and next(iter(shared)).startswith("lipa / Half; ")
+        assert not any(r["condition"] == "rml / Lipa half" for r in rows)
+        assert "listed once" in (result.deposit / "UPLOAD.md").read_text()
 
 
 def test_names_may_start_with_a_digit_and_unknown_ones_are_errors(project: Path) -> None:

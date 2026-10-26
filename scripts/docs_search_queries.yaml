@@ -200,6 +200,14 @@
 - query: publish data
   expect: [how_to/study_freeze]
 
+# Reuse runs across studies
+- query: reuse trajectories
+  expect: [how_to/reuse_condition]
+- query: use the same simulations in two studies
+  expect: [how_to/reuse_condition, explanation/projects]
+- query: share a condition between studies
+  expect: [how_to/reuse_condition]
+
 # Ligands
 - query: docked substrate
   expect: [how_to/ligand, how_to/restraints]

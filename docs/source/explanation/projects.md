@@ -102,6 +102,18 @@ The examples on these pages come from a paper with one enzyme at one
 temperature in each study: `lipa363` is lipase A at 363 K. That layout is one
 choice, not a rule.
 
+## A condition can belong to several studies
+
+A condition is a set of simulations; a study is one way to analyze them. The
+same simulations can answer two questions. For example, an enzyme with
+polymer in water at 300 K is a condition of a study of solvents at 300 K,
+and of a study of temperatures in water. Each study gives the condition its
+own analysis frame: its equilibration window, its control, its factors.
+
+So a study can take the condition of another study by copying its config:
+the copy reads the same runs, which are simulated once, and freeze lists
+their trajectories once. See {doc}`../how_to/reuse_condition`.
+
 ## What the project adds
 
 The question stays the same across the studies of a paper. A project writes
@@ -226,4 +238,5 @@ machine, every stored result with unchanged inputs is reused.
 
 - {doc}`../how_to/project`: analyze, test and publish a project.
 - {doc}`../how_to/move_studies_into_project`: bring existing studies into a project.
+- {doc}`../how_to/reuse_condition`: analyze one condition's runs in a second study.
 - {doc}`study_folders`: what a study folder holds and how it is published.

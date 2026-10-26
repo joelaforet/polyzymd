@@ -160,6 +160,13 @@ RUNS_WARNING = (
 )
 
 
+#: The header of a copied config whose runs exist: the copy keeps them.
+REUSE_NOTE = (
+    "scratch_directory is the folder of the runs of {config}: this config reuses them, "
+    "and its new replicates go there too"
+)
+
+
 def runs_folder(study_root: Path, label: str) -> Path:
     """Return the folder that a new condition's config writes its runs into.
 
@@ -193,7 +200,7 @@ def ignore_runs(folder: Path) -> None:
 
 
 def copy_condition(
-    config: Path, folder: Path, runs: Path, *, name: str | None = None
+    config: Path, folder: Path, runs: Path, *, name: str | None = None, keep_runs: bool = True
 ) -> tuple[list[str], list[str]]:
     """Copy ``config`` to ``folder/config.yaml`` with the input files it names.
 
@@ -201,9 +208,13 @@ def copy_condition(
     existing file or directory is copied into ``folder/structures/`` and
     written as a path relative to the new config. ``projects_directory``
     becomes ``runs`` (the folder :func:`runs_folder` gives), relative to the
-    new config, and ``scratch_directory`` becomes null, so new runs go into
-    ``runs``; where the existing runs are goes into ``data.local.yaml``
-    instead (:func:`record_data_location`). A polymer ``cache_directory`` is
+    new config. With ``keep_runs``, ``scratch_directory`` becomes the folder
+    that holds the config's runs, when it has any (:func:`existing_runs`),
+    so the copy reuses them: analysis, ``status``, ``run`` and ``submit`` of
+    either config see the same replicates, and new ones go beside them.
+    Otherwise it becomes null, and new runs go into ``runs``: a copy made
+    to become another condition (``add-condition --from``) gets runs of its
+    own. A polymer ``cache_directory`` is
     left out so the default is used. The config hash leaves these out, so
     stored results still match. The text is kept with its comments and
     indentation, and only the lines of the copied paths, the output
@@ -270,10 +281,11 @@ def copy_condition(
     dropped_cache = isinstance(polymers, dict) and "cache_directory" in polymers
     if isinstance(polymers, dict):
         polymers.pop("cache_directory", None)
+    existing = existing_runs(config) if keep_runs else None
     output = rewritten.setdefault("output", {})
     if isinstance(output, dict):
         output["projects_directory"] = os.path.relpath(runs, folder.resolve())
-        output["scratch_directory"] = None
+        output["scratch_directory"] = None if existing is None else _from(folder, existing)
     if name is not None:
         rewritten["name"] = name
     target = folder / "config.yaml"
@@ -294,8 +306,11 @@ def copy_condition(
         same = False
     if not same:
         kept = yaml.dump(rewritten, Dumper=_indented_list_dumper(), sort_keys=False)
-    where = f"{os.path.relpath(runs, folder.resolve())} (relative to this file)"
-    note = textwrap.wrap(RUNS_WARNING.format(runs=where) + ".", 74)
+    if existing is None:
+        where = f"{os.path.relpath(runs, folder.resolve())} (relative to this file)"
+        note = textwrap.wrap(RUNS_WARNING.format(runs=where) + ".", 74)
+    else:
+        note = textwrap.wrap(f"{REUSE_NOTE.format(config=config.name)}.", 74)
     target.write_text(
         f"# Copied by polyzymd from {config.name}\n"
         + "".join(f"#   {line}\n" for line in note)
@@ -309,6 +324,31 @@ def copy_condition(
             hint="Check that the original config loads with polyzymd validate.",
         ) from exc
     return copied, missing
+
+
+def existing_runs(config: Path) -> Path | None:
+    """Return the folder holding the runs of ``config``, or ``None`` when it has none.
+
+    A relative folder is relative to the config's folder.
+    """
+    from polyzymd.config.schema import SimulationConfig
+
+    try:
+        loaded = SimulationConfig.from_yaml(Path(config))
+        if not loaded.discover_replicate_dirs():
+            return None
+        where = Path(loaded.output.effective_scratch_directory).expanduser()
+    except (OSError, ValueError):
+        return None
+    return (where if where.is_absolute() else Path(config).resolve().parent / where).resolve()
+
+
+def _from(folder: Path, target: Path) -> str:
+    """Return ``target`` relative to ``folder`` when they share a folder below the top level."""
+    folder = folder.resolve()
+    if len(Path(os.path.commonpath([folder, target])).parts) > 2:
+        return os.path.relpath(target, folder)
+    return str(target)
 
 
 def _changed_paths(old: Any, new: Any, keys: frozenset[str], key: str | None = None) -> list:
@@ -419,26 +459,17 @@ def _with_output_lines(text: str, output: Any) -> str:
 def record_data_location(study_root: Path, label: str, config: Path) -> None:
     """Write where the runs of ``config`` are into the study's ``data.local.yaml``, for ``label``.
 
-    The directory is the config's own scratch directory, read before the
-    copy takes it out; a relative one is relative to the config's folder.
-    Nothing is written when that directory holds no run of the config: the
-    copy's runs then go into ``runs/``. Entries for other conditions are kept.
+    The directory is the one holding the config's runs (:func:`existing_runs`).
+    Nothing is written when the config has no run: the copy's runs then go
+    into ``runs/``. Entries for other conditions are kept.
     """
     import yaml
 
     from polyzymd.analyses.study_file import DATA_FILE
-    from polyzymd.config.schema import SimulationConfig
 
-    try:
-        loaded = SimulationConfig.from_yaml(Path(config))
-        if not loaded.discover_replicate_dirs():
-            return
-        where = loaded.output.effective_scratch_directory
-    except (OSError, ValueError):
+    where = existing_runs(config)
+    if where is None:
         return
-    where = Path(where).expanduser()
-    if not where.is_absolute():
-        where = Path(config).resolve().parent / where
     file = Path(study_root) / DATA_FILE
     current = yaml.safe_load(file.read_text()) if file.is_file() else None
     current = dict(current or {})
@@ -710,7 +741,13 @@ def add_condition(
             # A copy of another condition of the study is renamed as --new names
             # a template; a config from outside keeps its name.
             renamed = condition_folder(label) if source is not None else None
-            copy_condition(Path(config), folder, runs_folder(root, label), name=renamed)
+            copy_condition(
+                Path(config),
+                folder,
+                runs_folder(root, label),
+                name=renamed,
+                keep_runs=source is None,
+            )
         else:
             new_condition(folder, runs_folder(root, label))
         _list_entry(file, "conditions", label, str((folder / "config.yaml").relative_to(root)))

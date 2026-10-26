@@ -82,6 +82,38 @@ def study_group() -> None:
     """
 
 
+def _other_studies_runs(protocol: Any) -> dict[Path, list[tuple[str, str]]]:
+    """Return, by run folder, the conditions of the project's other studies and their config hashes.
+
+    A condition copied from another study with add-condition --config reads
+    that condition's runs; study check warns when the two configs differ.
+    """
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study import with_data_dir
+    from polyzymd.analyses.study_file import load_study_file
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.artifact_integrity import config_hash
+
+    runs: dict[Path, list[tuple[str, str]]] = {}
+    if protocol.project is None:
+        return runs
+    for name, folder in protocol.project.studies.items():
+        if name == protocol.project_label:
+            continue
+        try:
+            other = load_study_file(folder)
+        except ProtocolError:
+            continue  # its own study check reports it
+        for label, path in other.conditions.items():
+            try:
+                config = with_data_dir(SimulationConfig.from_yaml(path), other.data.get(label))
+            except Exception:  # noqa: BLE001 - an unreadable config is its study's to report
+                continue
+            where = Path(config.output.effective_scratch_directory).resolve()
+            runs.setdefault(where, []).append((f"{name} / {label}", config_hash(config)))
+    return runs
+
+
 @study_group.command("check")
 @click.argument("path", type=click.Path(path_type=Path), default=Path("."))
 @click.option(
@@ -131,8 +163,10 @@ def check_command(path: Path, production: bool = False) -> None:
         click.echo(f"region {name}: {selection}")
     failed = False
     from polyzymd.analyses.study_file import outside_configs
+    from polyzymd.simulation.artifact_integrity import config_hash
 
     outside = outside_configs(protocol)
+    shared = _other_studies_runs(protocol)
     labels = list(protocol.conditions)
     controls = labels[:1]
     if protocol.comparison is not None:
@@ -159,6 +193,16 @@ def check_command(path: Path, production: bool = False) -> None:
         source = "data.local.yaml" if label in protocol.data else "config"
         config = with_data_dir(config, protocol.data.get(label))
         found = sorted(int(i) for i, _ in config.discover_replicate_dirs())
+        mine = config_hash(config)
+        for other, theirs in shared.get(
+            Path(config.output.effective_scratch_directory).resolve(), []
+        ):
+            if theirs != mine:
+                click.echo(
+                    f"warning: {role} {label}: its runs are also those of {other}, whose config "
+                    "differs, so replicates run with one config are not runs of the other; copy "
+                    "that config again, or edit the two alike"
+                )
         where = f"{config.output.effective_scratch_directory} (from {source})"
         if not found:
             click.echo(
@@ -781,7 +825,9 @@ def add_condition_command(
     runs into the git-ignored runs/ folder of the project (of the study, for
     a study in no project) unless you set its scratch_directory. With
     --config, when the config's scratch_directory holds its runs, that
-    folder is written to data.local.yaml.
+    folder is written to data.local.yaml, and the copy keeps its runs there:
+    a condition of another study copied this way reuses that condition's
+    runs, which are not run again.
 
     \b
     Examples:
@@ -816,8 +862,13 @@ def add_condition_command(
     where = (yaml.safe_load(data.read_text()) or {}).get(label) if data.is_file() else None
     if config is not None and where is not None:
         click.echo(f"data {label}: {where} (from the config's scratch_directory)")
-    runs = os.path.relpath(runs_folder(root, label))
-    click.echo(f"warning: {RUNS_WARNING.format(runs=runs)}")
+        click.echo(
+            f"runs: the copy reuses the runs in {where}; nothing is run again, and new "
+            "replicates of either config go there too"
+        )
+    else:
+        runs = os.path.relpath(runs_folder(root, label))
+        click.echo(f"warning: {RUNS_WARNING.format(runs=runs)}")
     click.echo(
         "next: "
         + ("fill in the config, check it with polyzymd validate, " if new else "")

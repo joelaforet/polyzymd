@@ -80,6 +80,7 @@ site_cu_boulder
 study_folder
 study_yaml
 project
+reuse_condition
 move_studies_into_project
 study_freeze
 ```

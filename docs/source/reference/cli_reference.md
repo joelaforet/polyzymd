@@ -1261,14 +1261,21 @@ Adds a condition to an existing study, in `conditions/<label>/`:
 - `--new` writes a template `config.yaml` to fill in, and `structures/` with
   placeholder files.
 - `--from OTHER_LABEL` copies the config of that condition of the study, with
-  the input files it names. The copy's `name:` is set to the new condition's
-  folder name, as `--new` sets it, and the command prints it.
+  the input files it names, to make another condition: the copy gets runs of
+  its own. The copy's `name:` is set to the new condition's folder name, as
+  `--new` sets it, and the command prints it.
 - `--config CONFIG` copies `CONFIG`, with the input files it names, as
   `study init --condition` does. When the config's `scratch_directory` holds
   runs of the config, that folder is written to `data.local.yaml` and printed
-  as `data <label>: <path> (from the config's scratch_directory)`.
+  as `data <label>: <path> (from the config's scratch_directory)`, and the
+  copy's `scratch_directory` points at it: the copy reuses those runs, and a
+  replicate run with either config goes there. So copying the config of
+  another study's condition analyzes that condition's runs in this study,
+  without running them again (see {doc}`../how_to/reuse_condition`).
+  `study check` warns when two conditions read the same runs but their
+  configs differ.
 
-The new config writes its runs into `runs/<study>/<label>/` of the project,
+Otherwise, the new config writes its runs into `runs/<study>/<label>/` of the project,
 or into `runs/<label>/` of a study in no project. Git ignores `runs/`, and
 freeze never publishes it. The command prints this as a warning, because
 trajectories can use a lot of disk space: on a cluster, set
