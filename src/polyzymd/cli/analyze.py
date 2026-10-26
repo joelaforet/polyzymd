@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from polyzymd.analyses.protocols import ProtocolReport
 
 ANALYSIS_PIXI_ENVS = ("analysis",)
+#: Environments that hold the analysis tools: ``build`` and ``test`` include
+#: the ``analysis`` feature, and the tutorials run analyze in ``build``.
+ANALYSIS_CAPABLE_PIXI_ENVS = ("analysis", "build", "test")
 EXIT_ANALYSIS_ERROR = 2
 #: Exit code of a report that left a condition or replicate out (``status: partial``).
 EXIT_PARTIAL = 3
@@ -592,7 +595,11 @@ def analyze_command(
         polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --submit --preset blanca-shirts
         polyzymd analyze contacts --study my_study/study.yaml
     """
-    warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)
+    # --project and --study call this command once per run: warn once.
+    root = click.get_current_context().find_root()
+    if not root.meta.get("polyzymd.analyze_env_warned"):
+        root.meta["polyzymd.analyze_env_warned"] = True
+        warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS, accepted=ANALYSIS_CAPABLE_PIXI_ENVS)
 
     from polyzymd.analyses.exceptions import AnalysisError, ProtocolError
 
