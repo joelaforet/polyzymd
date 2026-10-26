@@ -73,10 +73,34 @@ analysis_protocol_report
 posthoc_testing
 ```
 
+(what-is-validated)=
+## What is validated, and what is not
+
+```{index} !validation, !validated, !verification
+```
+
+PolyzyMD checks that it does what you ask:
+
+- **Each build.** The physics audit compares the built system, term by term,
+  with references rebuilt from the force fields, charges, water model and ions
+  that the config names, and refuses a build that differs
+  ({doc}`physics_checks`).
+- **Each analysis.** Each was compared, on test systems, with an independent
+  calculation, such as `gmx rmsf` for RMSF and MDTraj for SASA and native
+  contacts. The records below give the comparisons and their agreement.
+- **The two engines.** The same system on OpenMM and on GROMACS is compared in
+  {ref}`engine-parity`.
+- **Every change.** An automated test suite runs on each change to the code.
+
+PolyzyMD does not validate the science of a simulation. The force fields,
+charge models and water model are your choice, and whether a result agrees
+with experiment is yours to establish. A built polymer chain or a packed box is
+a starting structure, not an equilibrated one: equilibrate before you analyze,
+and check it ({doc}`../explanation/convergence_detection`).
+
 ## Verification records
 
 Each analysis compared, on test systems, with an independent calculation.
-For the comparison of the two simulation engines, see {ref}`engine-parity`.
 
 ```{toctree}
 :caption: Verification records

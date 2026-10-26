@@ -73,6 +73,11 @@ Give every command the same `--output-dir`, or run them from the same
 directory, so that each one reads back the replicate results the others
 stored.
 
+In a study, give the study instead: `polyzymd analyze rmsf --study my_study`.
+It reads the conditions and the equilibration window from `study.yaml`. With
+`-c`, `--eq` defaults to `10ns`; for shorter runs, give `--eq 0ns` or the window
+you want.
+
 ## See Also
 
 - {doc}`analysis_compare_conditions` — Comparing conditions step by step

@@ -159,7 +159,12 @@ polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --eq 10ns \
 ## Step 4: Run the other analyses
 
 Every analysis takes the same `-c`, `--label`, `--replicates` and `--eq`
-options. Run each analysis on the same conditions:
+options. Without `--eq`, a command given configs with `-c` discards the first 10 ns of
+every replicate. A study replaces this default with its own `equilibration:`.
+For runs shorter than 10 ns, such as a test run, give `--eq 0ns` or the window
+you want; otherwise the command stops and says that no frame is left.
+
+Run each analysis on the same conditions:
 
 ```bash
 polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml --eq 10ns

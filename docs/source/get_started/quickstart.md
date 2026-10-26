@@ -48,9 +48,10 @@ The commands then work in any folder of this shell.
 
 **On the NVIDIA GPU of this machine:** in step 2, after `add-condition`, set
 `openmm.platform: CUDA` and `openmm.precision: mixed` in the copied config.
-Choose the platform before the first run of a condition; if you change it
-later, the analyses warn that the earlier replicates came from another
-config. In step 4, build in `build` and run in the `sim-cuda-*` environment
+Choose the platform before the first build of a condition. Changing it later
+is safe for replicates that have already run: the platform does not change the
+built system. A replicate that is built but has not started must be built
+again. In step 4, build in `build` and run in the `sim-cuda-*` environment
 that matches your driver (the newest whose CUDA version does not exceed the
 `CUDA Version` that `nvidia-smi` prints):
 

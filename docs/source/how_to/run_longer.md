@@ -67,8 +67,11 @@ and why. `polyzymd status` shows a replicate that finished its old length as
 Submit the replicate again:
 
 ```bash
-polyzymd submit -c config.yaml -r 1 --preset <preset> --pixi-env sim-cuda-12-4
+polyzymd submit -c config.yaml -r 1 --preset <preset> --pixi-env <environment>
 ```
+
+Give the `sim-cuda-*` environment that the replicate ran with, as
+{doc}`hpc_slurm` explains: the newest one that the nodes' driver supports.
 
 Each job continues from the last segment and resubmits itself until the new
 total is reached. `submit` skips complete replicates, and refuses one whose

@@ -184,7 +184,7 @@
 - query: polymer smiles
   expect: [how_to/dynamic_polymers, tutorials/star_sited_monomers]
 - query: add a ligand
-  expect: [reference/configuration, tutorials/prepare_pdb_for_openff]
+  expect: [how_to/ligand, reference/configuration, tutorials/prepare_pdb_for_openff]
 - query: protonate pdb
   expect: [tutorials/prepare_pdb_for_openff]
 - query: hbonds
@@ -199,3 +199,7 @@
   expect: [how_to/study_freeze]
 - query: publish data
   expect: [how_to/study_freeze]
+
+# Ligands
+- query: docked substrate
+  expect: [how_to/ligand, how_to/restraints]

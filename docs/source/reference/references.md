@@ -9,10 +9,35 @@ For contributors: when you add a method, add its reference here and in the
 `References` section of the module docstring.
 ```
 
-To cite PolyzyMD itself, see
-[`CITATION.cff`](https://github.com/joelaforet/polyzymd/blob/main/CITATION.cff)
-in the repository root. The "Methods to cite" list of each `build_provenance.md`
-starts with PolyzyMD at the version that made the build.
+(cite-polyzymd)=
+## Cite PolyzyMD
+
+```{index} !cite polyzymd, !how to cite
+```
+
+Cite PolyzyMD with the version you used. `polyzymd --version` prints it, and
+the "Methods to cite" list of each `build_provenance.md` starts with PolyzyMD
+at the version that made the build.
+
+> Laforet, Joseph R., Jr. PolyzyMD: build, run and analyse molecular dynamics
+> of complex biomolecular systems (version 1.3.0).
+> https://github.com/joelaforet/polyzymd
+
+```bibtex
+@software{laforet_polyzymd,
+  author  = {Laforet, Jr., Joseph R.},
+  title   = {{PolyzyMD}: build, run and analyse molecular dynamics of complex
+             biomolecular systems},
+  version = {1.3.0},
+  year    = {2026},
+  url     = {https://github.com/joelaforet/polyzymd}
+}
+```
+
+The same entry is in
+[`CITATION.cff`](https://github.com/joelaforet/polyzymd/blob/main/CITATION.cff),
+from which GitHub's "Cite this repository" button makes APA and BibTeX. Cite
+also the methods that your build and your analyses used, listed below.
 
 ## Building the system
 

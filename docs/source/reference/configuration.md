@@ -720,6 +720,13 @@ thermodynamics:
   pressure: 1.0                          # atmospheres
 ```
 
+`temperature` is the production temperature. Each equilibration stage sets its
+own `temperature` (or, for a ramp, `temperature_start` and `temperature_end`),
+and does not follow this one. When you change the temperature, change the
+stages too. `polyzymd validate` warns when a constant-temperature stage, or the
+end of a ramp in the last stage, differs from this one, and marks that stage in
+its summary.
+
 ---
 
 ## Simulation Phases Configuration

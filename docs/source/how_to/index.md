@@ -7,11 +7,11 @@ If you are new to PolyzyMD, do the {doc}`../get_started/quickstart` first.
 :gutter: 3
 
 :::{grid-item-card} Set up a simulation
-:link: polymers
-:link-type: doc
+:link: howto-set-up
+:link-type: ref
 
-Add polymers, co-solvents, restraints and equilibration stages. Fix a PDB that OpenFF
-refuses.
+Add polymers, co-solvents, a ligand, restraints and equilibration stages. Fix a
+PDB that OpenFF refuses.
 :::
 
 :::{grid-item-card} Run on a cluster
@@ -22,8 +22,8 @@ Submit simulations and analysis jobs with SLURM, and monitor them.
 :::
 
 :::{grid-item-card} Organize and publish studies
-:link: study_folder
-:link-type: doc
+:link: howto-organize
+:link-type: ref
 
 Make a study folder for each set of compared conditions, group studies into
 a project, and freeze them for publication.
@@ -38,6 +38,7 @@ Choose an analysis, run it on a study, and measure your own quantity.
 
 ::::
 
+(howto-set-up)=
 ## Set up a simulation
 
 ```{toctree}
@@ -48,6 +49,7 @@ rewrite_config_rc5
 polymers
 dynamic_polymers
 cosolvents
+ligand
 restraints
 equilibration
 troubleshoot_openff_pdb_ingestion
@@ -68,6 +70,7 @@ own_protocol
 site_cu_boulder
 ```
 
+(howto-organize)=
 ## Organize and publish studies
 
 ```{toctree}

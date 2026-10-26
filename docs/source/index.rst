@@ -113,6 +113,12 @@ Common tasks
 
       Add a co-solvent
 
+   .. button-ref:: how_to/ligand
+      :color: primary
+      :outline:
+
+      Add a docked ligand
+
    .. button-ref:: how_to/run_gromacs
       :color: primary
       :outline:
@@ -186,7 +192,7 @@ Coming from PolyzyMD 1.2? These pages cover what changed for you.
       Write a Python function of one frame or one replicate; PolyzyMD runs it
       everywhere and compares the conditions.
 
-   .. grid-item-card:: Freeze a study to publish
+   .. grid-item-card:: Freeze your work to publish
       :link: how_to/study_freeze
       :link-type: doc
 
