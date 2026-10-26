@@ -39,6 +39,24 @@ def _make_generator(config: SlurmConfig) -> SlurmScriptGenerator:
 # ---------------------------------------------------------------------------
 
 
+def test_job_script_paths_have_no_dot_dot(tmp_path, monkeypatch):
+    """A study's runs/ folder is reached through conditions/x/../../..; the script names it plainly."""
+    monkeypatch.setattr(slurm_module, "_discover_manifest_path", lambda: "/ws/pixi.toml")
+    (tmp_path / "conditions" / "water").mkdir(parents=True)
+    up = tmp_path / "conditions" / "water" / ".." / ".."
+    script = SlurmScriptGenerator(SlurmConfig()).generate_job_script(
+        config_path="/ws/config.yaml",
+        replicate=1,
+        working_dir=str(up / "runs" / "run_1"),
+        output_file=str(up / "runs" / "slurm_logs" / "job.%j.out"),
+    )
+
+    runs = (tmp_path / "runs").resolve()
+    assert f"#SBATCH --output={runs}/slurm_logs/job.%j.out" in script
+    assert f'#SBATCH --chdir="{runs}/run_1"' in script
+    assert "/../" not in script
+
+
 class TestPresetLoading:
     """SlurmConfig.from_preset() creates valid configs for every named preset."""
 

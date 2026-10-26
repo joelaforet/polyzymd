@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from polyzymd.config.schema import SimulationConfig
+from polyzymd.utils.paths import tidy_path
 from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range
 from polyzymd.workflow.slurm import (
     JobContext,
@@ -966,11 +967,12 @@ def submit_daisy_chain(
     if projects_dir:
         sim_config.output.projects_directory = Path(projects_dir)
 
-    # Determine output script directory
+    # Determine output script directory, named without the ``..`` of a
+    # study's runs/ path (the same folder).
     if output_dir:
-        script_output_dir = Path(output_dir)
+        script_output_dir = tidy_path(output_dir)
     else:
-        script_output_dir = sim_config.output.get_job_scripts_directory()
+        script_output_dir = tidy_path(sim_config.output.get_job_scripts_directory())
 
     # The preset with the site overrides; an empty value removes a setting.
     settings = SubmitSettings.from_options(

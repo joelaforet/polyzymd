@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from polyzymd.core.branding import FULL_CREDIT_LINE
+from polyzymd.utils.paths import tidy_path
 from polyzymd.utils.templates import render_package_template, shell_quote
 from polyzymd.workflow.slurm import (
     SlurmConfig,
@@ -352,8 +353,8 @@ class GromacsSlurmScriptGenerator:
         if output_file is None:
             output_file = f"slurm_logs/{job_name}.%j.out"
         # The job runs in its run directory (``--chdir``); see the OpenMM generator.
-        output_file = str(Path(output_file).absolute())
-        working_dir = str(Path(working_dir).absolute())
+        output_file = str(tidy_path(output_file))
+        working_dir = str(tidy_path(working_dir))
 
         wall_hours = self._parse_wall_time_hours(self._config.time_limit)
         maxh_hours = wall_hours * self.MAXH_SAFETY_FACTOR

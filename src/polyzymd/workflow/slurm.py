@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
 
 from polyzymd.core.branding import FULL_CREDIT_LINE
+from polyzymd.utils.paths import tidy_path
 from polyzymd.utils.templates import render_package_template
 
 LOGGER = logging.getLogger(__name__)
@@ -654,8 +655,8 @@ class SlurmScriptGenerator:
         # The job runs in its run directory (``--chdir``), which is how
         # ``squeue`` tells the jobs of two runs apart. Absolute paths keep the
         # log where ``sbatch`` was invoked and the run directory where it is.
-        output_file = str(Path(output_file).absolute())
-        working_dir = str(Path(working_dir).absolute())
+        output_file = str(tidy_path(output_file))
+        working_dir = str(tidy_path(working_dir))
 
         openff_logs_flag = " --openff-logs" if self._openff_logs else ""
         skip_build_flag = " \\\n    --skip-build" if self._skip_build else ""

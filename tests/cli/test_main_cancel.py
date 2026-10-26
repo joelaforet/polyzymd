@@ -189,6 +189,18 @@ class TestCancelCommand:
         cancel_jobs.assert_not_called()
         assert "polyzymd submit" in result.output
 
+    def test_paths_are_printed_without_dot_dot(self, tmp_path):
+        """A study's runs are at conditions/x/../../runs; cancel names them plainly."""
+        (tmp_path / "conditions" / "water").mkdir(parents=True)
+        working_dir = tmp_path / "conditions" / "water" / ".." / ".." / "runs" / "run_1"
+        config_path, sim_config = _config_and_mock(tmp_path, lambda r: working_dir)
+
+        result, _, _ = _invoke(config_path, sim_config, ["-r", "1"])
+
+        assert result.exit_code == 0, result.output
+        assert str((tmp_path / "runs" / "run_1" / "STOP").resolve()) in result.output
+        assert "/../" not in result.output
+
     def test_resume_without_a_marker_warns(self, tmp_path):
         working_dir = tmp_path / "run_1"
         working_dir.mkdir()

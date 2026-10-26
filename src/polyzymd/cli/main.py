@@ -2498,7 +2498,7 @@ def submit(
             script_dir = (
                 Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
             )
-            colored_echo(f"  Script dir:  {script_dir}", phase="workflow")
+            colored_echo(f"  Script dir:  {_shown(script_dir)}", phase="workflow")
             from polyzymd.workflow.daisy_chain import replicate_chain_state
 
             for rep in replicate_list:
@@ -2590,7 +2590,8 @@ def submit(
                 if generate_only:
                     script_path = engine_impl.prepare_submission(request)
                     colored_echo(
-                        f"  Rep {request.replicate}: script at {script_path}", phase="workflow"
+                        f"  Rep {request.replicate}: script at {_shown(script_path)}",
+                        phase="workflow",
                     )
                 else:
                     result = engine_impl.submit(request)
@@ -3650,6 +3651,8 @@ def cancel(
             working_dir = Path(scratch_dir)
         else:
             working_dir = Path(sim_config.get_working_directory(replicate))
+        # The same folder, named without the ``..`` of a study's runs/ path.
+        working_dir = Path(_shown(working_dir))
         marker = stop_file_path(working_dir)
         # A GROMACS job works in <replicate>/gromacs. Job scripts written
         # before they also checked the replicate folder look only there.
@@ -4316,7 +4319,7 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 def _print_recover_dry_run(script_path: Path, slurm_config, pixi_env: str) -> None:
     """Print what ``recover --submit`` would write and submit, writing nothing."""
     colored_echo("\n[DRY RUN] Would write and submit:", phase="workflow")
-    colored_echo(f"  sbatch --export=NONE {script_path}", phase="workflow")
+    colored_echo(f"  sbatch --export=NONE {_shown(script_path)}", phase="workflow")
     colored_echo(f"  SLURM: {_slurm_summary(slurm_config)}", phase="workflow")
     colored_echo(f"  Pixi env: {_shown_pixi_env(pixi_env)}", phase="workflow")
 
@@ -4744,7 +4747,7 @@ def recover(
             colored_echo(f"Recovery failed: {e}", err=True, level=logging.ERROR)
             sys.exit(1)
 
-        colored_echo(f"Script: {recovery_path}", phase="workflow")
+        colored_echo(f"Script: {_shown(recovery_path)}", phase="workflow")
 
         from polyzymd.workflow.slurm_submit import run_sbatch
 
@@ -4807,7 +4810,7 @@ def recover(
         script_path.write_text(script_content)
         script_path.chmod(0o755)
 
-        colored_echo(f"Script: {script_path}", phase="workflow")
+        colored_echo(f"Script: {_shown(script_path)}", phase="workflow")
 
         # Submit as polyzymd submit does: a clean environment (--export=NONE),
         # so the job does not inherit this shell's.
