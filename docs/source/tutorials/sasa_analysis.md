@@ -90,23 +90,27 @@ polyzymd analyze sasa --study trpcage --run isolated
 The output is:
 
 ```
-log: /home/me/pz_quickstart/trpcage/logs/polyzymd-analyze-20261006-210823-pid23165.log
+log: /home/me/pz_quickstart/trpcage/logs/polyzymd-analyze-20261026-113537-pid274746.log
+note: --run shows the isolated result of sasa, so this report is printed and not saved; sasa's report.json keeps the result a run without --run reports.
 # polyzymd analyze sasa  metric mean_sasa  unit A^2  run isolated  eq 0ns  conditions 2  replicates 3,3  protocol sasa/2
-Water  n 3  mean 1927  sem 10.85  ci95 1881 to 1974  values 1937, 1906, 1939  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
-SBMA  n 3  mean 1924  sem 22.86  ci95 1826 to 2022  values 1912, 1968, 1892  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
-Water vs SBMA  delta -3.236  ci95 -86.08 to 79.6  p 0.9067  p_adj 0.9067  test welch_t  correction BH  family 1  d -0.1044  not_significant
+Water  n 3  mean 1881  sem 6.51  ci95 1853 to 1909  values 1887, 1888, 1868  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
+SBMA  n 3  mean 1874  sem 23.28  ci95 1774 to 1974  values 1845, 1920, 1856  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
+Water vs SBMA  delta -7.217  ci95 -98.89 to 84.45  p 0.79  p_adj 0.79  test welch_t  correction BH  family 1  d -0.2438  not_significant
 warning: condition Water, condition SBMA: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected
-verdict: no significant difference in mean_sasa between Water and SBMA (delta -3.236 A^2, 95% CI -86.08 to 79.6, p_adj 0.9067, p 0.9067, n 3 vs 3)
+verdict: no significant difference in mean_sasa between Water and SBMA (delta -7.217 A^2, 95% CI -98.89 to 84.45, p_adj 0.79, p 0.79, n 3 vs 3)
 ```
 
 Your values differ a little, because each run adds up the forces in a
 different order.
 
+The `note:` line says that the report of a `--run` result is printed, not
+saved. The values and the figures are saved all the same.
+
 These runs are three replicates of a few picoseconds. The chains start within
 0.5 nm of the protein, so they cover it from the start. The numbers show the
 method, not a property of SBMA.
 
-The protein alone has about 1930 Å² of SASA in both conditions. At this
+The protein alone has about 1880 Å² of SASA in both conditions. At this
 sample size no difference shows between them. That does not prove that the
 polymer leaves the surface of the protein unchanged.
 
@@ -119,16 +123,17 @@ polyzymd analyze sasa --study trpcage --run with_polymer
 The output is:
 
 ```
-log: /home/me/pz_quickstart/trpcage/logs/polyzymd-analyze-20261006-210828-pid23332.log
+log: /home/me/pz_quickstart/trpcage/logs/polyzymd-analyze-20261026-113540-pid274833.log
+note: --run shows the with_polymer result of sasa, so this report is printed and not saved; sasa's report.json keeps the result a run without --run reports.
 # polyzymd analyze sasa  metric mean_sasa  unit A^2  run with_polymer  eq 0ns  conditions 2  replicates 3,3  protocol sasa/2
-Water  n 3  mean 1927  sem 10.85  ci95 1881 to 1974  values 1937, 1906, 1939  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
-SBMA  n 3  mean 1610  sem 43.08  ci95 1425 to 1795  values 1526, 1637, 1668  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
-Water vs SBMA  delta -317.1  ci95 -489.1 to -145.1  p 0.01371  p_adj 0.01371  test welch_t  correction BH  family 1  d -5.829  significant
+Water  n 3  mean 1881  sem 6.51  ci95 1853 to 1909  values 1887, 1888, 1868  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
+SBMA  n 3  mean 1525  sem 14.56  ci95 1463 to 1588  values 1554, 1517, 1505  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
+Water vs SBMA  delta -355.6  ci95 -408.8 to -302.4  p 0.0003299  p_adj 0.0003299  test welch_t  correction BH  family 1  d -18.21  significant
 warning: condition Water, condition SBMA: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected
-verdict: SBMA smaller mean_sasa than Water (delta -317.1 A^2, 95% CI -489.1 to -145.1, p_adj 0.01371, p 0.01371, n 3 vs 3)
+verdict: SBMA smaller mean_sasa than Water (delta -355.6 A^2, 95% CI -408.8 to -302.4, p_adj 0.0003299, p 0.0003299, n 3 vs 3)
 ```
 
-With the polymer in the context, the protein in `SBMA` has about 320 Å² less
+With the polymer in the context, the protein in `SBMA` has about 360 Å² less
 accessible surface. `Water` gives the same value as in step 2.
 
 The two steps together show the pattern that shielding gives:
@@ -175,20 +180,20 @@ It prints:
 ```
 # polyzymd analyze covered  metric mean_covered  unit A^2  eq 0ns  conditions 2  replicates 3,3  protocol covered/2
 Water  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
-SBMA  n 3  mean 313.9  sem 47.48  ci95 109.6 to 518.2  values 386, 331.3, 224.3  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
-Water vs SBMA  delta +313.9  ci95 109.6 to 518.2  p 0.02213  p_adj 0.02213  test welch_t  correction BH  family 1  d 5.397  significant
+SBMA  n 3  mean 348.4  sem 32.07  ci95 210.4 to 486.4  values 291.8, 402.8, 350.6  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
+Water vs SBMA  delta +348.4  ci95 210.4 to 486.4  p 0.008367  p_adj 0.008367  test welch_t  correction BH  family 1  d 8.87  significant
 warning: condition Water, condition SBMA: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected
 warning: condition Water has the same mean_covered in every replicate, so its interval is not estimable
-verdict: SBMA larger mean_covered than Water (delta +313.9 A^2, 95% CI 109.6 to 518.2, p_adj 0.02213, p 0.02213, n 3 vs 3; little power: Water has the same value in every replicate)
+verdict: SBMA larger mean_covered than Water (delta +348.4 A^2, 95% CI 210.4 to 486.4, p_adj 0.008367, p 0.008367, n 3 vs 3; little power: Water has the same value in every replicate)
 ```
 
 Python also prints warnings of MDAnalysis and one that says the bytecode of
 `np.subtract` is hashed, because it has no source file. They do not change
 the values.
 
-`SBMA` covers about 310 Å² of the protein surface. Step 3 compared the SASA
+`SBMA` covers about 350 Å² of the protein surface. Step 3 compared the SASA
 of `SBMA` with that of `Water`. The covered area subtracts the SASA of the
-same `SBMA` replicate, so the two numbers differ by a few Å². The values are
+same `SBMA` replicate, so the two numbers differ by about 7 Å². The values are
 stored in `trpcage/results/sasa_covered/polyzymd_results/`. A second run
 reads the two SASA series back instead of measuring them again.
 
