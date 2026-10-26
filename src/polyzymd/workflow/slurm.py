@@ -358,8 +358,8 @@ class SlurmConfig:
     """
 
     partition: str = "aa100"
-    qos: str = "normal"
-    account: str = "ucb625_asc1"
+    qos: str = "gpu-normal"
+    account: str = "ucb-general"
     time_limit: str = "23:59:59"
     email: str = ""
     nodes: int = 1
@@ -386,17 +386,23 @@ class SlurmConfig:
         Returns:
             SlurmConfig with preset values.
         """
+        # CU Boulder Alpine. CURC renames partitions and QoS values from time
+        # to time (amilan and atesting_a100 are gone, and the GPU partitions
+        # refuse QoS normal); check a change with `sbatch --test-only` and
+        # `sacctmgr show assoc user=$USER format=account,partition,qos`.
+        # Values checked in October 2026. ucb-general is the allocation every
+        # CU user has; a lab allocation goes in with --account.
         presets: Dict[str, Dict] = {
             "aa100": {
                 "partition": "aa100",
-                "qos": "normal",
-                "account": "ucb625_asc1",
+                "qos": "gpu-normal",
+                "account": "ucb-general",
                 "time_limit": "23:59:59",
             },
             "al40": {
                 "partition": "al40",
-                "qos": "normal",
-                "account": "ucb625_asc1",
+                "qos": "gpu-normal",
+                "account": "ucb-general",
                 "time_limit": "23:59:59",
             },
             # Blanca GPU nodes excluded from both shirts presets.  Each entry
@@ -447,11 +453,15 @@ class SlurmConfig:
                 "account": "",
                 "time_limit": "23:59:59",
             },
+            # Alpine's GPU test slices: one A100 MIG slice in the a100_test
+            # reservation, without which the job waits behind the reserved node.
             "testing": {
-                "partition": "atesting_a100",
-                "qos": "testing",
-                "account": "ucb625_asc1",
+                "partition": "aa100",
+                "qos": "gpu-testing",
+                "account": "ucb-general",
                 "time_limit": "0:05:59",
+                "gpu_type": "a100_3g.20gb",
+                "reservation": "a100_test",
             },
         }
 

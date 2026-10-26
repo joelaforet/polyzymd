@@ -27,7 +27,7 @@ def test_none_keeps_the_preset_value_and_a_value_replaces_it():
         SlurmConfig.from_preset("aa100"), {"qos": None, "account": "smithlab"}
     )
 
-    assert config.qos == "normal"
+    assert config.qos == "gpu-normal"
     assert config.account == "smithlab"
 
 

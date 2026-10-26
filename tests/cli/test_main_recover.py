@@ -2200,7 +2200,7 @@ class TestRecoverReusesSubmitSettings:
         assert "account smithlab" in result.output
         assert "qos (none)" in result.output
         assert "GPU type l40s" in result.output
-        assert "ucb625_asc1" not in result.output
+        assert "ucb-general" not in result.output
 
     def test_a_given_flag_replaces_one_recorded_value(self):
         result = self._recover("--submit", "--dry-run", "--account", "otherlab")

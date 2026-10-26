@@ -47,7 +47,11 @@ EQUILIBRATION = "0.25ns"
 # ---------------------------------------------------------------------------
 
 EXPECTED_ACCOUNT_LINES = {
-    "alpine-cpu": ["#SBATCH --partition=acpu", "#SBATCH --qos=cpu-normal"],
+    "alpine-cpu": [
+        "#SBATCH --partition=acpu",
+        "#SBATCH --qos=cpu-normal",
+        "#SBATCH --account=ucb-general",
+    ],
     "blanca-shirts": [
         "#SBATCH --partition=blanca-shirts",
         "#SBATCH --qos=blanca-shirts",
