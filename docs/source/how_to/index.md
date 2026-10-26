@@ -10,7 +10,7 @@ If you are new to PolyzyMD, do the {doc}`../get_started/quickstart` first.
 :link: polymers
 :link-type: doc
 
-Add polymers, restraints and equilibration stages. Fix a PDB that OpenFF
+Add polymers, co-solvents, restraints and equilibration stages. Fix a PDB that OpenFF
 refuses.
 :::
 
@@ -47,6 +47,7 @@ Choose an analysis, run it on a study, and measure your own quantity.
 rewrite_config_rc5
 polymers
 dynamic_polymers
+cosolvents
 restraints
 equilibration
 troubleshoot_openff_pdb_ingestion

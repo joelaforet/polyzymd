@@ -1,12 +1,12 @@
-# Run OpenMM on other hardware
+# Run OpenMM on a local GPU, a CPU or another cluster
 
 PolyzyMD does not require a particular cluster. The molecular build files and the
 OpenMM simulation code are portable. The automatic SLURM routing in version
 1.3 has a smaller scope: it supports NVIDIA GPUs whose drivers can use one of
 the checked-in CUDA 12.0, 12.4, or 12.6 environments.
 
-Use this guide when you run on another cluster, use a CPU, or evaluate an AMD
-GPU.
+Use this guide when you run on the NVIDIA GPU of your own computer, on a CPU,
+on a SLURM cluster other than CU Boulder and Bridges-2, or on an AMD GPU.
 
 ## Know the three configuration layers
 
@@ -14,7 +14,7 @@ These settings solve different problems:
 
 | Layer | Purpose | Where to change it |
 |-------|---------|--------------------|
-| SLURM preset | Requests a partition, account, time limit, and GPU type | `src/polyzymd/workflow/slurm.py` or CLI overrides |
+| SLURM preset | Requests a partition, account, time limit, and GPU type | CLI overrides on `polyzymd submit` (or a new preset in `src/polyzymd/workflow/slurm.py`) |
 | Pixi environment | Supplies a compatible OpenMM and accelerator runtime | `pixi.toml` and `pixi.lock` |
 | OpenMM platform | Selects `CUDA`, `OpenCL`, or `CPU` when PolyzyMD creates a Context | `openmm.platform` in `config.yaml` |
 
@@ -43,22 +43,27 @@ This OpenMM rule does not apply to the GROMACS backend. GROMACS uses its own
 site module or container and its own self-restarting SLURM template. See
 {doc}`run_gromacs` for portable CPU and GPU recipes.
 
+(other-nvidia-slurm-cluster)=
 ## Use another NVIDIA SLURM cluster
 
-First, request one interactive GPU. Run the same probe that the generated job
-uses:
+The step-by-step recipe, with the driver table and the full command, is in
+{ref}`hpc-slurm-other-cluster`. In short: first, request one interactive GPU.
+Run the same probe that the generated job uses:
 
 ```bash
 nvidia-smi --query-gpu=driver_version,compute_cap --format=csv,noheader
 ```
 
-Select one validated environment for the campaign. Then generate one test
-script. Use an existing preset and override its Slurm fields when possible:
+Select one validated environment for the campaign: the newest whose driver
+threshold the node meets (560.28 for `sim-cuda-12-6`, 550.54 for
+`sim-cuda-12-4`, 525.60 for `sim-cuda-12-0`). Then generate one test script
+from the `generic-gpu` preset, which sets no account and no QoS:
+
 
 ```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --preset aa100 \
+    --preset generic-gpu \
     --partition <site-partition> \
     --account <site-account> \
     --qos <site-qos> \
@@ -67,8 +72,11 @@ pixi run -e build polyzymd submit \
     --generate-only
 ```
 
-Remove an option when the site does not use it. Inspect the generated `#SBATCH`
-lines before submission. Run a short test job before you start a campaign.
+Leave out an option when the site does not use it. With a preset that sets
+one, pass it empty (`--qos ""`) to drop the preset's value.
+
+Inspect the generated `#SBATCH` lines before submission. Run a short test
+job before you start a campaign.
 
 For presets without a site policy, `auto` selects the newest compatible
 checked-in environment. Use an explicit environment after site validation so
@@ -105,11 +113,18 @@ driver does not cause PolyzyMD to select another environment.
 Run on the GPU of a workstation or a laptop in two steps. Build in the `build`
 environment, then run in a `sim-cuda-*` environment.
 
-The `build` environment holds OpenFF, so only it can build. Its OpenMM uses a
-recent CUDA version. An older NVIDIA driver cannot run that version, and the
-run fails with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. A `sim-cuda-*`
-environment cannot build, because it has no OpenFF, but its OpenMM uses an
-older CUDA version.
+Only the `build` environment can build, because only it holds OpenFF. Its
+OpenMM may not run on your GPU (an older driver fails with
+`CUDA_ERROR_UNSUPPORTED_PTX_VERSION`). So always run on a GPU in a
+`sim-cuda-*` environment, whose OpenMM matches your driver.
+
+:::{important}
+Choose `openmm.platform` (and `precision`) before you build a condition's
+replicates. Changing it later is safe for replicates that have already run:
+analyses accept them, because the platform does not change the built system.
+A replicate that is built but has not started must be built again, because
+`polyzymd run` checks the build against the whole config.
+:::
 
 1. Find the highest CUDA version of your driver. `nvidia-smi` prints it as
    `CUDA Version` in its first lines.

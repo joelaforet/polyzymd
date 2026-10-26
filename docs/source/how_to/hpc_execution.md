@@ -148,8 +148,18 @@ condition and replicate, stores its result but never writes the run's
   | `bridges2-rm` | `RM-shared` | none | none |
 
   `--partition`, `--account` and `--qos` replace the preset's values, or give
-  all three without a preset. Each job gets `--time 12:00:00`, `--mem 16G`
-  and `--cpus 2` unless you pass others.
+  them without a preset. On a cluster no preset covers, leave out `--preset`
+  and give your site's values; leave out `--qos` when the site uses none, and
+  the script has no QoS line:
+
+  ```bash
+  pixi run -e analysis polyzymd analyze rg -c config.yaml \
+      --submit --partition <cpu-partition> --account <account> --dry-run
+  ```
+
+  Each job gets `--time 12:00:00`, `--mem 16G` and `--cpus 2` unless you pass
+  others. These analysis presets are CPU presets, so their names differ from
+  the GPU presets of `polyzymd submit` (see {doc}`hpc_slurm`).
 
 Run on Blanca with two LipA conditions of five replicates each, the submitted
 hydrogen-bond analysis gave the same report as one job measuring every

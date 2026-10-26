@@ -10,20 +10,29 @@ PolyzyMD
    .. container::
 
       **Build, run and analyze molecular dynamics of proteins** — alone or with
-      polymers, ligands and co-solvents — with every build checked against its
-      config and every analysis compared across replicates.
+      polymers, ligands and co-solvents — on OpenMM or GROMACS, with every
+      build checked against its config and every analysis compared across
+      replicates.
 
-      .. button-ref:: get_started/installation
-         :color: primary
-         :shadow:
+      .. container:: pz-buttons
 
-         Install PolyzyMD
+         .. button-ref:: get_started/installation
+            :color: primary
+            :shadow:
 
-      .. button-ref:: get_started/quickstart
-         :color: primary
-         :outline:
+            Install PolyzyMD
 
-         Run your first simulation
+         .. button-ref:: get_started/quickstart
+            :color: primary
+            :outline:
+
+            Run your first simulation
+
+         .. button-ref:: get_started/evaluate
+            :color: primary
+            :outline:
+
+            Evaluating PolyzyMD?
 
 How PolyzyMD works
 ------------------
@@ -91,11 +100,36 @@ Common tasks
 
 .. container:: pz-buttons
 
+   .. button-ref:: get_started/examples
+      :color: primary
+      :outline:
+
+      Run the examples
+
    .. button-ref:: how_to/dynamic_polymers
       :color: primary
       :outline:
 
       Build polymers from SMILES
+
+   .. button-ref:: how_to/cosolvents
+      :color: primary
+      :outline:
+
+      Add a co-solvent
+
+   .. button-ref:: how_to/run_gromacs
+      :color: primary
+      :outline:
+
+      Run with GROMACS
+
+   .. button-ref:: local-nvidia-gpu
+      :ref-type: ref
+      :color: primary
+      :outline:
+
+      Run on your NVIDIA GPU
 
    .. button-ref:: how_to/hpc_slurm
       :color: primary
@@ -144,7 +178,8 @@ New in 1.3
       :link: how_to/run_longer
       :link-type: doc
 
-      Interrupted runs continue; finished runs extend to a longer production.
+      Interrupted runs continue on OpenMM and GROMACS; finished OpenMM runs
+      extend to a longer production.
 
 .. note::
 

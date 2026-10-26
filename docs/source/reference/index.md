@@ -48,6 +48,7 @@ cli_reference
 configuration
 physics_checks
 gromacs_openmm
+validation
 ```
 
 ## Input data
@@ -76,6 +77,7 @@ posthoc_testing
 ## Verification records
 
 Each analysis compared, on test systems, with an independent calculation.
+For the comparison of the two simulation engines, see {doc}`validation`.
 
 ```{toctree}
 :caption: Verification records

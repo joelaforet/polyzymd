@@ -1,0 +1,57 @@
+# A protein in a water-co-solvent mixture. Trp-cage (20 residues) in 2 M
+# urea with TIP3P water and 0.15 M NaCl, run for a few picoseconds on the CPU.
+# Change the durations (ns) for a real study; see the configuration reference.
+name: "trpcage_urea"
+engine: "openmm"
+description: "Trp-cage in 2 M urea with NaCl"
+
+solutes:
+  - type: protein
+    name: "trpcage"
+    pdb_path: "../quickstart/trpcage.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+
+solvent:
+  force_field: ["openff-2.3.0.offxml"]
+  water:
+    model: "tip3p"
+  # Urea is in the co-solvent library, so PolyzyMD knows its SMILES and
+  # density. "preset" takes the charges PolyzyMD ships for it. The molecules
+  # are added on top of the water: 2 M of the box volume.
+  co_solvents:
+    - name: "urea"
+      concentration: 2.0
+      charges: {method: preset}
+  ions:
+    neutralize: true
+    nacl_concentration: 0.15
+  box:
+    padding: 1.0
+    shape: "rhombic_dodecahedron"
+
+thermodynamics:
+  temperature: 300.0
+  pressure: 1.0
+
+simulation_phases:
+  equilibration_stages:
+    - name: "equil"
+      duration: 0.002
+      samples: 2
+      ensemble: "NVT"
+      temperature: 300.0
+  production:
+    ensemble: "NPT"
+    duration: 0.01
+    samples: 10
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    barostat: "MC"
+
+openmm:
+  platform: "CPU"
+
+output:
+  projects_directory: "."
+  naming_template: "{enzyme}_{temperature}K_run{replicate}"

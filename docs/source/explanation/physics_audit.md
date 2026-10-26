@@ -66,8 +66,11 @@ preset charge and every mass. A water box has thousands of copies of one molecul
 each copy, so one wrong copy fails the check.
 
 A protein that received another force field's bonded terms fails
-`parameters.bonded`; the test suite builds such a protein and checks that it
-fails.
+`parameters.bonded`. The test
+`tests/audit/test_parameter_checks.py::test_the_force_field_order_bug_fails_the_protein`
+builds such a protein (Sage loaded after ff14SB, the bug this audit was
+written for) and checks that the protein, and only the protein, fails
+`parameters.bonded` and `parameters.nonbonded`.
 
 A coverage check makes sure that every atom belongs to exactly one component,
 and that no bonded term joins two molecules.
@@ -152,6 +155,34 @@ The checks continue after the build:
   that started before 1.3.0 has no audited build to compare with; its
   record says so, and it goes on.
 
+(physics-audit-tests)=
+## How the audit is tested
+
+Each check has a test that builds a correct system, breaks a copy of it on
+purpose, and asserts that the right check fails. The tests use one small
+system that holds every component type: Trp-cage, a substrate, polymer chains
+of two monomers, DMSO, water and NaCl (`tests/_support/small_system.py`).
+
+| What is tested | Test file |
+|---|---|
+| Wrong parameters: force field order, a wrong charge, a missing constraint, a wrong mass, one wrong water among thousands, one wrong polymer chain, a bond between two components | `tests/audit/test_parameter_checks.py` |
+| The system against the config: chain counts, salt and ionic strength, net charge, hydrogen constraints, cutoff, buried water, polymer overlap, periodic image, bridging chains, restraint constants and atoms | `tests/audit/test_system_checks.py` |
+| Reading the engines' files: permuted torsions, a force the audit cannot read, GROMACS settings OpenMM cannot reproduce, a structure with another atom count | `tests/audit/test_terms_and_settings.py` |
+| OpenMM and GROMACS exports hold the same terms and settings | `tests/audit/test_components_and_engines.py` |
+| The GROMACS files pass the audit, and edits to an `.itp` or `.mdp` fail it | `tests/audit/test_engine_parity.py` |
+| GROMACS applies the staged position restraints PolyzyMD writes (`grompp` and `gmx dump`) | `tests/exporters/test_gromacs_staged_restraints.py` |
+| The gates: `run` and `submit` refuse unvouched files; a failed audit commits nothing; a run whose System differs from the build is recorded and shown in `status` | `tests/audit/test_gates.py` |
+| `modeling_exceptions`, the build record and the methods to cite | `tests/audit/test_report_and_provenance.py` |
+
+These files, with `tests/config/test_solutes.py`, run on every pull request
+in the workflow
+[`engine-parity.yml`](https://github.com/joelaforet/polyzymd/actions/workflows/engine-parity.yml).
+The whole test suite runs on Linux and macOS in
+[`full-test.yml`](https://github.com/joelaforet/polyzymd/actions/workflows/full-test.yml),
+for pushes and pull requests to `main` and `dev` and once a week.
+For what the engine tests compare, and a single-point energy of one build on
+both engines, see {doc}`../reference/validation`.
+
 ## What the audit does not check
 
 The audit checks that the built system is the one the config describes. It
@@ -185,6 +216,7 @@ the config with a reason, where a reviewer sees it. `polyzymd status
 ## Related pages
 
 - {doc}`../reference/physics_checks` — every check, its status and component
+- {doc}`../reference/validation` — engine parity tests and a single-point energy on both engines
 - {doc}`../reference/data_requirements` — the build record and run files
 - {doc}`../reference/configuration` — solutes, charges and `modeling_exceptions`
 - {doc}`../how_to/rewrite_config_rc5` — rewrite a config for 1.3.0

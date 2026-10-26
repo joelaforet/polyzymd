@@ -20,8 +20,8 @@ do not need conda or mamba installed separately.
 ```{note}
 macOS is supported for non-CUDA setup, development, and trajectory analysis
 where the required dependencies solve. The CUDA simulation environments
-(`sim-cuda-12-0`, `sim-cuda-12-4`, and `sim-cuda-12-6`) are Linux-only and intended for GPU
-clusters.
+(`sim-cuda-12-0`, `sim-cuda-12-4`, and `sim-cuda-12-6`) are for NVIDIA GPUs on
+Linux, on a cluster or on this machine.
 ```
 
 ```{note}
@@ -70,6 +70,41 @@ polyzymd info
 
 If those last two commands work, your install is ready.
 
+(install-local-gpu)=
+### Run on the NVIDIA GPU of this machine
+
+`build` builds the systems and runs them on the CPU. To run OpenMM on an
+NVIDIA GPU of this machine, also install one `sim-cuda-*` environment. Pick
+the newest one whose CUDA version does not exceed the `CUDA Version` that
+`nvidia-smi` prints (see [Choose the CUDA environment](#choose-the-cuda-environment)):
+
+```bash
+nvidia-smi | head -4
+pixi install -e sim-cuda-12-6
+pixi run -e sim-cuda-12-6 polyzymd info
+```
+
+You then build in `build` and run in `sim-cuda-12-6`. See
+{ref}`the local GPU recipe <local-nvidia-gpu>`.
+
+(install-gromacs)=
+### GROMACS
+
+PolyzyMD does not install GROMACS. To run a config with `engine: gromacs`,
+put a `gmx` executable on `PATH`, or give its path with `--gmx-path`. Get it
+from your cluster's module (`module load gromacs`), from the conda-forge
+`gromacs` package, or by building it from source. Check it:
+
+```bash
+gmx --version
+```
+
+PolyzyMD 1.3 was tested with GROMACS 2024.2 and 2026.0. The `.mdp` files it
+writes use the c-rescale barostat, which needs GROMACS 2021 or newer. The
+`gromacs:` settings `ntmpi` and `ntomp` become `-ntmpi` and `-ntomp`, so a
+thread-MPI build (`gmx`, not `gmx_mpi`) runs a config as written. For
+clusters and MPI builds, see {doc}`../how_to/run_gromacs`.
+
 <!-- IMAGE OPPORTUNITY: Add a terminal screenshot showing `pixi install -e
 build`, `pixi shell -e build`, and a successful `polyzymd info` output. -->
 
@@ -81,6 +116,35 @@ PolyzyMD v1.3 uses a split environment workflow on clusters:
 - Run `polyzymd submit` from `build`. For known sites, `--pixi-env auto`
   selects the site's fixed `sim-cuda-12-*` runtime when it generates the job.
 - Use `analysis` after trajectories are produced to run comparisons and plots.
+
+In short: `build` for `validate`, `build`, `submit`, `status` and `cancel`;
+a `sim-cuda-*` environment only inside the jobs (or for `polyzymd run` on a
+local GPU); `analysis` or `build` for `analyze`.
+
+```{important}
+Before you submit, on a cluster:
+
+- **You do not need a CUDA module.** Each `sim-cuda-*` environment brings its
+  own CUDA runtime. The GPU node needs only an NVIDIA driver new enough for
+  it.
+- **Install the environment your jobs use on the login node first.** The job
+  script activates it with `pixi shell-hook`, which would install a missing
+  environment on the compute node, and compute nodes often have no internet.
+  With `--pixi-env auto`, install all three `sim-cuda-*` environments.
+- **Mind your disk quota.** The `build` environment takes about 4 GB, and the
+  pixi package cache several GB more. The environments live in `.pixi/envs/`
+  of the clone, so clone PolyzyMD to project storage if your home quota is
+  small, and point the cache there too, for example with
+  `export PIXI_CACHE_DIR=/projects/$USER/pixi-cache` in `~/.bashrc`.
+- **Make `pixi` available to job shells.** `polyzymd submit` starts each job
+  with `sbatch --export=NONE`, and the job script calls `pixi` by name. Put
+  `export PATH="$HOME/.pixi/bin:$PATH"` in `~/.bashrc` *above* any line that
+  returns early for non-interactive shells, such as
+  `[ -z "$PS1" ] && return`. Check it with a short job:
+  `sbatch --export=NONE --wrap 'command -v pixi'` (add your partition and
+  account), then read the `slurm-<jobid>.out` file it writes. It must print
+  the path of `pixi`.
+```
 
 The environments are separate because the CUDA 12.4 OpenMM builds require a
 NumPy 1.x runtime, while package development and analysis use Python 3.12
@@ -146,13 +210,17 @@ On a GPU node, check the driver version:
 nvidia-smi | head -1
 ```
 
-Use the environment assigned to the site:
+Use the environment assigned to the site, or pick one from the driver:
 
-| Site policy | Environment |
+| Where you run | Environment |
 |-------------|-------------|
 | PSC Bridges-2 | `sim-cuda-12-6` |
 | CU Boulder Blanca | `sim-cuda-12-4` |
 | Validated older CUDA site | `sim-cuda-12-0` |
+| Your own machine, or another cluster | The newest of `sim-cuda-12-6`, `sim-cuda-12-4` and `sim-cuda-12-0` whose CUDA version does not exceed the `CUDA Version` that `nvidia-smi` prints |
+
+For example, a driver that prints `CUDA Version: 12.2` takes `sim-cuda-12-0`,
+and one that prints `13.1` takes `sim-cuda-12-6`.
 
 Generated Slurm scripts query `nvidia-smi` before Pixi activation and reject
 missing, malformed, or unsupported GPU capabilities. They then create a CUDA

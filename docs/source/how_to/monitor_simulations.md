@@ -74,6 +74,14 @@ directory that holds the config, with the correct scheduler module loaded.
 submission fails with `invalid partition specified`. Resubmission resumes from
 the last checkpoint; it never rebuilds the system.
 
+The footer's command carries the preset and the site overrides (account,
+QoS, partition, GPU type, pixi environment) that `polyzymd submit` recorded
+for the replicate, so it works on a cluster without a built-in preset.
+
+A replicate submitted by an older PolyzyMD has no such record: its footer
+names only `--preset`, and you add the overrides you first submitted with
+(see {ref}`hpc-slurm-other-cluster`).
+
 Each `DEAD` row ends with `action: resubmit` or `action: inspect`. Only
 `resubmit` chains get a submit line; `inspect` chains are listed under "dead
 chains that need a look before restarting". Some `last:` lines call for

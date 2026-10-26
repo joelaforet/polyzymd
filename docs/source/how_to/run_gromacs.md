@@ -22,8 +22,9 @@ activated the environment with `pixi shell -e build`.
 ## Run locally
 
 Set `engine: gromacs` in `config.yaml`. GROMACS does not read the `openmm:`
-block of the template, and it writes `.xtc` trajectories. Then run one
-replicate:
+block of the template, and it writes `.xtc` trajectories. For what each config
+setting becomes in the `.mdp` (thermostat, barostat, restraints, seeds), see
+{doc}`../reference/gromacs_openmm`. Then run one replicate:
 
 ```bash
 pixi run -e build polyzymd run -c config.yaml -r 1
@@ -68,6 +69,9 @@ complete replicate prints `already complete; nothing to do`. A production
 that stopped without a checkpoint cannot continue: the message says how many
 steps ran and how to run production again from the end of equilibration.
 
+Minimization and equilibration write no checkpoint that a local run can use.
+A run stopped before production therefore starts again from minimization.
+
 ## Export the files only
 
 Use `polyzymd build --format gromacs` when you only want PolyzyMD to build and
@@ -82,6 +86,17 @@ component `.itp` parameter files. PolyzyMD also writes MDP files and a run
 script from `config.yaml`. You do not need them. Use them as a starting point,
 or replace them with your own GROMACS workflow. To analyze a run made with
 your own `.mdp` files in the study, see {doc}`own_protocol`.
+
+:::{important}
+An edited file locks `polyzymd run` and `polyzymd submit` out of that
+replicate. The build hashes every `.mdp`, `.top`, `.itp` and `.gro` file it
+audited (`audited_files.sha256`). If one is missing or changed, PolyzyMD
+refuses the replicate and says which file: for example, `prod.mdp is missing
+or changed since the build was audited`. Either restore the file or build
+the replicate again, or run your edited files with `gmx grompp` and
+`gmx mdrun` yourself and bring the run into the study with
+{doc}`own_protocol`.
+:::
 
 ---
 
@@ -424,7 +439,8 @@ gromacs/
 ├── <prefix>.gro              # Initial coordinates
 ├── <prefix>.top              # Topology (includes all molecule types)
 ├── <prefix>_*.itp            # Atom types and molecule parameters
-├── <prefix>_pointenergy.mdp  # Single-point energy check
+├── <prefix>_pointenergy.mdp  # Single-point energy input from OpenFF Interchange
+├── components.ndx            # Index groups: one per component and segment
 │
 ├── em.mdp                    # Energy minimization parameters
 ├── eq_01_<stage>.mdp         # One file per equilibration stage
@@ -459,6 +475,51 @@ The build writes `audited_files.sha256` only when the physics audit passes.
 Every SLURM job of `polyzymd submit` checks it with `sha256sum --check`
 before it runs `grompp`, and stops if a file is missing or changed. For the checks, see
 {doc}`../reference/physics_checks`.
+
+### Molecule names in the topology
+
+OpenFF Interchange names the molecule types of the `.top` file. The `[ system ]`
+name is `FOO`. Water is `water_TIP3P`, and a molecule that carries a name,
+such as a bundled co-solvent (`urea`), keeps it. Every other molecule type is
+`MOL<n>`, where `<n>` is the position, counted from 0, of the first molecule
+of that type in the system. For a protein with two polymer chains in water
+with NaCl, `[ molecules ]` reads:
+
+```text
+MOL0          1      ; protein
+MOL1          2      ; polymer chains
+water_TIP3P   3573
+MOL3576       10     ; Na+
+MOL3586       11     ; Cl-
+```
+
+The order of `[ molecules ]` is the order of the atoms in the `.gro` file. To
+find which atoms belong to which component, use
+`components.ndx`: it has one group per component name (such as `trpcage`,
+`polymer`, `solvent`, `ions`) and one per segment ID (`PROT`, `POLY`, `SOL`,
+`ION`). Use it with `gmx make_ndx`, `gmx trjconv -n` or `gmx select`. The
+component table of `build_provenance.md` lists each component with its
+molecule count, force field and charges.
+
+### The single-point energy file
+
+`<prefix>_pointenergy.mdp` is written by OpenFF Interchange next to the
+topology. PolyzyMD does not use it. It runs zero steps with the nonbonded
+settings of the topology, so you can compute the energy of the exported
+coordinates and compare it with OpenMM:
+
+```bash
+gmx grompp -f <prefix>_pointenergy.mdp -c <prefix>.gro -p <prefix>.top -o sp.tpr
+gmx mdrun -s sp.tpr -deffnm sp
+```
+
+`sp.log` then lists the energy terms. Its `ewald-rtol` (1e-4) and
+`disp-corr = Ener` differ from the run `.mdp` files (1e-5 and `EnerPres`).
+`ewald-rtol 1e-4` is the Ewald tolerance of the OpenMM system, and the
+pressure part of `EnerPres` does not change an energy. For such a comparison of the quickstart system,
+see {doc}`../reference/validation`.
+
+### Position restraints
 
 Position restraints are appended as `#ifdef POSRES_*` blocks inside the
 molecule `.itp` files. MDP files use `-DPOSRES_PROTEIN`, `-DPOSRES_POLYMER`,
@@ -537,6 +598,8 @@ polyzymd submit -c config.yaml --engine gromacs --memory 64G ...
 
 ## See Also
 
+- {doc}`../reference/gromacs_openmm` — What each config setting becomes on GROMACS and on OpenMM
+- {doc}`../reference/validation` — Engine parity tests and a single-point energy on both engines
 - {doc}`../reference/cli_reference` — CLI options for `run`, `submit` and `recover`
 - {doc}`../reference/configuration` — Full configuration reference including `gromacs:` block
 - {doc}`../explanation/gromacs_parallelism` — Thread-MPI, real MPI and OpenMP threads

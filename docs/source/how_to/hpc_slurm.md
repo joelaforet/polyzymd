@@ -24,6 +24,100 @@ or an interactive compute allocation. Do not run them on a login node.
 Run `polyzymd submit` from the `build` environment. Prefix each command with
 `pixi run -e build`, or activate the environment once with `pixi shell -e build`.
 
+Which environment runs what: `build` runs `build`, `validate`, `submit`,
+`status`, `recover` and `cancel`. A `sim-cuda-*` environment runs only inside
+the OpenMM jobs (and for a run on a local GPU). `analysis`, or `build`, runs
+`analyze`.
+
+The examples on this page use `--preset <preset>`. For the values of the CU
+Boulder clusters, see {doc}`site_cu_boulder`.
+
+(hpc-slurm-other-cluster)=
+## If your cluster is not listed
+
+The built-in presets are for CU Boulder Alpine and Blanca and for PSC
+Bridges-2 (see Step 3). On any other SLURM cluster with NVIDIA GPUs, start
+from the `generic-gpu` preset, which sets no account and no QoS, and give
+your site's values.
+
+1. Find your site's values:
+
+   ```bash
+   sacctmgr show association user=$USER format=account,partition,qos
+   sinfo -o "%P %G"    # partitions and their GPU types (GRES)
+   ```
+
+2. On a GPU node (for example in an interactive job), read the NVIDIA driver
+   version:
+
+   ```bash
+   nvidia-smi --query-gpu=driver_version,compute_cap --format=csv,noheader
+   ```
+
+3. Pick the newest environment that the driver supports. These are the
+   thresholds the job script checks:
+
+   | Driver version | `nvidia-smi` CUDA Version | Environment |
+   |---|---|---|
+   | 560.28 or newer | 12.6 or newer | `sim-cuda-12-6` |
+   | 550.54 or newer | 12.4 or 12.5 | `sim-cuda-12-4` |
+   | 525.60 or newer | 12.0 to 12.3 | `sim-cuda-12-0` |
+
+   Give that environment with `--pixi-env`, not `auto`. With `auto` and no
+   site policy, each node picks by its own driver, so replicates on a mixed
+   partition can run different OpenMM versions.
+
+4. Install that environment on the login node before you submit:
+   `pixi install -e build -e sim-cuda-12-4` (with your environment). You do
+   not need a CUDA module: the `sim-cuda-*` environment brings its own CUDA
+   runtime, and the node needs only a new enough driver. Compute nodes often
+   have no internet, so a job cannot install it.
+
+5. Write one script and read its `#SBATCH` lines:
+
+   ```bash
+   pixi run -e build polyzymd submit \
+       -c config.yaml \
+       --preset generic-gpu \
+       --partition <gpu-partition> \
+       --account <account> \
+       --gpu-type <gres-type> \
+       --pixi-env sim-cuda-12-4 \
+       --time-limit 24:00:00 \
+       --replicates 1 \
+       --generate-only
+   ```
+
+   Leave out `--account` or `--gpu-type` when your site does not use them.
+   With another preset, an empty value removes the preset's line, for example
+   `--qos ""` for a site without QoS.
+
+6. Submit the same command without `--generate-only`. Keep the command in a
+   script, because you give the same flags again to submit more replicates.
+
+**Memory.** Each job asks for `--mem=3G` unless you set `--memory` (for
+example `--memory 8G` for a large system). The `bridges2` preset sets no
+memory line.
+
+**Resume a replicate.** `polyzymd recover -c config.yaml -r 1 --submit`
+reuses the preset and overrides that `submit` recorded for the replicate (see
+[Recover a stalled replicate](#hpc-slurm-recover)).
+
+With a PolyzyMD that has no such record, run the same `polyzymd submit`
+command again instead: it continues each replicate from its last checkpoint.
+
+**Submit a generated script yourself.** `--generate-only` writes
+`job_scripts/run_rep<N>.sh` in the condition's output folder (for a project,
+`runs/<study>/<condition>/`). The script writes its log to `slurm_logs/` in
+the same folder, which must exist; `--generate-only` creates it.
+
+Submit it the way PolyzyMD does, without your shell's environment:
+
+```bash
+mkdir -p slurm_logs   # in that folder, if it does not exist
+sbatch --export=NONE job_scripts/run_rep1.sh
+```
+
 ## Step 1: build the systems in a compute job
 
 The SLURM jobs run in a simulation environment without OpenFF, so they cannot
@@ -46,13 +140,15 @@ the `polyzymd build` command to run. For Blanca, see {doc}`site_cu_boulder`.
 pixi run -e build polyzymd validate -c config.yaml
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --preset aa100 \
+    --preset <preset> \
     --pixi-env auto \
     --replicates 1 \
     --generate-only
 ```
 
 `--generate-only` writes the script to `job_scripts/` and does not submit it.
+On a cluster without a built-in preset, give `--pixi-env` an explicit
+environment (see [If your cluster is not listed](#hpc-slurm-other-cluster)).
 Read the `#SBATCH` lines before you submit real jobs.
 
 `--dry-run` prints the submission plan. It writes no file and submits nothing.
@@ -69,16 +165,21 @@ A preset sets the partition, QoS, account and time limit of each job.
 | `blanca-shirts` | `blanca,blanca-shirts` | `preemptable` | 23:59:59 | CU Boulder Blanca condo nodes |
 | `blanca-chbe-rdi` | `blanca,blanca-chbe-rdi` | `preemptable` | 23:59:59 | CU Boulder Blanca condo nodes |
 | `bridges2` | `GPU-shared` | none | 24:00:00 | PSC Bridges-2 GPU nodes |
+| `generic-gpu` | `gpu` | none | 23:59:59 | Any other SLURM cluster with NVIDIA GPUs; no account |
 | `testing` | `atesting_a100` | `testing` | 0:05:59 | Short tests on CU Boulder Alpine |
 
-The Alpine presets (`aa100`, `al40` and `testing`) set a CU Boulder
-allocation as the account. On another allocation, give your own with
-`--account <account>`. To use another cluster, override the preset's fields
-with `--partition`, `--account`, `--qos` and `--gpu-type`. See
-{doc}`hardware_platforms`. For the CU Boulder clusters, see
-{doc}`site_cu_boulder`.
+The Alpine presets (`aa100`, `al40` and `testing`) set the account
+`ucb625_asc1`, an allocation that only members of one CU Boulder lab can use.
+On another allocation, give your own with `--account <account>`. On another
+cluster, start from `generic-gpu` and set your site's values with
+`--partition`, `--account`, `--qos` and `--gpu-type`; an empty value, such as
+`--qos ""`, removes the preset's line (see
+[If your cluster is not listed](#hpc-slurm-other-cluster)).
 
-Use `testing` first when you try a new system or a new workflow.
+For the CU Boulder clusters, see {doc}`site_cu_boulder`.
+
+Each OpenMM job asks for one GPU, one task and `--mem=3G` (the `bridges2`
+preset sets no memory line). Change the memory with `--memory`.
 
 ## Step 4: submit one short test job
 
@@ -87,21 +188,23 @@ Run a short job before you submit many replicates:
 ```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --preset testing \
+    --preset <preset> \
     --pixi-env auto \
     --time-limit 0:10:00 \
     --replicates 1
 ```
 
 A short job finds a wrong path, a scheduler problem or a broken environment
-in minutes.
+in minutes. Use a test or debug partition if your site has one (add
+`--partition <test-partition>`); on CU Boulder Alpine, use the `testing`
+preset.
 
 ## Step 5: submit the production replicates
 
 ```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --preset aa100 \
+    --preset <preset> \
     --pixi-env auto \
     --replicates 1-5 \
     --email your.email@university.edu
@@ -113,10 +216,10 @@ To write the output to other folders, give `--projects-dir` and
 ```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --preset aa100 \
+    --preset <preset> \
     --pixi-env auto \
     --projects-dir /projects/$USER/polyzymd \
-    --scratch-dir /scratch/alpine/$USER/polyzymd_sims
+    --scratch-dir /scratch/$USER/polyzymd_sims
 ```
 
 To give a large system more memory, set `--memory`:
@@ -124,7 +227,7 @@ To give a large system more memory, set `--memory`:
 ```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --preset aa100 \
+    --preset <preset> \
     --pixi-env auto \
     --memory 8G
 ```
@@ -150,6 +253,7 @@ pixi run -e build polyzymd check-progress -c config.yaml -r 1
 time to completion and the reason a chain stopped, for many configs at once.
 See {doc}`monitor_simulations`.
 
+(hpc-slurm-recover)=
 ## Recover a stalled replicate
 
 Show what remains of replicate 1:
@@ -161,13 +265,17 @@ pixi run -e build polyzymd recover -c config.yaml -r 1
 If work remains, submit a recovery job:
 
 ```bash
-pixi run -e build polyzymd recover \
-    -c config.yaml \
-    -r 1 \
-    --submit \
-    --preset aa100 \
-    --pixi-env auto
+pixi run -e build polyzymd recover -c config.yaml -r 1 --submit
 ```
+
+
+The job uses the preset and overrides (account, QoS, partition, GPU type,
+time limit, pixi environment and the others) that `polyzymd submit` recorded
+in the replicate's `submit_settings.json`. An option given to `recover`, such
+as `--account`, replaces that one value. A replicate submitted by an older
+PolyzyMD has no record: give `--preset` and the overrides yourself, or run
+the same `polyzymd submit` command again, which continues each replicate from
+its last checkpoint.
 
 (hpc-slurm-stop-a-chain)=
 ## Stop a chain
@@ -202,7 +310,7 @@ To start again, remove the marker and submit again:
 
 ```bash
 pixi run -e build polyzymd cancel -c config.yaml -r 1-3 --resume
-pixi run -e build polyzymd submit -c config.yaml -r 1-3 --preset aa100
+pixi run -e build polyzymd submit -c config.yaml -r 1-3 --preset <preset>
 ```
 
 `STOP` is a text file at `<replicate folder>/STOP`. It names who stopped the
@@ -271,7 +379,9 @@ select the environment that runs `submit`.
 
 For a known site, `--pixi-env auto` takes the site's environment when
 PolyzyMD writes the script. Blanca uses `sim-cuda-12-4`. Bridges-2 uses
-`sim-cuda-12-6`. A newer driver does not change this choice.
+`sim-cuda-12-6`. A newer driver does not change this choice. With any other
+preset, `auto` is resolved on each node from its driver, by the thresholds in
+[If your cluster is not listed](#hpc-slurm-other-cluster).
 
 On the allocated node, the job checks the driver and activates the
 environment. It then makes an explicit CUDA Context, calculates an energy and
@@ -279,9 +389,10 @@ runs one integration step. This test finds an unusable CUDA runtime or PTX
 compiler before the molecular setup. PolyzyMD does not fall back to the CPU.
 
 If the node is not compatible, the job submits a replacement job that
-excludes the node. After three failed attempts, the chain stops. The preset
-excludes nodes that are known to be incompatible, so these nodes never use an
-attempt. See {ref}`excluded-blanca-gpu-nodes`.
+excludes the node. After three failed attempts, the chain stops. The Blanca
+presets exclude nodes that are known to be incompatible, so these nodes never
+use an attempt (see {ref}`excluded-blanca-gpu-nodes`). On another cluster,
+give known-bad nodes with `--exclude`.
 
 PolyzyMD records the runtime of each replicate. A replicate cannot change its
 pixi environment, OpenMM version, platform or precision when it is submitted
@@ -381,19 +492,22 @@ On CPU nodes:
 ```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --preset aa100 \
+    --preset <preset> \
+    --partition <cpu-partition> \
     --replicates 1-3
 ```
 
-On GPU nodes:
+On GPU nodes, `--constraint` selects node features, such as GPU models:
 
 ```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --preset blanca-shirts \
+    --preset <preset> \
     --constraint "A40|A100" \
     --replicates 1-3
 ```
+
+For tested CU Boulder recipes, see {doc}`site_cu_boulder`.
 
 GROMACS uses the site module or container that the config's `gromacs:` block
 names. For CPU and GPU settings, MPI, constraints and recovery, see
@@ -403,8 +517,22 @@ names. For CPU and GPU settings, MPI, constraints and recovery, see
 
 ### `pixi: command not found`
 
-Make `pixi` available in non-interactive shells. A setting in your login shell
-files alone is not enough.
+The job script calls `pixi` by name, and `submit` starts it with
+`sbatch --export=NONE`, so the job does not inherit your shell's `PATH`. Put
+the line that adds pixi to `PATH` in `~/.bashrc`, above any line that returns
+early for non-interactive shells:
+
+```bash
+export PATH="$HOME/.pixi/bin:$PATH"
+```
+
+Check it with a small job:
+
+```bash
+sbatch --export=NONE --partition=<partition> --wrap 'which pixi'
+```
+
+The job's output file must print the path of `pixi`.
 
 ### `sbatch not found`
 

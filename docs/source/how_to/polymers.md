@@ -3,7 +3,9 @@
 Add random co-polymer chains around the protein with a `type: polymer` entry
 in the `solutes:` list of `config.yaml`. The builder draws a monomer sequence for each chain, places
 the chains around the protein with {term}`PACKMOL`, and then adds water and
-ions.
+ions. No SDF files of your chains? Use `generation_mode: dynamic`, which
+builds each chain from monomer SMILES: see {doc}`dynamic_polymers`. This page
+covers the `cached` mode, which reads pre-built SDF files.
 
 :::{admonition} Environment setup
 :class: tip

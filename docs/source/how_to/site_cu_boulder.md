@@ -111,6 +111,33 @@ pixi run -e build polyzymd submit \
     --replicates 1-5
 ```
 
+Try a new system with a short job on the Alpine test partition first. The
+`testing` preset sets `atesting_a100`, the `testing` QoS and a 5:59 time
+limit:
+
+```bash
+ml slurm/alpine
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --preset testing \
+    --account <account> \
+    --pixi-env auto \
+    --replicates 1
+```
+
+On Alpine, keep the trajectories in scratch and the scripts and logs in
+project storage:
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --preset aa100 \
+    --account <account> \
+    --projects-dir /projects/$USER/polyzymd \
+    --scratch-dir /scratch/alpine/$USER/polyzymd_sims \
+    --replicates 1-5
+```
+
 On Blanca, the preset sets the partition, the account and the QoS. This
 OpenMM submission ran on Blanca on 7 October 2026:
 

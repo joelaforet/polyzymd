@@ -1,5 +1,16 @@
 # Compare a polymer condition with water
 
+:::{admonition} At a glance
+:class: note
+
+- **You will learn:** how a study compares each condition with its control,
+  and how to read the comparison and the warnings that limit it.
+- **You need:** the project of {doc}`first_analysis`, with three replicates
+  of `Water`.
+- **Time:** about 20 minutes on a laptop CPU, 5 to 7 of them building and
+  simulating.
+:::
+
 In this tutorial you add a second condition to the quickstart study: Trp-cage
 with two short chains of sulfobetaine methacrylate (SBMA). You run three
 replicates of it, and then compare it with the `Water` condition in four
@@ -28,6 +39,14 @@ root, activate it once:
 ```bash
 pixi shell -e build
 ```
+
+**On the NVIDIA GPU of this machine:** in step 3, run `polyzymd build` with
+the same `-c` and `-r` in `build`, then `polyzymd run` in your `sim-cuda-*`
+shell. The copy keeps the `openmm:` settings of `Water`.
+
+**With GROMACS:** if `Water` uses `config_gromacs.yaml`, the copy keeps
+`engine: gromacs`, and every step works the same. `validate` then prints
+`Engine: gromacs`.
 :::
 
 ## Step 1: Copy the condition
@@ -41,6 +60,7 @@ The output is:
 
 ```
 condition SBMA: /home/me/pz_quickstart/trpcage/conditions/sbma/config.yaml, listed in study.yaml
+name: set to 'sbma' in the copy; change description: and the settings in which SBMA differs from Water
 warning: the runs go into runs/trpcage/sbma unless you set scratch_directory in config.yaml; trajectories can use a lot of disk space, so on a cluster set scratch_directory to scratch storage
 next: commit, and run polyzymd study check
 ```
@@ -51,17 +71,28 @@ it.
 
 ## Step 2: Add the polymer
 
-Open `trpcage/conditions/sbma/config.yaml`. Change the name and the
-description:
+Open `trpcage/conditions/sbma/config.yaml`. Its `name:` is `sbma`. Change
+it to `trpcage_sbma`, and change the description:
 
 ```yaml
 name: trpcage_sbma
 description: Trp-cage with two SBMA 3-mers in water with NaCl
 ```
 
-Add this entry to the `solutes:` list, after the protein entry:
+Add the polymer entry below to the `solutes:` list, after the protein entry.
+The protein entry is shown for context; do not copy it a second time.
+
+:::{tip}
+Indent `- type: polymer` exactly like `- type: protein` above it, and the
+lines below it by the same amount. Otherwise `validate` stops with
+`not valid YAML: expected <block end>, but found '-'`.
+:::
 
 ```yaml
+solutes:
+  - type: protein
+    name: "trpcage"
+    # ... the rest of the protein entry, unchanged
   - type: polymer
     generation_mode: dynamic
     type_prefix: SBMA
@@ -157,7 +188,10 @@ condition SBMA: replicates [1, 2, 3] under /home/me/pz_quickstart/trpcage/condit
 ## Step 4: Analyze the project
 
 Open `project.yaml` and list two more analyses: the polymer contacts and the
-protein-polymer hydrogen bonds.
+protein-polymer hydrogen bonds. Both find the polymer with the selection
+`chainid C`, because the build puts the protein in chain A, a small molecule
+in chain B, every polymer chain in chain C and the solvent in chains D and
+later.
 
 ```yaml
 analyses:
@@ -271,8 +305,6 @@ trpcage/results/
 │   ├── report.json
 │   ├── figures/contacts/
 │   │   ├── contacts_coverage_comparison.png
-│   │   ├── contacts_contact_fraction_profile.png
-│   │   ├── contacts_contact_fraction_difference.png
 │   │   └── contacts_class_bars.png
 │   └── polyzymd_results/residue_occlusion/
 └── hydrogen_bonds/
@@ -299,7 +331,10 @@ Water vs SBMA  labels 20  tested 5  family 5  test welch_t  correction BH  lower
 ```
 
 Of the 20 residues, 5 have values that vary, so 5 are tested. None differs
-after the correction. A `warning:` line follows for each residue whose test
+after the correction. This command also writes the per-residue figures to
+`figures/contacts/`: `contacts_contact_fraction_profile.png` and, because the
+study has two conditions, `contacts_contact_fraction_difference.png`. The
+default result, `coverage`, writes only the two figures above. A `warning:` line follows for each residue whose test
 or interval is limited. The JSON report (`--format json`) holds every row.
 
 ## What you did

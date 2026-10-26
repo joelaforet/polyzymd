@@ -64,6 +64,49 @@ The SLURM job scripts for OpenMM need an NVIDIA GPU. For a local NVIDIA GPU,
 a CPU, an AMD GPU, another cluster or a new driver, see
 {doc}`../how_to/hardware_platforms`.
 
+(scope-and-limitations)=
+## Scope and limitations
+
+PolyzyMD 1.3 builds explicit-solvent systems around one protein and runs plain
+molecular dynamics of them on OpenMM or GROMACS. Check that your study fits
+before you start.
+
+**What it builds.** One protein from a PDB file, with at most one small
+molecule (a ligand), one polymer entry (any number of chains of one or more
+monomers) and any number of co-solvents. The solvent is TIP3P water with NaCl
+ions, in a cubic or rhombic dodecahedral box. See
+{doc}`../reference/configuration`.
+
+**Force fields and charges.** Only OpenFF SMIRNOFF force fields (`.offxml`
+files), applied through OpenFF Interchange, such as the OpenFF port of Amber
+ff14SB for the protein and Sage for everything else. Each solute names one
+file, and every molecule except the protein uses the file of the solvent.
+Charges come from the force field's library (protein), files PolyzyMD ships
+(`preset`), NAGL, AM1-BCC or Espaloma. PolyzyMD reads no AMBER, CHARMM or
+GROMACS topologies as input.
+
+**Dynamics.** NVT and NPT stages with Langevin dynamics on both engines.
+OpenMM uses a Monte Carlo barostat; GROMACS, which has none, runs stochastic
+cell rescaling in its place. Nosé-Hoover, Andersen and anisotropic pressure
+coupling run only on GROMACS. Position restraints work on both engines, with
+fewer groups on GROMACS; distance restraints only on OpenMM. No NVE. Each build is audited against its config
+(see {doc}`../explanation/physics_audit`).
+
+**Engines and hardware.** OpenMM 8 on a CPU or an NVIDIA GPU (CUDA), on Linux.
+GROMACS, which you install yourself. The generated OpenMM SLURM jobs need an
+NVIDIA GPU. macOS works for setup and analysis, without CUDA. See
+{doc}`../reference/gromacs_openmm` and {doc}`../how_to/hardware_platforms`.
+
+**Statistics.** One value per replicate, a Student-t interval, Welch's test
+and the Benjamini-Hochberg correction. Every replicate starts from the same
+protein structure, so the spread measures sampling from that start. There is
+no block averaging, bootstrap or jackknife. See
+{doc}`../explanation/analysis_statistics_best_practices`.
+
+**Out of scope.** Enhanced sampling, free-energy calculations, membranes,
+non-OpenFF force fields, water models other than TIP3P, salts other than NaCl,
+and bitwise-reproducible reruns.
+
 ## Where to go next
 
 ::::{grid} 2
@@ -91,6 +134,22 @@ Run more replicates of the quickstart and measure their RMSF.
 Add a condition with a polymer and compare it with water.
 :::
 
+:::{grid-item-card} Evaluate PolyzyMD
+:link: evaluate
+:link-type: doc
+
+For reviewers: one run, the build record, the audit and the statistics, in
+order.
+:::
+
+:::{grid-item-card} Start from an example
+:link: examples
+:link-type: doc
+
+The shipped configs: protein in water, with a polymer, with a co-solvent,
+and with a ligand and a restraint.
+:::
+
 :::{grid-item-card} Do a specific task
 :link: ../how_to/index
 :link-type: doc
@@ -107,4 +166,6 @@ Find how-to guides for polymers, restraints, GROMACS, SLURM and more.
 
 Install PolyzyMD with pixi <installation>
 Run your first simulation <quickstart>
+examples
+evaluate
 ```

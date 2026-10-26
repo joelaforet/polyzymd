@@ -26,3 +26,7 @@ The run goes into `paper/runs/trpcage/water/`, which git ignores.
 
 For a real study, lengthen `duration` (in ns) and run on a GPU. The test
 `tests/test_quickstart_example.py` runs these commands for both engines.
+
+The other folders of `examples/` add one feature each: `polymer/` (chains
+built from SMILES, OpenMM and GROMACS), `cosolvent/` (2 M urea) and
+`ligand_restraint/` (T4 lysozyme with benzene and a distance restraint).

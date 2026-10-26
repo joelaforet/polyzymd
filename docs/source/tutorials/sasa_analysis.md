@@ -1,5 +1,16 @@
 # Measure polymer shielding with SASA
 
+:::{admonition} At a glance
+:class: note
+
+- **You will learn:** how the atoms in a SASA calculation (its context) show
+  how much of the protein a polymer shields, and how to compute a new
+  quantity from two time series in Python.
+- **You need:** the project of {doc}`analysis_complete_workflow`, with the
+  `Water` and `SBMA` conditions. No new simulation.
+- **Time:** about 10 minutes.
+:::
+
 In this tutorial you measure how much of the surface of Trp-cage the SBMA
 chains cover. You compute the solvent-accessible surface area (SASA) of the
 protein twice: once with only the protein in the calculation, and once with
@@ -27,6 +38,9 @@ repository root, activate it once:
 ```bash
 pixi shell -e build
 ```
+
+The analyses read the runs of either engine, and from a CPU or a GPU, the
+same way.
 :::
 
 ## What SASA tells you

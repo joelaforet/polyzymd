@@ -56,13 +56,20 @@ deterministic.) They agree statistically, not frame by frame. OpenMM has a
 ## Nonbonded interactions and constraints
 
 PolyzyMD writes the settings of the OpenFF force fields into the `.mdp`, so
-that GROMACS computes the same energies as OpenMM through Interchange.
+that GROMACS computes the same energies as OpenMM through Interchange. For a
+measured single-point energy of one build on both engines, see
+{doc}`validation`.
 
-| What | Value on both engines |
-|---|---|
-| Electrostatics | PME, real-space cutoff 0.9 nm, Ewald tolerance 1e-5, Fourier spacing 0.12 nm |
-| Van der Waals | cutoff 0.9 nm, potential switch from 0.8 nm, dispersion correction for energy and pressure |
-| Constraints | bonds to hydrogen (`h-bonds`, LINCS in GROMACS); rigid water |
+| What | OpenMM | GROMACS (`.mdp`) |
+|---|---|---|
+| Electrostatics | PME, real-space cutoff 0.9 nm, Ewald error tolerance 1e-4 (set by OpenFF Interchange; OpenMM picks the grid from it) | PME, `rcoulomb = 0.9`, `ewald-rtol = 1e-5`, `fourier-spacing = 0.12` |
+| Van der Waals | cutoff 0.9 nm, switch from 0.8 nm, dispersion correction | `rvdw = 0.9`, `vdw-modifier = Potential-switch`, `rvdw-switch = 0.8`, `DispCorr = EnerPres` |
+| Constraints | bonds to hydrogen; rigid water | `constraints = h-bonds`, LINCS; rigid water |
+
+The cutoff, switch, PME and dispersion correction are the same on both
+engines; the physics audit checks them against the force field file
+(`nonbonded.settings`). The PME accuracy differs: the GROMACS run files ask
+for a tighter reciprocal-space error than OpenMM uses.
 
 ## Equilibration
 
@@ -86,3 +93,9 @@ PolyzyMD passes no `-maxwarn` to `gmx grompp`, so every warning stops the
 run. A neutral system built by PolyzyMD gives no warning. To accept a warning
 that you have read and understood, set `grompp_flags: "-maxwarn 1"` in the
 `gromacs:` section of the config.
+
+`grompp_flags` reaches only the SLURM job scripts that `polyzymd submit`
+writes. A local `polyzymd run` calls `grompp` without it, so the warning still
+stops a local run. To run such a build on your own computer, call
+`gmx grompp ... -maxwarn 1` on the exported files yourself (see
+{doc}`../how_to/run_gromacs`).

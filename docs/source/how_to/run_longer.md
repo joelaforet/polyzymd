@@ -10,6 +10,13 @@ longer. For GROMACS, run new replicates with the longer `duration`. You can
 also extend a run yourself with `gmx convert-tpr -extend` and
 `gmx mdrun -cpi`, but PolyzyMD does not record or check such a run.
 
+An interrupted run, which stopped before the end of its production,
+continues on both engines when you run the same command again. See
+[Stop and continue a local run](hardware_platforms.md#stop-and-continue-a-local-run)
+for OpenMM and
+[Stop and continue a local run](run_gromacs.md#stop-and-continue-a-local-run)
+for GROMACS.
+
 ## Change the config
 
 The config belongs to the condition, not to one replicate. Raising its
