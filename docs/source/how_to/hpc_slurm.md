@@ -69,12 +69,14 @@ A preset sets the partition, QoS, account and time limit of each job.
 | `blanca-shirts` | `blanca,blanca-shirts` | `preemptable` | 23:59:59 | CU Boulder Blanca condo nodes |
 | `blanca-chbe-rdi` | `blanca,blanca-chbe-rdi` | `preemptable` | 23:59:59 | CU Boulder Blanca condo nodes |
 | `bridges2` | `GPU-shared` | none | 24:00:00 | PSC Bridges-2 GPU nodes |
+| `generic-gpu` | `gpu` | none | 23:59:59 | Any SLURM cluster with NVIDIA GPUs; no account |
 | `testing` | `atesting_a100` | `testing` | 0:05:59 | Short tests on CU Boulder Alpine |
 
 The Alpine presets (`aa100`, `al40` and `testing`) set a CU Boulder
 allocation as the account. On another allocation, give your own with
-`--account <account>`. To use another cluster, override the preset's fields
-with `--partition`, `--account`, `--qos` and `--gpu-type`. See
+`--account <account>`. To use another cluster, start from `generic-gpu` and
+set the site's fields with `--partition`, `--account`, `--qos` and
+`--gpu-type`. An empty value, such as `--qos ""`, removes the preset's line. See
 {doc}`hardware_platforms`. For the CU Boulder clusters, see
 {doc}`site_cu_boulder`.
 
@@ -161,13 +163,14 @@ pixi run -e build polyzymd recover -c config.yaml -r 1
 If work remains, submit a recovery job:
 
 ```bash
-pixi run -e build polyzymd recover \
-    -c config.yaml \
-    -r 1 \
-    --submit \
-    --preset aa100 \
-    --pixi-env auto
+pixi run -e build polyzymd recover -c config.yaml -r 1 --submit
 ```
+
+The job uses the preset and overrides (account, QoS, partition, GPU type,
+pixi environment, ...) that `polyzymd submit` recorded in the replicate's
+`submit_settings.json`. An option given to `recover`, such as `--account`,
+replaces that one value. A replicate submitted by an older PolyzyMD has no
+record: give `--preset` and the overrides yourself.
 
 (hpc-slurm-stop-a-chain)=
 ## Stop a chain

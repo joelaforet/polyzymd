@@ -58,7 +58,7 @@ script. Use an existing preset and override its Slurm fields when possible:
 ```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --preset aa100 \
+    --preset generic-gpu \
     --partition <site-partition> \
     --account <site-account> \
     --qos <site-qos> \
@@ -67,7 +67,8 @@ pixi run -e build polyzymd submit \
     --generate-only
 ```
 
-Remove an option when the site does not use it. Inspect the generated `#SBATCH`
+Remove an option when the site does not use it, or pass it empty (`--qos ""`)
+to drop a preset's value. Inspect the generated `#SBATCH`
 lines before submission. Run a short test job before you start a campaign.
 
 For presets without a site policy, `auto` selects the newest compatible

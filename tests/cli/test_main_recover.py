@@ -2140,3 +2140,84 @@ def test_a_continuation_with_other_dynamics_than_the_config_warns(tmp_path, monk
     err = capsys.readouterr().err
     assert "segment 1 continues the dynamics the chain started with (NPT, LangevinMiddle" in err
     assert "not the config's production (NVT, Langevin, friction 0.5/ps)" in err
+
+
+class TestRecoverReusesSubmitSettings:
+    """recover --submit replays the preset and overrides that submit recorded."""
+
+    @pytest.fixture(autouse=True)
+    def _patches(self, tmp_path):
+        from polyzymd.workflow.submit_settings import SubmitSettings, write_submit_settings
+
+        self.config_file = tmp_path / "config.yaml"
+        self.config_file.write_text("name: test")
+        self.working_dir = tmp_path / "work"
+        self.working_dir.mkdir()
+        write_submit_settings(
+            self.working_dir,
+            SubmitSettings.from_options(
+                "aa100", pixi_env="sim-cuda-12-0", account="smithlab", qos="", gpu_type="l40s"
+            ),
+        )
+        with (
+            patch(
+                "polyzymd.config.schema.SimulationConfig.from_yaml",
+                return_value=_mock_sim_config_for_submit(self.working_dir),
+            ),
+            patch(
+                "polyzymd.simulation.progress.load_or_scan_progress",
+                return_value=_mock_progress(total_steps=10000000, completed_steps=5000000),
+            ),
+            patch("polyzymd.simulation.progress.save_progress"),
+            patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[]),
+            patch(
+                "polyzymd.workflow.slurm._discover_manifest_path", return_value="/fake/pixi.toml"
+            ),
+        ):
+            yield
+
+    def _recover(self, *extra):
+        return CliRunner().invoke(cli, ["recover", "-c", str(self.config_file), "-r", "1", *extra])
+
+    def test_resume_hint_needs_no_preset(self):
+        result = self._recover()
+
+        assert result.exit_code == 0, result.output
+        assert f"polyzymd recover -c {self.config_file} -r 1 --submit\n" in result.output
+        assert "--account smithlab --qos ''" in result.output
+        assert "PRESET" not in result.output
+
+    def test_dry_run_uses_the_recorded_account_qos_and_gpu_type(self):
+        result = self._recover("--submit", "--dry-run")
+
+        assert result.exit_code == 0, result.output
+        assert "account smithlab" in result.output
+        assert "qos (none)" in result.output
+        assert "GPU type l40s" in result.output
+        assert "ucb625_asc1" not in result.output
+
+    def test_a_given_flag_replaces_one_recorded_value(self):
+        result = self._recover("--submit", "--dry-run", "--account", "otherlab")
+
+        assert result.exit_code == 0, result.output
+        assert "account otherlab" in result.output
+        assert "qos (none)" in result.output
+
+    def test_another_preset_drops_the_record(self):
+        result = self._recover("--submit", "--dry-run", "--preset", "bridges2")
+
+        assert result.exit_code == 0, result.output
+        assert "are not used" in result.output
+        assert "smithlab" not in result.output.split("are not used", 1)[1]
+
+    def test_the_submitted_job_uses_and_keeps_the_settings(self):
+        submitted = MagicMock(returncode=0, stdout="Submitted batch job 7", stderr="")
+        with patch("subprocess.run", return_value=submitted):
+            result = self._recover("--submit")
+
+        assert result.exit_code == 0, result.output
+        script = (self.working_dir / "recovery_scripts" / "recover_rep1.sh").read_text()
+        assert "#SBATCH --account=smithlab" in script
+        assert "--qos" not in script
+        assert "REQUESTED_PIXI_ENV=sim-cuda-12-0" in script
+        assert (self.working_dir / "submit_settings.json").is_file()

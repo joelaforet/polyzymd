@@ -184,6 +184,10 @@ class GromacsEngine(SimulationEngine):
             ),
         )
         generator.save_script(script, script_path)
+        from polyzymd.workflow.slurm_submit import make_log_folder
+
+        # A generated script can be submitted by hand; sbatch does not create its log folder.
+        make_log_folder(script_path)
         return script_path
 
     def check_build(self, request: EngineSubmitRequest) -> None:

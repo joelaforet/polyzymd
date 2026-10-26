@@ -578,6 +578,45 @@ class TestSubmitNeedsABuild:
         assert len(validated) == 1
         assert "--skip-build" in results[1][0].script_path.read_text()
 
+    def test_generated_scripts_have_their_log_folder_and_settings_record(
+        self, tmp_path, monkeypatch
+    ):
+        """A script from --generate-only can be passed to sbatch by hand."""
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.workflow import daisy_chain
+        from polyzymd.workflow.submit_settings import read_submit_settings
+
+        monkeypatch.setattr(
+            "polyzymd.workflow.slurm._discover_manifest_path", lambda: "/ws/pixi.toml"
+        )
+        monkeypatch.setattr(
+            "polyzymd.simulation.artifact_integrity.validate_build_bundle",
+            lambda working_dir, config, **gate: None,
+        )
+        config = self._config_file(tmp_path)
+
+        results = daisy_chain.submit_daisy_chain(
+            config,
+            "aa100",
+            replicates="1",
+            generate_only=True,
+            pixi_env="sim-cuda-12-0",
+            account="smithlab",
+            qos="",
+            gpu_type="l40s",
+        )
+
+        script = results[1][0].script_path.read_text()
+        output = next(line for line in script.splitlines() if line.startswith("#SBATCH --output"))
+        assert Path(output.split("=", 1)[1]).parent.is_dir()
+        assert "--qos" not in script
+        assert "#SBATCH --account=smithlab" in script
+        assert "#SBATCH --gres=gpu:l40s:1" in script
+        recorded = read_submit_settings(SimulationConfig.from_yaml(config).get_working_directory(1))
+        assert recorded.preset == "aa100"
+        assert recorded.overrides == {"account": "smithlab", "qos": "", "gpu_type": "l40s"}
+        assert recorded.pixi_env == "sim-cuda-12-0"
+
     def test_started_replicate_is_not_checked_against_the_edited_config(
         self, tmp_path, monkeypatch
     ):

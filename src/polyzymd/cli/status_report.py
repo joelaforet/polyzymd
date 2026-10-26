@@ -129,6 +129,9 @@ class ReplicateReport:
     action: str | None = None
     #: Segments whose System is not the audited build (polyzymd.audit.runtime), with why.
     diverged: list[str] = field(default_factory=list)
+    #: Preset and overrides ``polyzymd submit`` recorded for the replicate
+    #: (:mod:`polyzymd.workflow.submit_settings`), reused by the resubmit commands.
+    submit_settings: dict | None = None
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -828,6 +831,7 @@ def build_system_report(
                 note=note,
                 action=action,
                 diverged=_diverged_segments(progress),
+                submit_settings=_recorded_submit_settings(rep_path),
             )
         )
 
@@ -937,6 +941,30 @@ def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
     return "  ".join(fields)
 
 
+def _recorded_submit_settings(run_dir: Path | None) -> dict | None:
+    """The submit settings recorded in ``run_dir``, as a dict, or ``None``."""
+    from polyzymd.workflow.submit_settings import read_submit_settings
+
+    settings = read_submit_settings(run_dir)
+    return settings.to_dict() if settings is not None else None
+
+
+def _submit_flags(rep: ReplicateReport, preset_hint: str | None, nodes: str = "") -> str:
+    """The ``polyzymd submit`` flags that resubmit ``rep`` with the settings it ran with.
+
+    A replicate whose submit recorded its settings gets them back; otherwise
+    the flags name ``preset_hint`` (or a ``<preset>`` placeholder). ``nodes``
+    are nodes to leave out in addition to the excluded ones.
+    """
+    if rep.submit_settings:
+        from polyzymd.workflow.submit_settings import SubmitSettings
+
+        return SubmitSettings(**rep.submit_settings).command_flags(extra_exclude=nodes)
+    preset = f"--preset {preset_hint}" if preset_hint else "--preset <preset>"
+    flag = f" --exclude {_with_preset_exclude(nodes, preset_hint)}" if nodes else ""
+    return preset + flag
+
+
 def _with_preset_exclude(nodes: str, preset: str | None) -> str:
     """Join ``nodes`` with the preset's excluded nodes, since ``submit --exclude`` replaces them."""
     names = [n for n in nodes.split(",") if n]
@@ -1013,7 +1041,7 @@ def render_agent(
 
     dead = [(r, rep) for r in reports for rep in r.replicates if rep.verdict == VERDICT_DEAD]
     local = [
-        (r.config_path, rep.replicate)
+        (r.config_path, rep)
         for r in reports
         for rep in r.replicates
         if rep.verdict == VERDICT_INTERRUPTED
@@ -1027,26 +1055,25 @@ def render_agent(
         else:
             # A chain that failed CUDA routing names the nodes to leave out.
             exclude = _EXCLUDE.search(rep.last_error or "")
-            key = (report.config_path, exclude.group(1) if exclude else "")
-            restart.setdefault(key, []).append(rep.replicate)
+            flags = _submit_flags(rep, preset_hint, exclude.group(1) if exclude else "")
+            restart.setdefault((report.config_path, flags), []).append(rep.replicate)
     if restart:
         lines.append("")
         lines.append("# dead chains — resume from checkpoint with:")
-        preset = f" --preset {preset_hint}" if preset_hint else " --preset <preset>"
-        for (cfg, nodes), reps in restart.items():
-            flag = f" --exclude {_with_preset_exclude(nodes, preset_hint)}" if nodes else ""
+        for (cfg, flags), reps in restart.items():
             rep_arg = ",".join(str(r) for r in sorted(reps))
-            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg}{preset}{flag}")
+            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg} {flags}")
     if local:
         lines.append("")
         lines.append(
             "# interrupted runs (stopped by a signal, state saved, no SLURM log) — continue "
             "each with the first command on a workstation, or the second on a cluster:"
         )
-        preset = f" --preset {preset_hint}" if preset_hint else " --preset <preset>"
-        for cfg, replicate in local:
-            lines.append(f"polyzymd run -c {cfg} -r {replicate}")
-            lines.append(f"polyzymd submit -c {cfg} -r {replicate}{preset}")
+        for cfg, rep in local:
+            lines.append(f"polyzymd run -c {cfg} -r {rep.replicate}")
+            lines.append(
+                f"polyzymd submit -c {cfg} -r {rep.replicate} {_submit_flags(rep, preset_hint)}"
+            )
     if inspect:
         lines.append("")
         lines.append("# dead chains that need a look before restarting:")
@@ -1056,14 +1083,14 @@ def render_agent(
     if stopped:
         lines.append("")
         lines.append("# stopped chains (polyzymd cancel left a STOP file) — restart with:")
-        by_cfg = {}
+        by_cfg: dict[tuple[str, str], list[int]] = {}
         for report, rep in stopped:
-            by_cfg.setdefault(report.config_path, []).append(rep.replicate)
-        preset = f" --preset {preset_hint}" if preset_hint else " --preset <preset>"
-        for cfg, reps in by_cfg.items():
+            key = (report.config_path, _submit_flags(rep, preset_hint))
+            by_cfg.setdefault(key, []).append(rep.replicate)
+        for (cfg, flags), reps in by_cfg.items():
             rep_arg = ",".join(str(r) for r in sorted(reps))
             lines.append(f"polyzymd cancel -c {cfg} -r {rep_arg} --resume")
-            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg}{preset}")
+            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg} {flags}")
     return "\n".join(lines) + "\n"
 
 

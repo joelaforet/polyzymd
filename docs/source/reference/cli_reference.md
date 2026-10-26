@@ -399,17 +399,17 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 |--------|-------|----------|---------|-------------|
 | `--config` | `-c` | Yes | - | Path to YAML configuration file |
 | `--replicates` | `-r` | No | "1" | Replicate range (e.g., "1-5", "1,3,5") |
-| `--preset` | - | No | aa100 | SLURM partition preset |
+| `--preset` | - | No | aa100 | SLURM partition preset; `generic-gpu` sets no account or QoS, for any cluster |
 | `--engine` | - | No | from config or openmm | Simulation engine: `gromacs` or `openmm` |
 | `--email` | - | No | "" | Email for job notifications |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--output-dir` | - | No | auto | Directory for job scripts |
 | `--time-limit` | - | No | from preset | Override SLURM time limit: minutes, M:SS, H:MM:SS or D-H:MM:SS; other values are refused. OpenMM refuses 5 minutes or less: SLURM tells the job to stop 5 minutes before the limit. |
-| `--memory` | - | No | 3G | Override SLURM memory allocation |
-| `--account` | - | No | - | Override SLURM account / allocation ID |
+| `--memory` | - | No | 3G | Override SLURM memory allocation; `""` writes no `--mem` line |
+| `--account` | - | No | from preset | Override SLURM account / allocation ID; `""` writes no `--account` line |
 | `--partition` | - | No | from preset | Override SLURM partition |
-| `--qos` | - | No | - | Override SLURM QoS |
+| `--qos` | - | No | from preset | Override SLURM QoS; `""` writes no `--qos` line |
 | `--gpu-type` | - | No | - | GPU type for GRES (e.g., "a100", "a40", "mi100") |
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
@@ -424,7 +424,13 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 `--dry-run` and `--generate-only` are mutually exclusive. Use `--dry-run` to
 preview the submission plan without writing any files. Use `--generate-only` to
 generate SLURM scripts for inspection without submitting them to the scheduler.
+`--generate-only` also creates the `slurm_logs/` folder the scripts write to,
+so a script can be submitted by hand with `sbatch --export=NONE <script>`.
 :::
+
+`submit` records the preset and every override it was given in
+`submit_settings.json` in each replicate's run folder. `polyzymd recover --submit`
+and the resubmit commands of `polyzymd status --format agent` reuse them.
 
 ### SLURM Presets
 
@@ -668,7 +674,7 @@ polyzymd status -c config.yaml
 | `--all DIR` | One of `-c`/`--all` | Search `DIR` (up to 3 levels deep, hidden directories skipped) for `config.yaml` files. Repeatable. |
 | `--format table\|agent\|json` | No | `table` (default) prints progress bars for one config. `agent` prints one compact line per replicate with SLURM state, throughput and ETA. `json` emits the same data as JSON. |
 | `--no-slurm` | No | Skip the `squeue` query. Verdicts then rely on `progress.json` alone and cannot separate dead chains from running ones. |
-| `--preset NAME` | No | Preset name to print in the resubmit hint for dead chains (`agent` format). |
+| `--preset NAME` | No | Preset name for the resubmit commands (`agent` format) of replicates without `submit_settings.json`; a replicate with the record gets the preset and overrides `submit` recorded. |
 | `--unfinished` | No | `agent` and `json` only. Omit completed replicates; a fully completed system collapses to its header line. |
 
 ### Agent format
@@ -772,6 +778,11 @@ continue from the last completed segment.
 polyzymd recover -c CONFIG [OPTIONS]
 ```
 
+`recover --submit` uses the preset and overrides that `polyzymd submit` recorded
+in the replicate's `submit_settings.json`. An option given to `recover`
+replaces that one recorded value. A replicate without the record uses
+`--preset` and the options given.
+
 ### Options
 
 | Option | Short | Required | Default | Description |
@@ -779,14 +790,18 @@ polyzymd recover -c CONFIG [OPTIONS]
 | `--config` | `-c` | Yes | - | Path to YAML configuration file |
 | `--replicate` | `-r` | No | 1 | Replicate number |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
-| `--preset` | - | No | aa100 | SLURM preset for recovery job |
+| `--preset` | - | No | recorded, else aa100 | SLURM preset for recovery job. A preset other than the recorded one drops the recorded overrides |
 | `--engine` | - | No | from config | Override simulation engine (`gromacs` or `openmm`) |
 | `--submit / --no-submit` | - | No | --no-submit | Submit a recovery job (default: status only) |
 | `--dry-run` | - | No | false | With `--submit`, print the script path and SLURM settings; write and submit nothing |
 | `--email` | - | No | "" | Email for job notifications |
 | `--memory` | - | No | 3G | Override SLURM memory allocation (e.g. '4G', '8G') |
 | `--partition` | - | No | from preset | Override SLURM partition |
-| `--qos` | - | No | - | Override SLURM QoS |
+| `--qos` | - | No | recorded or preset | Override SLURM QoS; `""` writes no `--qos` line |
+| `--account` | - | No | recorded or preset | Override SLURM account; `""` writes no `--account` line |
+| `--time-limit` | - | No | recorded or preset | Override SLURM time limit |
+| `--gpu-type` | - | No | recorded or preset | GPU type for GRES |
+| `--exclude` | - | No | recorded or preset | SLURM `--exclude` override; replaces the preset list |
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
 | `--pixi-env` | - | No | engine-specific | Runtime for the recovery job; OpenMM `auto` uses a fixed environment for known-site presets, and GROMACS uses `build` |

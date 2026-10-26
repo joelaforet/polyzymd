@@ -440,6 +440,41 @@ class TestPrepareSubmissionPassThrough:
         assert kwargs["checkpoint_interval_s"] == 90.0
 
     @patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator")
+    def test_prepare_submission_creates_the_log_folder(self, mock_generator_cls, tmp_path):
+        """A script written without submitting can be passed to sbatch by hand."""
+        config = _make_config()
+        config.gromacs.mdrun_flags_equilibration = None
+        config.gromacs.mdrun_flags_production = None
+        config.gromacs.command_prefix = None
+        config.gromacs.mpi_launcher_flags = ""
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        working_dir = tmp_path / "gromacs"
+        working_dir.mkdir(parents=True)
+        for name in ("CALB_PEG.top", "CALB_PEG.gro", "em.mdp", "prod.mdp"):
+            (working_dir / name).write_text("x\n")
+        log = tmp_path / "projects" / "slurm_logs" / "job.%j.out"
+
+        def save(text, path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+            return path
+
+        mock_generator = MagicMock()
+        mock_generator.generate_job_script.return_value = f"#!/bin/bash\n#SBATCH --output={log}\n"
+        mock_generator.save_script.side_effect = save
+        mock_generator_cls.return_value = mock_generator
+        request = EngineSubmitRequest(
+            replicate=1,
+            config_path=tmp_path / "config.yaml",
+            working_dir=working_dir,
+            slurm_config=SlurmConfig(),
+        )
+
+        engine.prepare_submission(request)
+
+        assert log.parent.is_dir()
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator")
     def test_prepare_submission_passes_stage_specific_mdrun_flags(
         self, mock_generator_cls, tmp_path
     ):
