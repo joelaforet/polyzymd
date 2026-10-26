@@ -56,6 +56,19 @@ def student_t_coverage_factor(n: int, coverage: float = DEFAULT_COVERAGE) -> flo
     return float(student_t.ppf(0.5 + coverage / 2.0, n - 1))
 
 
+def sample_variance(values: ArrayLike) -> float:
+    """Return the sample variance (``ddof=1``) of *values*, exactly 0 for identical values.
+
+    ``np.var`` subtracts a mean that carries rounding error, so three copies of
+    0.05 give about 1e-35 instead of 0, and a standard error of 5e-18 and an
+    effect size of 8e15 follow from it. Identical values have no spread.
+    """
+    array = np.asarray(values, dtype=np.float64).ravel()
+    if array.size > 1 and np.all(array == array[0]):
+        return 0.0
+    return float(np.var(array, ddof=1))
+
+
 @dataclass(frozen=True)
 class MeanSemCI:
     """Mean, standard uncertainty and Student t confidence interval.
@@ -117,7 +130,7 @@ def mean_sem_ci(values: ArrayLike, coverage: float = DEFAULT_COVERAGE) -> MeanSe
             coverage=None,
         )
 
-    sem = float(np.std(array, ddof=1) / np.sqrt(float(n)))
+    sem = float(np.sqrt(sample_variance(array)) / np.sqrt(float(n)))
     half_width = factor * sem
     return MeanSemCI(
         mean=mean,

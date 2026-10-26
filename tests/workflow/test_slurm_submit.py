@@ -47,6 +47,20 @@ class TestRunSbatch:
         assert mock_run.call_args[0][0] == ["sbatch", "--export=NONE", str(script)]
         assert result.returncode == 0
 
+    def test_submit_and_recover_share_one_sbatch_command(self, tmp_path):
+        """sbatch_command is the one place the submit flags are written."""
+        from polyzymd.workflow.slurm_submit import sbatch_command
+
+        script = tmp_path / "job.sh"
+        assert sbatch_command(script) == ["sbatch", "--export=NONE", str(script)]
+        assert sbatch_command(script, "n1,n2") == [
+            "sbatch",
+            "--export=NONE",
+            "--exclude",
+            "n1,n2",
+            str(script),
+        ]
+
     @patch("polyzymd.workflow.slurm_submit.subprocess.run")
     def test_the_log_folder_is_made_before_sbatch(self, mock_run, tmp_path):
         """sbatch cannot write a log into a missing folder, so it is made first."""

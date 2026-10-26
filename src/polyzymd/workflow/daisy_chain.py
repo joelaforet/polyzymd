@@ -31,7 +31,8 @@ from polyzymd.workflow.slurm import (
     SlurmConfig,
     SlurmScriptGenerator,
 )
-from polyzymd.workflow.slurm_submit import make_log_folder, require_sbatch
+from polyzymd.workflow.slurm_submit import make_log_folder, require_sbatch, sbatch_command
+from polyzymd.workflow.submit_settings import SubmitSettings, write_submit_settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -394,6 +395,7 @@ class DaisyChainSubmitter:
         dc_config: DaisyChainConfig,
         pixi_env: str = "sim-cuda-12-4",
         openff_logs: bool = False,
+        settings: SubmitSettings | None = None,
     ) -> None:
         """Initialize the submitter.
 
@@ -407,8 +409,12 @@ class DaisyChainSubmitter:
             Pixi environment name (e.g. ``"sim-cuda-12-4"``, ``"sim-cuda-12-6"``).
         openff_logs : bool
             Enable verbose OpenFF logs in generated scripts.
+        settings : SubmitSettings or None
+            Preset and overrides to record in each replicate's run folder
+            once its script is written, for ``recover`` and ``status``.
         """
         self._sim_config = sim_config
+        self._settings = settings
         self._dc_config = dc_config
         self._openff_logs = openff_logs
         # The simulation environments have no OpenFF, so jobs load the build.
@@ -554,6 +560,9 @@ class DaisyChainSubmitter:
             Submission result with job information.
         """
         if self._dc_config.generate_only:
+            # The script can be submitted by hand, and sbatch does not create
+            # the folder of its log.
+            make_log_folder(script_path)
             job_id = f"GENERATED_{replicate}"
             LOGGER.info(f"[GENERATE ONLY] Script generated: {script_path}")
             return SubmissionResult(
@@ -583,15 +592,9 @@ class DaisyChainSubmitter:
         Path(self._get_scratch_dir(replicate)).mkdir(parents=True, exist_ok=True)
         make_log_folder(script_path)
 
-        # Use --export=NONE to start with clean environment, letting the
-        # script's pixi shell-hook initialization work properly regardless
-        # of submission context
-        cmd = ["sbatch", "--export=NONE"]
-
-        if self._dc_config.slurm_config.exclude:
-            cmd.extend(["--exclude", self._dc_config.slurm_config.exclude])
-
-        cmd.append(str(script_path))
+        # A clean environment (--export=NONE), so the script's pixi
+        # shell-hook works regardless of the submitting shell.
+        cmd = sbatch_command(script_path, self._dc_config.slurm_config.exclude)
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -679,6 +682,8 @@ class DaisyChainSubmitter:
         script_path = self._save_script(script_content, filename)
 
         result = self._submit_job(script_path=script_path, replicate=replicate)
+        if self._settings is not None:
+            write_submit_settings(self._get_scratch_dir(replicate), self._settings)
 
         # One active daisy-chain job owns serial segment progression
         self._job_chains[replicate] = [result]
@@ -895,7 +900,7 @@ def submit_daisy_chain(
     config_path : str or Path
         Path to simulation YAML config.
     slurm_preset : str
-        SLURM preset name (aa100, al40, blanca-shirts, bridges2, testing).
+        SLURM preset name (see :data:`polyzymd.workflow.slurm.PRESET_NAMES`).
     replicates : str
         Replicate range string (e.g. ``"1-5"``, ``"1,3,5"``).
     email : str
@@ -919,11 +924,11 @@ def submit_daisy_chain(
     memory : str or None
         Override SLURM memory allocation (e.g. ``"4G"``).
     account : str or None
-        Override SLURM account / allocation ID.
+        Override SLURM account / allocation ID; ``""`` removes the preset's.
     partition : str or None
         Override SLURM partition.
     qos : str or None
-        Override SLURM QoS value.
+        Override SLURM QoS value; ``""`` removes the preset's.
     gpu_type : str or None
         Override GPU type for presets that use ``--gpus`` directive.
     constraint : str or None
@@ -944,8 +949,7 @@ def submit_daisy_chain(
     Raises
     ------
     ValueError
-        If the SLURM account is empty on a preset that requires one
-        and neither ``dry_run`` nor ``generate_only`` is set.
+        If an override is empty where SLURM needs a value (partition, time limit).
     FileNotFoundError
         If a replicate has no valid build from ``polyzymd build`` (not
         checked for ``dry_run``).
@@ -965,44 +969,22 @@ def submit_daisy_chain(
     else:
         script_output_dir = sim_config.output.get_job_scripts_directory()
 
-    # Create SLURM config from preset
-    slurm_config = SlurmConfig.from_preset(slurm_preset, email=email)  # type: ignore[arg-type]
-
-    # Record whether the preset itself ships with an empty account.
-    preset_account_is_empty = not slurm_config.account
-
-    # Apply CLI overrides
-    if time_limit:
-        slurm_config.time_limit = time_limit
-    if memory:
-        slurm_config.memory = memory
-    if account:
-        slurm_config.account = account
-    if partition:
-        slurm_config.partition = partition
-    if qos:
-        slurm_config.qos = qos
-    if gpu_type:
-        slurm_config.gpu_type = gpu_type
-    if constraint:
-        slurm_config.constraint = constraint
-    if nodelist is not None:
-        slurm_config.nodelist = nodelist
-    if exclude is not None:
-        slurm_config.exclude = exclude or None
-
-    # Guard: an empty account on presets that require one (e.g. Alpine) will
-    # produce an invalid SBATCH script.  Skip the guard when the preset itself
-    # ships with account="" (e.g. bridges2).
-    if not slurm_config.account and not preset_account_is_empty:
-        msg = (
-            f"SLURM account is required but was not set for preset '{slurm_preset}'. "
-            "Pass your allocation ID with --account <id>."
-        )
-        if dry_run or generate_only:
-            LOGGER.warning(msg)
-        else:
-            raise ValueError(msg)
+    # The preset with the site overrides; an empty value removes a setting.
+    settings = SubmitSettings.from_options(
+        slurm_preset,
+        pixi_env=pixi_env,
+        time_limit=time_limit,
+        memory=memory,
+        account=account,
+        partition=partition,
+        qos=qos,
+        gpu_type=gpu_type,
+        constraint=constraint,
+        nodelist=nodelist,
+        exclude=exclude,
+        email=email or None,
+    )
+    slurm_config = settings.slurm_config()
 
     # Create submission config
     dc_config = DaisyChainConfig.from_simulation_config(
@@ -1040,6 +1022,6 @@ def submit_daisy_chain(
 
     # Create submitter and submit
     submitter = DaisyChainSubmitter(
-        sim_config, dc_config, pixi_env=pixi_env, openff_logs=openff_logs
+        sim_config, dc_config, pixi_env=pixi_env, openff_logs=openff_logs, settings=settings
     )
     return submitter.submit_all()

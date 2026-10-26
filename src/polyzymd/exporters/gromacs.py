@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import shlex
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -490,11 +491,13 @@ class MDPGenerator:
         return THERMOSTAT_MAP.get(thermostat, THERMOSTAT_MAP["LangevinMiddle"])
 
     def _barostat(self, barostat: str, frequency: int | None = None) -> tuple[str, str]:
-        """Return GROMACS's pcoupl and pcoupltype for a PolyzyMD barostat, warning once that it is approximate.
+        """Return GROMACS's pcoupl and pcoupltype for a PolyzyMD barostat, noting once that it is approximate.
 
+        The substitution is the expected one for every GROMACS run, so it is an
+        INFO note, not a warning: c-rescale samples the same NPT ensemble.
         ``barostat_frequency`` sets how often OpenMM's MC barostat tries a volume
         move; c-rescale keeps GROMACS's own coupling interval, so a value other
-        than the default 25 gives a warning once.
+        than the default 25 gives a warning once, since that setting is dropped.
         """
         if frequency not in (None, 25) and "barostat_frequency" not in self._warned:
             self._warned.add("barostat_frequency")
@@ -505,7 +508,7 @@ class MDPGenerator:
             )
         if "barostat" not in self._warned:
             self._warned.add("barostat")
-            logger.warning(
+            logger.info(
                 "GROMACS has no Monte Carlo barostat; barostat %s runs as c-rescale, which samples "
                 "the same NPT ensemble with a different algorithm. See the GROMACS and OpenMM "
                 "page of the PolyzyMD docs.",
@@ -1662,6 +1665,7 @@ class RunScriptGenerator:
         prefix: str,
         equilibration_mdps: List[str],
         gmx_command: str = "gmx",
+        mdrun_flags: Optional[Dict[str, str]] = None,
     ):
         """Initialize the run script generator.
 
@@ -1669,10 +1673,20 @@ class RunScriptGenerator:
             prefix: System prefix for file naming.
             equilibration_mdps: List of equilibration MDP filenames.
             gmx_command: GROMACS command (default "gmx", can be path).
+            mdrun_flags: Extra ``gmx mdrun`` flags by stage (``em``, ``eq``,
+                ``prod``), as ``polyzymd run`` passes them
+                (``GromacsEngine.local_mdrun_flags``): ``-ntmpi``, ``-ntomp``,
+                GPU offload and the config's ``mdrun_flags``.
         """
         self._prefix = prefix
         self._eq_mdps = equilibration_mdps
         self._gmx = gmx_command
+        self._mdrun_flags = dict(mdrun_flags or {})
+
+    def _flags(self, stage: str) -> str:
+        """The mdrun flags of ``stage``, with a leading space, or an empty string."""
+        flags = self._mdrun_flags.get(stage, "")
+        return f" {flags}" if flags else ""
 
     def generate(self, output_path: Path) -> Path:
         """Generate the GROMACS run script.
@@ -1697,6 +1711,7 @@ class RunScriptGenerator:
                 "generated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "gmx_command": self._gmx,
                 "prefix": self._prefix,
+                "script_name": output_path.name,
                 "energy_minimization_block": "\n".join(
                     self._generate_energy_minimization()
                 ).rstrip(),
@@ -1724,6 +1739,9 @@ class RunScriptGenerator:
         _validate_local_shell_token(self._prefix, "prefix")
         for mdp_name in self._eq_mdps:
             _validate_local_shell_token(mdp_name, "equilibration_mdp")
+        for flags in self._mdrun_flags.values():
+            for token in shlex.split(flags):
+                _validate_local_shell_token(token, "mdrun_flags")
 
     def _generate_energy_minimization(self) -> List[str]:
         """Generate energy minimization commands."""
@@ -1731,13 +1749,11 @@ class RunScriptGenerator:
             "# ========================================",
             "# Step 1: Energy Minimization",
             "# ========================================",
-            'echo "=== Step 1: Energy Minimization ==="',
-            "",
             "if [ ! -f em.gro ]; then",
             '    echo "=== Step 1: Energy Minimization ==="',
             "",
             "    $GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro -p ${PREFIX}.top -o em.tpr",
-            "    $GMX mdrun -deffnm em -v",
+            f"    $GMX mdrun -deffnm em -v{self._flags('em')}",
             "",
             "    # Check if standard minimization succeeded",
             "    if [ ! -f em.gro ]; then",
@@ -1792,7 +1808,7 @@ class RunScriptGenerator:
             lines.extend(
                 [
                     grompp_cmd,
-                    f"$GMX mdrun -deffnm {output_name} -v",
+                    f"$GMX mdrun -deffnm {output_name} -v{self._flags('eq')}",
                     "",
                     f"if [ ! -f {output_name}.gro ]; then",
                     f'    echo "ERROR: Equilibration stage {stage_num} failed!"',
@@ -1821,7 +1837,7 @@ class RunScriptGenerator:
             'echo "=== Step 3: Production MD ==="',
             "",
             "$GMX grompp -f prod.mdp -c ${LAST_EQ}.gro -t ${LAST_EQ}.cpt -p ${PREFIX}.top -o prod.tpr",
-            "$GMX mdrun -deffnm prod -v",
+            f"$GMX mdrun -deffnm prod -v{self._flags('prod')}",
             "",
             'echo "Production complete: prod.xtc"',
             'echo ""',
@@ -2003,7 +2019,15 @@ class GromacsExporter:
         # Step 4: Generate run script
         logger.info("Generating run script...")
         eq_mdp_names = [p.name for p in eq_paths]
-        script_generator = RunScriptGenerator(prefix, eq_mdp_names, gmx_command)
+        mdrun_flags = None
+        if getattr(self._config, "gromacs", None) is not None:
+            from polyzymd.engines import create_engine
+
+            # The same flags polyzymd run passes: threads, ranks, GPU offload.
+            mdrun_flags = create_engine(
+                self._config, override="gromacs", defer_binary=True
+            ).local_mdrun_flags(gmx_command)
+        script_generator = RunScriptGenerator(prefix, eq_mdp_names, gmx_command, mdrun_flags)
         script_path = output_dir / f"run_{prefix}_gromacs.sh"
         script_generator.generate(script_path)
         result["run_script"] = script_path

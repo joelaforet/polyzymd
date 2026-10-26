@@ -30,7 +30,19 @@ from polyzymd.utils.templates import render_package_template
 LOGGER = logging.getLogger(__name__)
 
 # Preset types
-PresetType = Literal["aa100", "al40", "blanca-shirts", "blanca-chbe-rdi", "bridges2", "testing"]
+PresetType = Literal[
+    "aa100", "al40", "blanca-shirts", "blanca-chbe-rdi", "bridges2", "generic-gpu", "testing"
+]
+#: Preset names, in the order ``--preset`` lists them.
+PRESET_NAMES: tuple[str, ...] = (
+    "aa100",
+    "al40",
+    "blanca-shirts",
+    "blanca-chbe-rdi",
+    "bridges2",
+    "generic-gpu",
+    "testing",
+)
 
 # Valid GPU types for Bridges2 (PSC).  Adding a new type is a one-line change here.
 BRIDGES2_GPU_TYPES: List[str] = ["v100-16", "v100-32", "l40s-48", "h100-80"]
@@ -44,6 +56,7 @@ PRESET_DEFAULT_PIXI_ENV: Dict[str, str] = {
     "blanca-shirts": "sim-cuda-12-4",
     "blanca-chbe-rdi": "sim-cuda-12-4",
     "bridges2": "sim-cuda-12-6",
+    "generic-gpu": "auto",
     "testing": "auto",
 }
 
@@ -421,6 +434,15 @@ class SlurmConfig:
                 # -N 1 nodes format instead of --nodes + --ntasks).
                 "gpu_type": "v100-32",
                 "gpu_directive_style": "gpus",
+            },
+            # Any SLURM cluster with NVIDIA GPUs: no account and no QoS line,
+            # so the site's defaults apply. Set the site's values with
+            # --partition, --account, --qos and --gpu-type.
+            "generic-gpu": {
+                "partition": "gpu",
+                "qos": "",
+                "account": "",
+                "time_limit": "23:59:59",
             },
             "testing": {
                 "partition": "atesting_a100",

@@ -30,8 +30,24 @@ def require_sbatch(script_path: Path | str) -> None:
         )
 
 
-def run_sbatch(script_path: Path | str) -> subprocess.CompletedProcess[str]:
-    """Submit a script with ``sbatch --export=NONE``.
+def sbatch_command(script_path: Path | str, exclude: str | None = None) -> list[str]:
+    """Return the ``sbatch`` command that submits ``script_path`` as PolyzyMD jobs are submitted.
+
+    ``--export=NONE`` starts the job from a clean login environment, so it
+    does not inherit the submitting shell's (another pixi environment's
+    ``PATH``, ``CONDA_PREFIX``, ``PYTHONPATH``). ``exclude`` repeats the
+    script's excluded nodes on the command line.
+    """
+    command = ["sbatch", "--export=NONE"]
+    if exclude:
+        command += ["--exclude", exclude]
+    return [*command, str(script_path)]
+
+
+def run_sbatch(
+    script_path: Path | str, exclude: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Submit a script with :func:`sbatch_command` (``sbatch --export=NONE``).
 
     The job starts from a clean login environment, as OpenMM jobs do, and
     runs its own ``module load`` lines. Nothing is loaded on the submitting
@@ -41,6 +57,8 @@ def run_sbatch(script_path: Path | str) -> subprocess.CompletedProcess[str]:
     ----------
     script_path : Path or str
         Path to the SLURM batch script.
+    exclude : str or None, optional
+        Nodes to exclude, passed as ``--exclude``.
 
     Returns
     -------
@@ -55,5 +73,5 @@ def run_sbatch(script_path: Path | str) -> subprocess.CompletedProcess[str]:
     require_sbatch(script_path)
     make_log_folder(script_path)
     return subprocess.run(
-        ["sbatch", "--export=NONE", str(script_path)], capture_output=True, text=True, check=False
+        sbatch_command(script_path, exclude), capture_output=True, text=True, check=False
     )

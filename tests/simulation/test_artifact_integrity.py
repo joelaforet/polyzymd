@@ -252,6 +252,33 @@ def test_build_validates_with_a_copied_config_and_with_the_absolute_path_hash(
         validate_build_bundle(run, second)
 
 
+def test_a_build_matches_a_config_that_changed_only_its_openmm_platform(tmp_path):
+    """Switching CPU to CUDA changes where the system runs, not what was built."""
+    from polyzymd.simulation.artifact_integrity import build_matches_config
+
+    built = _copied_quickstart_config(tmp_path / "a")
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / MANIFEST_NAME).write_text(json.dumps({"config_hash": config_hash(built)}))
+    assert built.openmm.platform == "CPU"
+
+    cuda = built.model_copy(
+        update={"openmm": built.openmm.model_copy(update={"platform": "CUDA", "device_index": "0"})}
+    )
+    salt = built.model_copy(
+        update={
+            "solvent": built.solvent.model_copy(
+                update={"ions": built.solvent.ions.model_copy(update={"nacl_concentration": 0.5})}
+            )
+        }
+    )
+
+    assert config_hash(cuda) != config_hash(built)  # the stored hash is unchanged
+    assert build_matches_config(run, built, 1) is True
+    assert build_matches_config(run, cuda, 1) is True
+    assert build_matches_config(run, salt, 1) is False
+
+
 def test_a_moved_build_validates(tmp_path, passing_audit):
     """Artifacts are recorded relative to the run folder, so a moved run folder still validates."""
     import shutil

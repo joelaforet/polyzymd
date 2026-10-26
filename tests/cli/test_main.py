@@ -2395,6 +2395,29 @@ class TestSubmitDryRunHardwareWarnings:
         assert "choose a CPU partition" not in output
         assert "neither gromacs.module_load nor gromacs.command_prefix is set" in output
 
+    def test_dry_run_shows_memory_gpu_type_and_how_auto_resolves(self) -> None:
+        result = CliRunner().invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(self.QUICKSTART / "config.yaml"),
+                "--dry-run",
+                "--preset",
+                "generic-gpu",
+                "--gpu-type",
+                "l40s",
+                "--memory",
+                "8G",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "memory 8G" in result.output
+        assert "GPU type l40s" in result.output
+        assert "auto (resolved per node at run time" in result.output
+        assert "qos (none)" in result.output and "account (none)" in result.output
+
 
 class TestNoPolymerWording:
     """Runs without polymers do not mention polymers; console text shows plain values."""
@@ -2417,6 +2440,23 @@ class TestNoPolymerWording:
         assert "packmol:" in result.output
         assert "gmx:" in result.output
         assert "Enzyme-Polymer" not in result.output
+
+    def test_info_reports_the_conda_version_of_a_package_that_says_0_0_0(self, monkeypatch) -> None:
+        """The conda build of OpenFF Interchange reports 0.0.0; info gives its real version."""
+        import importlib.util
+
+        monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+        monkeypatch.setattr(
+            "polyzymd.utils.version.package_version",
+            lambda module: {"openff.interchange": "0.5.2"}.get(module),
+        )
+
+        result = CliRunner().invoke(cli, ["info"])
+
+        assert result.exit_code == 0, result.output
+        assert "OpenFF Interchange: 0.5.2" in result.output
+        assert "OpenFF Toolkit: unknown" in result.output
+        assert "0.0.0" not in result.output
 
 
 @pytest.mark.parametrize("command", ["compare", "new-analysis"])
@@ -3463,3 +3503,32 @@ class TestGromacsStopMessages:
         assert "starts them again" in _gromacs_stop_outcome(
             "Running energy minimization (mdrun)", tmp_path
         )
+
+
+def test_known_library_notices_are_silenced_and_others_are_not(caplog) -> None:
+    """pint's electric_potential redefinition and Interchange's torch FutureWarning are hidden."""
+    import logging
+    import warnings
+
+    from polyzymd.cli.main import silence_known_library_warnings
+
+    torch_message = (
+        "`torch.distributed.reduce_op` is deprecated, please use `torch.distributed.ReduceOp` "
+        "instead"
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        silence_known_library_warnings()
+        for module in ("openff.interchange.components.interchange", "mypackage"):
+            warnings.warn_explicit(torch_message, FutureWarning, "x.py", 1, module=module)
+        warnings.warn_explicit("other", FutureWarning, "x.py", 1, module="openff.interchange")
+    assert [(str(w.message)[:5], w.filename) for w in caught] == [
+        ("`torc", "x.py"),
+        ("other", "x.py"),
+    ]
+
+    pint = logging.getLogger("pint.util")
+    with caplog.at_level(logging.WARNING):
+        pint.warning("Redefining '[electric_potential]' (<class 'X'>)")
+        pint.warning("Redefining '[length]' (<class 'X'>)")
+    assert [r.getMessage() for r in caplog.records] == ["Redefining '[length]' (<class 'X'>)"]

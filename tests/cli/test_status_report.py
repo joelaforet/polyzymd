@@ -970,3 +970,39 @@ def test_a_finished_replicate_whose_config_asks_for_more_is_extendable(tmp_path:
     assert (rep.verdict, rep.action) == ("extendable", "continue")
     assert "the config now asks for 1000 ns" in rep.note
     assert "EXTENDABLE" in render_agent([report], now=NOW)
+
+
+def test_resubmit_commands_reuse_the_recorded_submit_settings():
+    """A replicate submitted with site overrides is resubmitted with them, not the preset only."""
+    from polyzymd.workflow.submit_settings import SubmitSettings
+
+    recorded = SubmitSettings.from_options(
+        "aa100", pixi_env="sim-cuda-12-0", account="smithlab", qos=""
+    ).to_dict()
+    dead = _rep(1, "dead", last_error="FATAL: x", action="resubmit", submit_settings=recorded)
+    plain = _rep(2, "dead", last_error="FATAL: x", action="resubmit")
+
+    text = render_agent([SystemReport("SYS", "c.yaml", "/s", [dead, plain])], now=NOW)
+
+    assert (
+        "polyzymd submit -c c.yaml -r 1 --preset aa100 --account smithlab --qos '' "
+        "--pixi-env sim-cuda-12-0"
+    ) in text
+    assert "polyzymd submit -c c.yaml -r 2 --preset <preset>" in text
+
+
+def test_conditions_sharing_a_run_folder_name_get_distinct_headers():
+    from polyzymd.cli.status_report import system_labels
+
+    reports = [
+        SystemReport("trp_300K", "s/water/config.yaml", "/s", [], config_name="water"),
+        SystemReport("trp_300K", "s/sbma/config.yaml", "/s", [], config_name="sbma"),
+        SystemReport("other", "s/o/config.yaml", "/s", [], config_name="o"),
+    ]
+
+    assert system_labels(reports) == ["trp_300K [water]", "trp_300K [sbma]", "other"]
+    same = [
+        SystemReport("trp", "s/a/config.yaml", "/s", [], config_name="x"),
+        SystemReport("trp", "s/b/config.yaml", "/s", [], config_name="x"),
+    ]
+    assert system_labels(same) == ["trp [a]", "trp [b]"]

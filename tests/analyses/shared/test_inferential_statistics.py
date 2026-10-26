@@ -269,6 +269,17 @@ def test_cohens_d_zero_variance_equal_means() -> None:
     assert result.cohens_d == 0.0
 
 
+def test_cohens_d_of_identical_replicates_is_undefined_not_rounding_noise() -> None:
+    """Three copies of 0.05 have no spread; float rounding of the mean must not give d ~ 1e16."""
+    from polyzymd.analyses.shared.inferential_statistics import cohens_d
+
+    result = cohens_d([0.05, 0.05, 0.05], [0.0, 0.0, 0.0])
+
+    assert math.isnan(result.cohens_d)
+    assert result.direction == "undetermined"
+    assert cohens_d([0.1, 0.1, 0.1], [0.1, 0.1, 0.1]).cohens_d == 0.0
+
+
 def test_bh_matches_the_step_up_definition_with_ties_and_missing_values() -> None:
     """q_i = min over p_j >= p_i of p_j m / rank_j, capped at 1; None and NaN pass through."""
     import numpy as np

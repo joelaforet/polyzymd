@@ -113,6 +113,55 @@ def test_a_copied_config_without_runs_records_no_data_location(tmp_path: Path) -
     assert _output(copy) == ((created.root / "runs" / "water").resolve(), None)
 
 
+def test_a_copied_config_keeps_its_text_and_list_indentation(tmp_path: Path) -> None:
+    """--config and --from change only the path, output and name lines of the shipped example.
+
+    The tutorials paste a ``  - type: polymer`` entry after the protein entry,
+    which needs the example's indented list items and comments to survive.
+    """
+    from polyzymd.analyses.study_scaffold import add_condition
+
+    example = Path(__file__).resolve().parents[2] / "examples" / "quickstart" / "config.yaml"
+    created = create_study(tmp_path / "st", git=False)
+
+    water = add_condition(created.root, "Water", config=example)
+    sbma = add_condition(created.root, "SBMA", source="Water")
+
+    original = example.read_text()
+    for copy in (water, sbma):
+        text = copy.read_text()
+        assert "\nsolutes:\n  - type: protein\n" in text
+        assert '    pdb_path: "structures/trpcage.pdb"\n' in text
+        assert "# Everything added to the box." in text
+        assert original.split("solvent:", 1)[1].split("output:")[0] in text
+        assert _output(copy)[1] is None
+    assert yaml.safe_load(sbma.read_text())["name"] == "sbma"
+    pasted = sbma.read_text().replace(
+        "    charges: {method: library}\n",
+        "    charges: {method: library}\n  - type: polymer\n    name: SBMA\n",
+        1,
+    )
+    assert [s["type"] for s in yaml.safe_load(pasted)["solutes"]] == ["protein", "polymer"]
+
+
+def test_a_config_that_cannot_keep_its_text_is_written_with_indented_lists(
+    tmp_path: Path,
+) -> None:
+    """A path in flow style cannot be edited in place; the rewritten config indents lists."""
+    from polyzymd.analyses.study_scaffold import add_condition
+
+    config = write_simulation_config(tmp_path / "example", scratch=Path("."))
+    (config.parent / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(config.read_text())
+    config.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=True))
+    created = create_study(tmp_path / "st", git=False)
+
+    copy = add_condition(created.root, "Water", config=config)
+
+    assert "\nsolutes:\n  - " in copy.read_text()
+    assert yaml.safe_load(copy.read_text())["solutes"][0]["pdb_path"] == "structures/test.pdb"
+
+
 def test_add_condition_git_ignores_runs_in_a_study_made_before_runs_existed(
     tmp_path: Path,
 ) -> None:
