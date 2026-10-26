@@ -128,6 +128,18 @@ grep "^ATOM" structures/ubq_clean.pdb | cut -c22 | sort | uniq -c
 
 The file now has 1231 atoms: the 602 heavy atoms and 629 hydrogens.
 
+```{figure} ../_static/renders/pdb_prep_hydrogens.webp
+:figclass: pz-render
+:class: dark-light
+:alt: Two matching views of the last six residues of ubiquitin as sticks with gray carbons: on the left without hydrogens, on the right with white hydrogens on every carbon, nitrogen and oxygen that needs one.
+
+The C-terminal tail of ubiquitin, residues 71 to 76, before (left) and after
+(right) `clean-pdb`. The heavy atoms are where the crystal structure put
+them; `clean-pdb` adds only the hydrogens, at pH 7. The two arginines get
+their charged guanidinium groups, and the terminal carboxylate of Gly 76
+stays deprotonated.
+```
+
 ## Step 5: Check the file with OpenFF
 
 PolyzyMD reads the protein with `openff.toolkit.Topology.from_pdb()`. OpenFF
@@ -259,6 +271,17 @@ adding: {'LYS 162': ['OXT']}
 
 Run the OpenFF check of Step 5 on `structures/t4l_clean.pdb`. It now prints
 `OpenFF read 1 molecule, 2603 atoms, net charge 8`.
+
+```{figure} ../_static/renders/pdb_prep_oxt.webp
+:figclass: pz-render
+:class: dark-light
+:alt: Two matching views of the last three residues of T4 lysozyme as sticks: on the left the last residue ends in a carboxyl carbon with one oxygen; on the right a second oxygen, marked by a light blue halo, completes the carboxylate, and hydrogens are added.
+
+The end of the 181L chain, residues 160 to 162, as downloaded (left) and
+after `add_terminal_oxt.py` and `clean-pdb` (right). Lys 162 had one
+carboxyl oxygen; the added terminal oxygen `OXT` is marked by the halo.
+No other heavy atom changes.
+```
 
 (ligand-sdf-from-crystal)=
 ### Make the ligand SDF from the crystal pose

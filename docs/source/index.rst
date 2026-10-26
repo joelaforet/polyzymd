@@ -28,16 +28,6 @@ PolyzyMD
 
             Run your first simulation
 
-.. raw:: html
-
-   <figure class="pz-render pz-movie">
-   <video class="pz-loop" autoplay loop muted playsinline preload="metadata" poster="_static/renders/polymer_loop_poster.webp" aria-label="Two short polymer chains drawn as blue sticks with red, blue and yellow sulfonate and ammonium groups writhe and drift beside a small protein drawn as a gray cartoon.">
-   <source src="_static/renders/polymer_loop.mp4" type="video/mp4">
-   </video>
-   <figcaption><p>Two SBMA 5-mers beside Trp-cage over 2 ns at 300 K, from the shipped example
-   <code>examples/polymer</code> (50 ps averages; water and ions hidden).</p></figcaption>
-   </figure>
-
 How PolyzyMD works
 ------------------
 
@@ -163,28 +153,52 @@ Common tasks
 New in 1.3
 ----------
 
+Coming from PolyzyMD 1.2? These pages cover what changed for you.
+
 .. grid:: 1 1 3 3
    :gutter: 2
 
-   .. grid-item-card:: Physics audit
-      :link: explanation/physics_audit
+   .. grid-item-card:: Rewrite your 1.2 config
+      :link: how_to/rewrite_config_rc5
       :link-type: doc
 
-      Every build is compared, term by term, with the force fields and charges
-      its config names.
+      Each component now names its own force field and charges. A table maps
+      every 1.2 key to its 1.3 place.
+
+   .. grid-item-card:: Projects, studies, conditions
+      :link: explanation/projects
+      :link-type: doc
+
+      A project holds the studies of a paper; a study, the conditions you
+      compare; a condition, its replicates.
+
+   .. grid-item-card:: Run and compare analyses
+      :link: how_to/analysis_compare_conditions
+      :link-type: doc
+
+      One command runs an analysis on every replicate and compares the
+      conditions, with intervals and tests.
+
+   .. grid-item-card:: Add your own analysis
+      :link: how_to/study_api
+      :link-type: doc
+
+      Write a Python function of one frame or one replicate; PolyzyMD runs it
+      everywhere and compares the conditions.
+
+   .. grid-item-card:: Freeze a study to publish
+      :link: how_to/study_freeze
+      :link-type: doc
+
+      Make a deposit from which a reader can redraw your figures and rerun
+      your analyses.
 
    .. grid-item-card:: Polymers from SMILES
       :link: tutorials/star_sited_monomers
       :link-type: doc
 
-      Star-sited monomers, drawn end caps and tacticity, built with mBuild.
-
-   .. grid-item-card:: Stop, continue, run longer
-      :link: how_to/run_longer
-      :link-type: doc
-
-      Interrupted runs continue on OpenMM and GROMACS; finished OpenMM runs
-      extend to a longer production.
+      Write each monomer as a star-sited SMILES; caps and tacticity are part
+      of the config.
 
 .. note::
 

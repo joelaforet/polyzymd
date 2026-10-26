@@ -1115,4 +1115,4 @@ page into one of these configs.
 - {doc}`../how_to/restraints` - Atom selection and restraints
 - {doc}`cli_reference` - CLI documentation
 - {doc}`physics_checks` - The checks every build must pass
-- {doc}`../how_to/rewrite_config_rc5` - Rewrite a 1.3.0rc4 config
+- {doc}`../how_to/rewrite_config_rc5` - Rewrite a 1.2 config for 1.3

@@ -16,6 +16,20 @@ The first `*` bonds toward the head of the chain, the second toward the tail.
 For a vinyl, acrylate or methacrylate monomer, the two linking atoms are the
 carbons of the C=C double bond, which is a single bond in the chain.
 
+```{figure} ../_static/renders/star_sites.webp
+:figclass: pz-render
+:class: dark-light
+:alt: Three panels of the same blue molecule: the SBMA monomer with its carbon-carbon double bond marked; the repeat unit with two small dark spheres for its two star sites; and a coiled chain of five units with halos along its backbone where the units are joined.
+
+From SBMA to a chain, at one scale. Left: the monomer as sold, with the
+two carbons of its C=C marked. Middle: the repeat unit
+`[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]`, the C=C now single,
+each `*` (dark) where the bond to the next unit points. Right: a 5-mer
+that PolyzyMD built for `examples/polymer`, with the four bonds between
+units marked; each one replaced the `*` of two units. Its end units keep
+their C=C.
+```
+
 ## The notebook
 
 {download}`star_sited_monomers.ipynb <../../../src/polyzymd/templates/notebooks/star_sited_monomers.ipynb>` is a sandbox

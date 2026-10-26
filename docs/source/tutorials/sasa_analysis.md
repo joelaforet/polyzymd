@@ -56,6 +56,20 @@ water molecule can reach. Each SASA calculation has two selections:
 If the protein has a smaller SASA with the polymer in the context, the
 polymer covers part of the protein surface.
 
+```{figure} ../_static/renders/sasa_covered.webp
+:figclass: pz-render
+:class: dark-light
+:alt: Two matching views of Trp-cage as a gray surface: on the left two blue polymer chains lie across it; on the right the chains are removed and the patch they covered is colored orange-red.
+
+Trp-cage with two SBMA 5-mers, as `examples/polymer` builds them (the
+system of the `SBMA` condition) (left), and the same view without the chains (right), with the
+surface of every protein atom the chains cover in vermillion: atoms whose
+SASA is smaller with `protein or resname SBM` in the context than with
+`protein` alone. In this structure the chains cover 171 Å² of the
+1874 Å² of the protein, computed with the SASA code of `polyzymd analyze
+sasa`.
+```
+
 ## Step 1: List SASA with two contexts
 
 Open `project.yaml` and add `sasa` under `analyses:`:

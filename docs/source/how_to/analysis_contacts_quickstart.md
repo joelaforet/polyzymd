@@ -37,6 +37,20 @@ which it is in contact. PolyzyMD also measures it for each polymer residue
 name, such as each monomer type. A residue can touch several types on one
 frame, so the per-type fractions do not add up to the total.
 
+```{figure} ../_static/renders/analysis_contacts.webp
+:figclass: pz-render
+:class: dark-light
+:alt: Trp-cage as a gray cartoon with a few side chains as sticks, the two near the start of the chain in orange-red, next to faint blue polymer chains.
+
+The contact fraction of each residue of Trp-cage over 2 ns at 300 K with
+two SBMA chains (`examples/polymer`), from `polyzymd analyze contacts
+--set method=distance`. The side chains of the residues the chains touch
+are drawn, their carbons from gray (rarely) to vermillion (in every
+frame). The chains stay at the N-terminus: residues 1 and 2 are in contact
+in 85 and 88 % of the frames, residue 20 in 24 %. The chains of the last
+frame are drawn faint.
+```
+
 For the steps of each method and the checks against an independent script,
 see {doc}`../reference/analysis_contacts_verification`. For the arguments of
 each function, see {doc}`../reference/analysis_functions`.
