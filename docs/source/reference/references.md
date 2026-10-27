@@ -19,20 +19,26 @@ Cite PolyzyMD with the version you used. `polyzymd --version` prints it, and
 the "Methods to cite" list of each `build_provenance.md` starts with PolyzyMD
 at the version that made the build.
 
-> Laforet, Joseph R., Jr. PolyzyMD: build, run and analyse molecular dynamics
+> Laforet Jr., Joseph R., PolyzyMD: build, run and analyze molecular dynamics
 > of complex biomolecular systems (version 1.3.0).
-> https://github.com/joelaforet/polyzymd
+> https://github.com/joelaforet/polyzymd. https://doi.org/10.5281/zenodo.23680214
 
 ```bibtex
 @software{laforet_polyzymd,
-  author  = {Laforet, Jr., Joseph R.},
-  title   = {{PolyzyMD}: build, run and analyse molecular dynamics of complex
+  author  = {Laforet Jr., Joseph R.},
+  title   = {{PolyzyMD}: build, run and analyze molecular dynamics of complex
              biomolecular systems},
   version = {1.3.0},
   year    = {2026},
+  doi     = {10.5281/zenodo.23680214},
   url     = {https://github.com/joelaforet/polyzymd}
 }
 ```
+
+`10.5281/zenodo.23680214` is PolyzyMD's concept DOI on Zenodo: it always resolves to the
+newest release. Each release also has a DOI of its own, listed on its Zenodo
+page; version 1.3.0 is
+[`10.5281/zenodo.23680215`](https://doi.org/10.5281/zenodo.23680215).
 
 The same entry is in
 [`CITATION.cff`](https://github.com/joelaforet/polyzymd/blob/main/CITATION.cff),

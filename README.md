@@ -8,6 +8,7 @@
   <a href="https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml"><img src="https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://polyzymd.readthedocs.io"><img src="https://readthedocs.org/projects/polyzymd/badge/?version=latest" alt="Documentation"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://doi.org/10.5281/zenodo.23680214"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.23680214.svg" alt="DOI"></a>
 </p>
 
 <p align="center">
@@ -92,6 +93,7 @@ its `build_provenance.md`.
   title = {PolyzyMD: build, run and analyse molecular dynamics of complex biomolecular systems},
   version = {1.3.0},
   year = {2026},
+  doi = {10.5281/zenodo.23680214},
   url = {https://github.com/joelaforet/polyzymd}
 }
 ```
