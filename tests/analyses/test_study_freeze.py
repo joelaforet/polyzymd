@@ -161,7 +161,9 @@ class TestMetadata:
             }
         ]
         relations = {(r["relation"], r["identifier"]) for r in zenodo["related_identifiers"]}
-        assert ("requires", "https://github.com/joelaforet/polyzymd") in relations
+        from polyzymd.citation import DOI, REPOSITORY
+
+        assert ("requires", DOI or REPOSITORY) in relations
         assert ("references", "10.5281/zenodo.1234567") in relations
         assert not any(r["relation"] == "isSupplementTo" for r in zenodo["related_identifiers"])
 

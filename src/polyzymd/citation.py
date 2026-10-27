@@ -7,9 +7,9 @@ which framework produced it and how to credit it, and ``polyzymd study
 freeze`` writes :func:`software_reference` and :func:`paper_reference` into
 each study's ``CITATION.cff`` and ``.zenodo.json``.
 
-When the PolyzyMD paper is published, set :data:`PAPER` (and ``DOI`` once
-PolyzyMD has a Zenodo DOI) here and in ``CITATION.cff``; every study frozen
-afterwards cites it.
+When the PolyzyMD paper is published, set :data:`PAPER` here and in
+``CITATION.cff``; every study frozen afterwards cites it. :data:`DOI` is the
+Zenodo concept DOI, which each release on GitHub adds a version to.
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ PEOPLE: list[dict[str, str]] = [
         "University of Colorado Boulder",
     }
 ]
-#: PolyzyMD's own DOI, once it has one.
-DOI: str | None = None
+#: PolyzyMD's concept DOI on Zenodo: it resolves to the newest release.
+DOI: str | None = "10.5281/zenodo.23680214"
 #: The PolyzyMD paper, once it exists: a CITATION.cff reference with at least
 #: ``title`` and ``status`` (or ``doi``). ``None`` leaves it out.
 PAPER: dict[str, Any] | None = None
@@ -41,7 +41,8 @@ def citation_line() -> str:
     """Return a one-line citation of the installed PolyzyMD version."""
     from polyzymd import __version__
 
-    return f"{AUTHORS} {TITLE} (version {__version__}). {REPOSITORY}"
+    line = f"{AUTHORS} {TITLE} (version {__version__}). {REPOSITORY}"
+    return f"{line}. https://doi.org/{DOI}" if DOI else line
 
 
 def software_reference() -> dict[str, Any]:

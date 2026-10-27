@@ -388,6 +388,9 @@ def test_citation_matches_citation_cff() -> None:
     from polyzymd.citation import PEOPLE
 
     assert [p.get("orcid") for p in PEOPLE] == [a.get("orcid") for a in cff["authors"]]
+    from polyzymd.citation import DOI
+
+    assert cff.get("doi") == DOI
 
 
 def test_readme_bibtex_cites_the_citation_cff_title() -> None:
