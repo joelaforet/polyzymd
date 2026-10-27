@@ -11,10 +11,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Union
 
-from openff.toolkit import Topology
-
 if TYPE_CHECKING:
-    from polyzymd.config.schema import EnzymeConfig
+    from openff.toolkit import Topology
+
+    from polyzymd.config.schema import ProteinSolute
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,11 +52,18 @@ class EnzymeBuilder:
         """Get the path to the loaded PDB file."""
         return self._pdb_path
 
-    def build(self, pdb_path: Union[str, Path]) -> Topology:
+    def build(
+        self,
+        pdb_path: Union[str, Path],
+        custom_substructures_path: Union[str, Path, None] = None,
+    ) -> Topology:
         """Load an enzyme structure from a PDB file.
 
         Args:
             pdb_path: Path to the enzyme PDB file.
+            custom_substructures_path: Optional JSON file of residue templates
+                for residues OpenFF's template matcher does not know. They are
+                passed to ``Topology.from_pdb(_custom_substructures=...)``.
 
         Returns:
             OpenFF Topology with the enzyme structure.
@@ -64,6 +71,8 @@ class EnzymeBuilder:
         Raises:
             FileNotFoundError: If the PDB file does not exist.
         """
+        from openff.toolkit import Topology
+
         pdb_path = Path(pdb_path)
 
         if not pdb_path.exists():
@@ -75,7 +84,18 @@ class EnzymeBuilder:
         # Note: Topology.from_pdb() correctly preserves residue names and numbers
         # from the PDB file. We previously called partition() here, but that was
         # overwriting residue numbers with internal IDs, breaking downstream analysis.
-        topology = Topology.from_pdb(str(pdb_path))
+        if custom_substructures_path is None:
+            topology = Topology.from_pdb(str(pdb_path))
+        else:
+            from polyzymd.config.schema import load_custom_substructures
+
+            templates = load_custom_substructures(Path(custom_substructures_path))
+            LOGGER.warning(
+                f"Reading residues {', '.join(templates)} with the templates in "
+                f"{custom_substructures_path}. OpenFF's _custom_substructures is a private "
+                "API: check that each matched residue has the chemistry you intend."
+            )
+            topology = Topology.from_pdb(str(pdb_path), _custom_substructures=templates)
 
         LOGGER.info(
             f"Successfully loaded enzyme: {topology.n_molecules} molecule(s), "
@@ -84,34 +104,23 @@ class EnzymeBuilder:
 
         self._topology = topology
         self._pdb_path = pdb_path
+        self.custom_substructures_path = (
+            Path(custom_substructures_path) if custom_substructures_path else None
+        )
 
         return topology
 
-    def build_from_config(self, config: "EnzymeConfig") -> Topology:
+    def build_from_config(self, config: "ProteinSolute") -> Topology:
         """Load enzyme from a configuration object.
 
         Args:
-            config: EnzymeConfig with PDB path.
+            config: ProteinSolute with PDB path.
 
         Returns:
             OpenFF Topology with the enzyme structure.
         """
         LOGGER.info(f"Building enzyme: {config.name}")
-        return self.build(config.pdb_path)
-
-    def get_molecule(self) -> "Topology":
-        """Get the first (and typically only) molecule from the topology.
-
-        Returns:
-            The enzyme molecule.
-
-        Raises:
-            RuntimeError: If no topology has been loaded.
-        """
-        if self._topology is None:
-            raise RuntimeError("No enzyme topology loaded. Call build() first.")
-
-        return self._topology.molecule(0)
+        return self.build(config.pdb_path, config.custom_substructures_path)
 
     def validate(self) -> bool:
         """Validate the loaded enzyme topology.

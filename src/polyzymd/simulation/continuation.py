@@ -11,22 +11,54 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
-import openmm
-from openmm import XmlSerializer
-from openmm import unit as u
-from openmm.app import (
-    CheckpointReporter,
-    DCDReporter,
-    PDBFile,
-    Simulation,
-    StateDataReporter,
-)
-from openmm.unit import Quantity
+if TYPE_CHECKING:
+    import openmm
+    from openmm.app import Simulation
+    from openmm.unit import Quantity
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _get_openmm_module() -> Any:
+    """Import and return the OpenMM top-level module lazily."""
+
+    import openmm
+
+    return openmm
+
+
+def _get_openmm_app_classes() -> tuple[Any, Any, Any, Any, Any]:
+    """Import and return OpenMM app classes lazily."""
+
+    from openmm.app import (
+        CheckpointReporter,
+        DCDReporter,
+        PDBFile,
+        Simulation,
+        StateDataReporter,
+    )
+
+    return CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
+
+
+def _get_xml_serializer() -> Any:
+    """Import and return the OpenMM XML serializer lazily."""
+
+    from openmm import XmlSerializer
+
+    return XmlSerializer
+
+
+def _get_openmm_unit_module() -> Any:
+    """Import and return the OpenMM unit module lazily."""
+
+    from openmm import unit as u
+
+    return u
 
 
 def quantity_from_dict(qdict: Dict[str, Any]) -> Quantity:
@@ -38,6 +70,8 @@ def quantity_from_dict(qdict: Dict[str, Any]) -> Quantity:
     Returns:
         OpenMM Quantity with appropriate units.
     """
+    u = _get_openmm_unit_module()
+
     value = qdict["__values__"]["value"]
     unit_str = qdict["__values__"]["unit"]
 
@@ -65,6 +99,32 @@ def quantity_from_dict(qdict: Dict[str, Any]) -> Quantity:
         return value * getattr(u, unit_str)
 
 
+def xml_looks_complete(path: Path, root_tag: str) -> bool:
+    """Cheaply check that an OpenMM XML file was fully written.
+
+    A hard kill (preemption, OOM) can leave ``interrupted_system.xml`` or
+    ``interrupted_state.xml`` at zero bytes or cut off mid-element. OpenMM
+    then fails with the unhelpful ``Invalid input string`` and the chain dies
+    although an intact ``restart_*`` pair or the segment's own
+    ``production_N_system.xml`` sits next to it. Rather than parse several MB
+    of XML we require a non-empty file whose tail contains the closing root
+    tag.
+    """
+    try:
+        size = path.stat().st_size
+        if size == 0:
+            return False
+        with path.open("rb") as fh:
+            fh.seek(max(0, size - 256))
+            tail = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    if f"</{root_tag}>" in tail:
+        return True
+    # A self-closing root (``<State/>``) is also complete.
+    return re.search(rf"<{root_tag}\b[^>]*/>", tail) is not None
+
+
 class ContinuationManager:
     """Manager for continuing MD simulations from previous segments.
 
@@ -86,6 +146,10 @@ class ContinuationManager:
         self,
         working_dir: Union[str, Path],
         segment_index: int,
+        platform: str = "CUDA",
+        precision: str = "mixed",
+        device_index: str | None = None,
+        replicate: int | None = None,
     ) -> None:
         """Initialize the ContinuationManager.
 
@@ -96,10 +160,19 @@ class ContinuationManager:
         segment_index : int
             Current segment index (0-based for first continuation after
             initial production, incrementing from there).
+        replicate : int, optional
+            The replicate number, which seeds this segment's thermostat
+            noise (:func:`polyzymd.simulation.seeds.dynamics_seed`). A
+            segment restored from a checkpoint keeps the checkpoint's
+            random state instead.
         """
         self._working_dir = Path(working_dir)
         self._segment_index = segment_index
         self._prev_segment = segment_index - 1
+        self._platform_name = platform
+        self._platform_precision = precision
+        self._platform_device_index = device_index
+        self._replicate = replicate
 
         # State
         self._system: Optional[openmm.System] = None
@@ -107,6 +180,17 @@ class ContinuationManager:
         self._simulation: Optional[Simulation] = None
         self._param_dict: Optional[Dict[str, Any]] = None
         self._use_checkpoint_recovery: bool = False
+        # Description of a runtime change between the previous segment and
+        # this process, or None when the runtime is unchanged.  Set by
+        # :meth:`_get_previous_paths`; used to explain checkpoint failures.
+        self._runtime_change: str | None = None
+        # Resume bookkeeping recorded on this segment in progress.json, and
+        # the reporter that tracks written frames; set by run_segment().
+        self._frame_record: Dict[str, Any] = {}
+        self._tracker: Any = None
+        # Step of the previous segment's last frame when this segment
+        # resumes before it; reports up to that step are not written.
+        self._skip_reports_through: int | None = None
 
     @property
     def working_dir(self) -> Path:
@@ -136,24 +220,170 @@ class ContinuationManager:
         FileNotFoundError
             If no suitable PDB file is found.
         """
-        patterns = [
-            "*solvated*.pdb",
-            "*_solvated.pdb",
-            "solvated_*.pdb",
-            "production_0/*_topology.pdb",
-        ]
+        segment_paths = (
+            self._working_dir
+            / f"production_{self._prev_segment}"
+            / f"production_{self._prev_segment}_topology.pdb",
+            self._working_dir / "production_0" / "production_0_topology.pdb",
+            self._working_dir / "production" / "production_topology.pdb",
+        )
+        for pdb_path in segment_paths:
+            if pdb_path.exists():
+                return pdb_path
 
-        for pattern in patterns:
-            pdb_files = list(self._working_dir.glob(pattern))
-            if pdb_files:
-                return pdb_files[0]
-
-        # Fallback to any PDB
-        pdb_files = list(self._working_dir.glob("**/*.pdb"))
-        if pdb_files:
-            return pdb_files[0]
+        # Arbitrary recursive PDB discovery is disallowed to avoid selecting decoys or inputs
 
         raise FileNotFoundError(f"Could not find solvated PDB file in {self._working_dir}")
+
+    def _previous_runtime_change(self) -> str | None:
+        """Describe how this process differs from the one that ran the segment.
+
+        Binary OpenMM ``.chk`` checkpoints are not portable: they are only
+        guaranteed to reload under the same OpenMM build on the same
+        platform.  Since #90 each segment's
+        ``production_N_parameters.json`` records the ``openmm_version`` and
+        ``pixi_environment`` of the process that wrote it, so a restart chain
+        that was rerouted to a different CUDA environment can be detected
+        before a checkpoint is trusted.
+
+        Returns
+        -------
+        str or None
+            Human-readable description of the change, ``"unknown"``-flavoured
+            when the previous provenance was never recorded, or ``None`` when
+            the runtime is demonstrably unchanged.
+        """
+        from polyzymd.utils.version import runtime_provenance
+
+        params_path = (
+            self._working_dir
+            / f"production_{self._prev_segment}"
+            / f"production_{self._prev_segment}_parameters.json"
+        )
+        previous: Dict[str, Any] = {}
+        if params_path.is_file():
+            try:
+                with open(params_path, "r") as handle:
+                    block = json.load(handle).get("provenance")
+                if isinstance(block, dict):
+                    previous = block
+            except (OSError, ValueError) as exc:
+                LOGGER.warning(f"Could not read provenance from {params_path}: {exc}")
+
+        current = runtime_provenance()
+        differences = []
+        for key in ("openmm_version", "pixi_environment"):
+            recorded = previous.get(key)
+            running = current.get(key)
+            if recorded is None:
+                differences.append(f"{key} of the previous segment is unrecorded")
+            elif recorded != running:
+                differences.append(f"{key} {recorded!r} -> {running!r}")
+        if not differences:
+            return None
+        return "; ".join(differences)
+
+    def _intact_portable_states(self) -> list[tuple[Path, Path]]:
+        """Return every intact (state XML, system XML) pair of the previous segment.
+
+        Pairs are listed in the order final state, interrupted state,
+        restart state.  A state XML that is empty or truncated is skipped;
+        a truncated partner system XML is replaced by the segment's own
+        ``production_N_system.xml`` when that one is intact.
+        """
+        prev_dir = self._working_dir / f"production_{self._prev_segment}"
+        default_system = prev_dir / f"production_{self._prev_segment}_system.xml"
+        candidates = (
+            (prev_dir / f"production_{self._prev_segment}_state.xml", default_system),
+            (prev_dir / "interrupted_state.xml", prev_dir / "interrupted_system.xml"),
+            (prev_dir / "restart_state.xml", prev_dir / "restart_system.xml"),
+        )
+        pairs: list[tuple[Path, Path]] = []
+        for state, system in candidates:
+            if not state.exists():
+                continue
+            if not xml_looks_complete(state, "State"):
+                LOGGER.warning(
+                    f"Skipping {state.name}: file is empty or truncated "
+                    f"(interrupted mid-write); trying the next portable state"
+                )
+                continue
+            if system.exists() and xml_looks_complete(system, "System"):
+                pairs.append((state, system))
+                continue
+            if system.exists():
+                LOGGER.warning(
+                    f"{system.name} is empty or truncated (interrupted mid-write); "
+                    f"pairing {state.name} with {default_system.name} instead"
+                )
+            if xml_looks_complete(default_system, "System"):
+                pairs.append((state, default_system))
+                continue
+            LOGGER.warning(f"No intact system XML for {state.name}; trying the next portable state")
+        return pairs
+
+    def _find_portable_state(self) -> tuple[Path, Path] | None:
+        """Return the best (state XML, system XML) pair for the previous segment.
+
+        Portable serialized ``State`` XML reloads under any OpenMM build, so
+        it is always preferred over a binary checkpoint.
+
+        When every intact candidate carries a ``stepCount`` and an earlier
+        segment wrote at least one trajectory frame, the choice follows the
+        steps rather than the file names.  With ``L`` the step of the last
+        written frame and ``I`` the frame interval, a state at step ``s``:
+
+        - with ``s < L`` makes the next segment write frames at steps the
+          trajectory already holds (a re-simulated boundary step);
+        - with ``s >= L + I`` skips the frame at ``L + I``, which was never
+          written (for example, the trajectory write raised and the crash
+          handler saved the context at that step);
+        - with ``L <= s < L + I`` continues the trajectory without overlap
+          or gap.
+
+        The candidate with the highest step below ``L + I`` is chosen.  If
+        every candidate is at or beyond ``L + I``, the lowest one is chosen,
+        since that loses the fewest frames.  Without step counts or frames
+        the order is final state, interrupted state, restart state.
+
+        Returns
+        -------
+        tuple of Path or None
+            ``(state_xml, system_xml)``, or ``None`` when the previous
+            segment left no portable state behind.
+        """
+        from polyzymd.simulation.report_state import last_reported_frame, read_state_step
+
+        pairs = self._intact_portable_states()
+        if not pairs:
+            return None
+
+        frame = last_reported_frame(self._working_dir, self._prev_segment + 1)
+        steps = [read_state_step(state) for state, _ in pairs]
+        if frame is None or frame.report_interval is None or any(s is None for s in steps):
+            return pairs[0]
+
+        limit = frame.last_step + frame.report_interval
+        ranked = list(zip(steps, range(len(pairs)), pairs))
+        continuing = [item for item in ranked if item[0] < limit]
+        if continuing:
+            # Highest step wins; on a tie keep the file-name order.
+            step, _, chosen = max(continuing, key=lambda item: (item[0], -item[1]))
+        else:
+            step, _, chosen = min(ranked, key=lambda item: (item[0], item[1]))
+        for other_step, _, (state, _system) in ranked:
+            if other_step >= limit:
+                LOGGER.warning(
+                    f"Not resuming from {state.name} (step {other_step}): the frame at "
+                    f"step {limit} was never written, so resuming there would skip it"
+                )
+        if chosen is not pairs[0]:
+            LOGGER.warning(
+                f"Resuming from {chosen[0].name} (step {step}) rather than "
+                f"{pairs[0][0].name}: segment {frame.segment_index}'s last frame is at "
+                f"step {frame.last_step}"
+            )
+        return chosen
 
     def _get_previous_paths(self) -> Dict[str, Path]:
         """Get paths to files from the previous segment.
@@ -163,7 +393,8 @@ class ContinuationManager:
         dict
             Dictionary with paths to state, system, and parameter files.
 
-            Recovery priority (portable state XML preferred over binary .chk):
+            Recovery priority (portable state XML preferred over binary .chk,
+            see :meth:`_find_portable_state`):
 
             1. **Normal completion** — ``production_N_state.xml`` and
                ``production_N_system.xml`` exist.
@@ -173,12 +404,18 @@ class ContinuationManager:
             3. **Graceful interruption with restart checkpoint** —
                ``restart_state.xml`` saved by wall-time checkpoint loop.
                Uses ``loadState()`` (portable).
-            4. **Graceful interruption (legacy, .chk only)** —
+            4. **Emergency interruption (.chk only)** —
                ``interrupted_checkpoint.chk`` exists but no state XML.
+               Falls back to ``loadCheckpoint()`` (non-portable) only after
+               XML state recovery is unavailable.
+            5. **Hard kill/OOM/node failure** — periodic ``checkpoint.chk``
+               from CheckpointReporter exists but no XML state files.
                Falls back to ``loadCheckpoint()`` (non-portable).
-            5. **Hard kill** — periodic ``checkpoint.chk`` from
-               CheckpointReporter exists but no XML state files.
-               Falls back to ``loadCheckpoint()`` (non-portable).
+
+            Cases 4 and 5 additionally compare the previous segment's
+            recorded ``openmm_version`` / ``pixi_environment`` (see #90) with
+            this process and log the mismatch, because a checkpoint written
+            by another OpenMM build is not reloadable.
         """
         prev_dir = self._working_dir / f"production_{self._prev_segment}"
 
@@ -187,52 +424,36 @@ class ContinuationManager:
         checkpoint_path = prev_dir / f"production_{self._prev_segment}_checkpoint.chk"
         params_path = prev_dir / f"production_{self._prev_segment}_parameters.json"
 
-        # Portable state XMLs from interruption handlers
-        interrupted_state = prev_dir / "interrupted_state.xml"
         interrupted_system = prev_dir / "interrupted_system.xml"
-        restart_state = prev_dir / "restart_state.xml"
-        restart_system = prev_dir / "restart_system.xml"
         interrupted_chk = prev_dir / "interrupted_checkpoint.chk"
 
         use_checkpoint = False
+        self._runtime_change = None
 
-        if state_path.exists():
-            # Case 1: Normal completion — state.xml exists
-            pass
-
-        elif interrupted_state.exists():
-            # Case 2: Graceful interruption — portable interrupted_state.xml
-            LOGGER.info(
-                f"Previous segment {self._prev_segment} was interrupted — "
-                f"recovering from interrupted_state.xml (portable)"
-            )
-            state_path = interrupted_state
-            if interrupted_system.exists():
-                system_path = interrupted_system
-
-        elif restart_state.exists():
-            # Case 3: Interrupted between checkpoints — wall-time restart
-            LOGGER.info(
-                f"Previous segment {self._prev_segment} was interrupted — "
-                f"recovering from restart_state.xml (portable wall-time checkpoint)"
-            )
-            state_path = restart_state
-            if restart_system.exists():
-                system_path = restart_system
+        # Cases 1-3: any portable serialized State reloads under any OpenMM
+        # build, so it always wins over a binary checkpoint.
+        portable = self._find_portable_state()
+        if portable is not None:
+            state_path, system_path = portable
+            if state_path.name != f"production_{self._prev_segment}_state.xml":
+                LOGGER.info(
+                    f"Previous segment {self._prev_segment} was interrupted — "
+                    f"recovering from {state_path.name} (portable)"
+                )
 
         elif interrupted_chk.exists() and interrupted_system.exists():
-            # Case 4: Legacy graceful interruption — only .chk available
+            # Case 4: Emergency recovery when only binary .chk survived
             LOGGER.warning(
                 f"Previous segment {self._prev_segment} was interrupted — "
-                f"no portable state XML found, falling back to "
-                f"interrupted_checkpoint.chk (non-portable)"
+                f"no portable state XML found, using emergency "
+                f"interrupted_checkpoint.chk recovery (non-portable)"
             )
             system_path = interrupted_system
             checkpoint_path = interrupted_chk
             use_checkpoint = True
 
         elif checkpoint_path.exists() and system_path.exists():
-            # Case 5: Hard kill — periodic CheckpointReporter .chk file
+            # Case 5: Emergency hard-kill/OOM/node-failure .chk recovery
             LOGGER.warning(
                 f"Previous segment {self._prev_segment} appears hard-killed — "
                 f"no state XML or interrupted files, recovering from "
@@ -247,6 +468,28 @@ class ContinuationManager:
                 f"({checkpoint_path}) but no system.xml ({system_path}) — "
                 f"cannot recover.  The segment must be re-run from scratch."
             )
+
+        # A binary checkpoint is only reloadable under the OpenMM build and
+        # environment that wrote it, so record whether this process is that
+        # one.  A restart chain that was rerouted to another CUDA environment
+        # (see the routing history in #89) or rebuilt against another OpenMM
+        # would otherwise fail here with an opaque OpenMM error, or worse,
+        # load silently misinterpreted binary state.
+        if use_checkpoint:
+            self._runtime_change = self._previous_runtime_change()
+            if self._runtime_change is None:
+                LOGGER.info(
+                    f"Previous segment {self._prev_segment} ran under this same "
+                    f"runtime — its binary checkpoint is safe to reload"
+                )
+            else:
+                LOGGER.warning(
+                    f"Previous segment {self._prev_segment} ran under a different "
+                    f"runtime ({self._runtime_change}) and left no portable state "
+                    f"XML — falling back to the non-portable checkpoint "
+                    f"{checkpoint_path.name}; a load failure here means the segment "
+                    f"must be re-run under the recorded environment"
+                )
 
         return {
             "state": state_path,
@@ -290,6 +533,8 @@ class ContinuationManager:
 
         # Load system (either normal or interrupted system XML)
         LOGGER.info(f"Loading system from {paths['system']}")
+        XmlSerializer = _get_xml_serializer()
+        _, _, PDBFile, _, _ = _get_openmm_app_classes()
         with open(paths["system"], "r") as f:
             self._system = XmlSerializer.deserialize(f.read())
 
@@ -297,6 +542,20 @@ class ContinuationManager:
         pdb_path = self._find_solvated_pdb()
         LOGGER.info(f"Loading topology from {pdb_path}")
         self._topology = PDBFile(str(pdb_path)).topology
+
+        from polyzymd.simulation.artifact_integrity import validate_openmm_identity
+
+        state = None
+        if not use_checkpoint:
+            state = XmlSerializer.deserialize(paths["state"].read_text())
+        validate_openmm_identity(
+            self._topology,
+            self._system,
+            topology_path=pdb_path,
+            system_path=paths["system"],
+            state=state,
+            state_path=paths["state"] if state is not None else None,
+        )
 
         # Load parameters
         LOGGER.info(f"Loading parameters from {paths['params']}")
@@ -314,10 +573,14 @@ class ContinuationManager:
         Returns
         -------
         openmm.Integrator
-            OpenMM LangevinMiddleIntegrator.
+            The production thermostat: OpenMM LangevinMiddleIntegrator or
+            LangevinIntegrator.
         """
+
         if self._param_dict is None:
             raise RuntimeError("Parameters not loaded. Call load_previous_state first.")
+
+        openmm = _get_openmm_module()
 
         integ_raw = self._param_dict["__values__"]["integ_params"]["__values__"]
         time_step = quantity_from_dict(integ_raw["time_step"])
@@ -327,13 +590,43 @@ class ContinuationManager:
 
         temperature = quantity_from_dict(thermostat_raw["temperature"])
         friction_coeff = quantity_from_dict(thermostat_raw["timescale"])
+        # Parameters written before the thermostat was recorded ran LangevinMiddle.
+        thermostat = thermostat_raw.get("thermostat", "LangevinMiddle")
+        if thermostat == "Langevin":
+            integrator = openmm.LangevinIntegrator(temperature, friction_coeff, time_step)
+        elif thermostat == "LangevinMiddle":
+            integrator = openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
+        else:
+            raise ValueError(f"OpenMM production cannot continue with thermostat {thermostat!r}")
+        if self._replicate is not None:
+            from polyzymd.simulation.seeds import dynamics_seed
 
-        return openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
+            integrator.setRandomNumberSeed(
+                dynamics_seed(self._replicate, f"production:{self._segment_index}")
+            )
+        return integrator
+
+    def saved_dynamics(self) -> Dict[str, Any]:
+        """Return the ensemble, thermostat and friction (1/ps) that segment 0 ran with.
+
+        A chain continues with these, whatever the config says now.
+        """
+        if self._param_dict is None:
+            raise RuntimeError("Parameters not loaded. Call load_previous_state first.")
+        thermo = self._param_dict["__values__"]["thermo_params"]["__values__"]
+        thermostat = thermo["thermostat_params"]["__values__"]
+        return {
+            "ensemble": "NPT" if "barostat_params" in thermo else "NVT",
+            "thermostat": thermostat.get("thermostat", "LangevinMiddle"),
+            "friction": float(thermostat["timescale"]["__values__"]["value"]),
+        }
 
     def _add_barostat_if_needed(self) -> None:
-        """Add barostat to the system if parameters specify NPT."""
+        """Add barostat to the system if parameters specify NPT, and seed it from the replicate."""
         if self._system is None or self._param_dict is None:
             raise RuntimeError("System/parameters not loaded")
+
+        openmm = _get_openmm_module()
 
         thermo_raw = self._param_dict["__values__"]["thermo_params"]["__values__"]
 
@@ -348,16 +641,24 @@ class ContinuationManager:
 
         if has_barostat:
             LOGGER.debug("Barostat already present")
-            return
+        else:
+            barostat_raw = thermo_raw["barostat_params"]["__values__"]
+            temperature = quantity_from_dict(barostat_raw["temperature"])
+            pressure = quantity_from_dict(barostat_raw["pressure"])
+            # The runner writes "frequency"; parameters written before that read as 25.
+            frequency = barostat_raw.get("frequency", barostat_raw.get("update_frequency", 25))
 
-        barostat_raw = thermo_raw["barostat_params"]["__values__"]
-        temperature = quantity_from_dict(barostat_raw["temperature"])
-        pressure = quantity_from_dict(barostat_raw["pressure"])
-        frequency = barostat_raw.get("update_frequency", 25)
+            barostat = openmm.MonteCarloBarostat(pressure, temperature, frequency)
+            self._system.addForce(barostat)
+            LOGGER.info(f"Added barostat: {pressure} at {temperature}")
 
-        barostat = openmm.MonteCarloBarostat(pressure, temperature, frequency)
-        self._system.addForce(barostat)
-        LOGGER.info(f"Added barostat: {pressure} at {temperature}")
+        if self._replicate is not None:
+            from polyzymd.simulation.seeds import dynamics_seed
+
+            seed = dynamics_seed(self._replicate, f"barostat:production:{self._segment_index}")
+            for force in self._system.getForces():
+                if isinstance(force, openmm.MonteCarloBarostat):
+                    force.setRandomNumberSeed(seed)
 
     def _setup_reporters(
         self,
@@ -377,9 +678,12 @@ class ContinuationManager:
         if self._simulation is None:
             raise RuntimeError("Simulation not created")
 
+        CheckpointReporter, _, _, _, StateDataReporter = _get_openmm_app_classes()
+        from polyzymd.simulation.report_state import production_dcd_reporter
+
         # Trajectory reporter
         traj_path = output_dir / f"production_{self._segment_index}_trajectory.dcd"
-        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
+        self._simulation.reporters.append(production_dcd_reporter(traj_path, report_interval))
 
         # State data reporter
         state_path = output_dir / f"production_{self._segment_index}_state_data.csv"
@@ -416,6 +720,8 @@ class ContinuationManager:
         if self._simulation is None:
             raise RuntimeError("Simulation not available")
 
+        XmlSerializer = _get_xml_serializer()
+
         # Save state (no enforcePeriodicBox to preserve molecular continuity)
         state_path = output_dir / f"production_{self._segment_index}_state.xml"
         state = self._simulation.context.getState(
@@ -436,6 +742,14 @@ class ContinuationManager:
 
         LOGGER.info(f"Saved final state to {state_path}")
         LOGGER.info(f"Saved system to {system_path}")
+
+    def _dynamics_seeds(self) -> Dict[str, int] | None:
+        """Return the seeds the segment's integrator and barostat run with, or None before setup."""
+        if self._simulation is None:
+            return None
+        from polyzymd.simulation.seeds import openmm_seeds
+
+        return openmm_seeds(self._simulation)
 
     def _write_segment_started(self, total_steps: int) -> None:
         """Write a RUNNING segment record to progress.json at segment start.
@@ -470,8 +784,10 @@ class ContinuationManager:
             steps_requested=total_steps,
             samples_written=0,
             status=SegmentStatus.RUNNING,
+            seeds=self._dynamics_seeds(),
         )
 
+        self._apply_frame_fields(record)
         _update_or_append_segment(progress, record)
         progress.status = SimulationStatus.RUNNING
 
@@ -512,6 +828,7 @@ class ContinuationManager:
             if seg.index == self._segment_index and seg.status == SegmentStatus.RUNNING:
                 seg.steps_completed = steps_done
                 seg.duration_ns = (steps_done * timestep_fs) / 1e6
+                self._apply_frame_fields(seg)
                 break
         else:
             # No RUNNING record found — shouldn't happen, but be safe
@@ -555,6 +872,10 @@ class ContinuationManager:
             LOGGER.warning("No progress file found — skipping progress update")
             return
 
+        from polyzymd.simulation.progress import trajectory_digest
+        from polyzymd.utils.version import record_provenance
+
+        segment_dir = self._working_dir / f"production_{self._segment_index}"
         record = SegmentRecord(
             index=self._segment_index,
             steps_completed=total_steps,
@@ -562,10 +883,14 @@ class ContinuationManager:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
+            seeds=self._dynamics_seeds(),
+            **record_provenance(self._simulation),
+            **trajectory_digest(segment_dir / f"production_{self._segment_index}_trajectory.dcd"),
         )
         from polyzymd.simulation.progress import _now_iso
 
         record.finished_at = _now_iso()
+        self._apply_frame_fields(record)
 
         _update_or_append_segment(progress, record)
 
@@ -606,6 +931,7 @@ class ContinuationManager:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _now_iso,
             _update_or_append_segment,
             load_progress,
             save_progress,
@@ -623,10 +949,13 @@ class ContinuationManager:
             index=self._segment_index,
             steps_completed=steps_done,
             steps_requested=total_steps,
-            samples_written=0,  # Interrupted — samples may be partial
+            samples_written=0,  # Replaced by the tracker's count when known
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
+            finished_at=_now_iso(),
+            seeds=self._dynamics_seeds(),
         )
+        self._apply_frame_fields(record)
 
         _update_or_append_segment(progress, record)
         progress.status = SimulationStatus.INTERRUPTED
@@ -637,13 +966,155 @@ class ContinuationManager:
             f"in segment {self._segment_index}"
         )
 
+    def _apply_frame_fields(self, record: Any) -> None:
+        """Copy the resume and frame bookkeeping onto a progress record.
+
+        Sets ``resumed_from``, ``overlap_frames``, ``gap_frames`` from the
+        resume check and ``report_interval``, ``start_step``,
+        ``last_reported_step`` and ``samples_written`` from the frame tracker.
+        """
+        fields: Dict[str, Any] = dict(self._frame_record)
+        if self._tracker is not None:
+            fields.update(self._tracker.frame_fields())
+        for name, value in fields.items():
+            if value is not None:
+                setattr(record, name, value)
+
+    def _check_resume_alignment(self, start_step: int, report_interval: int) -> Dict[str, int]:
+        """Compare the loaded state's step with the previous segment's last frame.
+
+        The first frame of this segment falls at the first multiple of
+        *report_interval* above *start_step*.  If that step is not after the
+        previous segment's last frame, this segment rewrites steps the
+        trajectory already holds, so its reporters skip those steps; if it is
+        more than one interval after, report steps in between have no frame.
+        Both cases are logged as warnings; the gap is returned for
+        ``progress.json``.
+
+        Parameters
+        ----------
+        start_step : int
+            Integrator step count after loading the previous state.
+        report_interval : int
+            Steps between frames in this segment.
+
+        Returns
+        -------
+        dict
+            ``overlap_frames`` and ``gap_frames``.
+        """
+        from polyzymd.simulation.report_state import first_report_step, last_reported_frame
+
+        frame = last_reported_frame(self._working_dir, self._segment_index)
+        if frame is None:
+            return {"overlap_frames": 0, "gap_frames": 0}
+        first = first_report_step(start_step, report_interval)
+        gap = 0
+        if first <= frame.last_step:
+            repeated = (frame.last_step - first) // report_interval + 1
+            self._skip_reports_through = frame.last_step
+            LOGGER.warning(
+                f"Segment {self._segment_index} resumes at step {start_step}, before "
+                f"segment {frame.segment_index}'s last frame at step {frame.last_step}: "
+                f"not writing its first {repeated} frame(s), which the trajectory "
+                f"already holds."
+            )
+        elif first > frame.last_step + report_interval:
+            gap = (first - frame.last_step) // report_interval - 1
+            LOGGER.warning(
+                f"Segment {self._segment_index} resumes at step {start_step}; its first "
+                f"frame is at step {first}, so {gap} report step(s) after segment "
+                f"{frame.segment_index}'s last frame at step {frame.last_step} have no frame."
+            )
+        return {"overlap_frames": 0, "gap_frames": gap}
+
+    def _correct_previous_steps(self, start_step: int) -> None:
+        """Make the previous segment's step count end at the state just loaded.
+
+        ``steps_completed`` of a hard-killed segment is estimated from its
+        state-data CSV, which need not match the step of the state this
+        segment resumed from.  When the previous record knows its own
+        ``start_step``, its ``steps_completed`` is set to
+        ``start_step_of_this_segment - start_step_of_previous`` so the chain's
+        step total counts each integrated step once.  When the previous record
+        has no ``last_reported_step``, it and ``samples_written`` are read
+        from the segment's trajectory files.
+        """
+        from polyzymd.simulation.progress import load_progress, save_progress
+        from polyzymd.simulation.report_state import segment_frames
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            return
+        for seg in progress.segments:
+            if seg.index != self._prev_segment or seg.start_step is None:
+                continue
+            changed = False
+            actual = start_step - seg.start_step
+            if actual >= 0 and actual != seg.steps_completed:
+                LOGGER.warning(
+                    f"Segment {seg.index} recorded {seg.steps_completed} steps but the state "
+                    f"segment {self._segment_index} resumed from lies {actual} steps after its "
+                    f"start; recording {actual}"
+                )
+                seg.steps_completed = actual
+                if progress.timestep_fs:
+                    seg.duration_ns = actual * progress.timestep_fs / 1e6
+                changed = True
+            # A segment that stopped before it finished recorded no trajectory hash;
+            # its file is final now that the next segment starts.
+            if seg.trajectory_sha256 is None:
+                from polyzymd.simulation.progress import trajectory_digest
+
+                digest = trajectory_digest(
+                    self._working_dir
+                    / f"production_{seg.index}"
+                    / f"production_{seg.index}_trajectory.dcd"
+                )
+                if digest["trajectory_sha256"] is not None:
+                    seg.trajectory_sha256 = digest["trajectory_sha256"]
+                    seg.trajectory_bytes = digest["trajectory_bytes"]
+                    changed = True
+            # A hard-killed segment never recorded its frames; read them from its files.
+            if seg.last_reported_step is None:
+                frame = segment_frames(self._working_dir, seg.index)
+                if frame is not None:
+                    seg.last_reported_step = frame.last_step
+                    seg.samples_written = frame.frames
+                    changed = True
+            if changed:
+                save_progress(self._working_dir, progress)
+            return
+
+    def _planned_end_step(self, total_steps: int) -> Optional[int]:
+        """Return the integrator step at which this segment should stop.
+
+        The caller sizes the segment from the steps recorded for earlier
+        segments.  For a hard-killed segment that count is an estimate made
+        before its state is loaded, so the segment is meant to end at
+        ``origin + recorded steps + total_steps``, never past
+        ``origin + total_steps_requested``.  ``origin`` is segment 0's start
+        step.  Returns ``None`` when ``progress.json`` records no total.
+        """
+        from polyzymd.simulation.progress import load_progress
+
+        progress = load_progress(self._working_dir)
+        if progress is None or not progress.total_steps_requested:
+            return None
+        origin = next((s.start_step for s in progress.segments if s.index == 0), None) or 0
+        recorded = sum(
+            s.steps_completed for s in progress.segments if s.index < self._segment_index
+        )
+        return min(origin + recorded + total_steps, origin + progress.total_steps_requested)
+
     def run_segment(
         self,
         duration_ns: float,
         num_samples: int = 250,
         timestep_fs: float = 2.0,
-        report_interval: int | None = None,
-        checkpoint_interval_s: float = 60.0,
+        *,
+        report_interval: int,
+        checkpoint_interval_s: float,
     ) -> Dict[str, Any]:
         """Run the continuation segment.
 
@@ -657,25 +1128,24 @@ class ContinuationManager:
         duration_ns : float
             Duration of this segment in nanoseconds.
         num_samples : int
-            Number of trajectory frames to save. Ignored when
-            ``report_interval`` is provided.
+            Number of trajectory frames to save.
         timestep_fs : float
             Time step in femtoseconds.
-        report_interval : int or None
-            Fixed reporter interval in steps. When provided, this
-            overrides the per-segment ``total_steps // num_samples``
-            calculation to keep frame spacing uniform across segments.
+        report_interval : int
+            Explicit reporter interval in steps.
         checkpoint_interval_s : float
             Wall-time interval in seconds between portable restart
-            checkpoints.  Also controls how frequently the loop checks
-            for SLURM preemption signals.  Set to 0 to disable
-            wall-time checkpoints (reverts to legacy behaviour).
+            checkpoints. Also controls how frequently the loop checks
+            for SLURM preemption signals.
 
         Returns
         -------
         dict
             Dictionary with segment results.
         """
+        from polyzymd.simulation.signals import raise_if_interrupted
+
+        raise_if_interrupted()
         if self._system is None or self._topology is None:
             raise RuntimeError("State not loaded. Call load_previous_state first.")
 
@@ -683,22 +1153,27 @@ class ContinuationManager:
             f"Starting segment {self._segment_index}: {duration_ns} ns, {num_samples} frames"
         )
 
-        # Update parameters for this segment
-        if self._param_dict:
-            self._param_dict["__values__"]["integ_params"]["__values__"]["total_time"] = {
-                "__class__": "Quantity",
-                "__values__": {"value": duration_ns, "unit": "nanosecond"},
-            }
-            self._param_dict["__values__"]["integ_params"]["__values__"]["num_samples"] = (
-                num_samples
-            )
-
         # Add barostat if needed
         self._add_barostat_if_needed()
 
         # Create integrator and simulation
         integrator = self._create_integrator()
-        self._simulation = Simulation(self._topology, self._system, integrator)
+        _, _, _, Simulation, _ = _get_openmm_app_classes()
+        from polyzymd.simulation.platform import resolve_platform
+
+        selection = resolve_platform(
+            self._platform_name,
+            precision=self._platform_precision,
+            device_index=self._platform_device_index,
+        )
+        self._simulation = Simulation(
+            self._topology,
+            self._system,
+            integrator,
+            selection.platform,
+            selection.properties,
+        )
+        raise_if_interrupted()
 
         # Load state from previous segment
         paths = self._get_previous_paths()
@@ -706,40 +1181,113 @@ class ContinuationManager:
             # Cases 4/5: Only binary checkpoint available (non-portable).
             chk_path = paths["checkpoint"]
             LOGGER.info(f"Recovering from interrupted segment via checkpoint: {chk_path}")
-            self._simulation.loadCheckpoint(str(chk_path))
+            try:
+                self._simulation.loadCheckpoint(str(chk_path))
+            except Exception as exc:  # OpenMM raises bare Exception subclasses
+                if self._runtime_change is None:
+                    raise
+                raise RuntimeError(
+                    f"Could not reload {chk_path}: OpenMM checkpoints are not "
+                    f"portable and this process differs from the one that wrote "
+                    f"it ({self._runtime_change}).  Re-run segment "
+                    f"{self._prev_segment} under the recorded environment, or "
+                    f"delete the segment directory to restart it."
+                ) from exc
         else:
             # Cases 1/2/3: Portable state XML (normal, interrupted, or restart).
             LOGGER.info(f"Loading state from {paths['state']}")
             self._simulation.loadState(str(paths["state"]))
+        resumed_from = (
+            paths["checkpoint"].name if self._use_checkpoint_recovery else paths["state"].name
+        )
+        start_step = int(self._simulation.context.getStepCount())
 
         # Create output directory
         output_dir = self._working_dir / f"production_{self._segment_index}"
         output_dir.mkdir(exist_ok=True)
+
+        topology_path = output_dir / f"production_{self._segment_index}_topology.pdb"
+        state = self._simulation.context.getState(getPositions=True)
+        _, _, PDBFile, _, _ = _get_openmm_app_classes()
+        with topology_path.open("w") as stream:
+            PDBFile.writeFile(self._topology, state.getPositions(), stream, keepIds=True)
 
         # Save system XML early so it exists on disk even if the segment is
         # hard-killed (SIGKILL / OOM).  This is required for checkpoint-based
         # recovery: loadCheckpoint() needs a matching System object.  The file
         # is overwritten at segment completion by _save_final_state().
         system_xml_path = output_dir / f"production_{self._segment_index}_system.xml"
+        XmlSerializer = _get_xml_serializer()
         with open(system_xml_path, "w") as f:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved initial system to {system_xml_path}")
 
-        # Calculate total steps
-        total_steps = int(duration_ns * 1e6 / timestep_fs)
+        from polyzymd.audit.runtime import record_system_check
 
-        # Determine report interval: prefer the fixed global value if given,
-        # otherwise fall back to per-segment calculation (legacy callers).
-        if report_interval is not None:
-            seg_report_interval = report_interval
-        else:
-            seg_report_interval = max(1, total_steps // num_samples)
+        record_system_check(
+            self._system,
+            self._working_dir,
+            output_dir,
+            f"production_{self._segment_index}",
+            self._segment_index,
+        )
+
+        # Count the steps from the step actually loaded, not from the
+        # estimate the caller sized the segment with.
+        total_steps = round(duration_ns * 1e6 / timestep_fs)
+        end_step = self._planned_end_step(total_steps)
+        if end_step is not None and end_step != start_step + total_steps:
+            LOGGER.info(
+                f"Segment {self._segment_index} starts at step {start_step}; running "
+                f"{max(0, end_step - start_step)} steps to end at step {end_step}"
+            )
+            total_steps = max(0, end_step - start_step)
+            duration_ns = total_steps * timestep_fs / 1e6
+
+        if report_interval <= 0:
+            raise ValueError("report_interval must be a positive integer")
+        if checkpoint_interval_s <= 0:
+            raise ValueError("checkpoint_interval_s must be positive")
+        seg_report_interval = report_interval
+        resume = self._check_resume_alignment(start_step, seg_report_interval)
+        self._frame_record = {"resumed_from": resumed_from, **resume}
 
         # Setup reporters
         self._setup_reporters(seg_report_interval, output_dir)
+        from polyzymd.simulation.report_state import ReportedStateTracker, save_state_after_crash
+
+        tracker = ReportedStateTracker(output_dir, seg_report_interval, start_step)
+        self._simulation.reporters.append(tracker)
+        self._tracker = tracker
+        skip_through = getattr(self, "_skip_reports_through", None)
+        if skip_through is not None:
+            from polyzymd.simulation.report_state import SkipReportsThrough
+
+            self._simulation.reporters[:] = [
+                SkipReportsThrough(reporter, skip_through)
+                for reporter in self._simulation.reporters
+            ]
+        first_frame_after = max(start_step, skip_through or start_step)
+        num_samples = max(
+            0,
+            (start_step + total_steps) // seg_report_interval
+            - first_frame_after // seg_report_interval,
+        )
 
         # Save parameters for this segment
         if self._param_dict:
+            integ_values = self._param_dict["__values__"]["integ_params"]["__values__"]
+            integ_values["total_time"] = {
+                "__class__": "Quantity",
+                "__values__": {"value": duration_ns, "unit": "nanosecond"},
+            }
+            integ_values["num_samples"] = num_samples
+            from polyzymd.utils.version import runtime_provenance
+
+            self._param_dict["provenance"] = runtime_provenance(self._simulation)
+            reporter_params = self._param_dict["__values__"].get("reporter_params")
+            if isinstance(reporter_params, dict) and "__values__" in reporter_params:
+                reporter_params["__values__"]["report_interval"] = seg_report_interval
             param_path = output_dir / f"production_{self._segment_index}_parameters.json"
             with open(param_path, "w") as f:
                 json.dump(self._param_dict, f, indent=2)
@@ -749,9 +1297,9 @@ class ContinuationManager:
             GracefulExit,
             get_interrupt_signal,
             install_handlers,
+            interrupted_state_save_exceptions,
             is_interrupted,
             save_interrupted_state,
-            save_restart_checkpoint,
         )
 
         install_handlers()
@@ -760,6 +1308,7 @@ class ContinuationManager:
         # check-progress can distinguish actively running simulations
         # from interrupted ones.
         self._write_segment_started(total_steps)
+        self._correct_previous_steps(start_step)
 
         # Run simulation with adaptive sub-chunks for interrupt responsiveness
         # and periodic wall-time restart checkpoints for preemption resilience.
@@ -773,13 +1322,9 @@ class ContinuationManager:
         _last_checkpoint_write = _time.monotonic()
         _loop_start = _time.monotonic()
 
-        # Adaptive sub-chunk sizing: start with seg_report_interval (the
-        # original chunk_size).  After the first checkpoint interval elapses,
-        # measure actual steps/second and adapt sub_chunk to target
-        # checkpoint_interval / 4 seconds (~15s worth of steps).  This
-        # ensures ~4 interrupt checks per checkpoint interval regardless of
-        # system size or hardware speed.
-        sub_chunk = min(seg_report_interval, total_steps)
+        # Calibrate immediately with at most 1,000 steps, then keep every
+        # blocking OpenMM call near five seconds independent of reporter rate.
+        sub_chunk = min(1000, seg_report_interval, total_steps)
         _adapted = False
 
         try:
@@ -792,15 +1337,10 @@ class ContinuationManager:
                 _now = _time.monotonic()
 
                 # Adaptive sub-chunk calibration (once, after first interval)
-                if (
-                    not _adapted
-                    and checkpoint_interval_s > 0
-                    and (_now - _loop_start) >= checkpoint_interval_s
-                ):
+                if not _adapted:
                     elapsed = _now - _loop_start
                     steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
-                    # Target sub-chunk duration = checkpoint_interval / 4
-                    target_seconds = checkpoint_interval_s / 4.0
+                    target_seconds = 5.0
                     new_sub_chunk = max(10, int(steps_per_sec * target_seconds))
                     # Sub-chunk must be a divisor-friendly size relative to
                     # seg_report_interval to avoid misaligned reporter writes.
@@ -838,14 +1378,10 @@ class ContinuationManager:
 
                 # Wall-time restart checkpoint
                 if (
-                    checkpoint_interval_s > 0
-                    and (_now - _last_checkpoint_write) >= checkpoint_interval_s
+                    (_now - _last_checkpoint_write) >= checkpoint_interval_s
                     and steps_done < total_steps  # skip if we're about to finish
                 ):
-                    save_restart_checkpoint(
-                        simulation=self._simulation,
-                        output_dir=output_dir,
-                    )
+                    tracker.save_restart(self._simulation)
                     _last_checkpoint_write = _now
 
                 if is_interrupted():
@@ -869,27 +1405,42 @@ class ContinuationManager:
                     )
         except GracefulExit:
             raise  # Re-raise so caller can set exit code
-        except Exception:
-            # On unexpected crash, still try to save interrupted state
+        except interrupted_state_save_exceptions():
+            # On unexpected crash (for example a trajectory write raising
+            # OSError), save only a state whose frames were all written.
             try:
-                save_interrupted_state(
+                saved_steps = save_state_after_crash(
                     simulation=self._simulation,
+                    tracker=tracker,
                     output_dir=output_dir,
                     segment_index=self._segment_index,
-                    steps_completed=steps_done,
                     total_steps=total_steps,
                 )
-            except Exception:
-                LOGGER.error("Failed to save interrupted state after crash")
+                self._update_progress_interrupted(
+                    steps_done=saved_steps,
+                    total_steps=total_steps,
+                    duration_ns=duration_ns,
+                    timestep_fs=timestep_fs,
+                )
+            except interrupted_state_save_exceptions() as save_exc:
+                LOGGER.exception(
+                    "Failed to save interrupted state after crash: %s",
+                    save_exc,
+                )
             raise
 
         # Save final state
         self._save_final_state(output_dir)
 
-        # Update progress tracker
+        from polyzymd.simulation.progress import flush_reporters
+
+        # The trajectory is hashed into progress.json: make sure it is all on disk.
+        flush_reporters(self._simulation)
+
+        # Update progress tracker with the frames this segment actually wrote
         self._update_progress_completed(
             total_steps=total_steps,
-            num_samples=num_samples,
+            num_samples=tracker.frames_written,
             duration_ns=duration_ns,
             timestep_fs=timestep_fs,
         )

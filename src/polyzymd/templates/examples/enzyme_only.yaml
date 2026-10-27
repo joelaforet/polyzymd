@@ -1,0 +1,151 @@
+# ============================================================================
+# PolyzyMD Configuration: Enzyme-Only Simulation
+# ============================================================================
+# Simple enzyme + docked substrate simulation without polymers
+# Suitable for baseline/control studies
+# ============================================================================
+
+name: "LipA_ResorufinButyrate_control"
+engine: "openmm"
+description: "LipA enzyme with docked Resorufin-Butyrate substrate - no polymers"
+solutes:
+
+  # ============================================================================
+  # Enzyme Configuration
+  # ============================================================================
+  - type: protein
+    name: "LipA"
+    pdb_path: "structures/LipA_prepared.pdb"
+    description: "Bacillus subtilis Lipase A"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+
+  # ============================================================================
+  # Substrate Configuration (Docked Ligand)
+  # ============================================================================
+  - type: small_molecule
+    name: "Resorufin-Butyrate"
+    sdf_path: "structures/resorufin_butyrate_docked.sdf"
+    conformer_index: 0  # Use best-scoring conformer
+    residue_name: "RBY"
+    force_field: ["openff-2.3.0.offxml"]
+    charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+
+# ============================================================================
+# Solvent Configuration
+# ============================================================================
+solvent:
+  force_field: ["openff-2.3.0.offxml"]
+  water:
+    model: "tip3p"
+  
+  co_solvents: []  # No co-solvents
+  
+  ions:
+    neutralize: true  # Add counter-ions to neutralize charge
+    nacl_concentration: 0.1  # 100 mM of NaCl pairs; neutralizing ions are added on top
+  
+  box:
+    padding: 2.0  # nm from solute to box edge (2.0 recommended for PACKMOL convergence)
+    shape: "rhombic_dodecahedron"
+    target_density: 1.0  # g/mL
+    tolerance: 2.0  # PACKMOL tolerance in Angstrom
+
+# ============================================================================
+# Restraints (Optional)
+# ============================================================================
+# Flat-bottom distance restraint to keep substrate near active site
+#
+# Selection syntax supports:
+#   resid N      - Residue number in the built topology (protein renumbered from 1)
+#   resname XXX  - Residue name (e.g., RBY, SER, LIG)
+#   name XXX     - Atom name (e.g., OG, CA, C1)
+#   index N      - Atom index (0-indexed, OpenMM internal)
+#   pdbindex N   - N-th atom of the built system, from 1 (PyMOL `index`, not `ID`)
+#   and/or       - Combine selections
+#
+# Example: To select the atom shown as serial 2740 in PyMOL:
+#   "pdbindex 2740"  OR  "index 2739"
+#
+restraints:
+  - type: "flat_bottom"
+    name: "substrate_active_site"
+    atom1:
+      component: "LipA"
+      selection: "resid 77 and name OG"  # Ser77 nucleophile
+      description: "Catalytic serine"
+    atom2:
+      component: "Resorufin-Butyrate"
+      selection: "name C1x"  # SDF atoms without names are C1x, C2x, ..., H1x
+      description: "Substrate reactive carbon"
+    distance: 3.3  # Angstroms threshold
+    force_constant: 10000.0  # kJ/mol/nm^2
+    enabled: true
+
+# ============================================================================
+# Thermodynamics
+# ============================================================================
+thermodynamics:
+  temperature: 293.0  # Kelvin (20°C)
+  pressure: 1.0  # atmospheres
+
+# ============================================================================
+# Simulation Phases
+# ============================================================================
+simulation_phases:
+  equilibration_stages:
+    - name: "heating"
+      samples: 10
+      ensemble: "NVT"
+      temperature_start: 60.0
+      temperature_end: 293.0
+      temperature_increment: 1.0
+      temperature_interval_steps: 600  # increase temperature by `temperature_increment` every this many steps
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+        - group: "ligand_heavy"
+          force_constant: 4184.0
+    - name: "free_equilibration"
+      duration: 0.4  # nanoseconds
+      samples: 40
+      ensemble: "NPT"
+      temperature: 293.0
+  
+  production:
+    ensemble: "NPT"
+    duration: 100.0  # nanoseconds total
+    samples: 2500  # frames to save (total across all segments)
+    checkpoint_interval: 60.0  # seconds between restart checkpoints
+    time_step: 2.0  # femtoseconds
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0  # picoseconds
+    barostat: "MC"  # Monte Carlo barostat
+    barostat_frequency: 25  # steps between barostat updates
+  
+# ============================================================================
+# Output Configuration
+# ============================================================================
+# HPC systems often separate long-term storage (projects) from high-performance
+# scratch storage. Configure both directories here, or use CLI overrides.
+#
+# Memory requirements:
+#   - Small systems (enzyme only): 3G default is usually sufficient
+#   - If you encounter OOM errors, increase with: polyzymd submit --memory 4G
+#
+output:
+  # Long-term storage: scripts, logs, configs (survives job completion)
+  # Example: /projects/$USER/polyzymd or just "." for local development
+  projects_directory: "."
+  
+  # High-performance scratch: trajectories, checkpoints (may be purged)
+  # Example: /scratch/alpine/$USER/simulations
+  # If not set, defaults to projects_directory (good for local testing)
+  scratch_directory: null
+  
+  # Subdirectory organization within projects_directory
+  job_scripts_subdir: "job_scripts"
+  slurm_logs_subdir: "slurm_logs"
+  
+  # Naming template for run directories
+  naming_template: "{enzyme}_{substrate}_{temperature}K_run{replicate}"

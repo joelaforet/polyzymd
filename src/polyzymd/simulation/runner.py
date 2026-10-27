@@ -9,16 +9,19 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Union
 
-import openmm
-from openmm import XmlSerializer
-from openmm import unit as omm_unit
-from openmm.app import CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
+from polyzymd.utils.version import record_provenance, runtime_provenance
 
 if TYPE_CHECKING:
+    import openmm
+    from openmm import XmlSerializer
+    from openmm import unit as omm_unit
+    from openmm.app import CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
+
     from polyzymd.config.schema import (
         EquilibrationStageConfig,
         SimulationConfig,
@@ -26,11 +29,149 @@ if TYPE_CHECKING:
     )
     from polyzymd.core.atom_groups import AtomGroupResolver
     from polyzymd.core.parameters import SimulationParameters
+else:
+    openmm = None
+    XmlSerializer = None
+    omm_unit = None
+    CheckpointReporter = None
+    DCDReporter = None
+    PDBFile = None
+    Simulation = None
+    StateDataReporter = None
 
 LOGGER = logging.getLogger(__name__)
 
 # Phase types
 PhaseType = Literal["equilibration", "production"]
+
+# Force constant (kJ/mol/nm^2) of the harmonic bond that stands in for a constraint
+# between a frozen heavy atom and a mobile hydrogen while minimizing on the frozen
+# copy of the System.  OpenMM refuses constraints on massless particles, so the
+# surrogate is what pulls the hydrogen onto its constraint length; the value is of
+# the same order as a real X-H bond force constant, which leaves a residual well
+# below CONSTRAINT_TOLERANCE_ANGSTROM.
+CONSTRAINT_SURROGATE_FORCE_CONSTANT = 500000.0
+
+# Largest constraint violation (Angstrom) tolerated in the minimized state before
+# Context.applyConstraints is invoked to project the coordinates back onto the
+# constraint manifold.
+CONSTRAINT_TOLERANCE_ANGSTROM = 0.01
+
+# Heavy atoms must not move during frozen minimization.  applyConstraints, if it
+# has to run, redistributes a residual violation by inverse mass and so can nudge
+# a heavy partner by roughly 1/12 of it; this is the ceiling checked afterwards.
+FROZEN_HEAVY_DISPLACEMENT_TOLERANCE_ANGSTROM = 0.02
+
+
+def _ensure_openmm_loaded() -> None:
+    """Load OpenMM symbols used by the simulation runner lazily.
+
+    Returns
+    -------
+    None
+        The module globals are populated on first use.
+    """
+    global CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
+    global XmlSerializer, omm_unit, openmm
+
+    if openmm is not None:
+        return
+
+    import openmm as _openmm
+    from openmm import XmlSerializer as _XmlSerializer
+    from openmm import unit as _omm_unit
+    from openmm.app import (
+        CheckpointReporter as _CheckpointReporter,
+    )
+    from openmm.app import (
+        DCDReporter as _DCDReporter,
+    )
+    from openmm.app import (
+        PDBFile as _PDBFile,
+    )
+    from openmm.app import (
+        Simulation as _Simulation,
+    )
+    from openmm.app import (
+        StateDataReporter as _StateDataReporter,
+    )
+
+    openmm = _openmm
+    XmlSerializer = _XmlSerializer
+    omm_unit = _omm_unit
+    CheckpointReporter = _CheckpointReporter
+    DCDReporter = _DCDReporter
+    PDBFile = _PDBFile
+    Simulation = _Simulation
+    StateDataReporter = _StateDataReporter
+
+
+def production_dynamics(production: Any) -> Dict[str, Any]:
+    """Return the ``run_production`` arguments the config's production phase sets.
+
+    Parameters
+    ----------
+    production : SimulationPhaseConfig
+        ``simulation_phases.production`` of the config.
+
+    Returns
+    -------
+    dict
+        ``ensemble``, ``thermostat``, ``friction`` (1/ps, the inverse of
+        ``thermostat_timescale``) and ``barostat_frequency``.
+    """
+    return {
+        "ensemble": production.ensemble.value,
+        "thermostat": production.thermostat.value if production.thermostat else "LangevinMiddle",
+        "friction": 1.0 / production.thermostat_timescale,
+        "barostat_frequency": production.barostat_frequency,
+    }
+
+
+#: Files an interrupted segment leaves for the next one to resume from.
+STALE_RESUME_FILES = (
+    "INTERRUPTED",
+    "interrupted_state.xml",
+    "interrupted_system.xml",
+    "interrupted_checkpoint.chk",
+    "restart_state.xml",
+    "restart_system.xml",
+)
+
+
+def _remove_stale_resume_files(phase_dir: Path, phase_name: str) -> Path | None:
+    """Move the resume files of an earlier attempt at a segment that starts over.
+
+    A segment that runs from its first step replaces the trajectory of any
+    earlier attempt. That attempt's ``INTERRUPTED`` marker and saved states
+    would otherwise stay beside the new files and make the segment look
+    interrupted. They are moved into ``earlier-attempt-<UTC time>/`` in the
+    segment folder, never deleted.
+
+    Returns
+    -------
+    Path or None
+        The folder they were moved to, or ``None`` when there were none.
+    """
+    from datetime import datetime, timezone
+
+    stale = [phase_dir / name for name in STALE_RESUME_FILES if (phase_dir / name).exists()]
+    if not stale:
+        return None
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = phase_dir / f"earlier-attempt-{stamp}"
+    suffix = 1
+    while target.exists():
+        target = phase_dir / f"earlier-attempt-{stamp}-{suffix}"
+        suffix += 1
+    target.mkdir()
+    for path in stale:
+        path.rename(target / path.name)
+    LOGGER.warning(
+        f"{phase_name} starts from its first step; moved "
+        f"{', '.join(path.name for path in stale)} left by an earlier attempt to {target}"
+    )
+    return target
 
 
 class SimulationRunner:
@@ -54,6 +195,9 @@ class SimulationRunner:
         >>> runner.run_production(temperature=300, duration_ns=100)
     """
 
+    #: Seeds of the running production segment, recorded in ``progress.json``.
+    _segment_seeds: Optional[Dict[str, int]] = None
+
     def __init__(
         self,
         topology: Any,
@@ -61,6 +205,9 @@ class SimulationRunner:
         positions: Any,
         working_dir: Union[str, Path],
         platform: str = "CUDA",
+        precision: str = "mixed",
+        device_index: str | None = None,
+        replicate: int | None = None,
     ) -> None:
         """Initialize the SimulationRunner.
 
@@ -70,18 +217,32 @@ class SimulationRunner:
             positions: Initial positions with units.
             working_dir: Working directory for output files.
             platform: Compute platform (CUDA, OpenCL, CPU).
+            replicate: The replicate number, which seeds the initial
+                velocities and the thermostat noise of every phase
+                (:func:`polyzymd.simulation.seeds.dynamics_seed`). ``None``
+                lets OpenMM choose random seeds.
         """
+        _ensure_openmm_loaded()
+
         self._topology = topology
         self._system = system
         self._positions = positions
         self._working_dir = Path(working_dir)
         self._platform_name = platform
+        self._platform_precision = precision
+        self._platform_device_index = device_index
+        self._replicate = replicate
 
         self._simulation: Optional[Simulation] = None
         self._current_positions = positions
         self._current_velocities = None  # Carried between equilibration stages
         self._current_box_vectors = None  # Updated during NPT stages
+        self._current_step_count = 0
+        self._current_time = None
         self._history: Dict[str, Any] = {}
+        # Reporter that tracks the frames written by the running production
+        # segment; set by run_production().
+        self._production_tracker: Any = None
 
         # Ensure working directory exists
         self._working_dir.mkdir(parents=True, exist_ok=True)
@@ -111,19 +272,32 @@ class SimulationRunner:
         impose_unique_force_groups(self._system)
         LOGGER.debug("Assigned unique force groups")
 
-    def _get_platform(self) -> openmm.Platform:
-        """Get the compute platform.
+    def _get_platform(self) -> Any:
+        """Get the compute platform selection.
 
         Returns:
-            OpenMM Platform object.
+            Resolved platform and Context properties.
         """
-        try:
-            platform = openmm.Platform.getPlatformByName(self._platform_name)
-            LOGGER.info(f"Using {self._platform_name} platform")
-        except Exception:
-            LOGGER.warning(f"Platform {self._platform_name} not available, falling back to CPU")
-            platform = openmm.Platform.getPlatformByName("CPU")
-        return platform
+        _ensure_openmm_loaded()
+
+        from polyzymd.simulation.platform import resolve_platform
+
+        return resolve_platform(
+            self._platform_name,
+            precision=self._platform_precision,
+            device_index=self._platform_device_index,
+        )
+
+    def _create_simulation(self, integrator: openmm.Integrator) -> Simulation:
+        """Create a Simulation using the configured platform and properties."""
+        selection = self._get_platform()
+        return Simulation(
+            self._topology,
+            self._system,
+            integrator,
+            selection.platform,
+            selection.properties,
+        )
 
     def _create_integrator(
         self,
@@ -131,6 +305,7 @@ class SimulationRunner:
         friction: float = 1.0,
         timestep: float = 2.0,
         thermostat: str = "LangevinMiddle",
+        phase: str | None = None,
     ) -> openmm.Integrator:
         """Create an integrator for the simulation.
 
@@ -139,6 +314,9 @@ class SimulationRunner:
             friction: Friction coefficient in 1/ps.
             timestep: Time step in femtoseconds.
             thermostat: Thermostat type.
+            phase: The phase this integrator runs, such as
+                ``"equilibration:0:0"``; with the replicate number it seeds
+                the thermostat noise.
 
         Returns:
             OpenMM Integrator.
@@ -148,18 +326,44 @@ class SimulationRunner:
         dt = timestep * omm_unit.femtosecond
 
         if thermostat == "LangevinMiddle":
-            return openmm.LangevinMiddleIntegrator(temp, fric, dt)
+            integrator = openmm.LangevinMiddleIntegrator(temp, fric, dt)
         elif thermostat == "Langevin":
-            return openmm.LangevinIntegrator(temp, fric, dt)
+            integrator = openmm.LangevinIntegrator(temp, fric, dt)
         else:
             LOGGER.warning(f"Unknown thermostat {thermostat}, using LangevinMiddle")
-            return openmm.LangevinMiddleIntegrator(temp, fric, dt)
+            integrator = openmm.LangevinMiddleIntegrator(temp, fric, dt)
+        seed = self._seed(phase)
+        if seed is not None:
+            integrator.setRandomNumberSeed(seed)
+            LOGGER.info(f"Thermostat noise of {phase}: seed {seed}")
+        return integrator
+
+    def _seed(self, phase: str | None) -> int | None:
+        """Return the seed of ``phase`` from the replicate number, or ``None`` without one."""
+        if self._replicate is None or phase is None:
+            return None
+        from polyzymd.simulation.seeds import dynamics_seed
+
+        return dynamics_seed(self._replicate, phase)
+
+    def _set_velocities(self, temperature: float, phase: str) -> int:
+        """Draw Maxwell-Boltzmann velocities at ``temperature`` K, seeded by the replicate number.
+
+        Returns the seed, or 0 when OpenMM chose a random one.
+        """
+        seed = self._seed(f"velocities:{phase}")
+        if seed is None:
+            self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
+            return 0
+        self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin, seed)
+        return seed
 
     def _add_barostat(
         self,
         pressure: float = 1.0,
         temperature: float = 300.0,
         frequency: int = 25,
+        phase: str | None = None,
     ) -> None:
         """Add a Monte Carlo barostat to the system.
 
@@ -167,12 +371,17 @@ class SimulationRunner:
             pressure: Pressure in atmospheres.
             temperature: Temperature in Kelvin.
             frequency: Update frequency in steps.
+            phase: The phase the barostat runs in. With a replicate number,
+                it seeds the barostat's random volume moves.
         """
         barostat = openmm.MonteCarloBarostat(
             pressure * omm_unit.atmosphere,
             temperature * omm_unit.kelvin,
             frequency,
         )
+        seed = self._seed(None if phase is None else f"barostat:{phase}")
+        if seed is not None:
+            barostat.setRandomNumberSeed(seed)
         self._system.addForce(barostat)
         LOGGER.info(f"Added MC barostat: {pressure} atm, {temperature} K")
 
@@ -188,34 +397,267 @@ class SimulationRunner:
             self._system.removeForce(i)
             LOGGER.debug("Removed barostat")
 
+    def _solute_atom_indices(self) -> List[int]:
+        """Indices of every protein and substrate atom (see ``AtomGroupResolver``)."""
+        return self._resolve_atom_group("solute")
+
+    def _solute_heavy_atom_indices(self) -> List[int]:
+        """Indices of every non-hydrogen protein and substrate atom."""
+        return self._resolve_atom_group("solute_heavy")
+
+    def _resolve_atom_group(self, group_name: str) -> List[int]:
+        """Resolve a predefined atom group against this runner's topology."""
+        from polyzymd.core.atom_groups import AtomGroupResolver, SystemComponentInfo
+
+        component_info = SystemComponentInfo.from_topology(self._topology)
+        return AtomGroupResolver(self._topology, component_info).resolve(group_name)
+
+    def _frozen_copy_of_system(self, frozen_indices: List[int]) -> openmm.System:
+        """Return a copy of the System in which *frozen_indices* cannot move.
+
+        The frozen set is the solute *heavy* atoms; solute hydrogens stay mobile so
+        that the minimiser can pull them onto the force field's X-H constraint
+        lengths.  OpenMM's minimiser leaves massless particles exactly where they
+        are, but it refuses to build a Context for any constraint that involves a
+        massless particle ("A constraint cannot involve a massless particle"), so a
+        heavy--hydrogen constraint cannot simply be carried over into the copy.
+        Dropping it outright is also wrong: with ``constraints=HBonds`` the force
+        field emits no harmonic term for a constrained bond, so an unconstrained
+        hydrogen has nothing holding it to its parent atom.  Each frozen--mobile
+        constraint is therefore replaced by a stiff harmonic bond at the constraint
+        distance, which reproduces the constraint to within the minimiser's
+        tolerance; :meth:`minimize` then verifies the real System's constraints and
+        applies them exactly if any residual remains.  Constraints whose two
+        particles are both frozen are removed (they are satisfied trivially because
+        neither atom moves); there are normally none, since every solute constraint
+        involves a hydrogen.  The real System is untouched.
+        """
+        frozen_system = XmlSerializer.deserialize(XmlSerializer.serialize(self._system))
+        frozen = set(frozen_indices)
+        for index in frozen:
+            frozen_system.setParticleMass(index, 0.0)
+
+        surrogate = openmm.HarmonicBondForce()
+        surrogate.setName("FrozenSoluteConstraintSurrogate")
+        removed = 0
+        replaced = 0
+        for constraint_index in range(frozen_system.getNumConstraints() - 1, -1, -1):
+            p1, p2, distance = frozen_system.getConstraintParameters(constraint_index)
+            first_frozen = p1 in frozen
+            second_frozen = p2 in frozen
+            if first_frozen and second_frozen:
+                frozen_system.removeConstraint(constraint_index)
+                removed += 1
+            elif first_frozen or second_frozen:
+                frozen_system.removeConstraint(constraint_index)
+                surrogate.addBond(p1, p2, distance, CONSTRAINT_SURROGATE_FORCE_CONSTANT)
+                replaced += 1
+        if replaced:
+            frozen_system.addForce(surrogate)
+        LOGGER.info(
+            "Frozen %d solute heavy atoms for minimization "
+            "(%d frozen-frozen constraints dropped, %d frozen-mobile constraints "
+            "replaced by harmonic surrogates in the copy)",
+            len(frozen),
+            removed,
+            replaced,
+        )
+        return frozen_system
+
+    @staticmethod
+    def _max_displacement_angstrom(before: Any, after: Any, indices: List[int]) -> float:
+        """Largest per-atom displacement (Angstrom) over *indices*."""
+        import numpy as np
+
+        if not indices:
+            return 0.0
+        a = np.asarray(before.value_in_unit(omm_unit.angstrom))[indices]
+        b = np.asarray(after.value_in_unit(omm_unit.angstrom))[indices]
+        return float(np.sqrt(((a - b) ** 2).sum(axis=1)).max())
+
+    @staticmethod
+    def _max_constraint_violation_angstrom(system: "openmm.System", positions: Any) -> float:
+        """Largest |distance - constraint length| (Angstrom) over the System's constraints.
+
+        Equilibration starts by setting these positions on a constrained integrator;
+        a state whose constraints are violated can make CCMA diverge on the very
+        first step ("Particle coordinate is NaN"), so the value is checked and
+        logged before the minimized coordinates leave this method's caller.
+        """
+        import numpy as np
+
+        count = system.getNumConstraints()
+        if count == 0:
+            return 0.0
+        coordinates = np.asarray(positions.value_in_unit(omm_unit.angstrom))
+        first = np.empty(count, dtype=int)
+        second = np.empty(count, dtype=int)
+        lengths = np.empty(count, dtype=float)
+        for index in range(count):
+            p1, p2, distance = system.getConstraintParameters(index)
+            first[index] = p1
+            second[index] = p2
+            lengths[index] = distance.value_in_unit(omm_unit.angstrom)
+        actual = np.sqrt(((coordinates[first] - coordinates[second]) ** 2).sum(axis=1))
+        return float(np.abs(actual - lengths).max())
+
     def minimize(
         self,
         max_iterations: int = 1000,
         tolerance: float = 10.0,
+        *,
+        freeze_solute: bool = True,
     ) -> float:
         """Run energy minimization.
 
         Args:
             max_iterations: Maximum iterations (0 = until convergence).
             tolerance: Energy tolerance in kJ/mol/nm.
+            freeze_solute: Hold every protein and substrate *heavy* atom fixed so
+                that only solvent, polymers, and the solute hydrogens relax.  The
+                prepared heavy-atom structure then enters equilibration with its
+                coordinates unchanged; the method verifies this and raises if any
+                frozen atom moved.  Solute hydrogens are deliberately left mobile
+                so the minimiser can place them on the force field's X-H
+                constraint lengths instead of keeping the input PDB's.
 
         Returns:
             Final potential energy in kJ/mol.
+
+        Raises:
+            RuntimeError: If ``freeze_solute`` is set and a frozen heavy atom moved.
         """
+        from polyzymd.simulation.phase_state import phase_completed, write_phase_record
+        from polyzymd.simulation.signals import GracefulExit, get_interrupt_signal, is_interrupted
+
+        phase_dir = self._working_dir / "minimization"
+        record_path = phase_dir / "phase.json"
+        state_path = phase_dir / "minimized_state.xml"
+        phase_dir.mkdir(exist_ok=True)
+
+        if phase_completed(record_path) and state_path.exists():
+            LOGGER.info("Loading completed minimization state from %s", state_path)
+            integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
+            simulation = self._create_simulation(integrator)
+            simulation.loadState(str(state_path))
+            state = simulation.context.getState(getEnergy=True, getPositions=True)
+            self._current_positions = state.getPositions()
+            self._current_box_vectors = state.getPeriodicBoxVectors()
+            return state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+
+        write_phase_record(record_path, phase="minimization", status="started")
+        if is_interrupted():
+            raise GracefulExit(get_interrupt_signal())
         LOGGER.info("Running energy minimization")
 
-        # Create temporary simulation for minimization
+        starting_positions = self._current_positions
+        frozen_indices: List[int] = []
+        hydrogen_indices: List[int] = []
+        if freeze_solute:
+            frozen_indices = self._solute_heavy_atom_indices()
+            hydrogen_indices = sorted(set(self._solute_atom_indices()) - set(frozen_indices))
+        frozen_rmsd: float | None = None
+        hydrogen_displacement: float | None = None
         integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
-        platform = self._get_platform()
+        selection = self._get_platform()
 
-        simulation = Simulation(self._topology, self._system, integrator, platform)
-        simulation.context.setPositions(self._current_positions)
+        if frozen_indices:
+            # Minimise on a copy in which the solute heavy atoms are massless (hence
+            # fixed), then hand the relaxed solvent/polymer/hydrogen coordinates to
+            # the real System.
+            frozen_system = self._frozen_copy_of_system(frozen_indices)
+            frozen_simulation = Simulation(
+                self._topology, frozen_system, integrator, selection.platform, selection.properties
+            )
+            frozen_simulation.context.setPositions(starting_positions)
+            frozen_simulation.minimizeEnergy(
+                tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
+                maxIterations=max_iterations,
+            )
+            minimized_positions = frozen_simulation.context.getState(
+                getPositions=True
+            ).getPositions()
+            del frozen_simulation
+            frozen_rmsd = self._max_displacement_angstrom(
+                starting_positions, minimized_positions, frozen_indices
+            )
+            if frozen_rmsd > 1e-4:
+                raise RuntimeError(
+                    f"Frozen-solute minimization moved a solute heavy atom by "
+                    f"{frozen_rmsd:.4f} A; the prepared structure must enter "
+                    "equilibration unchanged."
+                )
+            hydrogen_displacement = self._max_displacement_angstrom(
+                starting_positions, minimized_positions, hydrogen_indices
+            )
+            LOGGER.info(
+                "Solute heavy atoms held fixed during minimization "
+                "(max displacement %.2e A over %d atoms); %d solute hydrogens relaxed "
+                "onto their constraint lengths (max displacement %.3f A)",
+                frozen_rmsd,
+                len(frozen_indices),
+                len(hydrogen_indices),
+                hydrogen_displacement,
+            )
+            integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
+            simulation = self._create_simulation(integrator)
+            simulation.context.setPositions(minimized_positions)
+        else:
+            simulation = self._create_simulation(integrator)
+            simulation.context.setPositions(starting_positions)
+            simulation.minimizeEnergy(
+                tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
+                maxIterations=max_iterations,
+            )
 
-        # Minimize
-        simulation.minimizeEnergy(
-            tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
-            maxIterations=max_iterations,
+        # Equilibration starts by setting these coordinates on a constrained
+        # integrator, so the constraints of the *real* System must hold before the
+        # positions leave this method.
+        final_positions = simulation.context.getState(getPositions=True).getPositions()
+        violation = self._max_constraint_violation_angstrom(self._system, final_positions)
+        LOGGER.info(
+            "Max constraint violation in the minimized state: %.5f A over %d constraints",
+            violation,
+            self._system.getNumConstraints(),
         )
+        if violation > CONSTRAINT_TOLERANCE_ANGSTROM:
+            # The minimizer holds constraints only approximately, so this is
+            # routine: the coordinates are put back onto the exact lengths.
+            simulation.context.applyConstraints(1e-6)
+            final_positions = simulation.context.getState(getPositions=True).getPositions()
+            corrected = self._max_constraint_violation_angstrom(self._system, final_positions)
+            if corrected > CONSTRAINT_TOLERANCE_ANGSTROM:
+                LOGGER.warning(
+                    "Minimized state violates a constraint by %.5f A, and %.5f A remains "
+                    "after applyConstraints (> %.3f A)",
+                    violation,
+                    corrected,
+                    CONSTRAINT_TOLERANCE_ANGSTROM,
+                )
+            else:
+                LOGGER.info(
+                    "Minimized state was %.5f A off its constraints (> %.3f A); put back "
+                    "onto them with applyConstraints (%.1e A remains)",
+                    violation,
+                    CONSTRAINT_TOLERANCE_ANGSTROM,
+                    corrected,
+                )
+            if frozen_indices:
+                # applyConstraints splits the correction by inverse mass, so a frozen
+                # heavy atom can move by roughly 1/12 of the residual violation.
+                frozen_rmsd = self._max_displacement_angstrom(
+                    starting_positions, final_positions, frozen_indices
+                )
+                hydrogen_displacement = self._max_displacement_angstrom(
+                    starting_positions, final_positions, hydrogen_indices
+                )
+                if frozen_rmsd > FROZEN_HEAVY_DISPLACEMENT_TOLERANCE_ANGSTROM:
+                    raise RuntimeError(
+                        f"Enforcing the constraints after frozen-solute minimization moved "
+                        f"a solute heavy atom by {frozen_rmsd:.4f} A "
+                        f"(> {FROZEN_HEAVY_DISPLACEMENT_TOLERANCE_ANGSTROM} A); "
+                        "the prepared structure must enter equilibration unchanged."
+                    )
 
         # Get final state (including box vectors for proper handoff to equilibration)
         state = simulation.context.getState(getEnergy=True, getPositions=True)
@@ -223,7 +665,24 @@ class SimulationRunner:
         self._current_positions = state.getPositions()
         self._current_box_vectors = state.getPeriodicBoxVectors()
 
+        temporary_state = state_path.with_name(f".{state_path.name}.tmp")
+        temporary_state.write_text(XmlSerializer.serialize(state))
+        os.replace(temporary_state, state_path)
+        write_phase_record(
+            record_path,
+            phase="minimization",
+            status="completed",
+            state_path=str(state_path.resolve()),
+            frozen_atoms=len(frozen_indices) if frozen_indices else None,
+            frozen_rmsd_angstrom=frozen_rmsd,
+            hydrogen_max_displacement_angstrom=hydrogen_displacement,
+        )
+
         LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
+        if is_interrupted():
+            # A signal that arrived during minimization is honoured only now,
+            # after the result is saved, so the next job does not redo it.
+            raise GracefulExit(get_interrupt_signal())
 
         return energy
 
@@ -256,11 +715,16 @@ class SimulationRunner:
                 or "none"
             )
             if stage.is_temperature_ramping:
-                temp_info = f"{stage.temperature_start}K -> {stage.temperature_end}K"
+                temp_info = (
+                    f"{stage.temperature_start}K -> {stage.temperature_end}K, "
+                    f"+{stage.temperature_increment:g} K every "
+                    f"{stage.temperature_interval_steps} steps "
+                    f"(derived duration {stage.resolved_duration:.6f} ns)"
+                )
             else:
                 temp_info = f"{stage.temperature}K"
             LOGGER.info(
-                f"  Stage {i}: {stage.name} - {stage.duration} ns, "
+                f"  Stage {i}: {stage.name} - {stage.resolved_duration:.6f} ns, "
                 f"{stage.ensemble.value}, {temp_info}, restraints: [{restraint_info}]"
             )
 
@@ -310,13 +774,20 @@ class SimulationRunner:
             Dictionary with stage results
         """
         from polyzymd.config.schema import Ensemble
+        from polyzymd.simulation.signals import raise_if_interrupted
+
+        raise_if_interrupted(resume_from_step)
         from polyzymd.core.position_restraints import (
             add_position_restraints_to_system,
             remove_position_restraints_from_system,
         )
+        from polyzymd.simulation.progress import _now_iso
 
+        started_at = _now_iso()
         stage_name = f"equilibration_{stage_index}_{stage.name}"
-        LOGGER.info(f"Starting equilibration stage: {stage.name} ({stage.duration} ns)")
+        LOGGER.info(
+            f"Starting equilibration stage: {stage.name} ({stage.resolved_duration:.6f} ns)"
+        )
 
         # Create output directory for this stage
         phase_dir = self._working_dir / stage_name
@@ -328,10 +799,11 @@ class SimulationRunner:
         friction = 1.0 / thermostat_timescale  # friction (1/ps) = 1 / timescale (ps)
 
         # Calculate steps and reporting interval
-        total_steps = int(stage.duration * 1e6 / timestep_fs)
+        total_steps = int(round(stage.resolved_duration * 1e6 / timestep_fs))
         report_interval = max(1, total_steps // stage.samples)
 
         # Handle ensemble - add/remove barostat
+        barostat_freq = None
         if stage.ensemble == Ensemble.NPT:
             self._remove_barostat()
             pressure = 1.0  # Default pressure for NPT stages
@@ -341,6 +813,7 @@ class SimulationRunner:
                 pressure=pressure,
                 temperature=start_temp,
                 frequency=barostat_freq,
+                phase=f"equilibration:{stage_index}:{resume_from_step}",
             )
         else:
             # NVT - ensure no barostat
@@ -375,11 +848,13 @@ class SimulationRunner:
             temperature=start_temp,
             friction=friction,
             timestep=timestep_fs,
+            thermostat=stage.thermostat.value if stage.thermostat else "LangevinMiddle",
+            # A resumed stage draws new noise, not a repeat of its start.
+            phase=f"equilibration:{stage_index}:{resume_from_step}",
         )
-        platform = self._get_platform()
-
         # Create simulation
-        self._simulation = Simulation(self._topology, self._system, integrator, platform)
+        self._simulation = self._create_simulation(integrator)
+        raise_if_interrupted(resume_from_step)
 
         # Set box vectors BEFORE positions - critical for NPT stage transitions
         # where box dimensions may have changed from previous stage
@@ -388,16 +863,31 @@ class SimulationRunner:
 
         self._simulation.context.setPositions(self._current_positions)
 
+        if resume_from_step > 0:
+            if self._current_step_count != resume_from_step:
+                raise RuntimeError(
+                    f"Equilibration resume marker is at step {resume_from_step}, but "
+                    f"the saved state is at step {self._current_step_count}"
+                )
+            self._simulation.currentStep = self._current_step_count
+            if self._current_time is not None:
+                self._simulation.context.setTime(self._current_time)
+
         # Velocity initialization: only generate fresh Maxwell-Boltzmann
         # velocities for the first stage. Subsequent stages inherit velocities
         # from the previous stage for physical continuity — matching the
         # GROMACS convention (gen_vel=yes only for stage 0).
-        if stage_index == 0 or self._current_velocities is None:
-            self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
+        velocity_seed = None
+        if (stage_index == 0 and resume_from_step == 0) or self._current_velocities is None:
+            velocity_seed = self._set_velocities(start_temp, f"equilibration:{stage_index}")
             LOGGER.info(f"Stage {stage_index}: initialized velocities at {start_temp} K")
         else:
             self._simulation.context.setVelocities(self._current_velocities)
             LOGGER.info(f"Stage {stage_index}: inherited velocities from previous stage")
+
+        from polyzymd.simulation.seeds import openmm_seeds
+
+        seeds = openmm_seeds(self._simulation, velocity_seed)
 
         # Log initial energy
         _state = self._simulation.context.getState(getEnergy=True)
@@ -409,7 +899,15 @@ class SimulationRunner:
         state_path = phase_dir / f"{stage_name}_state_data.csv"
         pdb_path = phase_dir / f"{stage_name}_topology.pdb"
 
-        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
+        append_trajectory = (
+            resume_from_step > 0 and traj_path.exists() and traj_path.stat().st_size > 0
+        )
+        append_state_data = (
+            resume_from_step > 0 and state_path.exists() and state_path.stat().st_size > 0
+        )
+        self._simulation.reporters.append(
+            DCDReporter(str(traj_path), report_interval, append=append_trajectory)
+        )
         self._simulation.reporters.append(
             StateDataReporter(
                 str(state_path),
@@ -423,6 +921,7 @@ class SimulationRunner:
                 volume=True,
                 density=True,
                 speed=True,
+                append=append_state_data,
             )
         )
 
@@ -448,20 +947,68 @@ class SimulationRunner:
 
         install_handlers()
 
-        # Helper: save EQ_INTERRUPTED marker for mid-stage resume
+        if self._simulation is None:
+            raise RuntimeError("Equilibration simulation was not initialized")
+
+        from functools import partial
+
+        from polyzymd.simulation.phase_state import load_phase_record
+        from polyzymd.simulation.phase_state import write_phase_record as _write_record
+
+        phase_record_path = phase_dir / "phase.json"
+        earlier = load_phase_record(phase_record_path) if resume_from_step > 0 else None
+        seeds_by_attempt = [*(earlier.seeds_by_attempt if earlier else []), seeds]
+        write_phase_record = partial(_write_record, seeds_by_attempt=seeds_by_attempt)
+        write_phase_record(
+            phase_record_path,
+            phase=stage_name,
+            status="started",
+            total_steps=total_steps,
+        )
+
+        # Helper: save a synchronized recovery point for mid-stage resume
         def _save_eq_interrupted(steps_done: int, current_temp: float) -> None:
+            self._simulation.saveCheckpoint(str(eq_chk_path))
+            interrupted_state = self._simulation.context.getState(
+                getPositions=True,
+                getVelocities=True,
+                getParameters=True,
+            )
+            state_path = phase_dir / f"{stage_name}_state.xml"
+            state_path.write_text(XmlSerializer.serialize(interrupted_state))
             marker_path = phase_dir / "EQ_INTERRUPTED"
-            marker_path.write_text(
-                f"stage_index={stage_index}\n"
-                f"stage_name={stage.name}\n"
-                f"steps_completed={steps_done}\n"
-                f"total_steps={total_steps}\n"
-                f"current_temperature={current_temp}\n"
-                f"is_temperature_ramping={stage.is_temperature_ramping}\n"
+            marker_lines = [
+                f"stage_index={stage_index}",
+                f"stage_name={stage.name}",
+                f"steps_completed={steps_done}",
+                f"total_steps={total_steps}",
+                f"current_temperature={current_temp}",
+                f"is_temperature_ramping={stage.is_temperature_ramping}",
+            ]
+            if stage.is_temperature_ramping:
+                marker_lines.extend(
+                    [
+                        f"temperature_start={stage.temperature_start}",
+                        f"temperature_end={stage.temperature_end}",
+                        f"temperature_increment={stage.temperature_increment}",
+                        f"temperature_interval_steps={stage.temperature_interval_steps}",
+                    ]
+                )
+            marker_path.write_text("\n".join(marker_lines) + "\n")
+            write_phase_record(
+                phase_record_path,
+                phase=stage_name,
+                status="recovery",
+                step=steps_done,
+                total_steps=total_steps,
+                temperature=current_temp,
+                state_path=str(state_path.resolve()),
             )
             LOGGER.info(
-                f"Saved EQ_INTERRUPTED marker: stage {stage_index}, "
-                f"step {steps_done}/{total_steps}, temp {current_temp} K"
+                f"Saved synchronized equilibration state, checkpoint, and "
+                f"EQ_INTERRUPTED marker: stage {stage_index}, "
+                f"step {steps_done}/{total_steps}, scheduled temperature "
+                f"{current_temp} K"
             )
 
         # Track steps completed (starting from resume point)
@@ -469,40 +1016,30 @@ class SimulationRunner:
 
         # Run simulation with temperature ramping if needed
         if stage.is_temperature_ramping:
+            ramp_start = stage.get_start_temperature()
+            ramp_end = stage.get_final_temperature()
+            ramp_increment = stage.temperature_increment
+            temperature_update_steps = stage.temperature_interval_steps
+            assert ramp_increment is not None
+            assert temperature_update_steps is not None
             LOGGER.info(
-                f"Temperature ramping: {stage.temperature_start} K -> {stage.temperature_end} K "
-                f"(increment={stage.temperature_increment} K every {stage.temperature_interval} fs)"
+                f"Temperature ramping: {ramp_start} K -> {ramp_end} K "
+                f"by {ramp_increment:g} K every {temperature_update_steps} steps; "
+                f"derived duration {stage.resolved_duration:.6f} ns "
+                f"({stage.temperature_ramp_updates} updates, {total_steps} total steps "
+                f"at {timestep_fs:g} fs)"
             )
-            steps_per_update = int(stage.temperature_interval / timestep_fs)
-
-            # Calculate total temperature updates needed
-            temp_range = stage.temperature_end - stage.temperature_start
-            num_updates = int(temp_range / stage.temperature_increment)
-            steps_for_ramping = num_updates * steps_per_update
-            remaining_steps_at_final = total_steps - steps_for_ramping
-
-            # Determine starting temperature — always begin from
-            # temperature_start and let the fast-forward loop advance
-            # current_temp by skipping already-completed chunks.  On
-            # resume, resume_temperature is used only for logging.
-            current_temp = stage.temperature_start
+            current_temp = stage.temperature_at_step(resume_from_step, total_steps)
             if resume_from_step > 0 and resume_temperature is not None:
                 LOGGER.info(
                     f"Resuming temperature ramp from step {resume_from_step}, "
-                    f"saved temp {resume_temperature} K (fast-forwarding from {current_temp} K)"
+                    f"saved temp {resume_temperature} K, calculated schedule temp "
+                    f"{current_temp:.6f} K"
                 )
 
-            # Temperature ramping phase — each update is a chunk we can
-            # interrupt between.  Skip chunks already completed on resume.
-            ramp_step_count = 0
-            while current_temp < stage.temperature_end:
-                chunk_end = ramp_step_count + steps_per_update
-                if chunk_end <= resume_from_step:
-                    # Already completed this chunk in a previous run
-                    ramp_step_count = chunk_end
-                    current_temp += stage.temperature_increment
-                    continue
-
+            # Hold each target for the requested step interval, then increment it.
+            while steps_done < total_steps:
+                current_temp = stage.temperature_at_step(steps_done, total_steps)
                 integrator.setTemperature(current_temp * omm_unit.kelvin)
                 if stage.ensemble == Ensemble.NPT:
                     self._simulation.context.setParameter(
@@ -510,12 +1047,12 @@ class SimulationRunner:
                         current_temp * omm_unit.kelvin,
                     )
 
-                # If resuming mid-chunk, only run the remainder
-                steps_already = max(0, resume_from_step - ramp_step_count)
-                steps_this_chunk = steps_per_update - steps_already
+                steps_to_update = temperature_update_steps - (steps_done % temperature_update_steps)
+                # Preserve the ramp schedule while bounding interrupt latency.
+                steps_this_chunk = min(1000, steps_to_update, total_steps - steps_done)
                 self._simulation.step(steps_this_chunk)
                 steps_done += steps_this_chunk
-                ramp_step_count = chunk_end
+                current_temp = stage.temperature_at_step(steps_done, total_steps)
 
                 if is_interrupted():
                     LOGGER.warning(
@@ -527,44 +1064,17 @@ class SimulationRunner:
                         signal_number=get_interrupt_signal(), steps_completed=steps_done
                     )
 
-                current_temp += stage.temperature_increment
-
-            # Final temperature - run remaining steps in chunks
-            integrator.setTemperature(stage.temperature_end * omm_unit.kelvin)
+            # Pin both coupling algorithms to the exact requested endpoint.
+            integrator.setTemperature(ramp_end * omm_unit.kelvin)
             if stage.ensemble == Ensemble.NPT:
                 self._simulation.context.setParameter(
                     openmm.MonteCarloBarostat.Temperature(),
-                    stage.temperature_end * omm_unit.kelvin,
+                    ramp_end * omm_unit.kelvin,
                 )
-            current_temp = stage.temperature_end
-            steps_at_final_done = steps_done - steps_for_ramping
-            steps_at_final_remaining = max(0, remaining_steps_at_final - steps_at_final_done)
-
-            if steps_at_final_remaining > 0:
-                LOGGER.info(
-                    f"Running {steps_at_final_remaining} steps at final "
-                    f"temperature {stage.temperature_end} K"
-                )
-                chunk_size = min(report_interval, steps_at_final_remaining)
-                while steps_at_final_remaining > 0:
-                    this_chunk = min(chunk_size, steps_at_final_remaining)
-                    self._simulation.step(this_chunk)
-                    steps_done += this_chunk
-                    steps_at_final_remaining -= this_chunk
-
-                    if is_interrupted():
-                        LOGGER.warning(
-                            f"Interrupt during equilibration stage {stage_index} "
-                            f"at step {steps_done}/{total_steps} (final temp)"
-                        )
-                        _save_eq_interrupted(steps_done, current_temp)
-                        raise GracefulExit(
-                            signal_number=get_interrupt_signal(),
-                            steps_completed=steps_done,
-                        )
+            current_temp = ramp_end
         else:
             # Constant temperature - run in chunks with signal checking
-            current_temp = stage.temperature
+            current_temp = stage.get_start_temperature()
             steps_remaining = total_steps - resume_from_step
             if resume_from_step > 0:
                 LOGGER.info(
@@ -572,9 +1082,9 @@ class SimulationRunner:
                     f"{steps_remaining} steps remaining"
                 )
             else:
-                LOGGER.info(f"Running {total_steps} steps at {stage.temperature} K")
+                LOGGER.info(f"Running {total_steps} steps at {current_temp} K")
 
-            chunk_size = min(report_interval, steps_remaining)
+            chunk_size = min(1000, report_interval, steps_remaining)
             while steps_remaining > 0:
                 this_chunk = min(chunk_size, steps_remaining)
                 self._simulation.step(this_chunk)
@@ -599,6 +1109,9 @@ class SimulationRunner:
         self._current_velocities = state.getVelocities()
         self._current_box_vectors = state.getPeriodicBoxVectors()
 
+        state_xml_path = phase_dir / f"{stage_name}_state.xml"
+        state_xml_path.write_text(XmlSerializer.serialize(state))
+
         # Log final energy for diagnostics
         final_energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
         LOGGER.info(f"Stage {stage_index} ({stage_name}): final PE = {final_energy:.2f} kJ/mol")
@@ -606,6 +1119,16 @@ class SimulationRunner:
         # Save checkpoint
         checkpoint_path = phase_dir / f"{stage_name}_checkpoint.chk"
         self._simulation.saveCheckpoint(str(checkpoint_path))
+
+        write_phase_record(
+            phase_record_path,
+            phase=stage_name,
+            status="completed",
+            step=total_steps,
+            total_steps=total_steps,
+            temperature=stage.get_final_temperature(),
+            state_path=str(state_xml_path.resolve()),
+        )
 
         # Remove EQ_INTERRUPTED marker if present (stage completed successfully)
         eq_interrupted_marker = phase_dir / "EQ_INTERRUPTED"
@@ -626,11 +1149,13 @@ class SimulationRunner:
             "stage_index": stage_index,
             "stage_name": stage.name,
             "ensemble": stage.ensemble.value,
-            "duration_ns": stage.duration,
+            "duration_ns": stage.resolved_duration,
             "total_steps": total_steps,
             "temperature_start_K": stage.get_start_temperature(),
             "temperature_end_K": final_temp,
             "is_temperature_ramping": stage.is_temperature_ramping,
+            "temperature_increment_K": stage.temperature_increment,
+            "temperature_interval_steps": stage.temperature_interval_steps,
             "position_restraints": [
                 {"group": r.group, "force_constant": r.force_constant}
                 for r in stage.position_restraints
@@ -640,6 +1165,10 @@ class SimulationRunner:
             ),
             "trajectory_path": str(traj_path),
             "checkpoint_path": str(checkpoint_path),
+            "started_at": started_at,
+            "finished_at": _now_iso(),
+            "seeds": seeds,
+            "seeds_by_attempt": seeds_by_attempt,
         }
 
         LOGGER.info(f"Equilibration stage '{stage.name}' complete")
@@ -670,9 +1199,9 @@ class SimulationRunner:
         for i, stage in enumerate(stages):
             stage_name = f"equilibration_{i}_{stage.name}"
             stage_dir = self._working_dir / stage_name
-            chk = stage_dir / f"{stage_name}_checkpoint.chk"
-            eq_marker = stage_dir / "EQ_INTERRUPTED"
-            if chk.exists() and not eq_marker.exists():
+            from polyzymd.simulation.phase_state import phase_completed
+
+            if phase_completed(stage_dir / "phase.json"):
                 completed.append(i)
             else:
                 break  # Stop at first gap — can't skip stages
@@ -730,16 +1259,24 @@ class SimulationRunner:
                     info["current_temperature"] = float(value)
                 elif key == "is_temperature_ramping":
                     info["is_temperature_ramping"] = value.lower() == "true"
+                elif key in {
+                    "temperature_start",
+                    "temperature_end",
+                    "temperature_increment",
+                }:
+                    info[key] = float(value)
+                elif key == "temperature_interval_steps":
+                    info[key] = int(value)
         except (ValueError, OSError) as exc:
             LOGGER.warning(f"Could not parse EQ_INTERRUPTED marker {marker_path}: {exc}")
             return None
 
-        # Verify checkpoint exists (needed for resume)
-        chk = stage_dir / f"{stage_name}_checkpoint.chk"
-        if not chk.exists():
+        # Resuming loads the stage's portable state; without it the stage restarts.
+        state_xml = stage_dir / f"{stage_name}_state.xml"
+        if not state_xml.exists():
             LOGGER.warning(
-                f"EQ_INTERRUPTED marker found for stage {next_idx} but no checkpoint — "
-                f"will restart stage from beginning"
+                f"EQ_INTERRUPTED marker found for stage {next_idx} but no "
+                f"{state_xml.name} — will restart stage from beginning"
             )
             return None
 
@@ -755,12 +1292,10 @@ class SimulationRunner:
         stage_index: int,
         stage_name: str,
     ) -> None:
-        """Load positions, velocities, and box vectors from a completed equilibration checkpoint.
+        """Load positions, velocities, and box vectors from a completed equilibration stage.
 
-        Creates a temporary ``Simulation`` to deserialise the binary
-        checkpoint, then stores the extracted state on ``self`` so
-        subsequent stages or production can pick up seamlessly.
-        The temporary simulation is discarded after extraction.
+        Reads the stage's ``*_state.xml`` and stores the state on ``self`` so
+        the next stage or production starts from it.
 
         Parameters
         ----------
@@ -770,30 +1305,81 @@ class SimulationRunner:
             Name of the completed stage (used in directory/file naming).
         """
         dir_name = f"equilibration_{stage_index}_{stage_name}"
-        chk_path = self._working_dir / dir_name / f"{dir_name}_checkpoint.chk"
+        stage_dir = self._working_dir / dir_name
+        state_path = stage_dir / f"{dir_name}_state.xml"
+        if not state_path.exists():
+            raise FileNotFoundError(f"Equilibration state not found: {state_path}")
 
-        if not chk_path.exists():
-            raise FileNotFoundError(f"Equilibration checkpoint not found: {chk_path}")
-
-        # Temporary simulation context to deserialise the binary checkpoint.
-        # We use a dummy VerletIntegrator because we only need to extract
-        # geometric state (positions, velocities, box vectors) — the next
-        # run_equilibration_stage() call creates a proper LangevinMiddleIntegrator.
-        integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
-        platform = self._get_platform()
-        temp_sim = Simulation(self._topology, self._system, integrator, platform)
-        temp_sim.loadCheckpoint(str(chk_path))
-
-        state = temp_sim.context.getState(getPositions=True, getVelocities=True)
+        state = XmlSerializer.deserialize(state_path.read_text())
         self._current_positions = state.getPositions()
         self._current_velocities = state.getVelocities()
         self._current_box_vectors = state.getPeriodicBoxVectors()
-        # Discard the temporary simulation — it has a dummy integrator
-        del temp_sim
-
+        self._current_step_count = int(state.getStepCount())
+        self._current_time = state.getTime()
         LOGGER.info(
-            f"Loaded state from equilibration stage {stage_index} ({stage_name}) checkpoint"
+            f"Loaded portable state from equilibration stage {stage_index} "
+            f"({stage_name}) at step {self._current_step_count}"
         )
+
+    @staticmethod
+    def _validate_eq_resume_metadata(
+        stage: "EquilibrationStageConfig",
+        resume_step: int,
+        saved_total_steps: int | None,
+        saved_temperature: float | None,
+        saved_temperature_start: float | None,
+        saved_temperature_end: float | None,
+        saved_temperature_increment: float | None,
+        saved_temperature_interval_steps: int | None,
+    ) -> None:
+        """Reject resume markers created with a different stage schedule."""
+        timestep_fs = stage.time_step or 2.0
+        expected_total_steps = int(round(stage.resolved_duration * 1e6 / timestep_fs))
+        if saved_total_steps is not None and saved_total_steps != expected_total_steps:
+            raise RuntimeError(
+                f"Cannot resume equilibration stage '{stage.name}': marker has "
+                f"{saved_total_steps} total steps, but the current configuration "
+                f"requires {expected_total_steps}"
+            )
+
+        if stage.is_temperature_ramping:
+            if saved_temperature is None:
+                raise RuntimeError(
+                    f"Cannot resume temperature ramp '{stage.name}': marker does not "
+                    "contain the scheduled temperature"
+                )
+            saved_schedule = (
+                saved_temperature_start,
+                saved_temperature_end,
+                saved_temperature_increment,
+                saved_temperature_interval_steps,
+            )
+            if any(value is None for value in saved_schedule):
+                raise RuntimeError(
+                    f"Cannot resume temperature ramp '{stage.name}': marker does not "
+                    "contain the complete increment schedule"
+                )
+            current_schedule = (
+                stage.temperature_start,
+                stage.temperature_end,
+                stage.temperature_increment,
+                stage.temperature_interval_steps,
+            )
+            if saved_schedule != current_schedule:
+                raise RuntimeError(
+                    f"Cannot resume temperature ramp '{stage.name}': marker schedule "
+                    f"{saved_schedule} does not match current schedule {current_schedule}"
+                )
+            expected_temperature = stage.temperature_at_step(
+                resume_step,
+                expected_total_steps,
+            )
+            if abs(saved_temperature - expected_temperature) > 1e-6:
+                raise RuntimeError(
+                    f"Cannot resume temperature ramp '{stage.name}': marker temperature "
+                    f"is {saved_temperature} K, but the current schedule requires "
+                    f"{expected_temperature} K at step {resume_step}"
+                )
 
     def run_staged_equilibration(
         self,
@@ -860,10 +1446,10 @@ class SimulationRunner:
                         "stage_index": i,
                         "stage_name": stage.name,
                         "skipped": True,
-                        "duration_ns": stage.duration,
+                        "duration_ns": stage.resolved_duration,
                     }
                 )
-                results["total_duration_ns"] += stage.duration
+                results["total_duration_ns"] += stage.resolved_duration
                 continue
 
             stage_dir_name = f"equilibration_{i}_{stage.name}"
@@ -874,6 +1460,18 @@ class SimulationRunner:
                 # Resume mid-stage from checkpoint
                 resume_step = interrupted_info.get("steps_completed", 0)
                 resume_temp = interrupted_info.get("current_temperature")
+                self._validate_eq_resume_metadata(
+                    stage=stage,
+                    resume_step=resume_step,
+                    saved_total_steps=interrupted_info.get("total_steps"),
+                    saved_temperature=resume_temp,
+                    saved_temperature_start=interrupted_info.get("temperature_start"),
+                    saved_temperature_end=interrupted_info.get("temperature_end"),
+                    saved_temperature_increment=interrupted_info.get("temperature_increment"),
+                    saved_temperature_interval_steps=interrupted_info.get(
+                        "temperature_interval_steps"
+                    ),
+                )
                 LOGGER.info(
                     f"Resuming interrupted equilibration stage {i} ({stage.name}) "
                     f"from step {resume_step}"
@@ -889,7 +1487,7 @@ class SimulationRunner:
                     resume_temperature=resume_temp,
                 )
                 results["stages"].append(stage_result)
-                results["total_duration_ns"] += stage.duration
+                results["total_duration_ns"] += stage.resolved_duration
                 continue
 
             # Clean up partial stage directory (exists but no checkpoint and
@@ -908,7 +1506,7 @@ class SimulationRunner:
                 stage_index=i,
             )
             results["stages"].append(stage_result)
-            results["total_duration_ns"] += stage.duration
+            results["total_duration_ns"] += stage.resolved_duration
 
         # Get final energy
         if results["stages"]:
@@ -944,67 +1542,82 @@ class SimulationRunner:
         barostat_frequency: int = 25,
         output_prefix: str = "production",
         segment_index: int = 0,
-        report_interval: int | None = None,
-        checkpoint_interval_s: float = 60.0,
+        *,
+        report_interval: int,
+        checkpoint_interval_s: float,
+        ensemble: str = "NPT",
+        thermostat: str = "LangevinMiddle",
     ) -> Dict[str, Any]:
-        """Run NPT production simulation.
+        """Run production in the configured ensemble (NPT or NVT).
+
+        :func:`production_dynamics` gives ``friction``, ``barostat_frequency``,
+        ``ensemble`` and ``thermostat`` from the config's production phase.
 
         Args:
             temperature: Temperature in Kelvin.
             duration_ns: Duration in nanoseconds.
-            num_samples: Number of trajectory frames to save. Ignored when
-                ``report_interval`` is provided.
+            num_samples: Number of trajectory frames to save.
             timestep_fs: Time step in femtoseconds.
             friction: Friction coefficient in 1/ps.
             pressure: Pressure in atmospheres.
-            barostat_frequency: Barostat update frequency.
+            barostat_frequency: Barostat update frequency (NPT only).
             output_prefix: Prefix for output files.
             segment_index: Segment index for multi-segment production.
-            report_interval: Fixed reporter interval in steps. When provided,
-                this overrides the per-segment ``total_steps // num_samples``
-                calculation to keep frame spacing uniform across segments.
+            report_interval: Explicit reporter interval in steps.
             checkpoint_interval_s: Wall-time interval in seconds between
-                portable restart checkpoints.  Also controls how frequently
-                the loop checks for SLURM preemption signals.  Set to 0 to
-                disable wall-time checkpoints (reverts to legacy behaviour).
+                portable restart checkpoints. Also controls how frequently
+                the loop checks for SLURM preemption signals.
 
         Returns:
             Dictionary with phase results.
         """
+        if ensemble not in ("NPT", "NVT"):
+            raise ValueError(f"production ensemble must be NPT or NVT, got {ensemble!r}")
+        if thermostat not in ("LangevinMiddle", "Langevin"):
+            # The parameters record the thermostat, so it must be the one that runs.
+            raise ValueError(
+                f"OpenMM production runs LangevinMiddle or Langevin, not {thermostat!r}"
+            )
+        npt = ensemble == "NPT"
         LOGGER.info(
-            f"Starting production: {duration_ns} ns at {temperature} K, {pressure} atm (NPT)"
+            f"Starting production: {duration_ns} ns at {temperature} K"
+            + (f", {pressure} atm" if npt else "")
+            + f" ({ensemble}, {thermostat}, friction {friction:g}/ps"
+            + (f", barostat every {barostat_frequency} steps)" if npt else ")")
         )
 
-        # Add barostat for NPT
         self._remove_barostat()
-        self._add_barostat(
-            pressure=pressure,
-            temperature=temperature,
-            frequency=barostat_frequency,
-        )
+        if npt:
+            self._add_barostat(
+                pressure=pressure,
+                temperature=temperature,
+                frequency=barostat_frequency,
+                phase=f"production:{segment_index}",
+            )
 
         # Create output directory
         phase_name = f"{output_prefix}_{segment_index}"
         phase_dir = self._working_dir / phase_name
         phase_dir.mkdir(exist_ok=True)
+        _remove_stale_resume_files(phase_dir, phase_name)
 
         # Calculate steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
 
-        # Determine report interval: prefer the fixed global value if given,
-        # otherwise fall back to per-segment calculation (legacy callers).
-        if report_interval is None:
-            report_interval = max(1, total_steps // num_samples)
+        if report_interval <= 0:
+            raise ValueError("report_interval must be a positive integer")
+        if checkpoint_interval_s <= 0:
+            raise ValueError("checkpoint_interval_s must be positive")
 
         # Create integrator and simulation
         integrator = self._create_integrator(
             temperature=temperature,
             friction=friction,
             timestep=timestep_fs,
+            thermostat=thermostat,
+            phase=f"production:{segment_index}",
         )
-        platform = self._get_platform()
-
-        self._simulation = Simulation(self._topology, self._system, integrator, platform)
+        self._simulation = self._create_simulation(integrator)
 
         # Set box vectors BEFORE positions - critical for correct periodic boundary handling
         if self._current_box_vectors is not None:
@@ -1026,25 +1639,35 @@ class SimulationRunner:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved initial system to {system_xml_path}")
 
+        from polyzymd.audit.runtime import record_system_check
+
+        record_system_check(self._system, self._working_dir, phase_dir, phase_name, segment_index)
+
         # Set velocities for production
         # - If we have velocities from equilibration, use them (physical continuity)
         # - Otherwise generate new velocities at target temperature
         # Note: For continuation segments (segment > 0), ContinuationManager uses
         # loadState() which restores both positions and velocities from the XML state file
+        velocity_seed = None
         if segment_index == 0:
             if self._current_velocities is not None:
                 self._simulation.context.setVelocities(self._current_velocities)
                 LOGGER.info("Using velocities preserved from equilibration")
             else:
-                self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
+                velocity_seed = self._set_velocities(temperature, "production")
                 LOGGER.info("Initialized velocities from Maxwell-Boltzmann distribution")
+        from polyzymd.simulation.seeds import openmm_seeds
+
+        self._segment_seeds = openmm_seeds(self._simulation, velocity_seed)
 
         # Add reporters
         traj_path = phase_dir / f"{phase_name}_trajectory.dcd"
         state_path = phase_dir / f"{phase_name}_state_data.csv"
         pdb_path = phase_dir / f"{phase_name}_topology.pdb"
 
-        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
+        from polyzymd.simulation.report_state import production_dcd_reporter
+
+        self._simulation.reporters.append(production_dcd_reporter(traj_path, report_interval))
         self._simulation.reporters.append(
             StateDataReporter(
                 str(state_path),
@@ -1069,6 +1692,16 @@ class SimulationRunner:
         prod_chk_path = phase_dir / f"{phase_name}_checkpoint.chk"
         self._simulation.reporters.append(CheckpointReporter(str(prod_chk_path), report_interval))
 
+        # Last reporter: rewrites restart_state.xml after each frame has been
+        # written by the reporters above, and records the step of that frame.
+        from polyzymd.simulation.report_state import ReportedStateTracker, save_state_after_crash
+
+        tracker = ReportedStateTracker(
+            phase_dir, report_interval, int(self._simulation.context.getStepCount())
+        )
+        self._simulation.reporters.append(tracker)
+        self._production_tracker = tracker
+
         # Save topology
         with open(pdb_path, "w") as f:
             PDBFile.writeFile(
@@ -1082,6 +1715,7 @@ class SimulationRunner:
         # Save parameters JSON (needed for continuation across segments)
         params_dict = {
             "__class__": "SimulationParameters",
+            "provenance": runtime_provenance(self._simulation),
             "__values__": {
                 "thermo_params": {
                     "__class__": "ThermoParameters",
@@ -1101,6 +1735,7 @@ class SimulationRunner:
                                     "__class__": "Quantity",
                                     "__values__": {"value": friction, "unit": "/picosecond"},
                                 },
+                                "thermostat": thermostat,
                             },
                         },
                         "barostat_params": {
@@ -1143,6 +1778,9 @@ class SimulationRunner:
                 },
             },
         }
+        if not npt:
+            # Continuation adds a barostat only when these parameters name one.
+            del params_dict["__values__"]["thermo_params"]["__values__"]["barostat_params"]
         params_path = phase_dir / f"{phase_name}_parameters.json"
         with open(params_path, "w") as f:
             json.dump(params_dict, f, indent=2)
@@ -1153,9 +1791,9 @@ class SimulationRunner:
             GracefulExit,
             get_interrupt_signal,
             install_handlers,
+            interrupted_state_save_exceptions,
             is_interrupted,
             save_interrupted_state,
-            save_restart_checkpoint,
         )
 
         install_handlers()
@@ -1177,13 +1815,9 @@ class SimulationRunner:
         _last_checkpoint_write = _time.monotonic()
         _loop_start = _time.monotonic()
 
-        # Adaptive sub-chunk sizing: start with report_interval (the original
-        # chunk_size).  After the first checkpoint interval elapses, measure
-        # actual steps/second and adapt sub_chunk to target
-        # checkpoint_interval / 4 seconds (~15s worth of steps).  This
-        # ensures ~4 interrupt checks per checkpoint interval regardless of
-        # system size or hardware speed.
-        sub_chunk = min(report_interval, total_steps)
+        # Calibrate immediately with at most 1,000 steps, then keep every
+        # blocking OpenMM call near five seconds independent of reporter rate.
+        sub_chunk = min(1000, report_interval, total_steps)
         _adapted = False
 
         try:
@@ -1196,15 +1830,10 @@ class SimulationRunner:
                 _now = _time.monotonic()
 
                 # Adaptive sub-chunk calibration (once, after first interval)
-                if (
-                    not _adapted
-                    and checkpoint_interval_s > 0
-                    and (_now - _loop_start) >= checkpoint_interval_s
-                ):
+                if not _adapted:
                     elapsed = _now - _loop_start
                     steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
-                    # Target sub-chunk duration = checkpoint_interval / 4
-                    target_seconds = checkpoint_interval_s / 4.0
+                    target_seconds = 5.0
                     new_sub_chunk = max(10, int(steps_per_sec * target_seconds))
                     # Sub-chunk must be a divisor-friendly size relative to
                     # report_interval to avoid misaligned reporter writes.
@@ -1247,14 +1876,10 @@ class SimulationRunner:
 
                 # Wall-time restart checkpoint
                 if (
-                    checkpoint_interval_s > 0
-                    and (_now - _last_checkpoint_write) >= checkpoint_interval_s
+                    (_now - _last_checkpoint_write) >= checkpoint_interval_s
                     and steps_done < total_steps  # skip if we're about to finish
                 ):
-                    save_restart_checkpoint(
-                        simulation=self._simulation,
-                        output_dir=phase_dir,
-                    )
+                    tracker.save_restart(self._simulation)
                     _last_checkpoint_write = _now
                 if is_interrupted():
                     LOGGER.warning(f"Interrupt detected at step {steps_done}/{total_steps}")
@@ -1278,18 +1903,29 @@ class SimulationRunner:
                     )
         except GracefulExit:
             raise  # Re-raise so caller can handle exit code
-        except Exception:
-            # On unexpected crash, still try to save interrupted state
+        except interrupted_state_save_exceptions():
+            # On unexpected crash (for example a trajectory write raising
+            # OSError), save only a state whose frames were all written.
             try:
-                save_interrupted_state(
+                saved_steps = save_state_after_crash(
                     simulation=self._simulation,
+                    tracker=tracker,
                     output_dir=phase_dir,
                     segment_index=segment_index,
-                    steps_completed=steps_done,
                     total_steps=total_steps,
                 )
-            except Exception:
-                LOGGER.error("Failed to save interrupted state after crash")
+                self._update_progress_interrupted(
+                    segment_index=segment_index,
+                    steps_done=saved_steps,
+                    total_steps=total_steps,
+                    duration_ns=duration_ns,
+                    timestep_fs=timestep_fs,
+                )
+            except interrupted_state_save_exceptions() as save_exc:
+                LOGGER.exception(
+                    "Failed to save interrupted state after crash: %s",
+                    save_exc,
+                )
             raise
 
         # Get final state (no enforcePeriodicBox to preserve molecular continuity)
@@ -1318,11 +1954,16 @@ class SimulationRunner:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved system to {system_xml_path}")
 
+        from polyzymd.simulation.progress import flush_reporters
+
+        # The trajectory is hashed into progress.json: make sure it is all on disk.
+        flush_reporters(self._simulation)
+
         # Update progress tracker (successful completion)
         self._update_progress_completed(
             segment_index=segment_index,
             total_steps=total_steps,
-            num_samples=num_samples,
+            num_samples=tracker.frames_written,
             duration_ns=duration_ns,
             timestep_fs=timestep_fs,
         )
@@ -1330,9 +1971,9 @@ class SimulationRunner:
         results = {
             "phase": "production",
             "segment": segment_index,
-            "ensemble": "NPT",
+            "ensemble": ensemble,
             "temperature_K": temperature,
-            "pressure_atm": pressure,
+            "pressure_atm": pressure if npt else None,
             "duration_ns": duration_ns,
             "total_steps": total_steps,
             "final_energy_kJ_mol": state.getPotentialEnergy().value_in_unit(
@@ -1346,6 +1987,19 @@ class SimulationRunner:
         LOGGER.info(f"Production segment {segment_index} complete")
 
         return results
+
+    def _apply_frame_fields(self, record: Any) -> None:
+        """Copy the production tracker's frame bookkeeping onto a progress record.
+
+        Sets ``report_interval``, ``start_step``, ``last_reported_step`` and
+        ``samples_written``; does nothing before :meth:`run_production` has
+        attached a tracker.
+        """
+        if self._production_tracker is None:
+            return
+        for name, value in self._production_tracker.frame_fields().items():
+            if value is not None:
+                setattr(record, name, value)
 
     def _write_segment_started(
         self,
@@ -1387,7 +2041,10 @@ class SimulationRunner:
             steps_requested=total_steps,
             samples_written=0,
             status=SegmentStatus.RUNNING,
+            seeds=self._segment_seeds,
+            **record_provenance(self._simulation),
         )
+        self._apply_frame_fields(record)
 
         _update_or_append_segment(progress, record)
         progress.status = SimulationStatus.RUNNING
@@ -1433,6 +2090,7 @@ class SimulationRunner:
             if seg.index == segment_index and seg.status == SegmentStatus.RUNNING:
                 seg.steps_completed = steps_done
                 seg.duration_ns = (steps_done * timestep_fs) / 1e6
+                self._apply_frame_fields(seg)
                 break
         else:
             # No RUNNING record found — shouldn't happen, but be safe
@@ -1480,6 +2138,9 @@ class SimulationRunner:
             LOGGER.warning("No progress file found — skipping progress update")
             return
 
+        from polyzymd.simulation.progress import trajectory_digest
+
+        segment_dir = Path(self._working_dir) / f"production_{segment_index}"
         record = SegmentRecord(
             index=segment_index,
             steps_completed=total_steps,
@@ -1487,8 +2148,12 @@ class SimulationRunner:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
+            seeds=self._segment_seeds,
+            **record_provenance(self._simulation),
+            **trajectory_digest(segment_dir / f"production_{segment_index}_trajectory.dcd"),
         )
         record.finished_at = _now_iso()
+        self._apply_frame_fields(record)
 
         _update_or_append_segment(progress, record)
 
@@ -1532,6 +2197,7 @@ class SimulationRunner:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _now_iso,
             _update_or_append_segment,
             load_progress,
             save_progress,
@@ -1549,10 +2215,14 @@ class SimulationRunner:
             index=segment_index,
             steps_completed=steps_done,
             steps_requested=total_steps,
-            samples_written=0,  # Interrupted — samples may be partial
+            samples_written=0,  # Replaced by the tracker's count when known
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
+            finished_at=_now_iso(),
+            seeds=self._segment_seeds,
+            **record_provenance(self._simulation),
         )
+        self._apply_frame_fields(record)
 
         _update_or_append_segment(progress, record)
         progress.status = SimulationStatus.INTERRUPTED
@@ -1562,22 +2232,6 @@ class SimulationRunner:
             f"Progress updated (interrupted): {steps_done}/{total_steps} steps "
             f"in segment {segment_index}"
         )
-
-    def save_history(self, path: Optional[Union[str, Path]] = None) -> None:
-        """Save simulation history to JSON.
-
-        Args:
-            path: Output path (defaults to working_dir/simulation_history.json).
-        """
-        if path is None:
-            path = self._working_dir / "simulation_history.json"
-        else:
-            path = Path(path)
-
-        with open(path, "w") as f:
-            json.dump(self._history, f, indent=2)
-
-        LOGGER.info(f"Saved simulation history to {path}")
 
     def load_checkpoint(self, checkpoint_path: Union[str, Path]) -> None:
         """Load state from a checkpoint file.

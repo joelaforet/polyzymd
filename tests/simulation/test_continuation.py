@@ -1,0 +1,726 @@
+"""Tests for the automatic restart and hard-kill recovery infrastructure.
+
+Covers:
+- Checkpoint fallback recovery paths in ContinuationManager._get_previous_paths()
+- File validation for checkpoint vs state-based recovery
+- _estimate_steps_from_csv edge cases (covered more extensively in test_progress.py)
+- EQ_INTERRUPTED marker parsing in _find_interrupted_eq_stage()
+- _find_completed_eq_stages with interrupted stages
+- FAILED segment cleanup logic
+- End-to-end restart flow for checkpoint-only segments
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _write_normal_segment(working_dir: Path, seg_idx: int) -> None:
+    """Write minimal files simulating a normally completed segment."""
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    (seg_dir / f"production_{seg_idx}_state.xml").write_text("<State/>")
+    (seg_dir / f"production_{seg_idx}_system.xml").write_text("<System/>")
+    (seg_dir / f"production_{seg_idx}_checkpoint.chk").write_bytes(b"\x00" * 16)
+    params = {
+        "__values__": {
+            "integ_params": {
+                "__values__": {
+                    "num_samples": 100,
+                    "time_step": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 2.0, "unit": "femtosecond"},
+                    },
+                    "total_time": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 10.0, "unit": "nanosecond"},
+                    },
+                }
+            },
+            "thermo_params": {"__values__": {}},
+        }
+    }
+    (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
+
+
+def _write_interrupted_segment(
+    working_dir: Path, seg_idx: int, steps_completed: int = 3000000
+) -> None:
+    """Write files for a gracefully interrupted segment (SIGUSR1/SIGTERM)."""
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    (seg_dir / "interrupted_state.xml").write_text("<State/>")
+    (seg_dir / "interrupted_system.xml").write_text("<System/>")
+    (seg_dir / "interrupted_checkpoint.chk").write_bytes(b"\x00" * 16)
+    (seg_dir / "INTERRUPTED").write_text(
+        f"segment_index={seg_idx}\n"
+        f"steps_completed={steps_completed}\n"
+        f"total_steps=5000000\n"
+        f"remaining_steps={5000000 - steps_completed}\n"
+    )
+    params = {
+        "__values__": {
+            "integ_params": {
+                "__values__": {
+                    "num_samples": 100,
+                    "time_step": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 2.0, "unit": "femtosecond"},
+                    },
+                    "total_time": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 10.0, "unit": "nanosecond"},
+                    },
+                }
+            },
+            "thermo_params": {"__values__": {}},
+        }
+    }
+    (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
+
+
+def _write_hard_killed_segment(
+    working_dir: Path,
+    seg_idx: int,
+    with_system_xml: bool = True,
+    with_csv: bool = False,
+    csv_steps: int = 80000,
+) -> None:
+    """Write files for a hard-killed segment (SIGKILL/OOM): checkpoint + system.xml only."""
+    import os
+    import time as _time
+
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    # Periodic checkpoint from CheckpointReporter
+    chk_path = seg_dir / f"production_{seg_idx}_checkpoint.chk"
+    chk_path.write_bytes(b"\x00" * 16)
+    if with_system_xml:
+        (seg_dir / f"production_{seg_idx}_system.xml").write_text("<System/>")
+    if with_csv:
+        # Write two data rows so _estimate_steps_from_csv computes the
+        # correct per-segment delta (last_step - first_step = csv_steps).
+        (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
+            f'#"Step","Time (ps)","PE (kJ/mole)"\n'
+            f"0,0.0,-100000.0\n"
+            f"{csv_steps},{csv_steps * 0.002},-100000.0\n"
+        )
+    # Parameters file (continuation manager needs this)
+    params = {
+        "__values__": {
+            "integ_params": {
+                "__values__": {
+                    "num_samples": 100,
+                    "time_step": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 2.0, "unit": "femtosecond"},
+                    },
+                    "total_time": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 10.0, "unit": "nanosecond"},
+                    },
+                }
+            },
+            "thermo_params": {"__values__": {}},
+        }
+    }
+    (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
+
+    # Backdate checkpoint mtime so the recency heuristic classifies this
+    # as INTERRUPTED (hard-killed) rather than RUNNING.
+    old_time = _time.time() - 1200  # 20 minutes ago
+    os.utime(chk_path, (old_time, old_time))
+
+
+# ---------------------------------------------------------------------------
+# ContinuationManager._get_previous_paths — recovery path selection
+# ---------------------------------------------------------------------------
+
+
+class TestFindSolvatedPdb:
+    """ContinuationManager._find_solvated_pdb accepts only approved topology paths."""
+
+    def _make_manager(self, working_dir):
+        """Create a minimal ContinuationManager-like object for testing."""
+        try:
+            from polyzymd.simulation.continuation import ContinuationManager
+
+            mgr = ContinuationManager.__new__(ContinuationManager)
+            mgr._working_dir = Path(working_dir)
+            mgr._prev_segment = 0
+            return mgr
+        except ImportError:
+            pytest.skip("polyzymd.simulation.continuation not importable")
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            Path("production_0") / "production_0_topology.pdb",
+            Path("production") / "production_topology.pdb",
+        ],
+    )
+    def test_finds_exact_approved_paths(self, tmp_path, relative_path):
+        """Approved exact topology paths should be accepted."""
+        pdb_path = tmp_path / relative_path
+        pdb_path.parent.mkdir(parents=True, exist_ok=True)
+        pdb_path.write_text("ATOM ...")
+        mgr = self._make_manager(tmp_path)
+
+        assert mgr._find_solvated_pdb() == pdb_path
+
+    def test_rejects_arbitrary_recursive_pdb(self, tmp_path):
+        """Arbitrary recursive PDB files should not be accepted."""
+        nested_dir = tmp_path / "nested"
+        nested_dir.mkdir()
+        (nested_dir / "decoy.pdb").write_text("ATOM ...")
+        mgr = self._make_manager(tmp_path)
+
+        with pytest.raises(FileNotFoundError, match="Could not find solvated PDB file"):
+            mgr._find_solvated_pdb()
+
+    def test_refuses_the_root_build_topology(self, tmp_path):
+        """A segment is continued only from a segment-owned topology, never the root build PDB."""
+        (tmp_path / "solvated_system.pdb").write_text("ATOM ...")
+        mgr = self._make_manager(tmp_path)
+
+        with pytest.raises(FileNotFoundError, match="Could not find solvated PDB file"):
+            mgr._find_solvated_pdb()
+
+    def test_prefers_predecessor_topology_over_root_decoy(self, tmp_path):
+        """A segment-owned topology is bound to its System/State artifacts."""
+        root = tmp_path / "solvated_system.pdb"
+        root.write_text("decoy")
+        segment = tmp_path / "production_2" / "production_2_topology.pdb"
+        segment.parent.mkdir()
+        segment.write_text("matching")
+        mgr = self._make_manager(tmp_path)
+        mgr._prev_segment = 2
+
+        assert mgr._find_solvated_pdb() == segment
+
+
+class TestGetPreviousPaths:
+    """ContinuationManager._get_previous_paths selects the right recovery path."""
+
+    def _make_manager(self, working_dir, prev_segment):
+        """Create a minimal ContinuationManager-like object for testing."""
+        # We import here to test in isolation; mock out openmm if unavailable
+        try:
+            from polyzymd.simulation.continuation import ContinuationManager
+
+            mgr = ContinuationManager.__new__(ContinuationManager)
+            mgr._working_dir = Path(working_dir)
+            mgr._prev_segment = prev_segment
+            return mgr
+        except ImportError:
+            pytest.skip("polyzymd.simulation.continuation not importable")
+
+    def test_normal_completion_path(self, tmp_path):
+        """Normal segment: state.xml exists → no checkpoint recovery."""
+        _write_normal_segment(tmp_path, 0)
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False
+        assert paths["state"].exists()
+        assert "state.xml" in str(paths["state"])
+
+    def test_graceful_interrupt_prefers_state_xml(self, tmp_path):
+        """Gracefully interrupted with interrupted_state.xml → portable state recovery."""
+        _write_interrupted_segment(tmp_path, 0)
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        # New behaviour: interrupted_state.xml exists → use loadState (portable)
+        assert paths["use_checkpoint"] is False
+        assert "interrupted_state.xml" in str(paths["state"])
+        assert "interrupted_system.xml" in str(paths["system"])
+
+    def test_truncated_interrupted_system_falls_back_to_segment_system(self, tmp_path):
+        """A 0-byte interrupted_system.xml (hard kill mid-write) must not be handed to OpenMM."""
+        _write_interrupted_segment(tmp_path, 0)
+        seg_dir = tmp_path / "production_0"
+        (seg_dir / "interrupted_system.xml").write_bytes(b"")
+        (seg_dir / "production_0_system.xml").write_text("<System/>")
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False
+        assert "interrupted_state.xml" in str(paths["state"])
+        assert "production_0_system.xml" in str(paths["system"])
+
+    def test_truncated_interrupted_state_skipped_for_restart_pair(self, tmp_path):
+        """A truncated interrupted_state.xml is skipped in favour of an intact restart pair."""
+        _write_interrupted_segment(tmp_path, 0)
+        seg_dir = tmp_path / "production_0"
+        (seg_dir / "interrupted_state.xml").write_text("<State><Positions><Position x=")
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+        (seg_dir / "restart_system.xml").write_text("<System/>")
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False
+        assert "restart_state.xml" in str(paths["state"])
+        assert "restart_system.xml" in str(paths["system"])
+
+    def test_graceful_interrupt_legacy_chk_only(self, tmp_path):
+        """Gracefully interrupted with only .chk (no state.xml) → checkpoint recovery."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        # Legacy format: only .chk and system.xml, no interrupted_state.xml
+        (seg_dir / "interrupted_checkpoint.chk").write_bytes(b"\x00" * 16)
+        (seg_dir / "interrupted_system.xml").write_text("<System/>")
+        (seg_dir / "INTERRUPTED").write_text(
+            "segment_index=0\nsteps_completed=3000000\n"
+            "total_steps=5000000\nremaining_steps=2000000\n"
+        )
+        params = {
+            "__values__": {
+                "integ_params": {
+                    "__values__": {
+                        "num_samples": 100,
+                        "time_step": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 2.0, "unit": "femtosecond"},
+                        },
+                        "total_time": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 10.0, "unit": "nanosecond"},
+                        },
+                    }
+                },
+                "thermo_params": {"__values__": {}},
+            }
+        }
+        (seg_dir / "production_0_parameters.json").write_text(json.dumps(params))
+
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is True
+        assert "interrupted_checkpoint.chk" in str(paths["checkpoint"])
+        assert "interrupted_system.xml" in str(paths["system"])
+
+    def test_restart_checkpoint_recovery(self, tmp_path):
+        """Wall-time restart checkpoint: restart_state.xml → portable state recovery."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        # No normal state.xml, no interrupted files, but restart checkpoint exists
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+        (seg_dir / "restart_system.xml").write_text("<System/>")
+        params = {
+            "__values__": {
+                "integ_params": {
+                    "__values__": {
+                        "num_samples": 100,
+                        "time_step": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 2.0, "unit": "femtosecond"},
+                        },
+                        "total_time": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 10.0, "unit": "nanosecond"},
+                        },
+                    }
+                },
+                "thermo_params": {"__values__": {}},
+            }
+        }
+        (seg_dir / "production_0_parameters.json").write_text(json.dumps(params))
+
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False
+        assert "restart_state.xml" in str(paths["state"])
+        assert "restart_system.xml" in str(paths["system"])
+
+    def test_interrupted_state_preferred_over_restart(self, tmp_path):
+        """When both interrupted_state.xml and restart_state.xml exist,
+        interrupted_state.xml is preferred (more recent)."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        (seg_dir / "interrupted_state.xml").write_text("<State-interrupted/>")
+        (seg_dir / "interrupted_system.xml").write_text("<System-interrupted/>")
+        (seg_dir / "restart_state.xml").write_text("<State-restart/>")
+        (seg_dir / "restart_system.xml").write_text("<System-restart/>")
+        params = {
+            "__values__": {
+                "integ_params": {
+                    "__values__": {
+                        "num_samples": 100,
+                        "time_step": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 2.0, "unit": "femtosecond"},
+                        },
+                        "total_time": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 10.0, "unit": "nanosecond"},
+                        },
+                    }
+                },
+                "thermo_params": {"__values__": {}},
+            }
+        }
+        (seg_dir / "production_0_parameters.json").write_text(json.dumps(params))
+
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False
+        assert "interrupted_state.xml" in str(paths["state"])
+        assert "interrupted_system.xml" in str(paths["system"])
+
+    def test_hard_kill_checkpoint_recovery(self, tmp_path):
+        """Hard-killed: only checkpoint + system.xml → checkpoint recovery."""
+        _write_hard_killed_segment(tmp_path, 0)
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is True
+        assert "production_0_system.xml" in str(paths["system"])
+        assert "production_0_checkpoint.chk" in str(paths["checkpoint"])
+
+    def test_hard_kill_no_system_xml_not_recoverable(self, tmp_path):
+        """Hard-killed with no system.xml: checkpoint exists but not recoverable."""
+        _write_hard_killed_segment(tmp_path, 0, with_system_xml=False)
+        mgr = self._make_manager(tmp_path, 0)
+        with pytest.raises(FileNotFoundError, match="cannot recover"):
+            mgr._get_previous_paths()
+
+    def test_hard_kill_recovery_after_completed_segment(self, tmp_path):
+        """Normal segment 0, then hard-killed segment 1 → recovery from seg 1."""
+        _write_normal_segment(tmp_path, 0)
+        _write_hard_killed_segment(tmp_path, 1)
+        mgr = self._make_manager(tmp_path, 1)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is True
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint portability across runtimes (openmm_version / pixi_environment)
+# ---------------------------------------------------------------------------
+
+
+def _set_segment_provenance(working_dir: Path, seg_idx: int, **provenance) -> None:
+    """Attach a #90-style provenance block to a segment's parameters JSON."""
+    params_path = working_dir / f"production_{seg_idx}" / f"production_{seg_idx}_parameters.json"
+    params = json.loads(params_path.read_text())
+    params["provenance"] = provenance
+    params_path.write_text(json.dumps(params))
+
+
+class TestCheckpointRuntimePortability:
+    """A binary .chk is only trusted when this process wrote-compatible.
+
+    OpenMM checkpoints are not portable across builds.  A preemptable chain
+    that is rerouted to a different CUDA environment must not silently
+    reinterpret one.
+    """
+
+    def _make_manager(self, working_dir, prev_segment):
+        from polyzymd.simulation.continuation import ContinuationManager
+
+        mgr = ContinuationManager.__new__(ContinuationManager)
+        mgr._working_dir = Path(working_dir)
+        mgr._prev_segment = prev_segment
+        mgr._runtime_change = None
+        return mgr
+
+    @staticmethod
+    def _pin_runtime(monkeypatch, openmm_version="8.1.2", pixi_environment="sim-cuda-12-4"):
+        import polyzymd.utils.version as version_module
+
+        monkeypatch.setattr(
+            version_module,
+            "runtime_provenance",
+            lambda: {
+                "polyzymd_version": "1.3.0rc5",
+                "openmm_version": openmm_version,
+                "pixi_environment": pixi_environment,
+                "hostname": "test-node",
+                "slurm_job_id": None,
+            },
+        )
+
+    def test_matching_runtime_keeps_the_checkpoint(self, tmp_path, monkeypatch, caplog):
+        _write_hard_killed_segment(tmp_path, 0)
+        _set_segment_provenance(
+            tmp_path, 0, openmm_version="8.1.2", pixi_environment="sim-cuda-12-4"
+        )
+        self._pin_runtime(monkeypatch)
+        mgr = self._make_manager(tmp_path, 0)
+
+        with caplog.at_level("INFO"):
+            paths = mgr._get_previous_paths()
+
+        assert paths["use_checkpoint"] is True
+        assert mgr._runtime_change is None
+        assert "safe to reload" in caplog.text
+
+    def test_changed_environment_is_reported(self, tmp_path, monkeypatch, caplog):
+        _write_hard_killed_segment(tmp_path, 0)
+        _set_segment_provenance(
+            tmp_path, 0, openmm_version="8.1.2", pixi_environment="sim-cuda-12-0"
+        )
+        self._pin_runtime(monkeypatch)
+        mgr = self._make_manager(tmp_path, 0)
+
+        with caplog.at_level("WARNING"):
+            mgr._get_previous_paths()
+
+        assert mgr._runtime_change is not None
+        assert "sim-cuda-12-0" in mgr._runtime_change
+        assert "sim-cuda-12-4" in mgr._runtime_change
+        assert "non-portable checkpoint" in caplog.text
+
+    def test_unrecorded_provenance_counts_as_a_change(self, tmp_path, monkeypatch):
+        """Segments written before #90 carry no provenance — do not assume."""
+        _write_hard_killed_segment(tmp_path, 0)
+        self._pin_runtime(monkeypatch)
+        mgr = self._make_manager(tmp_path, 0)
+
+        mgr._get_previous_paths()
+
+        assert mgr._runtime_change is not None
+        assert "unrecorded" in mgr._runtime_change
+
+    def test_portable_state_wins_over_a_checkpoint_from_another_runtime(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        """restart_state.xml is used even though a .chk is also present."""
+        _write_hard_killed_segment(tmp_path, 0)
+        seg_dir = tmp_path / "production_0"
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+        _set_segment_provenance(
+            tmp_path, 0, openmm_version="8.0.0", pixi_environment="sim-cuda-12-0"
+        )
+        self._pin_runtime(monkeypatch)
+        mgr = self._make_manager(tmp_path, 0)
+
+        paths = mgr._get_previous_paths()
+
+        assert paths["use_checkpoint"] is False
+        assert paths["state"].name == "restart_state.xml"
+        # No system XML of its own — fall back to the segment's system.xml.
+        assert paths["system"].name == "production_0_system.xml"
+        assert mgr._runtime_change is None
+
+    def test_find_portable_state_prefers_completed_then_interrupted(self, tmp_path):
+        _write_hard_killed_segment(tmp_path, 0)
+        seg_dir = tmp_path / "production_0"
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+        (seg_dir / "interrupted_state.xml").write_text("<State/>")
+        (seg_dir / "interrupted_system.xml").write_text("<System/>")
+        mgr = self._make_manager(tmp_path, 0)
+
+        state, system = mgr._find_portable_state()
+        assert state.name == "interrupted_state.xml"
+        assert system.name == "interrupted_system.xml"
+
+        (seg_dir / "production_0_state.xml").write_text("<State/>")
+        state, system = mgr._find_portable_state()
+        assert state.name == "production_0_state.xml"
+        assert system.name == "production_0_system.xml"
+
+    def test_find_portable_state_returns_none_for_a_hard_kill(self, tmp_path):
+        _write_hard_killed_segment(tmp_path, 0)
+        assert self._make_manager(tmp_path, 0)._find_portable_state() is None
+
+
+# ---------------------------------------------------------------------------
+# File validation in load_previous_state
+# ---------------------------------------------------------------------------
+
+
+class TestLoadPreviousStateValidation:
+    """load_previous_state validates files based on recovery mode."""
+
+    def _make_manager(self, working_dir, prev_segment):
+        try:
+            from polyzymd.simulation.continuation import ContinuationManager
+
+            mgr = ContinuationManager.__new__(ContinuationManager)
+            mgr._working_dir = Path(working_dir)
+            mgr._prev_segment = prev_segment
+            return mgr
+        except ImportError:
+            pytest.skip("polyzymd.simulation.continuation not importable")
+
+    def test_normal_segment_validates_state_xml(self, tmp_path):
+        """For normal recovery, state.xml must exist."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        # No state.xml, no checkpoint, no interrupted files
+        (seg_dir / "production_0_system.xml").write_text("<System/>")
+        (seg_dir / "production_0_parameters.json").write_text("{}")
+        mgr = self._make_manager(tmp_path, 0)
+        with pytest.raises(FileNotFoundError, match="state"):
+            mgr.load_previous_state()
+
+    def test_checkpoint_recovery_validates_checkpoint(self, tmp_path):
+        """Legacy format: only interrupted_system.xml + interrupted_checkpoint.chk
+        (no interrupted_state.xml) → checkpoint recovery validates .chk exists."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        # Has interrupted_system.xml and interrupted_checkpoint.chk but no state XML
+        (seg_dir / "interrupted_system.xml").write_text("<System/>")
+        # No interrupted_checkpoint.chk — should fail validation
+        (seg_dir / "production_0_parameters.json").write_text("{}")
+        mgr = self._make_manager(tmp_path, 0)
+        # Without interrupted_state.xml or interrupted_checkpoint.chk,
+        # the recovery path doesn't match case 4.  Falls through to
+        # no-match → state_path points to non-existent production_0_state.xml.
+        with pytest.raises(FileNotFoundError, match="state"):
+            mgr.load_previous_state()
+
+    def test_legacy_chk_recovery_validates_checkpoint_exists(self, tmp_path):
+        """Legacy format: interrupted_system.xml + interrupted_checkpoint.chk
+        present → checkpoint recovery mode."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        (seg_dir / "interrupted_system.xml").write_text("<System/>")
+        (seg_dir / "interrupted_checkpoint.chk").write_bytes(b"\x00")
+        (seg_dir / "production_0_parameters.json").write_text("{}")
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        # Verify case 4: legacy .chk recovery
+        assert paths["use_checkpoint"] is True
+        assert "interrupted_checkpoint.chk" in str(paths["checkpoint"])
+        assert "interrupted_system.xml" in str(paths["system"])
+
+
+def test_continuation_seeds_the_barostat_of_the_previous_segment():
+    """A segment reseeds the barostat it loads, so its volume moves repeat on a rerun."""
+    openmm = pytest.importorskip("openmm")
+    from polyzymd.simulation.continuation import ContinuationManager
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    mgr = ContinuationManager.__new__(ContinuationManager)
+    mgr._replicate = 3
+    mgr._segment_index = 2
+    mgr._system = openmm.System()
+    mgr._system.addForce(openmm.MonteCarloBarostat(1.0, 300.0))
+    mgr._param_dict = {"__values__": {"thermo_params": {"__values__": {"barostat_params": {}}}}}
+    mgr._add_barostat_if_needed()
+    (barostat,) = mgr._system.getForces()
+    assert barostat.getRandomNumberSeed() == dynamics_seed(3, "barostat:production:2")
+
+
+def test_interrupted_continuation_segment_records_finish_time_and_seeds(tmp_path):
+    """An interrupted segment records when it stopped and the seeds its dynamics ran with."""
+    openmm = pytest.importorskip("openmm")
+    from types import SimpleNamespace
+
+    from polyzymd.simulation.continuation import ContinuationManager
+    from polyzymd.simulation.progress import (
+        SegmentRecord,
+        SimulationProgress,
+        load_progress,
+        save_progress,
+    )
+
+    start = "2026-10-07T07:00:00+00:00"
+    save_progress(
+        tmp_path,
+        SimulationProgress(
+            config_path="c",
+            total_steps_requested=100,
+            total_samples_requested=1,
+            segments=[SegmentRecord(index=1, started_at=start)],
+        ),
+    )
+    integrator = openmm.LangevinMiddleIntegrator(300.0, 1.0, 0.002)
+    integrator.setRandomNumberSeed(41)
+    system = openmm.System()
+    barostat = openmm.MonteCarloBarostat(1.0, 300.0)
+    barostat.setRandomNumberSeed(42)
+    system.addForce(barostat)
+
+    mgr = ContinuationManager.__new__(ContinuationManager)
+    mgr._working_dir = tmp_path
+    mgr._segment_index = 1
+    mgr._simulation = SimpleNamespace(integrator=integrator, system=system)
+    mgr._frame_record = {}
+    mgr._tracker = None
+    mgr._update_progress_interrupted(
+        steps_done=10, total_steps=100, duration_ns=0.2, timestep_fs=2.0
+    )
+
+    (segment,) = load_progress(tmp_path).segments
+    assert segment.started_at == start
+    assert segment.finished_at > start
+    assert segment.seeds == {"integrator": 41, "barostat": 42}
+
+
+@pytest.mark.parametrize(
+    ("settings", "integrator_name", "barostat_frequency"),
+    [
+        (
+            {"ensemble": "NVT", "thermostat": "Langevin", "thermostat_timescale": 2.0},
+            "LangevinIntegrator",
+            None,
+        ),
+        (
+            {"ensemble": "NPT", "barostat": "MC", "barostat_frequency": 50},
+            "LangevinMiddleIntegrator",
+            50,
+        ),
+    ],
+    ids=["nvt langevin", "npt every 50 steps"],
+)
+def test_a_segment_continues_with_the_dynamics_of_production(
+    tmp_path, settings, integrator_name, barostat_frequency
+):
+    """A continuation segment rebuilds the thermostat and barostat production saved."""
+    openmm = pytest.importorskip("openmm")
+    from polyzymd.simulation.continuation import ContinuationManager
+    from tests.simulation.test_runner import _one_atom_runner, _production_phase, _run_production
+
+    runner, _, _ = _run_production(tmp_path, _production_phase(**settings))
+    manager = ContinuationManager.__new__(ContinuationManager)
+    manager._replicate = None
+    manager._segment_index = 1
+    manager._param_dict = json.loads(
+        (tmp_path / "production_0" / "production_0_parameters.json").read_text()
+    )
+    manager._system = _one_atom_runner(tmp_path / "fresh", replicate=None)._system
+
+    integrator = manager._create_integrator()
+    manager._add_barostat_if_needed()
+
+    assert type(integrator).__name__ == integrator_name
+    friction = 1.0 / settings.get("thermostat_timescale", 1.0)
+    assert integrator.getFriction()._value == pytest.approx(friction)
+    barostats = [
+        force
+        for force in manager._system.getForces()
+        if isinstance(force, openmm.MonteCarloBarostat)
+    ]
+    assert [b.getFrequency() for b in barostats] == (
+        [barostat_frequency] if barostat_frequency else []
+    )
+    saved = (tmp_path / "production_0" / "production_0_system.xml").read_text()
+    assert ("MonteCarloBarostat" in saved) is (barostat_frequency is not None)
+
+
+def test_saved_dynamics_name_what_the_chain_started_with(tmp_path):
+    """saved_dynamics reads the ensemble, thermostat and friction of segment 0's parameters."""
+    pytest.importorskip("openmm")
+    from polyzymd.simulation.continuation import ContinuationManager
+    from tests.simulation.test_runner import _production_phase, _run_production
+
+    _run_production(
+        tmp_path, _production_phase(ensemble="NVT", thermostat="Langevin", thermostat_timescale=2.0)
+    )
+    params = json.loads((tmp_path / "production_0" / "production_0_parameters.json").read_text())
+    manager = ContinuationManager.__new__(ContinuationManager)
+    manager._param_dict = params
+    assert manager.saved_dynamics() == {
+        "ensemble": "NVT",
+        "thermostat": "Langevin",
+        "friction": 0.5,
+    }
+
+    # Parameters written before the thermostat was recorded ran LangevinMiddle.
+    del params["__values__"]["thermo_params"]["__values__"]["thermostat_params"]["__values__"][
+        "thermostat"
+    ]
+    assert manager.saved_dynamics()["thermostat"] == "LangevinMiddle"

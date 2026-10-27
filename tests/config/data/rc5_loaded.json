@@ -1,0 +1,1476 @@
+{
+ "dynamic_polymer_test": {
+  "description": "Minimal test of dynamic polymer generation with OpenMM",
+  "engine": "openmm",
+  "gromacs": {
+   "analysis_topology": null,
+   "command_prefix": null,
+   "env_exports": {},
+   "gmx_binary": null,
+   "gpu": false,
+   "gpus": 1,
+   "grompp_flags": "",
+   "mdrun_flags": "",
+   "mdrun_flags_equilibration": null,
+   "mdrun_flags_production": null,
+   "memory": "16G",
+   "module_load": null,
+   "mpi_launcher_flags": "",
+   "ntmpi": 1,
+   "ntomp": 8,
+   "setup_commands": [],
+   "slurm_ntasks": null
+  },
+  "modeling_exceptions": [],
+  "name": "dynamic_polymer_test",
+  "openmm": {
+   "device_index": null,
+   "platform": "CUDA",
+   "precision": "mixed"
+  },
+  "output": {
+   "job_scripts_subdir": "job_scripts",
+   "naming_template": "{enzyme}_{polymer_type}_dynamic_test_run{replicate}",
+   "projects_directory": "<config>",
+   "save_checkpoint": true,
+   "save_state_data": true,
+   "scratch_directory": null,
+   "slurm_logs_subdir": "slurm_logs",
+   "trajectory_format": "dcd"
+  },
+  "restraints": [],
+  "simulation_phases": {
+   "equilibration_stages": [
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "duration": 0.01,
+     "ensemble": "NVT",
+     "name": "test_equilibration",
+     "position_restraints": [],
+     "samples": 10,
+     "temperature": 300.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": "LangevinMiddle",
+     "thermostat_timescale": 1.0,
+     "time_step": 2.0
+    }
+   ],
+   "production": {
+    "barostat": "MC",
+    "barostat_frequency": 25,
+    "checkpoint_interval": 60.0,
+    "duration": 0.1,
+    "ensemble": "NPT",
+    "samples": 10,
+    "thermostat": "LangevinMiddle",
+    "thermostat_timescale": 1.0,
+    "time_step": 2.0
+   }
+  },
+  "solutes": [
+   {
+    "charges": {
+     "method": "library",
+     "model": null
+    },
+    "custom_substructures_path": null,
+    "description": "Test enzyme for dynamic polymer generation",
+    "force_field": [
+     "ff14sb_off_impropers_0.0.4.offxml"
+    ],
+    "name": "TestEnzyme",
+    "pdb_path": "<config>/structures/enzyme.pdb",
+    "segid": "PROT",
+    "type": "protein"
+   },
+   {
+    "cache_directory": "<config>/.polymer_cache",
+    "charges": {
+     "method": "nagl",
+     "model": "openff-gnn-am1bcc-1.0.0.pt"
+    },
+    "count": 2,
+    "end_groups": {
+     "head": [
+      {
+       "label": "A",
+       "name": "SBMA",
+       "probability": 0.7,
+       "residue_name": "SBM",
+       "smiles": "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+      },
+      {
+       "label": "B",
+       "name": "EGMA",
+       "probability": 0.3,
+       "residue_name": "EGM",
+       "smiles": "[*]C=C(C)C(=O)OCCOCCOCCOCCOC"
+      }
+     ],
+     "tail": [
+      {
+       "label": "A",
+       "name": "SBMA",
+       "probability": 0.7,
+       "residue_name": "SBM",
+       "smiles": "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+      },
+      {
+       "label": "B",
+       "name": "EGMA",
+       "probability": 0.3,
+       "residue_name": "EGM",
+       "smiles": "[*]C=C(C)C(=O)OCCOCCOCCOCCOC"
+      }
+     ]
+    },
+    "force_field": [
+     "openff-2.3.0.offxml"
+    ],
+    "generation_mode": "dynamic",
+    "length": 5,
+    "max_retries": 10,
+    "monomers": [
+     {
+      "label": "A",
+      "name": "SBMA",
+      "probability": 0.7,
+      "residue_name": "SBM",
+      "smiles": "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+     },
+     {
+      "label": "B",
+      "name": "EGMA",
+      "probability": 0.3,
+      "residue_name": "EGM",
+      "smiles": "[*]CC([*])(C)C(=O)OCCOCCOCCOCCOC"
+     }
+    ],
+    "name": "polymer",
+    "packing": {
+     "confine_to_sphere": true,
+     "movebadrandom": false,
+     "nloop": 200,
+     "padding": 2.0,
+     "tolerance": 2.0
+    },
+    "random_seed": null,
+    "sdf_directory": null,
+    "segid": "POLY",
+    "type": "polymer",
+    "type_prefix": "SBMA-EGMA"
+   }
+  ],
+  "solvent": {
+   "box": {
+    "padding": 1.0,
+    "shape": "cube",
+    "target_density": 1.0,
+    "tolerance": 2.0
+   },
+   "co_solvents": [],
+   "force_field": [
+    "openff-2.3.0.offxml"
+   ],
+   "ions": {
+    "kcl_concentration": 0.0,
+    "mgcl2_concentration": 0.0,
+    "nacl_concentration": 0.1,
+    "neutralize": true
+   },
+   "water": {
+    "model": "tip3p"
+   }
+  },
+  "thermodynamics": {
+   "pressure": 1.0,
+   "temperature": 300.0
+  }
+ },
+ "enzyme_cosolvent": {
+  "description": "LipA enzyme with Resorufin-Butyrate in 10 mol% DMSO co-solvent",
+  "engine": "openmm",
+  "gromacs": {
+   "analysis_topology": null,
+   "command_prefix": null,
+   "env_exports": {},
+   "gmx_binary": null,
+   "gpu": false,
+   "gpus": 1,
+   "grompp_flags": "",
+   "mdrun_flags": "",
+   "mdrun_flags_equilibration": null,
+   "mdrun_flags_production": null,
+   "memory": "16G",
+   "module_load": null,
+   "mpi_launcher_flags": "",
+   "ntmpi": 1,
+   "ntomp": 8,
+   "setup_commands": [],
+   "slurm_ntasks": null
+  },
+  "modeling_exceptions": [],
+  "name": "LipA_ResorufinButyrate_DMSO10mol",
+  "openmm": {
+   "device_index": null,
+   "platform": "CUDA",
+   "precision": "mixed"
+  },
+  "output": {
+   "job_scripts_subdir": "job_scripts",
+   "naming_template": "{enzyme}_{substrate}_DMSO10_{temperature}K_run{replicate}",
+   "projects_directory": "<config>",
+   "save_checkpoint": true,
+   "save_state_data": true,
+   "scratch_directory": null,
+   "slurm_logs_subdir": "slurm_logs",
+   "trajectory_format": "dcd"
+  },
+  "restraints": [
+   {
+    "atom1": {
+     "component": "LipA",
+     "description": "Catalytic serine",
+     "selection": "resid 77 and name OG"
+    },
+    "atom2": {
+     "component": "Resorufin-Butyrate",
+     "description": "Substrate reactive carbon",
+     "selection": "name C1"
+    },
+    "distance": 3.3,
+    "enabled": true,
+    "force_constant": 10000.0,
+    "name": "substrate_active_site",
+    "type": "flat_bottom"
+   }
+  ],
+  "simulation_phases": {
+   "equilibration_stages": [
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "ensemble": "NVT",
+     "name": "heating",
+     "position_restraints": [
+      {
+       "force_constant": 4184.0,
+       "group": "protein_heavy"
+      },
+      {
+       "force_constant": 4184.0,
+       "group": "ligand_heavy"
+      }
+     ],
+     "samples": 20,
+     "temperature": null,
+     "temperature_end": 298.0,
+     "temperature_increment": 1.0,
+     "temperature_interval_steps": 600,
+     "temperature_start": 60.0,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    },
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "duration": 0.3,
+     "ensemble": "NVT",
+     "name": "solvent_relaxation",
+     "position_restraints": [
+      {
+       "force_constant": 4184.0,
+       "group": "protein_heavy"
+      }
+     ],
+     "samples": 30,
+     "temperature": 298.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    },
+    {
+     "barostat": "MC",
+     "barostat_frequency": null,
+     "duration": 0.5,
+     "ensemble": "NPT",
+     "name": "free_equilibration",
+     "position_restraints": [],
+     "samples": 50,
+     "temperature": 298.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    }
+   ],
+   "production": {
+    "barostat": "MC",
+    "barostat_frequency": 25,
+    "checkpoint_interval": 60.0,
+    "duration": 50.0,
+    "ensemble": "NPT",
+    "samples": 1250,
+    "thermostat": "LangevinMiddle",
+    "thermostat_timescale": 1.0,
+    "time_step": 2.0
+   }
+  },
+  "solutes": [
+   {
+    "charges": {
+     "method": "library",
+     "model": null
+    },
+    "custom_substructures_path": null,
+    "description": "Bacillus subtilis Lipase A",
+    "force_field": [
+     "ff14sb_off_impropers_0.0.4.offxml"
+    ],
+    "name": "LipA",
+    "pdb_path": "<config>/structures/LipA_prepared.pdb",
+    "segid": "PROT",
+    "type": "protein"
+   },
+   {
+    "charges": {
+     "method": "nagl",
+     "model": "openff-gnn-am1bcc-1.0.0.pt"
+    },
+    "conformer_index": 0,
+    "force_field": [
+     "openff-2.3.0.offxml"
+    ],
+    "name": "Resorufin-Butyrate",
+    "residue_name": "RBY",
+    "sdf_path": "<config>/structures/resorufin_butyrate_docked.sdf",
+    "segid": "LIG",
+    "type": "small_molecule"
+   }
+  ],
+  "solvent": {
+   "box": {
+    "padding": 2.0,
+    "shape": "rhombic_dodecahedron",
+    "target_density": 1.05,
+    "tolerance": 2.0
+   },
+   "co_solvents": [
+    {
+     "charges": {
+      "method": "preset",
+      "model": null
+     },
+     "concentration": null,
+     "count": null,
+     "density": 1.1,
+     "mole_fraction": 0.1,
+     "name": "dmso",
+     "residue_name": "DMS",
+     "smiles": "CS(=O)C"
+    }
+   ],
+   "force_field": [
+    "openff-2.3.0.offxml"
+   ],
+   "ions": {
+    "kcl_concentration": 0.0,
+    "mgcl2_concentration": 0.0,
+    "nacl_concentration": 0.1,
+    "neutralize": true
+   },
+   "water": {
+    "model": "tip3p"
+   }
+  },
+  "thermodynamics": {
+   "pressure": 1.0,
+   "temperature": 298.0
+  }
+ },
+ "enzyme_only": {
+  "description": "LipA enzyme with docked Resorufin-Butyrate substrate - no polymers",
+  "engine": "openmm",
+  "gromacs": {
+   "analysis_topology": null,
+   "command_prefix": null,
+   "env_exports": {},
+   "gmx_binary": null,
+   "gpu": false,
+   "gpus": 1,
+   "grompp_flags": "",
+   "mdrun_flags": "",
+   "mdrun_flags_equilibration": null,
+   "mdrun_flags_production": null,
+   "memory": "16G",
+   "module_load": null,
+   "mpi_launcher_flags": "",
+   "ntmpi": 1,
+   "ntomp": 8,
+   "setup_commands": [],
+   "slurm_ntasks": null
+  },
+  "modeling_exceptions": [],
+  "name": "LipA_ResorufinButyrate_control",
+  "openmm": {
+   "device_index": null,
+   "platform": "CUDA",
+   "precision": "mixed"
+  },
+  "output": {
+   "job_scripts_subdir": "job_scripts",
+   "naming_template": "{enzyme}_{substrate}_{temperature}K_run{replicate}",
+   "projects_directory": "<config>",
+   "save_checkpoint": true,
+   "save_state_data": true,
+   "scratch_directory": null,
+   "slurm_logs_subdir": "slurm_logs",
+   "trajectory_format": "dcd"
+  },
+  "restraints": [
+   {
+    "atom1": {
+     "component": "LipA",
+     "description": "Catalytic serine",
+     "selection": "resid 77 and name OG"
+    },
+    "atom2": {
+     "component": "Resorufin-Butyrate",
+     "description": "Substrate reactive carbon",
+     "selection": "name C1"
+    },
+    "distance": 3.3,
+    "enabled": true,
+    "force_constant": 10000.0,
+    "name": "substrate_active_site",
+    "type": "flat_bottom"
+   }
+  ],
+  "simulation_phases": {
+   "equilibration_stages": [
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "ensemble": "NVT",
+     "name": "heating",
+     "position_restraints": [
+      {
+       "force_constant": 4184.0,
+       "group": "protein_heavy"
+      },
+      {
+       "force_constant": 4184.0,
+       "group": "ligand_heavy"
+      }
+     ],
+     "samples": 10,
+     "temperature": null,
+     "temperature_end": 293.0,
+     "temperature_increment": 1.0,
+     "temperature_interval_steps": 600,
+     "temperature_start": 60.0,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    },
+    {
+     "barostat": "MC",
+     "barostat_frequency": null,
+     "duration": 0.4,
+     "ensemble": "NPT",
+     "name": "free_equilibration",
+     "position_restraints": [],
+     "samples": 40,
+     "temperature": 293.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    }
+   ],
+   "production": {
+    "barostat": "MC",
+    "barostat_frequency": 25,
+    "checkpoint_interval": 60.0,
+    "duration": 100.0,
+    "ensemble": "NPT",
+    "samples": 2500,
+    "thermostat": "LangevinMiddle",
+    "thermostat_timescale": 1.0,
+    "time_step": 2.0
+   }
+  },
+  "solutes": [
+   {
+    "charges": {
+     "method": "library",
+     "model": null
+    },
+    "custom_substructures_path": null,
+    "description": "Bacillus subtilis Lipase A",
+    "force_field": [
+     "ff14sb_off_impropers_0.0.4.offxml"
+    ],
+    "name": "LipA",
+    "pdb_path": "<config>/structures/LipA_prepared.pdb",
+    "segid": "PROT",
+    "type": "protein"
+   },
+   {
+    "charges": {
+     "method": "nagl",
+     "model": "openff-gnn-am1bcc-1.0.0.pt"
+    },
+    "conformer_index": 0,
+    "force_field": [
+     "openff-2.3.0.offxml"
+    ],
+    "name": "Resorufin-Butyrate",
+    "residue_name": "RBY",
+    "sdf_path": "<config>/structures/resorufin_butyrate_docked.sdf",
+    "segid": "LIG",
+    "type": "small_molecule"
+   }
+  ],
+  "solvent": {
+   "box": {
+    "padding": 2.0,
+    "shape": "rhombic_dodecahedron",
+    "target_density": 1.0,
+    "tolerance": 2.0
+   },
+   "co_solvents": [],
+   "force_field": [
+    "openff-2.3.0.offxml"
+   ],
+   "ions": {
+    "kcl_concentration": 0.0,
+    "mgcl2_concentration": 0.0,
+    "nacl_concentration": 0.1,
+    "neutralize": true
+   },
+   "water": {
+    "model": "tip3p"
+   }
+  },
+  "thermodynamics": {
+   "pressure": 1.0,
+   "temperature": 293.0
+  }
+ },
+ "enzyme_polymer": {
+  "description": "LipA enzyme with Resorufin-Butyrate and SBMA-EGPMA co-polymers",
+  "engine": "openmm",
+  "gromacs": {
+   "analysis_topology": null,
+   "command_prefix": null,
+   "env_exports": {},
+   "gmx_binary": null,
+   "gpu": false,
+   "gpus": 1,
+   "grompp_flags": "",
+   "mdrun_flags": "",
+   "mdrun_flags_equilibration": null,
+   "mdrun_flags_production": null,
+   "memory": "16G",
+   "module_load": null,
+   "mpi_launcher_flags": "",
+   "ntmpi": 1,
+   "ntomp": 8,
+   "setup_commands": [],
+   "slurm_ntasks": null
+  },
+  "modeling_exceptions": [],
+  "name": "LipA_ResorufinButyrate_SBMA-EGPMA",
+  "openmm": {
+   "device_index": null,
+   "platform": "CUDA",
+   "precision": "mixed"
+  },
+  "output": {
+   "job_scripts_subdir": "job_scripts",
+   "naming_template": "{enzyme}_{substrate}_{polymer_type}_{temperature}K_run{replicate}",
+   "projects_directory": "<config>",
+   "save_checkpoint": true,
+   "save_state_data": true,
+   "scratch_directory": null,
+   "slurm_logs_subdir": "slurm_logs",
+   "trajectory_format": "dcd"
+  },
+  "restraints": [
+   {
+    "atom1": {
+     "component": "LipA",
+     "description": "Catalytic serine",
+     "selection": "resid 77 and name OG"
+    },
+    "atom2": {
+     "component": "Resorufin-Butyrate",
+     "description": "Substrate reactive carbon",
+     "selection": "name C1"
+    },
+    "distance": 3.3,
+    "enabled": true,
+    "force_constant": 10000.0,
+    "name": "substrate_active_site",
+    "type": "flat_bottom"
+   }
+  ],
+  "simulation_phases": {
+   "equilibration_stages": [
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "ensemble": "NVT",
+     "name": "heating",
+     "position_restraints": [
+      {
+       "force_constant": 4184.0,
+       "group": "protein_heavy"
+      },
+      {
+       "force_constant": 4184.0,
+       "group": "polymer_heavy"
+      }
+     ],
+     "samples": 10,
+     "temperature": null,
+     "temperature_end": 293.0,
+     "temperature_increment": 1.0,
+     "temperature_interval_steps": 600,
+     "temperature_start": 60.0,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    },
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "duration": 0.2,
+     "ensemble": "NVT",
+     "name": "polymer_relaxation",
+     "position_restraints": [
+      {
+       "force_constant": 4184.0,
+       "group": "protein_heavy"
+      }
+     ],
+     "samples": 20,
+     "temperature": 293.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    },
+    {
+     "barostat": "MC",
+     "barostat_frequency": null,
+     "duration": 0.2,
+     "ensemble": "NPT",
+     "name": "free_equilibration",
+     "position_restraints": [],
+     "samples": 20,
+     "temperature": 293.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    }
+   ],
+   "production": {
+    "barostat": "MC",
+    "barostat_frequency": 25,
+    "checkpoint_interval": 60.0,
+    "duration": 100.0,
+    "ensemble": "NPT",
+    "samples": 2500,
+    "thermostat": "LangevinMiddle",
+    "thermostat_timescale": 1.0,
+    "time_step": 2.0
+   }
+  },
+  "solutes": [
+   {
+    "charges": {
+     "method": "library",
+     "model": null
+    },
+    "custom_substructures_path": null,
+    "description": "Bacillus subtilis Lipase A",
+    "force_field": [
+     "ff14sb_off_impropers_0.0.4.offxml"
+    ],
+    "name": "LipA",
+    "pdb_path": "<config>/structures/LipA_prepared.pdb",
+    "segid": "PROT",
+    "type": "protein"
+   },
+   {
+    "charges": {
+     "method": "nagl",
+     "model": "openff-gnn-am1bcc-1.0.0.pt"
+    },
+    "conformer_index": 0,
+    "force_field": [
+     "openff-2.3.0.offxml"
+    ],
+    "name": "Resorufin-Butyrate",
+    "residue_name": "RBY",
+    "sdf_path": "<config>/structures/resorufin_butyrate_docked.sdf",
+    "segid": "LIG",
+    "type": "small_molecule"
+   },
+   {
+    "cache_directory": "<config>/.polymer_cache",
+    "charges": {
+     "method": "preset",
+     "model": null
+    },
+    "count": 2,
+    "end_groups": null,
+    "force_field": [
+     "openff-2.3.0.offxml"
+    ],
+    "generation_mode": "cached",
+    "length": 5,
+    "max_retries": 10,
+    "monomers": [
+     {
+      "label": "A",
+      "name": "SBMA",
+      "probability": 0.98,
+      "residue_name": "SBM",
+      "smiles": null
+     },
+     {
+      "label": "B",
+      "name": "EGPMA",
+      "probability": 0.02,
+      "residue_name": "EGP",
+      "smiles": null
+     }
+    ],
+    "name": "polymer",
+    "packing": {
+     "confine_to_sphere": true,
+     "movebadrandom": false,
+     "nloop": 200,
+     "padding": 2.0,
+     "tolerance": 2.0
+    },
+    "random_seed": null,
+    "sdf_directory": "<config>/polymer_sdfs/SBMA-EGPMA",
+    "segid": "POLY",
+    "type": "polymer",
+    "type_prefix": "SBMA-EGPMA"
+   }
+  ],
+  "solvent": {
+   "box": {
+    "padding": 2.0,
+    "shape": "rhombic_dodecahedron",
+    "target_density": 1.0,
+    "tolerance": 2.0
+   },
+   "co_solvents": [],
+   "force_field": [
+    "openff-2.3.0.offxml"
+   ],
+   "ions": {
+    "kcl_concentration": 0.0,
+    "mgcl2_concentration": 0.0,
+    "nacl_concentration": 0.1,
+    "neutralize": true
+   },
+   "water": {
+    "model": "tip3p"
+   }
+  },
+  "thermodynamics": {
+   "pressure": 1.0,
+   "temperature": 293.0
+  }
+ },
+ "every_option": {
+  "description": "Every rc.5 option set",
+  "engine": "openmm",
+  "gromacs": {
+   "analysis_topology": null,
+   "command_prefix": null,
+   "env_exports": {},
+   "gmx_binary": null,
+   "gpu": false,
+   "gpus": 1,
+   "grompp_flags": "",
+   "mdrun_flags": "",
+   "mdrun_flags_equilibration": null,
+   "mdrun_flags_production": null,
+   "memory": "16G",
+   "module_load": null,
+   "mpi_launcher_flags": "",
+   "ntmpi": 1,
+   "ntomp": 8,
+   "setup_commands": [],
+   "slurm_ntasks": null
+  },
+  "modeling_exceptions": [
+   {
+    "check": "geometry.buried_water",
+    "component": "LipA",
+    "reason": "crystal waters kept"
+   }
+  ],
+  "name": "every_option",
+  "openmm": {
+   "device_index": "1",
+   "platform": "CUDA",
+   "precision": "double"
+  },
+  "output": {
+   "job_scripts_subdir": "job_scripts",
+   "naming_template": "{enzyme}_{substrate}_{temperature}K_run{replicate}",
+   "projects_directory": "<config>/runs",
+   "save_checkpoint": true,
+   "save_state_data": true,
+   "scratch_directory": null,
+   "slurm_logs_subdir": "slurm_logs",
+   "trajectory_format": "dcd"
+  },
+  "restraints": [
+   {
+    "atom1": {
+     "component": "LipA",
+     "description": "serine",
+     "selection": "resid 77 and name OG"
+    },
+    "atom2": {
+     "component": "RBY",
+     "description": null,
+     "selection": "name C1"
+    },
+    "distance": 3.5,
+    "enabled": true,
+    "force_constant": 5000.0,
+    "name": "tether",
+    "type": "harmonic"
+   }
+  ],
+  "simulation_phases": {
+   "equilibration_stages": [
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "ensemble": "NVT",
+     "name": "warm",
+     "position_restraints": [
+      {
+       "force_constant": 800.0,
+       "group": "protein_heavy"
+      }
+     ],
+     "samples": 3,
+     "temperature": null,
+     "temperature_end": 310.0,
+     "temperature_increment": 5.0,
+     "temperature_interval_steps": 100,
+     "temperature_start": 290.0,
+     "thermostat": null,
+     "thermostat_timescale": 0.5,
+     "time_step": 1.0
+    },
+    {
+     "barostat": "MC",
+     "barostat_frequency": 50,
+     "duration": 0.01,
+     "ensemble": "NPT",
+     "name": "press",
+     "position_restraints": [],
+     "samples": 5,
+     "temperature": 310.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    }
+   ],
+   "production": {
+    "barostat": "MC",
+    "barostat_frequency": 10,
+    "checkpoint_interval": 60.0,
+    "duration": 0.02,
+    "ensemble": "NPT",
+    "samples": 10,
+    "thermostat": "Langevin",
+    "thermostat_timescale": 2.0,
+    "time_step": 4.0
+   }
+  },
+  "solutes": [
+   {
+    "charges": {
+     "method": "library",
+     "model": null
+    },
+    "custom_substructures_path": null,
+    "description": "a protein",
+    "force_field": [
+     "ff14sb_off_impropers_0.0.4.offxml"
+    ],
+    "name": "LipA",
+    "pdb_path": "<config>/structures/enzyme.pdb",
+    "segid": "ENZ",
+    "type": "protein"
+   },
+   {
+    "charges": {
+     "method": "nagl",
+     "model": "openff-gnn-am1bcc-1.0.0.pt"
+    },
+    "conformer_index": 1,
+    "force_field": [
+     "openff-2.3.0.offxml"
+    ],
+    "name": "RBY",
+    "residue_name": "RBY",
+    "sdf_path": "<config>/structures/substrate.sdf",
+    "segid": "SUB",
+    "type": "small_molecule"
+   },
+   {
+    "cache_directory": "<config>/cache",
+    "charges": {
+     "method": "nagl",
+     "model": "openff-gnn-am1bcc-1.0.0.pt"
+    },
+    "count": 3,
+    "end_groups": {
+     "head": [
+      {
+       "label": "H",
+       "name": null,
+       "probability": 0.4,
+       "residue_name": null,
+       "smiles": "[*][H]"
+      },
+      {
+       "label": "A",
+       "name": "SBMA",
+       "probability": 0.6,
+       "residue_name": "SBM",
+       "smiles": "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+      }
+     ],
+     "tail": [
+      {
+       "label": "M",
+       "name": "methyl",
+       "probability": 1.0,
+       "residue_name": null,
+       "smiles": "[*]C"
+      }
+     ]
+    },
+    "force_field": [
+     "openff-2.3.0.offxml"
+    ],
+    "generation_mode": "dynamic",
+    "length": 6,
+    "max_retries": 4,
+    "monomers": [
+     {
+      "label": "A",
+      "name": "SBMA",
+      "probability": 0.7,
+      "residue_name": "SBM",
+      "smiles": "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"
+     },
+     {
+      "label": "B",
+      "name": "EGPMA",
+      "probability": 0.3,
+      "residue_name": "EGM",
+      "smiles": "[*]CC([*])(C)C(=O)OCCOc1ccccc1"
+     }
+    ],
+    "name": "brush",
+    "packing": {
+     "confine_to_sphere": false,
+     "movebadrandom": true,
+     "nloop": 50,
+     "padding": 1.5,
+     "tolerance": 2.5
+    },
+    "random_seed": 7,
+    "sdf_directory": null,
+    "segid": "PLY",
+    "type": "polymer",
+    "type_prefix": "SBMA-EGPMA"
+   }
+  ],
+  "solvent": {
+   "box": {
+    "padding": 1.5,
+    "shape": "cube",
+    "target_density": 0.99,
+    "tolerance": 2.5
+   },
+   "co_solvents": [
+    {
+     "charges": {
+      "method": "preset",
+      "model": null
+     },
+     "concentration": null,
+     "count": null,
+     "density": 1.1,
+     "mole_fraction": 0.05,
+     "name": "dmso",
+     "residue_name": "DMS",
+     "smiles": "CS(=O)C"
+    },
+    {
+     "charges": {
+      "method": "am1bcc",
+      "model": null
+     },
+     "concentration": null,
+     "count": 4,
+     "density": 1.16,
+     "mole_fraction": null,
+     "name": "acetamide",
+     "residue_name": "ACM",
+     "smiles": "CC(N)=O"
+    }
+   ],
+   "force_field": [
+    "openff-2.3.0.offxml"
+   ],
+   "ions": {
+    "ionic_strength": 0.13,
+    "kcl_concentration": 0.0,
+    "mgcl2_concentration": 0.0,
+    "nacl_concentration": 0.0,
+    "neutralize": true
+   },
+   "water": {
+    "model": "tip3p"
+   }
+  },
+  "thermodynamics": {
+   "pressure": 1.2,
+   "temperature": 310.0
+  }
+ },
+ "quickstart": {
+  "description": "Trp-cage in water with NaCl",
+  "engine": "openmm",
+  "gromacs": {
+   "analysis_topology": null,
+   "command_prefix": null,
+   "env_exports": {},
+   "gmx_binary": null,
+   "gpu": false,
+   "gpus": 1,
+   "grompp_flags": "",
+   "mdrun_flags": "",
+   "mdrun_flags_equilibration": null,
+   "mdrun_flags_production": null,
+   "memory": "16G",
+   "module_load": null,
+   "mpi_launcher_flags": "",
+   "ntmpi": 1,
+   "ntomp": 8,
+   "setup_commands": [],
+   "slurm_ntasks": null
+  },
+  "modeling_exceptions": [],
+  "name": "trpcage_water",
+  "openmm": {
+   "device_index": null,
+   "platform": "CPU",
+   "precision": "mixed"
+  },
+  "output": {
+   "job_scripts_subdir": "job_scripts",
+   "naming_template": "{enzyme}_{temperature}K_run{replicate}",
+   "projects_directory": "<config>",
+   "save_checkpoint": true,
+   "save_state_data": true,
+   "scratch_directory": null,
+   "slurm_logs_subdir": "slurm_logs",
+   "trajectory_format": "dcd"
+  },
+  "restraints": [],
+  "simulation_phases": {
+   "equilibration_stages": [
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "duration": 0.002,
+     "ensemble": "NVT",
+     "name": "equil",
+     "position_restraints": [],
+     "samples": 2,
+     "temperature": 300.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    }
+   ],
+   "production": {
+    "barostat": "MC",
+    "barostat_frequency": 25,
+    "checkpoint_interval": 60.0,
+    "duration": 0.004,
+    "ensemble": "NPT",
+    "samples": 4,
+    "thermostat": "LangevinMiddle",
+    "thermostat_timescale": 1.0,
+    "time_step": 2.0
+   }
+  },
+  "solutes": [
+   {
+    "charges": {
+     "method": "library",
+     "model": null
+    },
+    "custom_substructures_path": null,
+    "description": null,
+    "force_field": [
+     "ff14sb_off_impropers_0.0.4.offxml"
+    ],
+    "name": "trpcage",
+    "pdb_path": "<config>/trpcage.pdb",
+    "segid": "PROT",
+    "type": "protein"
+   }
+  ],
+  "solvent": {
+   "box": {
+    "padding": 1.0,
+    "shape": "rhombic_dodecahedron",
+    "target_density": 1.0,
+    "tolerance": 2.0
+   },
+   "co_solvents": [],
+   "force_field": [
+    "openff-2.3.0.offxml"
+   ],
+   "ions": {
+    "kcl_concentration": 0.0,
+    "mgcl2_concentration": 0.0,
+    "nacl_concentration": 0.15,
+    "neutralize": true
+   },
+   "water": {
+    "model": "tip3p"
+   }
+  },
+  "thermodynamics": {
+   "pressure": 1.0,
+   "temperature": 300.0
+  }
+ },
+ "quickstart_gromacs": {
+  "description": "Trp-cage in water with NaCl",
+  "engine": "gromacs",
+  "gromacs": {
+   "analysis_topology": null,
+   "command_prefix": null,
+   "env_exports": {},
+   "gmx_binary": null,
+   "gpu": false,
+   "gpus": 1,
+   "grompp_flags": "",
+   "mdrun_flags": "",
+   "mdrun_flags_equilibration": null,
+   "mdrun_flags_production": null,
+   "memory": "16G",
+   "module_load": null,
+   "mpi_launcher_flags": "",
+   "ntmpi": 1,
+   "ntomp": 2,
+   "setup_commands": [],
+   "slurm_ntasks": null
+  },
+  "modeling_exceptions": [],
+  "name": "trpcage_water_gromacs",
+  "openmm": {
+   "device_index": null,
+   "platform": "CUDA",
+   "precision": "mixed"
+  },
+  "output": {
+   "job_scripts_subdir": "job_scripts",
+   "naming_template": "{enzyme}_{temperature}K_run{replicate}",
+   "projects_directory": "<config>",
+   "save_checkpoint": true,
+   "save_state_data": true,
+   "scratch_directory": null,
+   "slurm_logs_subdir": "slurm_logs",
+   "trajectory_format": "dcd"
+  },
+  "restraints": [],
+  "simulation_phases": {
+   "equilibration_stages": [
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "duration": 0.002,
+     "ensemble": "NVT",
+     "name": "equil",
+     "position_restraints": [],
+     "samples": 2,
+     "temperature": 300.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    }
+   ],
+   "production": {
+    "barostat": "MC",
+    "barostat_frequency": 25,
+    "checkpoint_interval": 60.0,
+    "duration": 0.004,
+    "ensemble": "NPT",
+    "samples": 4,
+    "thermostat": "LangevinMiddle",
+    "thermostat_timescale": 1.0,
+    "time_step": 2.0
+   }
+  },
+  "solutes": [
+   {
+    "charges": {
+     "method": "library",
+     "model": null
+    },
+    "custom_substructures_path": null,
+    "description": null,
+    "force_field": [
+     "ff14sb_off_impropers_0.0.4.offxml"
+    ],
+    "name": "trpcage",
+    "pdb_path": "<config>/trpcage.pdb",
+    "segid": "PROT",
+    "type": "protein"
+   }
+  ],
+  "solvent": {
+   "box": {
+    "padding": 1.0,
+    "shape": "rhombic_dodecahedron",
+    "target_density": 1.0,
+    "tolerance": 2.0
+   },
+   "co_solvents": [],
+   "force_field": [
+    "openff-2.3.0.offxml"
+   ],
+   "ions": {
+    "kcl_concentration": 0.0,
+    "mgcl2_concentration": 0.0,
+    "nacl_concentration": 0.15,
+    "neutralize": true
+   },
+   "water": {
+    "model": "tip3p"
+   }
+  },
+  "thermodynamics": {
+   "pressure": 1.0,
+   "temperature": 300.0
+  }
+ },
+ "template": {
+  "description": "Description of your simulation system",
+  "engine": "openmm",
+  "gromacs": {
+   "analysis_topology": null,
+   "command_prefix": null,
+   "env_exports": {},
+   "gmx_binary": null,
+   "gpu": false,
+   "gpus": 1,
+   "grompp_flags": "",
+   "mdrun_flags": "",
+   "mdrun_flags_equilibration": null,
+   "mdrun_flags_production": null,
+   "memory": "16G",
+   "module_load": null,
+   "mpi_launcher_flags": "",
+   "ntmpi": 1,
+   "ntomp": 8,
+   "setup_commands": [],
+   "slurm_ntasks": null
+  },
+  "modeling_exceptions": [],
+  "name": "rc5_template",
+  "openmm": {
+   "device_index": null,
+   "platform": "CUDA",
+   "precision": "mixed"
+  },
+  "output": {
+   "job_scripts_subdir": "job_scripts",
+   "naming_template": "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}",
+   "projects_directory": "<config>/runs",
+   "save_checkpoint": true,
+   "save_state_data": true,
+   "scratch_directory": null,
+   "slurm_logs_subdir": "slurm_logs",
+   "trajectory_format": "dcd"
+  },
+  "restraints": [],
+  "simulation_phases": {
+   "equilibration_stages": [
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "ensemble": "NVT",
+     "name": "heating",
+     "position_restraints": [
+      {
+       "force_constant": 4184.0,
+       "group": "protein_heavy"
+      }
+     ],
+     "samples": 50,
+     "temperature": null,
+     "temperature_end": 300.0,
+     "temperature_increment": 1.0,
+     "temperature_interval_steps": 600,
+     "temperature_start": 60.0,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    },
+    {
+     "barostat": null,
+     "barostat_frequency": null,
+     "duration": 1.0,
+     "ensemble": "NVT",
+     "name": "restrained_relaxation",
+     "position_restraints": [
+      {
+       "force_constant": 4184.0,
+       "group": "protein_heavy"
+      }
+     ],
+     "samples": 100,
+     "temperature": 300.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    },
+    {
+     "barostat": "MC",
+     "barostat_frequency": null,
+     "duration": 0.5,
+     "ensemble": "NPT",
+     "name": "free_equilibration",
+     "position_restraints": [],
+     "samples": 100,
+     "temperature": 300.0,
+     "temperature_end": null,
+     "temperature_increment": null,
+     "temperature_interval_steps": null,
+     "temperature_start": null,
+     "thermostat": null,
+     "thermostat_timescale": null,
+     "time_step": null
+    }
+   ],
+   "production": {
+    "barostat": "MC",
+    "barostat_frequency": 25,
+    "checkpoint_interval": 60.0,
+    "duration": 100.0,
+    "ensemble": "NPT",
+    "samples": 2500,
+    "thermostat": "LangevinMiddle",
+    "thermostat_timescale": 1.0,
+    "time_step": 2.0
+   }
+  },
+  "solutes": [
+   {
+    "charges": {
+     "method": "library",
+     "model": null
+    },
+    "custom_substructures_path": null,
+    "description": "My enzyme description",
+    "force_field": [
+     "ff14sb_off_impropers_0.0.4.offxml"
+    ],
+    "name": "protein_X",
+    "pdb_path": "<config>/structures/protein_X.pdb",
+    "segid": "PROT",
+    "type": "protein"
+   }
+  ],
+  "solvent": {
+   "box": {
+    "padding": 1.2,
+    "shape": "rhombic_dodecahedron",
+    "target_density": 1.0,
+    "tolerance": 2.0
+   },
+   "co_solvents": [],
+   "force_field": [
+    "openff-2.3.0.offxml"
+   ],
+   "ions": {
+    "kcl_concentration": 0.0,
+    "mgcl2_concentration": 0.0,
+    "nacl_concentration": 0.15,
+    "neutralize": true
+   },
+   "water": {
+    "model": "tip3p"
+   }
+  },
+  "thermodynamics": {
+   "pressure": 1.0,
+   "temperature": 300.0
+  }
+ }
+}

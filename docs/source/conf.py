@@ -4,26 +4,10 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import os
-import re
 import sys
 
 # Add the source directory to the path so autodoc can find modules
 sys.path.insert(0, os.path.abspath("../../src"))
-
-
-def _get_version() -> str:
-    """Read the project version, preferring installed metadata with __init__.py fallback."""
-    try:
-        from importlib.metadata import version
-
-        return version("polyzymd")
-    except Exception:
-        # Fallback: parse __init__.py directly (works without pip install)
-        init = os.path.join(os.path.dirname(__file__), "..", "..", "src", "polyzymd", "__init__.py")
-        with open(init) as f:
-            match = re.search(r'__version__\s*=\s*"([^"]+)"', f.read())
-        return match.group(1) if match else "unknown"
-
 
 # Mock imports for packages that may not be available during doc build
 # This allows autodoc to generate documentation without actually importing these
@@ -45,7 +29,7 @@ autodoc_mock_imports = [
     "parmed",
     "rdkit",
     "numpy",
-    "polymerist",
+    "mbuild",
 ]
 
 # -- Project information -----------------------------------------------------
@@ -54,14 +38,14 @@ autodoc_mock_imports = [
 project = "PolyzyMD"
 copyright = "2026, Joseph R. Laforet Jr."
 author = "Joseph R. Laforet Jr."
-release = _get_version()
-version = ".".join(release.split(".")[:2])  # short X.Y version for Sphinx
+release = "1.3.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
     "sphinx.ext.autodoc",  # Auto-generate docs from docstrings
+    "sphinxcontrib.autodoc_pydantic",
     "sphinx.ext.autosummary",  # Generate summary tables
     "sphinx.ext.napoleon",  # Support Google/NumPy style docstrings
     "sphinx.ext.viewcode",  # Add links to source code
@@ -82,7 +66,7 @@ napoleon_include_special_with_doc = True
 napoleon_use_admonition_for_examples = True
 napoleon_use_admonition_for_notes = True
 napoleon_use_admonition_for_references = False
-napoleon_use_ivar = True
+napoleon_use_ivar = False
 napoleon_use_param = True
 napoleon_use_rtype = True
 napoleon_type_aliases = None
@@ -99,11 +83,21 @@ autodoc_default_options = {
 autodoc_typehints = "description"
 autodoc_typehints_description_target = "documented"
 
+# autodoc-pydantic settings (Pydantic v2 model rendering)
+autodoc_pydantic_model_show_field_summary = False
+autodoc_pydantic_model_show_json = False
+autodoc_pydantic_model_show_config_summary = False
+autodoc_pydantic_model_show_config_member = False
+autodoc_pydantic_model_show_validator_summary = True
+autodoc_pydantic_model_show_validator_members = True
+autodoc_pydantic_field_show_constraints = True
+autodoc_pydantic_field_show_required = True
+autodoc_pydantic_field_show_default = True
+autodoc_pydantic_field_show_alias = False
+autodoc_pydantic_model_undoc_members = True
+
 # Autosummary settings
-# Stub generation is disabled because all API docs use automodule directives
-# directly.  Enabling it would generate stub pages that duplicate every
-# class/attribute already documented in the api/*.md pages.
-autosummary_generate = False
+autosummary_generate = True
 
 # Intersphinx mapping to external documentation
 intersphinx_mapping = {
@@ -137,29 +131,49 @@ source_suffix = {
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = "sphinx_rtd_theme"
+html_theme = "pydata_sphinx_theme"
 html_static_path = ["_static"]
-
-# Logo configuration
-html_logo = "_static/logo.png"
-html_favicon = "_static/logo.png"
-
-# Theme options
+html_extra_path = ["_extra"]
+html_title = "PolyzyMD"
+html_favicon = "_static/favicon.png"
+# The badge has a transparent background, so it sits on the header in light and dark mode.
+html_logo = "_static/polyzymd_badge_256.png"
 html_theme_options = {
-    "logo_only": True,
-    "prev_next_buttons_location": "bottom",
-    "style_external_links": True,
-    "collapse_navigation": False,
-    "sticky_navigation": True,
-    "navigation_depth": 3,
-    "includehidden": True,
-    "titles_only": False,
+    "logo": {"text": "PolyzyMD", "alt_text": "PolyzyMD home"},
+    # The top-level toctree (Get started, Tutorials, How-to, Explanation,
+    # Reference, Contributing) becomes the header tabs: one per Diataxis section.
+    "header_links_before_dropdown": 6,
+    "navbar_align": "left",
+    "navbar_end": ["theme-switcher", "navbar-icon-links"],
+    "icon_links": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/joelaforet/polyzymd",
+            "icon": "fa-brands fa-github",
+        },
+    ],
+    "show_toc_level": 2,
+    "navigation_with_keys": False,
+    "show_prev_next": True,
+    "footer_start": ["copyright"],
+    "footer_end": ["sphinx-version"],
+    "pygments_light_style": "tango",
+    "pygments_dark_style": "monokai",
 }
-
-# Custom CSS
+# The landing page has no left sidebar: its cards are the navigation.
+html_sidebars = {"index": []}
+html_show_sourcelink = False
 html_css_files = [
     "custom.css",
 ]
+# Looping molecular movies pause for readers who ask for reduced motion.
+html_js_files = [
+    "pz-movie.js",
+]
+# Rank task pages (get started, tutorials, how-to) above API pages, and pages
+# with the query words in their title above pages that mention them once.
+# scripts/check_docs_search.py measures the ranking on the queries users type.
+html_search_scorer = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_scorer.js")
 
 # -- Options for TODO extension ----------------------------------------------
 todo_include_todos = True

@@ -1,0 +1,2271 @@
+"""Trajectory loading utilities for PolyzyMD analysis.
+
+This module provides config-aware trajectory loading that understands
+PolyzyMD's directory structure and daisy-chain continuation patterns.
+File discovery is delegated to the active simulation engine so that
+both OpenMM and GROMACS directory layouts are handled transparently.
+
+Key Features
+------------
+- Config-based path resolution (config.yaml is single source of truth)
+- Engine-aware file discovery (OpenMM daisy-chain, GROMACS flat layout)
+- Automatic detection of daisy-chain trajectory segments
+- Support for both scratch and projects directories
+- Lazy loading and memory-efficient iteration
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+import re
+from dataclasses import dataclass, field
+from numbers import Real
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Iterator, Sequence
+
+import numpy as np
+from numpy.typing import NDArray
+from pydantic import ValidationError
+
+if TYPE_CHECKING:
+    from MDAnalysis.core.universe import Universe
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.engines.base import SimulationEngine, TrajectoryLayout
+
+LOGGER = logging.getLogger(__name__)
+_WARNED_GRO_TOPOLOGY_PATHS: set[Path] = set()
+_WARNED_TPR_FALLBACK_PATHS: set[Path] = set()
+_WARNED_CHAIN_ID_PATHS: set[Path] = set()
+_WARNED_ELEMENT_ENRICHMENT_KEYS: set[str] = set()
+_WARNED_DCD_TIME_SHIFT_PATHS: set[Path] = set()
+
+PBC_POLICIES: tuple[str, ...] = ("as_is", "make_whole")
+MAKE_WHOLE_SELECTION = "not (water or resname NA CL K MG ZN SOD CLA POT NA+ CL-)"
+
+_ELEMENT_SYMBOLS = frozenset(
+    {
+        "H",
+        "He",
+        "Li",
+        "Be",
+        "B",
+        "C",
+        "N",
+        "O",
+        "F",
+        "Ne",
+        "Na",
+        "Mg",
+        "Al",
+        "Si",
+        "P",
+        "S",
+        "Cl",
+        "Ar",
+        "K",
+        "Ca",
+        "Sc",
+        "Ti",
+        "V",
+        "Cr",
+        "Mn",
+        "Fe",
+        "Co",
+        "Ni",
+        "Cu",
+        "Zn",
+        "Br",
+        "I",
+    }
+)
+_COMMON_ION_ELEMENTS = {
+    "NA": "Na",
+    "SOD": "Na",
+    "CL": "Cl",
+    "CLA": "Cl",
+    "MG": "Mg",
+    "CA": "Ca",
+    "CAL": "Ca",
+    "ZN": "Zn",
+    "K": "K",
+    "POT": "K",
+    "FE": "Fe",
+    "CU": "Cu",
+    "MN": "Mn",
+}
+_BIOMOLECULAR_NAME_PREFIX_ELEMENTS = {"C", "N", "O", "S", "P", "F", "I"}
+_STANDARD_BIOMOLECULAR_RESIDUES = {
+    "ALA",
+    "ARG",
+    "ASN",
+    "ASP",
+    "CYS",
+    "CYX",
+    "GLN",
+    "GLU",
+    "GLY",
+    "HID",
+    "HIE",
+    "HIP",
+    "HIS",
+    "ILE",
+    "LEU",
+    "LYS",
+    "MET",
+    "PHE",
+    "PRO",
+    "SER",
+    "THR",
+    "TRP",
+    "TYR",
+    "VAL",
+    "A",
+    "C",
+    "G",
+    "T",
+    "U",
+    "DA",
+    "DC",
+    "DG",
+    "DT",
+    "DU",
+}
+
+
+def _normalized_warning_path(path: Path) -> Path:
+    """Return a stable key for topology warning de-duplication.
+
+    Parameters
+    ----------
+    path : Path
+        Topology path to normalize.
+
+    Returns
+    -------
+    Path
+        Expanded and resolved path suitable for process-wide warning gating.
+    """
+    expanded = Path(path).expanduser()
+    try:
+        return expanded.resolve(strict=False)
+    except OSError:
+        return expanded.absolute()
+
+
+def _require_mdanalysis(feature_name: str = "trajectory analysis") -> None:
+    """Raise ImportError if MDAnalysis is not available."""
+    try:
+        import MDAnalysis  # noqa: F401
+    except ImportError:
+        raise ImportError(
+            f"MDAnalysis is required for {feature_name}.\n"
+            "Ensure MDAnalysis is available in the PolyzyMD pixi environment "
+            '(for example: pixi run -e analysis python -c "import MDAnalysis")'
+        ) from None
+
+
+def _canonical_element_symbol(value: object) -> str | None:
+    """Return a canonical element symbol for an unambiguous token.
+
+    Parameters
+    ----------
+    value : object
+        Candidate atom type or atom name token.
+
+    Returns
+    -------
+    str or None
+        Canonical element symbol, or ``None`` when the token is not a plain
+        element symbol.
+    """
+
+    token = str(value).strip()
+    if not token or not token.isalpha() or len(token) > 2:
+        return None
+    symbol = token[0].upper() + token[1:].lower()
+    if symbol in _ELEMENT_SYMBOLS:
+        return symbol
+    return None
+
+
+def _context_allows_type_element(symbol: str, name: object, resname: object | None) -> bool:
+    """Return whether atom context supports an element inferred from type.
+
+    Parameters
+    ----------
+    symbol : str
+        Element symbol inferred from the atom type.
+    name : object
+        Atom name from the topology.
+    resname : object or None
+        Residue name used to reject ambiguous ion aliases.
+
+    Returns
+    -------
+    bool
+        ``True`` when the atom name and residue context support the type-derived
+        element.
+    """
+
+    name_token = str(name).strip().upper()
+    name_symbol = _canonical_element_symbol(name_token)
+    residue = str(resname).strip().upper().rstrip("+-") if resname is not None else ""
+    if (
+        len(name_token) == 2
+        and name_symbol == symbol
+        and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
+        and residue not in _COMMON_ION_ELEMENTS
+    ):
+        return True
+
+    name_symbol = _infer_element_from_atom_name(name, resname)
+    return name_symbol == symbol
+
+
+def _infer_elements_from_atom_types(universe: Any) -> tuple[list[str] | None, str]:
+    """Infer topology elements from atom types when context agrees.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+
+    Returns
+    -------
+    tuple[list[str] | None, str]
+        Inferred element symbols and a diagnostic message. The element list is
+        ``None`` when any atom type is missing, ambiguous, or conflicts with
+        atom name and residue context.
+    """
+
+    try:
+        atom_types = list(universe.atoms.types)
+    except (AttributeError, TypeError):
+        return None, "atom types are unavailable"
+    try:
+        names = list(universe.atoms.names)
+    except (AttributeError, TypeError):
+        return None, "atom names are unavailable for type validation"
+    try:
+        resnames = list(universe.atoms.resnames)
+    except (AttributeError, TypeError):
+        resnames = [None] * len(names)
+
+    if len(atom_types) != len(names) or len(atom_types) != len(resnames):
+        return None, "atom type, name, and residue metadata lengths differ"
+
+    inferred: list[str] = []
+    for index, (atom_type, name, resname) in enumerate(
+        zip(atom_types, names, resnames, strict=True)
+    ):
+        symbol = _canonical_element_symbol(atom_type)
+        if symbol is None:
+            return None, f"atom type {atom_type!r} is not element-like"
+        if not _context_allows_type_element(symbol, name, resname):
+            return None, (
+                f"atom type {atom_type!r} at index {index} conflicts with "
+                f"atom name {name!r} and residue {resname!r}"
+            )
+        inferred.append(symbol)
+    return inferred, "all atom types are element-like and context-safe"
+
+
+def _infer_element_from_atom_name(name: object, resname: object | None = None) -> str | None:
+    """Infer an element from a conservative atom-name heuristic.
+
+    Parameters
+    ----------
+    name : object
+        Atom name from the topology.
+    resname : object or None, optional
+        Residue name used to distinguish ions such as calcium from protein
+        alpha carbons named ``CA``.
+
+    Returns
+    -------
+    str or None
+        Inferred element symbol, or ``None`` when no conservative inference is
+        possible.
+    """
+
+    raw_name = str(name).strip()
+    token = re.sub(r"^\d+", "", raw_name).upper()
+    if not token:
+        return None
+    base_token = re.sub(r"\d+$", "", token)
+    has_numeric_suffix = base_token != token
+
+    residue = str(resname).strip().upper().rstrip("+-") if resname is not None else ""
+    residue_element = _COMMON_ION_ELEMENTS.get(residue)
+    if residue_element is not None:
+        name_element = _COMMON_ION_ELEMENTS.get(base_token)
+        if name_element == residue_element:
+            return name_element
+        return None
+    if base_token in {"CL", "BR"}:
+        return _canonical_element_symbol(base_token)
+    if (
+        len(base_token) == 2
+        and base_token == token
+        and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
+        and _canonical_element_symbol(base_token)
+    ):
+        return None
+    if (
+        has_numeric_suffix
+        and len(base_token) == 2
+        and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
+        and _canonical_element_symbol(base_token)
+    ):
+        return None
+    if token in _COMMON_ION_ELEMENTS and token != "CA" and not residue:
+        return _COMMON_ION_ELEMENTS[token]
+    if token.startswith("H"):
+        return "H"
+    first_letter = token[0]
+    if first_letter in _BIOMOLECULAR_NAME_PREFIX_ELEMENTS:
+        return first_letter
+    return None
+
+
+def _infer_elements_from_atom_names(universe: Any) -> tuple[list[str] | None, str]:
+    """Infer topology elements from atom names when all atoms are recognized.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+
+    Returns
+    -------
+    tuple[list[str] | None, str]
+        Inferred element symbols and a diagnostic message. The element list is
+        ``None`` when any atom cannot be inferred conservatively.
+    """
+
+    try:
+        names = list(universe.atoms.names)
+    except (AttributeError, TypeError):
+        return None, "atom names are unavailable"
+    try:
+        resnames = list(universe.atoms.resnames)
+    except (AttributeError, TypeError):
+        resnames = [None] * len(names)
+
+    inferred: list[str] = []
+    for index, (name, resname) in enumerate(zip(names, resnames, strict=True)):
+        symbol = _infer_element_from_atom_name(name, resname)
+        if symbol is None:
+            return None, f"atom name {name!r} at index {index} is not safely inferable"
+        inferred.append(symbol)
+    return inferred, "all atom names matched conservative element rules"
+
+
+def _universe_has_elements(universe: Any) -> bool:
+    """Return whether a universe exposes complete element metadata.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+
+    Returns
+    -------
+    bool
+        ``True`` when element metadata can be read for all atoms.
+    """
+
+    try:
+        elements = list(universe.atoms.elements)
+    except (AttributeError, TypeError):
+        return False
+    return len(elements) == len(universe.atoms)
+
+
+def openmm_system_file(trajectory_file: str | Path) -> Path | None:
+    """Return the OpenMM system XML PolyzyMD saved beside ``trajectory_file``, if any.
+
+    A segment ``production_0/production_0_trajectory.dcd`` has its system in
+    ``production_0/production_0_system.xml``.
+    """
+    path = Path(trajectory_file)
+    stem = path.stem[: -len("_trajectory")] if path.stem.endswith("_trajectory") else path.stem
+    candidate = path.with_name(f"{stem}_system.xml")
+    return candidate if candidate.is_file() else None
+
+
+def open_universe(
+    topology_file: str | Path,
+    trajectory_files: Sequence[str | Path],
+    gromacs_topology: str | Path | None = None,
+) -> Any:
+    """Return the MDAnalysis universe of ``trajectory_files`` with ``topology_file``.
+
+    Several trajectory files are read in order as one trajectory. A GROMACS
+    ``prod.tpr`` written by a GROMACS newer than this MDAnalysis can read
+    (GROMACS 2026 for MDAnalysis 2.10) is replaced by the run's ``.top``
+    beside it (``gromacs_topology`` when given, else the only ``.top``), laid
+    out as MDAnalysis lays out a TPR
+    (:func:`~polyzymd.analyses.shared.gromacs.universe_from_gromacs_top`),
+    with a warning. A universe read from a TPR, ``.top`` or OpenMM
+    ``system.prmtop`` takes PolyzyMD's chain IDs (A protein, B substrate,
+    C polymer) from the build's ``solvated_system.pdb``
+    (:func:`~polyzymd.analyses.shared.gromacs.apply_build_chain_ids`), since
+    none of these files stores them. The universe's
+    ``_polyzymd_bond_source`` names where its bonds came from: ``"tpr"``,
+    ``"top"`` or ``None`` for the file format's own bonds.
+    """
+    import MDAnalysis as mda
+
+    from polyzymd.analyses.shared.gromacs import (
+        apply_build_chain_ids,
+        build_pdb_file,
+        gromacs_topology_file,
+        tpr_unsupported,
+        universe_from_gromacs_top,
+    )
+
+    files = [str(path) for path in trajectory_files]
+    coordinates: Any = files[0] if len(files) == 1 else files
+    topology = Path(topology_file)
+    is_tpr = topology.suffix.lower() == ".tpr"
+    try:
+        universe = (
+            mda.Universe(str(topology), coordinates) if files else mda.Universe(str(topology))
+        )
+    except ValueError as error:
+        if not (is_tpr and tpr_unsupported(error)):
+            raise
+        top_file = gromacs_topology_file(
+            topology.parent, Path(gromacs_topology).name if gromacs_topology else None
+        )
+        # The same MDAnalysis cannot read any run's TPR: say so once, then log each.
+        level = logging.DEBUG if _WARNED_TPR_FALLBACK_PATHS else logging.WARNING
+        _WARNED_TPR_FALLBACK_PATHS.add(topology)
+        LOGGER.log(
+            level,
+            "MDAnalysis %s cannot read %s (%s); reading its topology from %s instead, "
+            "laid out as MDAnalysis lays out a TPR. Other runs' TPRs are read the same way.",
+            mda.__version__,
+            topology.name,
+            str(error.__context__).strip(),
+            top_file.name,
+        )
+        universe = universe_from_gromacs_top(top_file, files)
+        universe._polyzymd_bond_source = "top"
+        universe._polyzymd_topology_source = str(top_file)
+    else:
+        universe._polyzymd_bond_source = "tpr" if is_tpr else None
+        universe._polyzymd_topology_source = str(topology)
+    if is_tpr or topology.suffix.lower() == ".prmtop":
+        metadata = apply_build_chain_ids(universe, build_pdb_file(topology))
+        if not metadata["applied"] and topology not in _WARNED_CHAIN_ID_PATHS:
+            _WARNED_CHAIN_ID_PATHS.add(topology)
+            LOGGER.warning(
+                "%s does not hold PolyzyMD's chain IDs (A protein, B substrate, C polymer) "
+                "and they could not be read from the build: %s. %s",
+                topology,
+                metadata["reason"],
+                (
+                    "Select by chainID MOL0 and so on, or by residue name."
+                    if is_tpr
+                    else "Select by residue name."
+                ),
+            )
+    _shift_openmm_dcd_times(universe, files)
+    return universe
+
+
+def openmm_dcd_time_shift(trajectory_file: str | Path, frame_interval_ps: float) -> float | None:
+    """Return how far an OpenMM DCD's header times fall behind its frames, in ps.
+
+    OpenMM 8.2 and later write every DCD as if its first frame were at step
+    ``reportInterval``. A production segment that continues a chain at a
+    later step then reads in MDAnalysis as if its times started again from
+    the first frame interval. The state-data CSV written beside it records
+    the real step of each frame: OpenMM writes the frame and the CSV row at
+    the same step, the frame first. The shift is taken from the CSV only when
+    the header has that signature (first step equal to the interval), the
+    CSV has at least two rows, one frame interval apart, and the first CSV
+    step is a whole
+    number of intervals after the header's first step.
+
+    Parameters
+    ----------
+    trajectory_file : str or Path
+        ``production_N_trajectory.dcd``; its CSV is
+        ``production_N_state_data.csv`` in the same folder.
+    frame_interval_ps : float
+        Time between frames in ps, as MDAnalysis reads it from the header.
+
+    Returns
+    -------
+    float or None
+        Time in ps to add to every frame's header time, or ``None`` when the
+        header needs no shift or the CSV cannot vouch for one.
+    """
+    from polyzymd.simulation.report_state import _csv_steps, dcd_frame_info
+
+    path = Path(trajectory_file)
+    if path.suffix.lower() != ".dcd" or not path.name.endswith("_trajectory.dcd"):
+        return None
+    header = dcd_frame_info(path)
+    if header is None:
+        return None
+    frames, first_step, interval = header
+    if frames <= 0 or interval <= 1 or first_step != interval:
+        return None
+    steps = _csv_steps(path.with_name(path.name[: -len("_trajectory.dcd")] + "_state_data.csv"))
+    # Two rows at least, so the CSV itself shows the frame interval.
+    if len(steps) < 2 or steps[1] - steps[0] != interval:
+        return None
+    if steps[0] <= first_step or steps[0] % interval:
+        return None
+    shift = (steps[0] - first_step) / interval * frame_interval_ps
+    if path not in _WARNED_DCD_TIME_SHIFT_PATHS:
+        _WARNED_DCD_TIME_SHIFT_PATHS.add(path)
+        LOGGER.warning(
+            "%s: its header puts the first frame at step %d, but the state-data CSV "
+            "beside it records step %d. OpenMM 8.2 and later write the frame interval "
+            "as the first step of every new trajectory file. Reading its frame times "
+            "from step %d.",
+            path,
+            first_step,
+            steps[0],
+            steps[0],
+        )
+    return shift
+
+
+def _shift_openmm_dcd_times(universe: Any, files: Sequence[str | Path]) -> None:
+    """Give each OpenMM DCD of ``universe`` the frame times its CSV records.
+
+    See :func:`openmm_dcd_time_shift`. The shift is stored as MDAnalysis'
+    ``time_offset`` of the file's reader, so every frame's ``ts.time``
+    carries it.
+    """
+    if not files:
+        return
+    trajectory = getattr(universe, "trajectory", None)
+    readers = getattr(trajectory, "readers", None)
+    if readers is None:
+        readers = [trajectory]
+    if len(readers) != len(files):
+        return
+    for reader, path in zip(readers, files):
+        ts = getattr(reader, "ts", None)
+        data = getattr(ts, "data", None)
+        dt = _finite_numeric_time(getattr(ts, "dt", None))
+        if not isinstance(data, dict) or dt is None or dt <= 0:
+            continue
+        shift = openmm_dcd_time_shift(path, dt)
+        if shift:
+            data["time_offset"] = float(data.get("time_offset", 0.0)) + shift
+
+
+def read_openmm_system(path: str | Path) -> tuple[NDArray[np.float64], list[tuple[int, int]]]:
+    """Return the partial charges and covalent bonds of a serialized OpenMM system.
+
+    The charges, in elementary charges, are the ``q`` of each particle of
+    the ``NonbondedForce``. The bonds are those of the ``HarmonicBondForce``
+    and the constraints, which OpenMM uses for bonds to hydrogen and rigid
+    water; the caller removes constraints that are not bonds, such as the
+    H-H constraint of rigid water. The file is streamed with
+    ``xml.etree.ElementTree.iterparse``.
+    """
+    import xml.etree.ElementTree as ET
+
+    charges: list[float] = []
+    bonds: list[tuple[int, int]] = []
+    force: str | None = None
+    for event, element in ET.iterparse(str(path), events=("start", "end")):
+        if element.tag == "Force":
+            force = element.get("type") if event == "start" else None
+            if event == "end":
+                element.clear()
+            continue
+        if event != "end":
+            continue
+        if element.tag == "Particle" and force == "NonbondedForce":
+            charges.append(float(element.get("q", "nan")))
+        elif element.tag == "Bond" and force == "HarmonicBondForce":
+            bonds.append((int(element.get("p1")), int(element.get("p2"))))
+        elif element.tag == "Constraint":
+            bonds.append((int(element.get("p1")), int(element.get("p2"))))
+        element.clear()
+    return np.asarray(charges, dtype=np.float64), bonds
+
+
+def enrich_universe_force_field(universe: Any, system_file: str | Path | None) -> dict[str, Any]:
+    """Add the partial charges and covalent bonds of the run's OpenMM system to ``universe``.
+
+    PolyzyMD saves each segment's OpenMM system as XML, in the particle order
+    of its topology PDB, which records bonds only for residues outside the
+    standard ones. When ``system_file`` exists and has one particle per atom,
+    the universe gets its ``charges`` and has its bonds replaced by the
+    system's bonds and constraints, without the constraints between two
+    hydrogens. Otherwise the universe is left unchanged.
+
+    Returns
+    -------
+    dict[str, Any]
+        ``applied``, the ``source`` path, and the number of ``bonds`` or the
+        ``reason`` nothing was applied; also stored as
+        ``universe._polyzymd_force_field``.
+    """
+    if system_file is None:
+        metadata: dict[str, Any] = {"applied": False, "source": None, "reason": "no system XML"}
+        universe._polyzymd_force_field = metadata
+        return metadata
+    charges, bonds = read_openmm_system(system_file)
+    if len(charges) != len(universe.atoms):
+        metadata = {
+            "applied": False,
+            "source": str(system_file),
+            "reason": f"{len(charges)} particles for {len(universe.atoms)} atoms",
+        }
+        universe._polyzymd_force_field = metadata
+        return metadata
+    hydrogen = (
+        np.asarray([str(e).strip().upper() == "H" for e in universe.atoms.elements])
+        if hasattr(universe.atoms, "elements")
+        else np.zeros(len(universe.atoms), dtype=bool)
+    )
+    kept = [(a, b) for a, b in bonds if not (hydrogen[a] and hydrogen[b])]
+    universe.add_TopologyAttr("charges", charges)
+    if hasattr(universe, "bonds") and len(universe.bonds):
+        universe.delete_bonds(universe.bonds)
+    universe.add_bonds(kept)
+    universe._polyzymd_bond_source = "system_xml"
+    metadata = {"applied": True, "source": str(system_file), "bonds": len(kept)}
+    universe._polyzymd_force_field = metadata
+    return metadata
+
+
+def enrich_universe_elements(
+    universe: Any, *, topology_key: str | Path | None = None
+) -> dict[str, Any]:
+    """Add missing MDAnalysis element metadata when it can be inferred safely.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe to enrich in place.
+    topology_key : str or Path or None, optional
+        Stable key for one-time logging, usually the topology path.
+
+    Returns
+    -------
+    dict[str, Any]
+        Lightweight enrichment metadata with ``applied``, ``source``, and
+        diagnostic ``message`` or ``reason`` fields.
+    """
+
+    if _universe_has_elements(universe):
+        metadata = {"applied": False, "source": "existing", "message": "elements already present"}
+        universe._polyzymd_element_enrichment = metadata
+        return metadata
+
+    elements, type_reason = _infer_elements_from_atom_types(universe)
+    source = "types"
+    if elements is None:
+        elements, name_reason = _infer_elements_from_atom_names(universe)
+        source = "names"
+        reason = f"type inference skipped: {type_reason}; name inference skipped: {name_reason}"
+    else:
+        reason = type_reason
+
+    if elements is None:
+        metadata = {"applied": False, "source": None, "reason": reason}
+        universe._polyzymd_element_enrichment = metadata
+        return metadata
+
+    universe.add_TopologyAttr("elements", elements)
+    metadata = {
+        "applied": True,
+        "source": source,
+        "message": f"elements inferred from atom {source}",
+    }
+    universe._polyzymd_element_enrichment = metadata
+
+    warning_key = str(topology_key or id(universe))
+    if warning_key not in _WARNED_ELEMENT_ENRICHMENT_KEYS:
+        _WARNED_ELEMENT_ENRICHMENT_KEYS.add(warning_key)
+        LOGGER.info(
+            "Inferred missing topology elements from atom %s for %s",
+            source,
+            topology_key or "MDAnalysis universe",
+        )
+    return metadata
+
+
+def _trajectory_frame_index(trajectory: Any) -> int | None:
+    """Return the current trajectory frame index when available.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+
+    Returns
+    -------
+    int | None
+        Current frame index, or ``None`` when it cannot be determined.
+    """
+
+    for owner in (trajectory, getattr(trajectory, "ts", None)):
+        frame = getattr(owner, "frame", None)
+        if isinstance(frame, bool):
+            continue
+        try:
+            return int(frame)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _restore_trajectory_frame(trajectory: Any, frame_index: int | None) -> None:
+    """Restore a trajectory reader to a previous frame when possible.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+    frame_index : int | None
+        Frame index captured before a metadata probe.
+    """
+
+    if frame_index is None:
+        return
+    try:
+        trajectory[frame_index]
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return
+
+
+def _finite_numeric_time(value: object) -> float | None:
+    """Return a finite real-valued time or ``None``.
+
+    Parameters
+    ----------
+    value : object
+        Candidate time value from MDAnalysis metadata.
+
+    Returns
+    -------
+    float | None
+        Finite time value, or ``None`` when the value is missing, non-real, or
+        non-finite.
+    """
+
+    if value is None or isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    time_value = float(value)
+    if not math.isfinite(time_value):
+        return None
+    return time_value
+
+
+def _trajectory_raw_time(trajectory: Any) -> float | None:
+    """Return raw timestamp metadata from a trajectory timestep.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+
+    Returns
+    -------
+    float | None
+        Raw finite timestep time from ``ts.data['time']`` plus the reader's
+        ``ts.data['time_offset']``, or ``None`` when it is unavailable.
+    """
+
+    ts = getattr(trajectory, "ts", None)
+    data = getattr(ts, "data", None)
+    if not isinstance(data, dict):
+        return None
+    time = _finite_numeric_time(data.get("time"))
+    offset = _finite_numeric_time(data.get("time_offset"))
+    if time is None or offset is None:
+        return time
+    return time + offset
+
+
+def _trajectory_time(trajectory: Any) -> float | None:
+    """Return the best finite timestamp exposed by a trajectory reader.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader or a compatible test double.
+
+    Returns
+    -------
+    float | None
+        Raw timestep time when available, otherwise ``trajectory.time`` when it
+        is finite.
+    """
+
+    raw_time = _trajectory_raw_time(trajectory)
+    if raw_time is not None:
+        return raw_time
+    return _finite_numeric_time(getattr(trajectory, "time", None))
+
+
+class TrajectoryLineageError(ValueError):
+    """Raised when daisy-chained trajectory segments do not form one time line.
+
+    Consecutive production segments written by a healthy restart chain start
+    exactly one frame interval after the previous segment ends. Two boundary
+    defects of the OpenMM restart chain are repaired instead of raised (see
+    :func:`_assert_contiguous_segments`): a segment that starts at the time of
+    the previous segment's last frame, and a segment that starts two frame
+    intervals after it. Any other overlap or gap, or a change of frame
+    interval, raises, because concatenating such segments would put frames at
+    the wrong times in every time-dependent analysis.
+    """
+
+
+@dataclass
+class _SegmentTiming:
+    """Raw timing metadata of one trajectory segment."""
+
+    path: Path
+    n_frames: int
+    first_time: float | None
+    last_time: float | None
+    dt: float | None
+    drop_last: bool = False
+    missing_before: bool = False
+
+
+@dataclass(frozen=True)
+class SegmentJoin:
+    """Frame times and boundary repairs of one replicate's concatenated segments.
+
+    Attributes
+    ----------
+    times_ps : numpy.ndarray
+        Time of every frame of the concatenated trajectory in ps, computed as
+        each segment's first-frame time plus the frame index within the
+        segment times the frame interval.
+    dropped_frames : tuple of int
+        Indices, in the concatenated trajectory, of each segment's last frame
+        that the next segment records again at the same time. They are left
+        out of the production frames.
+    missing_before : tuple of int
+        Indices of each segment's first frame when that segment starts two
+        frame intervals after the previous segment ends, so one frame is
+        missing just before it.
+    segment_paths : tuple of Path
+        The segments in chain order.
+    """
+
+    times_ps: NDArray[np.float64]
+    dropped_frames: tuple[int, ...] = ()
+    missing_before: tuple[int, ...] = ()
+    segment_paths: tuple[Path, ...] = ()
+
+    @property
+    def repaired(self) -> bool:
+        """Whether any boundary frame was dropped or found missing."""
+        return bool(self.dropped_frames or self.missing_before)
+
+    def warnings(self) -> list[str]:
+        """Describe each repair, naming the frame index and its time in ps."""
+        messages = [
+            f"Left out frame {index} (t={self.times_ps[index]:.6g} ps), the last frame of "
+            "a segment, because the next segment starts at the same time step: the "
+            "restart resumed from a state saved before that frame and simulated it again."
+            for index in self.dropped_frames
+        ]
+        messages += [
+            f"One frame is missing before frame {index} (t={self.times_ps[index]:.6g} ps): "
+            "the segment starts two frame intervals after the previous one ends."
+            for index in self.missing_before
+        ]
+        return messages
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the repairs as JSON-compatible values for provenance."""
+        return {
+            "dropped_frames": list(self.dropped_frames),
+            "dropped_frame_times_ps": [float(self.times_ps[i]) for i in self.dropped_frames],
+            "missing_before": list(self.missing_before),
+            "missing_before_times_ps": [float(self.times_ps[i]) for i in self.missing_before],
+        }
+
+
+def _segment_join(timings: Sequence[_SegmentTiming], reference_dt: float) -> SegmentJoin:
+    """Build the frame times and repair indices of checked segment timings.
+
+    Parameters
+    ----------
+    timings : sequence of _SegmentTiming
+        Timings returned by :func:`_assert_contiguous_segments`, whose
+        ``drop_last`` and ``missing_before`` flags mark the repairs.
+    reference_dt : float
+        Frame interval shared by every segment, in ps.
+    """
+
+    times: list[NDArray[np.float64]] = []
+    dropped: list[int] = []
+    missing: list[int] = []
+    offset = 0
+    for timing in timings:
+        assert timing.first_time is not None
+        times.append(timing.first_time + reference_dt * np.arange(timing.n_frames))
+        if timing.missing_before:
+            missing.append(offset)
+        offset += timing.n_frames
+        if timing.drop_last:
+            dropped.append(offset - 1)
+    return SegmentJoin(
+        times_ps=np.concatenate(times) if times else np.zeros(0),
+        dropped_frames=tuple(dropped),
+        missing_before=tuple(missing),
+        segment_paths=tuple(t.path for t in timings),
+    )
+
+
+def _probe_segment_timing(universe: Any, trajectory_file: Path) -> _SegmentTiming:
+    """Read the first/last raw times and frame interval of one segment.
+
+    Parameters
+    ----------
+    universe : MDAnalysis.Universe
+        Universe built from the run's topology; the segment is loaded into it
+        with ``load_new`` so the topology is parsed only once.
+    trajectory_file : Path
+        Trajectory segment to probe.
+    """
+
+    universe.load_new(str(trajectory_file))
+    _shift_openmm_dcd_times(universe, [trajectory_file])
+    trajectory = universe.trajectory
+    n_frames = int(len(trajectory))
+    if n_frames == 0:
+        return _SegmentTiming(trajectory_file, 0, None, None, None)
+
+    trajectory[0]
+    first_time = _trajectory_time(trajectory)
+    dt: float | None = None
+    if n_frames > 1:
+        trajectory[1]
+        second_time = _trajectory_time(trajectory)
+        if first_time is not None and second_time is not None:
+            dt = second_time - first_time
+    if dt is None:
+        dt = _finite_numeric_time(getattr(trajectory, "dt", None))
+    trajectory[n_frames - 1]
+    last_time = _trajectory_time(trajectory)
+    trajectory[0]
+    return _SegmentTiming(trajectory_file, n_frames, first_time, last_time, dt)
+
+
+def _assert_contiguous_segments(
+    topology_file: Path,
+    trajectory_files: Sequence[Path],
+    *,
+    relative_tolerance: float = 1e-3,
+    excluded_segments: Sequence[int] = (),
+    empty_segments: Sequence[int] = (),
+) -> list[_SegmentTiming]:
+    """Require daisy-chained segments to form one monotonic, evenly spaced time line.
+
+    Each segment's raw first and last times and frame interval are read from
+    the files themselves. Every segment must use the same frame interval, and
+    segment *k* must start one interval after segment *k-1* ends, except in
+    two cases that the OpenMM restart chain produces and that are repaired:
+
+    * Segment *k* starts at the time of segment *k-1*'s last frame. The
+      restart resumed from a state saved shortly before that frame and wrote
+      the same time step again. Segment *k-1*'s last frame is marked
+      ``drop_last``, because segment *k* continues from the resumed state and
+      not from that frame.
+    * Segment *k* starts two intervals after segment *k-1* ends. One frame was
+      never written, for example because a file-system error interrupted the
+      write, and segment *k* is marked ``missing_before``.
+
+    Each repair is logged as a warning.
+
+    Parameters
+    ----------
+    topology_file : Path
+        Topology used to open the segments.
+    trajectory_files : Sequence[Path]
+        Segments in chain order.
+    relative_tolerance : float, optional
+        Allowed deviation as a fraction of the frame interval (DCD headers
+        store the interval as float32, so exact comparison is not possible).
+    excluded_segments : sequence of int, optional
+        Segment indices the engine left out because they are not complete.
+        They are named in the error, since leaving out a segment that other
+        segments continue from is itself a reason the time line has a gap.
+    empty_segments : sequence of int, optional
+        Segment indices the engine left out because their file holds no
+        frame. They are named in the error, since the gap may be where they
+        were.
+
+    Returns
+    -------
+    list[_SegmentTiming]
+        Timing metadata per segment, in order, with the repair flags set.
+
+    Raises
+    ------
+    TrajectoryLineageError
+        If frame intervals differ between segments, or a segment starts
+        anywhere other than zero, one or two intervals after its predecessor
+        ends.
+    """
+
+    if len(trajectory_files) < 2:
+        return []
+
+    _require_mdanalysis("segment lineage validation")
+
+    universe = open_universe(topology_file, [])
+    timings = [_probe_segment_timing(universe, Path(f)) for f in trajectory_files]
+
+    if any(t.first_time is None or t.last_time is None for t in timings):
+        LOGGER.warning(
+            "Trajectory segments under %s expose no raw time metadata; skipping the "
+            "segment lineage check.",
+            Path(trajectory_files[0]).parent.parent,
+        )
+        return timings
+
+    reference_dt = next((t.dt for t in timings if t.dt is not None and t.dt > 0), None)
+    if reference_dt is None:
+        LOGGER.warning(
+            "Could not determine a frame interval for segments under %s; skipping the "
+            "segment lineage check.",
+            Path(trajectory_files[0]).parent.parent,
+        )
+        return timings
+    tolerance = relative_tolerance * reference_dt
+
+    problems: list[str] = []
+    for timing in timings:
+        if timing.dt is not None and abs(timing.dt - reference_dt) > tolerance:
+            problems.append(
+                f"{timing.path}: frame interval {timing.dt:.6g} differs from "
+                f"{reference_dt:.6g} used by the first segment"
+            )
+    for previous, current in zip(timings, timings[1:]):
+        assert previous.last_time is not None and current.first_time is not None
+        gap = current.first_time - previous.last_time
+        if abs(gap) <= tolerance:
+            previous.drop_last = True
+            LOGGER.warning(
+                "%s starts at t=%.6g, the time of the last frame of %s; leaving that "
+                "frame out, since the restart simulated the step again from an earlier state.",
+                current.path,
+                current.first_time,
+                previous.path,
+            )
+        elif abs(gap - 2 * reference_dt) <= tolerance:
+            current.missing_before = True
+            LOGGER.warning(
+                "%s starts at t=%.6g, two frame intervals after %s ends; one frame is "
+                "missing between them.",
+                current.path,
+                current.first_time,
+                previous.path,
+            )
+        elif abs(gap - reference_dt) > tolerance:
+            if gap <= 0:
+                kind = "overlaps or runs backwards relative to"
+            else:
+                kind = f"leaves a gap of {gap - reference_dt:.6g} after"
+            problems.append(
+                f"{current.path} (starts at t={current.first_time:.6g}) {kind} "
+                f"{previous.path} (ends at t={previous.last_time:.6g}); expected a step of "
+                f"{reference_dt:.6g}"
+            )
+
+    if problems:
+        skipped = (
+            f" Production segment(s) {list(empty_segments)} were skipped because their "
+            "trajectory holds no frames; the segments around them must still join without "
+            "a gap."
+            if empty_segments
+            else ""
+        )
+        if excluded_segments:
+            cause = (
+                f"Production segment(s) {list(excluded_segments)} were left out of this "
+                "chain because progress.json records them as still running or failed, so "
+                "the gap below is where they would have been. Wait for the run to finish, "
+                "or pass require_complete=False to read them as they stand. If that does "
+                "not explain the gap, two restart chains may have written into the same "
+                "run directory (duplicate SLURM resubmission), or a segment is missing."
+            )
+        else:
+            cause = (
+                "A repeated last frame or one missing frame at a boundary is repaired, so "
+                "these segments overlap by more than one frame, skip more than one frame, or "
+                "change the frame interval. Possible causes are a missing segment, two "
+                "restart chains writing into the same run directory, or a report interval "
+                "changed part way through the chain."
+            )
+        raise TrajectoryLineageError(
+            "Trajectory segments do not form a single contiguous time line; refusing to "
+            f"concatenate them. {cause}{skipped} Inspect progress.json and the production_N "
+            "directories, move aside the segments that do not belong to the chain, then "
+            "retry.\n  - " + "\n  - ".join(problems)
+        )
+
+    LOGGER.debug(
+        "Segment lineage check passed for %d segments (dt=%.6g, t=%.6g..%.6g)",
+        len(timings),
+        reference_dt,
+        timings[0].first_time,
+        timings[-1].last_time,
+    )
+    return timings
+
+
+class _TimestampPreservingTrajectory:
+    """Proxy that exposes raw MDAnalysis timestep timestamps.
+
+    Some MDAnalysis multi-DCD ``ChainReader`` instances normalize
+    ``reader.time`` to a loaded-frame-relative origin even though each timestep
+    keeps the absolute source timestamp in ``reader.ts.data['time']``. This proxy
+    preserves the reader protocol while making ``time`` return that raw timestamp
+    when available.
+    """
+
+    def __init__(self, reader: Any) -> None:
+        """Store the wrapped trajectory reader.
+
+        Parameters
+        ----------
+        reader : Any
+            MDAnalysis trajectory reader to wrap.
+        """
+
+        object.__setattr__(self, "_reader", reader)
+
+    def __len__(self) -> int:
+        """Return the wrapped trajectory length."""
+
+        return len(self._reader)
+
+    def __iter__(self) -> Iterator[Any]:
+        """Iterate over the wrapped trajectory reader."""
+
+        return iter(self._reader)
+
+    def __getitem__(self, item: Any) -> Any:
+        """Delegate frame and slice access to the wrapped reader."""
+
+        return self._reader[item]
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate unknown attributes to the wrapped reader."""
+
+        return getattr(self._reader, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Delegate mutable reader attributes to the wrapped reader."""
+
+        if name == "_reader":
+            object.__setattr__(self, name, value)
+            return
+        setattr(self._reader, name, value)
+
+    @property
+    def time(self) -> float:
+        """Return raw timestep time when available."""
+
+        raw_time = _trajectory_raw_time(self._reader)
+        if raw_time is not None:
+            return raw_time
+        return self._reader.time
+
+
+def underlying_reader(trajectory: Any) -> Any:
+    """Return the MDAnalysis reader behind a trajectory the loader may have wrapped.
+
+    :meth:`TrajectoryLoader.load_universe` replaces the reader of a
+    multi-segment universe with :class:`_TimestampPreservingTrajectory` when
+    the chained reader hides the raw timestamps. That proxy is not an
+    ``MDAnalysis.coordinates.base.ProtoReader``, and
+    ``MDAnalysis.analysis.base.AnalysisFromFunction`` treats a trajectory
+    argument that is not one as the function's first argument. Pass the
+    result of this function wherever an MDAnalysis analysis class takes a
+    trajectory.
+
+    Parameters
+    ----------
+    trajectory : Any
+        ``universe.trajectory`` of a loaded universe.
+
+    Returns
+    -------
+    Any
+        The wrapped reader for a proxy, otherwise ``trajectory`` itself.
+    """
+
+    if isinstance(trajectory, _TimestampPreservingTrajectory):
+        return object.__getattribute__(trajectory, "_reader")
+    return trajectory
+
+
+def _wrap_timestamp_preserving_trajectory(trajectory: Any) -> Any:
+    """Wrap trajectory readers that hide raw source timestamps.
+
+    Parameters
+    ----------
+    trajectory : Any
+        MDAnalysis trajectory reader.
+
+    Returns
+    -------
+    Any
+        Original reader when no correction is needed, otherwise a proxy that
+        exposes raw timestamp metadata through ``time``.
+    """
+
+    previous_frame = _trajectory_frame_index(trajectory)
+    try:
+        trajectory[0]
+        raw_time = _trajectory_raw_time(trajectory)
+        reported_time = _finite_numeric_time(getattr(trajectory, "time", None))
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return trajectory
+    finally:
+        _restore_trajectory_frame(trajectory, previous_frame)
+
+    if raw_time is None or reported_time is None:
+        return trajectory
+    if math.isclose(raw_time, reported_time, rel_tol=1e-12, abs_tol=1e-12):
+        return trajectory
+    return _TimestampPreservingTrajectory(trajectory)
+
+
+def _segment_indices(trajectory_paths: "Sequence[Path]") -> list[int]:
+    """Return the production segment index of each trajectory file.
+
+    Parameters
+    ----------
+    trajectory_paths : sequence of Path
+        Trajectory files in chain order.
+
+    Returns
+    -------
+    list of int
+        Segment index per file whose parent directory is named
+        ``production_<N>``. Legacy single-directory layouts contribute nothing,
+        since they have no segment index.
+    """
+
+    indices = []
+    for path in trajectory_paths:
+        match = re.fullmatch(r"production_(\d+)", Path(path).parent.name)
+        if match is not None:
+            indices.append(int(match.group(1)))
+    return indices
+
+
+def _expected_trajectories(engine: str) -> str:
+    """Where an engine's production trajectories must be for analysis to find them."""
+    if engine == "gromacs":
+        return (
+            "Analysis reads gromacs/prod_centered.xtc, prod_nojump.xtc or prod.xtc, with "
+            "gromacs/prod.tpr, in the replicate folder."
+        )
+    return (
+        "Analysis reads production_0/production_0_trajectory.dcd (then production_1/..., "
+        "with no gaps) in the replicate folder."
+    )
+
+
+def _segment_completeness_warning(layout: "TrajectoryLayout") -> str | None:
+    """Describe production segments the engine left out or flagged.
+
+    Parameters
+    ----------
+    layout : TrajectoryLayout
+        Engine-resolved layout for one replicate.
+
+    Returns
+    -------
+    str or None
+        Warning text naming the affected segment indices, or ``None`` when
+        every discovered segment is complete.
+    """
+
+    missing = list(getattr(layout, "missing_segments", []))
+    if missing:
+        kept = _segment_indices(getattr(layout, "trajectory_paths", []))
+        return (
+            f"Production segment(s) {missing} are recorded in progress.json as run but "
+            f"are not on disk, so this replicate is read from segment(s) {kept or 'none'} only "
+            "and its production is shorter than simulated; copy the missing segments, or "
+            "compare conditions over a common window with until."
+        )
+    excluded = list(getattr(layout, "excluded_segments", []))
+    if excluded:
+        # Derive the kept segments from the files that will actually be read.
+        # A segment can appear in segment_status and still be absent from the
+        # chain, for example a completed segment that wrote no frames, and
+        # reading the status instead would call that a gap.
+        highest_kept = max(
+            _segment_indices(getattr(layout, "trajectory_paths", [])),
+            default=-1,
+        )
+        if any(index < highest_kept for index in excluded):
+            consequence = (
+                "they sit between segments that were kept, so the concatenated time line "
+                "has a gap where they were and the lineage check will refuse it"
+            )
+        else:
+            consequence = "the analysis window ends before them"
+        return (
+            f"Excluded production segment(s) {excluded} from this replicate because the "
+            f"engine records them as still running or failed; {consequence}."
+        )
+    incomplete = list(getattr(layout, "incomplete_segments", []))
+    if incomplete:
+        return (
+            f"Reading production segment(s) {incomplete} that the engine records as still "
+            "running or failed; the last frames may be mid-write."
+        )
+    return None
+
+
+def apply_pbc_policy(
+    universe: "Universe",
+    pbc_policy: str = "as_is",
+    *,
+    topology: Path | str | None = None,
+    selection: str = MAKE_WHOLE_SELECTION,
+) -> str:
+    """Apply the requested periodic boundary policy to a loaded universe.
+
+    ``"as_is"`` leaves coordinates exactly as the trajectory stores them, which
+    is what every PolyzyMD analysis did before this option existed.
+    ``"make_whole"`` registers an MDAnalysis ``unwrap`` transformation on
+    ``selection``, everything that is not water or a monatomic ion by default,
+    so molecules split across a periodic boundary are rejoined before any
+    measurement reads them. Unwrapping walks the bond graph, so it raises
+    ``TopologyBondsMissingError`` when those atoms have no bonds. ``topology``
+    is named in that message. Returns the policy that was applied, and raises
+    ``ValueError`` for an unknown one.
+    """
+
+    from polyzymd.analyses.shared.topology import require_topology_bonds
+
+    policy = str(pbc_policy)
+    if policy not in PBC_POLICIES:
+        raise ValueError(f"pbc_policy must be one of {PBC_POLICIES}, got {pbc_policy!r}")
+    if policy == "as_is":
+        return policy
+
+    from MDAnalysis import transformations
+
+    atoms = universe.select_atoms(selection)
+    if len(atoms) == 0:
+        atoms = universe.atoms
+    # Unwrapping walks the bond graph of these atoms, so the bonds that matter
+    # are the ones inside this selection, not the ones anywhere in the topology.
+    require_topology_bonds(
+        atoms,
+        context="pbc_policy='make_whole'",
+        topology_path=topology,
+    )
+    universe.trajectory.add_transformations(transformations.unwrap(atoms))
+    LOGGER.info(
+        "Applied pbc_policy='make_whole' to %d of %d atoms (selection %r)",
+        len(atoms),
+        len(universe.atoms),
+        selection,
+    )
+    return policy
+
+
+@dataclass
+class TrajectoryInfo:
+    """Information about discovered trajectory files.
+
+    Attributes
+    ----------
+    topology_file : Path
+        Path to topology file (PDB)
+    trajectory_files : list[Path]
+        List of trajectory files (DCD) in order
+    n_segments : int
+        Number of daisy-chain segments
+    working_directory : Path
+        Base working directory for this replicate
+    replicate : int
+        Replicate number
+    topology_format : str or None, optional
+        Engine-reported topology format, when available.
+    trajectory_format : str or None, optional
+        Engine-reported trajectory format, when available.
+    warnings : list[str]
+        Discovery warnings that should be preserved in downstream provenance.
+    excluded_segments : list[int]
+        Segment indices the engine left out because they are not complete.
+    empty_segments : list[int]
+        Segment indices the engine left out because their file holds no frame.
+    segment_status : dict[int, str]
+        Status the engine recorded for each production segment index.
+    gromacs_topology_file : Path or None
+        The GROMACS ``.top`` that replaces ``prod.tpr`` when MDAnalysis cannot
+        read it, by the name the run uses.
+    """
+
+    topology_file: Path
+    trajectory_files: list[Path] = field(default_factory=list)
+    n_segments: int = 0
+    working_directory: Path = field(default_factory=Path)
+    replicate: int = 1
+    topology_format: str | None = None
+    trajectory_format: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    excluded_segments: list[int] = field(default_factory=list)
+    empty_segments: list[int] = field(default_factory=list)
+    segment_status: dict[int, str] = field(default_factory=dict)
+    gromacs_topology_file: Path | None = None
+
+    @property
+    def n_trajectory_files(self) -> int:
+        """Number of trajectory files found."""
+        return len(self.trajectory_files)
+
+    def validate(self) -> None:
+        """Validate that all files exist."""
+        if not self.topology_file.exists():
+            raise FileNotFoundError(f"Topology not found: {self.topology_file}")
+
+        missing = [f for f in self.trajectory_files if not f.exists()]
+        if missing:
+            raise FileNotFoundError(f"Missing trajectory files: {missing}")
+
+
+class TrajectoryLoader:
+    """Config-aware trajectory loader for PolyzyMD simulations.
+
+    This class handles the complexity of finding and loading trajectories
+    from PolyzyMD's output structure, including:
+
+    - Daisy-chain continuation segments (OpenMM)
+    - Flat production directories (GROMACS)
+    - Scratch vs projects directory resolution
+    - Multiple replicates
+
+    File discovery is delegated to the simulation engine resolved from the
+    config's ``engine`` field.  The engine is created lazily on the first
+    call that needs it, so construction remains cheap. Engine resolution errors
+    propagate unless an explicit ``engine_override`` is supplied.
+
+    Parameters
+    ----------
+    config : SimulationConfig
+        PolyzyMD simulation configuration.
+    engine_override : str or None, optional
+        Force a specific engine name (``"openmm"`` or ``"gromacs"``)
+        instead of reading ``config.engine``.
+
+    Examples
+    --------
+    >>> from polyzymd.config import load_config
+    >>> config = load_config("config.yaml")
+    >>> loader = TrajectoryLoader(config)
+    >>>
+    >>> # Load single replicate
+    >>> u = loader.load_universe(replicate=1)
+    >>> print(f"Loaded {len(u.trajectory)} frames")
+    >>>
+    >>> # Get trajectory info without loading
+    >>> info = loader.get_trajectory_info(replicate=1)
+    >>> print(f"Found {info.n_segments} segments")
+    >>>
+    >>> # Load multiple replicates
+    >>> for rep in range(1, 6):
+    ...     u = loader.load_universe(replicate=rep)
+    ...     # ... analyze
+    >>>
+    >>> # Explicit engine override for GROMACS directories
+    >>> loader = TrajectoryLoader(config, engine_override="gromacs")
+
+    Notes
+    -----
+    Frame indices in MDAnalysis are 0-indexed. For user-facing output,
+    add 1 to follow PyMOL convention (1-indexed frames).
+    """
+
+    def __init__(
+        self,
+        config: "SimulationConfig",
+        engine_override: str | None = None,
+    ) -> None:
+        _require_mdanalysis()
+        self.config = config
+        self._engine_override = engine_override
+        self._engine: SimulationEngine | None = None
+        self._universe_cache: dict[tuple[int, str, bool], "Universe"] = {}
+        self._segment_joins: dict[int, SegmentJoin] = {}
+
+    # ------------------------------------------------------------------
+    # Engine delegation helpers
+    # ------------------------------------------------------------------
+
+    def _get_engine(self) -> "SimulationEngine":
+        """Lazily create and cache the simulation engine.
+
+        Engine resolution errors from ``create_engine()`` propagate to callers
+        unless an explicit ``engine_override`` supplies a valid backend.
+
+        Returns
+        -------
+        SimulationEngine
+            Engine instance resolved from config.
+        """
+        if self._engine is None:
+            from polyzymd.engines import create_engine
+
+            # Reading a run needs no engine binary: a GROMACS run is analysed
+            # on a machine without GROMACS.
+            self._engine = create_engine(
+                self.config, override=self._engine_override, defer_binary=True
+            )
+        return self._engine
+
+    def _resolve_layout(
+        self,
+        working_dir: Path,
+        replicate: int | None = None,
+        *,
+        require_complete: bool = True,
+    ) -> "TrajectoryLayout":
+        """Resolve trajectory layout via the engine.
+
+        Parameters
+        ----------
+        working_dir : Path
+            Replicate working directory.
+        replicate : int or None, optional
+            Replicate index.  When ``None`` (e.g. from
+            ``find_topology(working_dir)``), the replicate is inferred
+            from the directory name (``run_<N>``) with a fallback to 1.
+        require_complete : bool, optional
+            Leave out production segments the engine records as still running
+            or failed, by default True.
+
+        Returns
+        -------
+        TrajectoryLayout
+            Engine-resolved file layout.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the engine cannot resolve the layout (e.g. invalid paths).
+        """
+        if replicate is None:
+            replicate = self._infer_replicate(working_dir)
+        engine = self._get_engine()
+        try:
+            engine_dir = engine.resolve_engine_working_directory(working_dir)
+        except (AttributeError, TypeError):
+            engine_dir = working_dir
+        try:
+            # The keyword is passed only when it differs from the engine
+            # default so that engine doubles with the older two-argument
+            # signature keep working.
+            if require_complete:
+                layout = engine.resolve_trajectory_layout(engine_dir, replicate)
+            else:
+                layout = engine.resolve_trajectory_layout(
+                    engine_dir, replicate, require_complete=False
+                )
+        except FileNotFoundError:
+            raise
+        except (TypeError, ValueError, ValidationError) as exc:
+            # Invalid path-like inputs are treated as missing layouts so callers
+            # can use the existing discovery fallback path
+            raise FileNotFoundError(
+                f"Engine could not resolve trajectory layout in {working_dir}: {exc}"
+            ) from exc
+        self._warn_gro_topology(layout)
+        return layout
+
+    @staticmethod
+    def _infer_replicate(working_dir: Path) -> int:
+        """Best-effort replicate number from a ``run_<N>`` directory name.
+
+        Parameters
+        ----------
+        working_dir : Path
+            Directory whose name may encode the replicate index.
+
+        Returns
+        -------
+        int
+            Parsed replicate number or ``1`` as a safe fallback.
+        """
+        try:
+            dir_name = str(Path(working_dir).name)
+        except (TypeError, ValueError):
+            return 1
+        match = re.match(r"run_(\d+)", dir_name)
+        if match:
+            return int(match.group(1))
+        return 1
+
+    def _gro_topology_warning(self, layout: "TrajectoryLayout") -> str | None:
+        """Build the chain-ID warning for GRO topology layouts.
+
+        GRO files do not reliably preserve chain identifiers, which can
+        break chain-based selections (``chainid A/B/C``) in analysis
+        settings.
+
+        Parameters
+        ----------
+        layout : TrajectoryLayout
+            Resolved layout from the engine.
+
+        Returns
+        -------
+        str or None
+            Actionable warning text when the layout uses a GRO topology,
+            otherwise ``None``.
+        """
+        if layout.topology_path is None or layout.topology_format.lower() != "gro":
+            return None
+        return (
+            f"Using GRO topology {layout.topology_path} — GRO files may not preserve "
+            "chain identifiers. Chain-based selections (chainid A/B/C) in "
+            "analysis selections may be unreliable. Prefer a PDB topology when available."
+        )
+
+    def _warn_gro_topology(self, layout: "TrajectoryLayout") -> str | None:
+        """Emit a one-time warning when the resolved topology is a GRO file.
+
+        Parameters
+        ----------
+        layout : TrajectoryLayout
+            Resolved layout from the engine.
+
+        Returns
+        -------
+        str or None
+            Actionable warning text when the layout uses a GRO topology,
+            otherwise ``None``.
+        """
+        warning = self._gro_topology_warning(layout)
+        if warning is not None and layout.topology_path is not None:
+            topology_key = _normalized_warning_path(layout.topology_path)
+            if topology_key in _WARNED_GRO_TOPOLOGY_PATHS:
+                return warning
+            _WARNED_GRO_TOPOLOGY_PATHS.add(topology_key)
+            LOGGER.warning(warning)
+        return warning
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def get_trajectory_info(
+        self,
+        replicate: int,
+        *,
+        require_complete: bool = True,
+    ) -> TrajectoryInfo:
+        """Get trajectory file information for a replicate.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number (1-indexed)
+        require_complete : bool, optional
+            Leave out production segments the engine records as still running
+            or failed, by default True. A segment that is still being written
+            would otherwise load as a short trajectory.
+
+        Returns
+        -------
+        TrajectoryInfo
+            Information about discovered trajectory files
+
+        Raises
+        ------
+        FileNotFoundError
+            If working directory or required files don't exist
+        """
+        # Get working directory from config
+        working_dir = self.config.get_working_directory(replicate)
+
+        if not working_dir.exists():
+            available = self._find_available_replicates()
+            raise FileNotFoundError(
+                self._format_missing_data_message(
+                    "Working directory not found",
+                    working_dir=working_dir,
+                    replicate=replicate,
+                    available_replicates=available,
+                    action=(
+                        "Run or complete the simulation for this replicate, or verify "
+                        "the config output/scratch paths before rerunning analysis."
+                    ),
+                )
+            )
+
+        # Delegate file discovery to the simulation engine
+        layout = self._resolve_layout(
+            working_dir, replicate=replicate, require_complete=require_complete
+        )
+
+        if layout.topology_path is None:
+            raise FileNotFoundError(f"No topology file found in {working_dir}")
+        if not layout.trajectory_paths:
+            available = self._find_available_replicates()
+            raise FileNotFoundError(
+                self._format_missing_data_message(
+                    "No production trajectory files found",
+                    working_dir=working_dir,
+                    replicate=replicate,
+                    available_replicates=available,
+                    action=(
+                        "Run or complete the production simulation for this replicate, "
+                        "then rerun analysis. Use --recompute only after trajectory files exist. "
+                        + _expected_trajectories(self._get_engine().name)
+                    ),
+                )
+            )
+
+        warnings = []
+        gro_warning = self._gro_topology_warning(layout)
+        if gro_warning is not None:
+            warnings.append(gro_warning)
+        names = {Path(path).name for path in layout.trajectory_paths}
+        if self._get_engine().name == "gromacs" and names == {"prod.xtc"}:
+            warnings.append(
+                f"Read the raw gromacs/prod.xtc of {working_dir}: molecules may be split across "
+                "the periodic boundary. Make them whole first, as PolyzyMD's own runs do "
+                "(prod_nojump.xtc, then prod_centered.xtc with gmx trjconv)."
+            )
+        segment_warning = _segment_completeness_warning(layout)
+        if segment_warning is not None:
+            warnings.append(segment_warning)
+            # The replicate's provenance carries it into every report, which is
+            # where it is read; the log keeps a copy.
+            LOGGER.info(segment_warning)
+        empty = list(getattr(layout, "empty_segments", []))
+        if empty:
+            # The engine logged each file by name; this keeps the indices in the provenance.
+            warnings.append(
+                f"Skipped production segment(s) {empty} of {working_dir} because their "
+                "trajectory files hold no frames; the remaining segments were checked to "
+                "join without a gap."
+            )
+
+        return TrajectoryInfo(
+            topology_file=layout.topology_path,
+            trajectory_files=layout.trajectory_paths,
+            n_segments=len(layout.trajectory_paths),
+            working_directory=working_dir,
+            replicate=replicate,
+            topology_format=layout.topology_format,
+            trajectory_format=layout.trajectory_format,
+            warnings=warnings,
+            excluded_segments=list(layout.excluded_segments),
+            empty_segments=list(getattr(layout, "empty_segments", [])),
+            segment_status=dict(layout.segment_status),
+            gromacs_topology_file=getattr(layout, "gromacs_topology_path", None),
+        )
+
+    def load_universe(
+        self,
+        replicate: int,
+        cache: bool = True,
+        *,
+        verify_lineage: bool = True,
+        require_complete: bool = True,
+        pbc_policy: str = "as_is",
+    ) -> "Universe":
+        """Load MDAnalysis Universe for a replicate.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number (1-indexed)
+        cache : bool, optional
+            If True (default), cache the Universe for reuse
+        verify_lineage : bool, optional
+            If True (default), require multi-segment trajectories to form a
+            single monotonic, evenly spaced time line before concatenating
+            them (see :class:`TrajectoryLineageError`).
+        require_complete : bool, optional
+            If True (default), leave out production segments the engine records
+            as still running or failed. Set it to False to read a campaign that
+            is still in flight, knowing the last segment ends mid-write.
+        pbc_policy : str, optional
+            Periodic boundary policy, ``"as_is"`` (default) or
+            ``"make_whole"``. See :func:`apply_pbc_policy`. The default keeps
+            the historical behaviour of reading coordinates exactly as stored.
+
+        Returns
+        -------
+        Universe
+            MDAnalysis Universe with trajectory loaded
+
+        Raises
+        ------
+        TrajectoryLineageError
+            If ``verify_lineage`` is set and the segments overlap, run
+            backwards, or leave gaps.
+        TopologyBondsMissingError
+            If ``pbc_policy="make_whole"`` and the topology has no bonds.
+
+        Notes
+        -----
+        For daisy-chain trajectories, all segments are loaded as a
+        continuous trajectory using MDAnalysis's ChainReader.
+        """
+        _require_mdanalysis()
+
+        cache_key = (replicate, str(pbc_policy), require_complete)
+        if cache and cache_key in self._universe_cache:
+            return self._universe_cache[cache_key]
+
+        # Pass the keyword only when it differs from the default so that
+        # patched or older ``get_trajectory_info`` implementations keep working.
+        if require_complete:
+            info = self.get_trajectory_info(replicate)
+        else:
+            info = self.get_trajectory_info(replicate, require_complete=False)
+        info.validate()
+
+        # Load universe - MDAnalysis handles multiple trajectory files
+        if len(info.trajectory_files) == 1:
+            u = open_universe(info.topology_file, info.trajectory_files, info.gromacs_topology_file)
+        else:
+            # Multiple segments - use ChainReader, but only after checking
+            # that the segments actually chain (no branched/duplicate chains).
+            if verify_lineage:
+                timings = _assert_contiguous_segments(
+                    info.topology_file,
+                    info.trajectory_files,
+                    excluded_segments=tuple(info.excluded_segments),
+                    empty_segments=tuple(info.empty_segments),
+                )
+                reference_dt = next((t.dt for t in timings if t.dt is not None and t.dt > 0), None)
+                if reference_dt is not None and all(t.first_time is not None for t in timings):
+                    self._segment_joins[replicate] = _segment_join(timings, reference_dt)
+            u = open_universe(info.topology_file, info.trajectory_files, info.gromacs_topology_file)
+        enrich_universe_elements(u, topology_key=info.topology_file)
+        enrich_universe_force_field(u, openmm_system_file(info.trajectory_files[0]))
+        apply_pbc_policy(u, pbc_policy, topology=info.topology_file)
+        u.trajectory = _wrap_timestamp_preserving_trajectory(u.trajectory)
+
+        if cache:
+            self._universe_cache[cache_key] = u
+
+        return u
+
+    def segment_join(self, replicate: int) -> SegmentJoin | None:
+        """Return the frame times and boundary repairs of the last loaded universe.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
+
+        Returns
+        -------
+        SegmentJoin or None
+            The join found when :meth:`load_universe` last checked this
+            replicate's segments. ``None`` when the replicate has one segment,
+            the check was skipped, the segments carry no time metadata, or no
+            universe has been loaded yet.
+        """
+        return self._segment_joins.get(replicate)
+
+    def iter_replicates(
+        self,
+        replicates: Sequence[int],
+    ) -> Iterator[tuple[int, "Universe"]]:
+        """Iterate over multiple replicates.
+
+        Parameters
+        ----------
+        replicates : sequence of int
+            Replicate numbers to load
+
+        Yields
+        ------
+        tuple of (int, Universe)
+            Replicate number and loaded Universe
+
+        Examples
+        --------
+        >>> for rep, u in loader.iter_replicates([1, 2, 3, 4, 5]):
+        ...     rmsf = compute_rmsf(u)
+        ...     results[rep] = rmsf
+        """
+        for rep in replicates:
+            yield rep, self.load_universe(rep)
+
+    def get_timestep(self, replicate: int, unit: str = "ps") -> float:
+        """Get the trajectory timestep (time between frames).
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number
+        unit : str, optional
+            Time unit. Options: "ps", "ns". Default is "ps".
+
+        Returns
+        -------
+        float
+            Time between consecutive frames
+        """
+        u = self.load_universe(replicate)
+        trajectory = u.trajectory
+
+        # Get timestep from trajectory
+        if len(trajectory) < 2:
+            raise ValueError("Need at least 2 frames to determine timestep")
+
+        previous_frame = _trajectory_frame_index(trajectory)
+        try:
+            trajectory[0]
+            t0 = _trajectory_time(trajectory)
+            trajectory[1]
+            t1 = _trajectory_time(trajectory)
+        finally:
+            _restore_trajectory_frame(trajectory, previous_frame)
+        if t0 is None or t1 is None:
+            raise ValueError("Trajectory timestamps are unavailable for timestep detection")
+
+        dt = t1 - t0  # in ps (MDAnalysis default)
+
+        if unit == "ns":
+            dt = dt / 1000.0
+        elif unit != "ps":
+            raise ValueError(f"Unknown time unit: {unit}")
+
+        return float(dt)
+
+    def get_first_frame_time(self, replicate: int, unit: str = "ps") -> float | None:
+        """Return the first loaded frame timestamp when available.
+
+        MDAnalysis reports trajectory times in picoseconds. This method probes
+        cached Universe metadata without changing the caller-visible current
+        frame when the reader exposes a restorable frame index.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
+        unit : str, optional
+            Time unit for output. Options are ``"ps"`` and ``"ns"``, by default
+            ``"ps"``.
+
+        Returns
+        -------
+        float | None
+            Finite first-frame timestamp in the requested unit, or ``None`` when
+            the trajectory does not expose a usable timestamp.
+
+        Raises
+        ------
+        ValueError
+            Raised when ``unit`` is not ``"ps"`` or ``"ns"``.
+        """
+
+        if unit not in {"ps", "ns"}:
+            raise ValueError(f"Unknown time unit: {unit}")
+
+        u = self.load_universe(replicate)
+        trajectory = u.trajectory
+        previous_frame = _trajectory_frame_index(trajectory)
+        try:
+            trajectory[0]
+            time_ps = _trajectory_time(trajectory)
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+        finally:
+            _restore_trajectory_frame(trajectory, previous_frame)
+
+        if time_ps is None:
+            return None
+        if unit == "ns":
+            return time_ps / 1000.0
+        return time_ps
+
+    def clear_cache(self) -> None:
+        """Clear the Universe cache to free memory."""
+        self._universe_cache.clear()
+
+    def _find_available_replicates(self) -> list[int]:
+        """Find available replicate numbers from existing run_* directories.
+
+        Returns
+        -------
+        list[int]
+            Sorted list of replicate numbers that have simulation directories
+        """
+        discovered = self._discover_replicates_from_config()
+        if discovered:
+            return discovered
+
+        scratch_dir = self._get_scratch_directory()
+        if scratch_dir is None:
+            return []
+        if not scratch_dir.exists():
+            return []
+
+        replicates = []
+        for d in scratch_dir.iterdir():
+            if d.is_dir() and d.name.startswith("run_"):
+                try:
+                    # Extract replicate number from directory name (e.g., "run_1" -> 1)
+                    rep_num = int(d.name.split("_")[1])
+                    replicates.append(rep_num)
+                except (IndexError, ValueError):
+                    continue
+        return sorted(replicates)
+
+    def _discover_replicates_from_config(self) -> list[int]:
+        """Discover replicate directories through SimulationConfig when available.
+
+        Returns
+        -------
+        list[int]
+            Sorted replicate numbers discovered by the config helper, or an
+            empty list when unavailable.
+        """
+        discover = getattr(self.config, "discover_replicate_dirs", None)
+        if not callable(discover):
+            return []
+        try:
+            replicate_dirs = discover()
+        except (AttributeError, TypeError, OSError, ValueError):
+            return []
+
+        replicates: list[int] = []
+        for item in replicate_dirs:
+            if isinstance(item, tuple) and item:
+                try:
+                    replicates.append(int(item[0]))
+                    continue
+                except (TypeError, ValueError):
+                    item = item[-1]
+            try:
+                path = Path(item)
+            except TypeError:
+                continue
+            match = re.search(r"run_?(\d+)$", path.name)
+            if match:
+                replicates.append(int(match.group(1)))
+        return sorted(set(replicates))
+
+    def _get_scratch_directory(self) -> Path | None:
+        """Return configured scratch directory when it can be resolved.
+
+        Returns
+        -------
+        Path or None
+            Effective scratch directory, or ``None`` when config metadata is
+            incomplete.
+        """
+        try:
+            scratch_dir = self.config.output.effective_scratch_directory
+        except AttributeError:
+            return None
+        if scratch_dir is None:
+            return None
+        try:
+            return Path(scratch_dir)
+        except TypeError:
+            return None
+
+    def _format_missing_data_message(
+        self,
+        headline: str,
+        *,
+        working_dir: Path,
+        replicate: int,
+        available_replicates: Sequence[int],
+        action: str,
+    ) -> str:
+        """Build a user-facing message for missing replicate trajectory data.
+
+        Parameters
+        ----------
+        headline : str
+            Stable leading message used by existing tests.
+        working_dir : Path
+            Expected working directory for the replicate.
+        replicate : int
+            Requested replicate number.
+        available_replicates : sequence of int
+            Replicates discovered on disk.
+        action : str
+            Actionable hint for the user.
+
+        Returns
+        -------
+        str
+            Multi-line diagnostic message.
+        """
+        scratch_dir = self._get_scratch_directory()
+        available = (
+            ", ".join(str(rep) for rep in available_replicates)
+            if available_replicates
+            else "none found"
+        )
+        scratch_text = str(scratch_dir) if scratch_dir is not None else "not configured"
+        return (
+            f"{headline}: {working_dir}\n"
+            f"Replicate: {replicate}\n"
+            f"Expected working directory: {working_dir}\n"
+            f"Scratch directory: {scratch_text}\n"
+            f"Available replicates: {available}\n"
+            f"Action: {action}"
+        )
+
+    def find_topology(self, working_dir: Path) -> Path:
+        """Find topology file in working directory.
+
+        Delegates file discovery to the simulation engine.  The engine
+        applies its own search order (e.g. PDB preference for GROMACS,
+        ``solvated_system.pdb`` preference for OpenMM).
+
+        A caller may pass a ``working_dir`` unrelated to the current
+        replicate.  The
+        replicate index is inferred from the directory name when
+        possible (``run_<N>``), falling back to ``1``.
+
+        Parameters
+        ----------
+        working_dir : Path
+            Directory to search for topology files.
+
+        Returns
+        -------
+        Path
+            Path to the topology file.
+
+        Raises
+        ------
+        FileNotFoundError
+            If no topology file is found.
+        """
+        layout = self._resolve_layout(working_dir, replicate=None)
+        if layout.topology_path is None:
+            raise FileNotFoundError(f"No topology file found in {working_dir}")
+        return layout.topology_path
+
+    def _find_trajectories(self, working_dir: Path) -> list[Path]:
+        """Find trajectory files via the simulation engine.
+
+        Parameters
+        ----------
+        working_dir : Path
+            Working directory to search.
+
+        Returns
+        -------
+        list[Path]
+            Ordered trajectory file paths.
+
+        Raises
+        ------
+        FileNotFoundError
+            If no trajectory files are found.
+        """
+        layout = self._resolve_layout(working_dir, replicate=None)
+        if not layout.trajectory_paths:
+            replicate = self._infer_replicate(working_dir)
+            raise FileNotFoundError(
+                self._format_missing_data_message(
+                    "No production trajectory files found",
+                    working_dir=working_dir,
+                    replicate=replicate,
+                    available_replicates=self._find_available_replicates(),
+                    action=(
+                        "Run or complete the production simulation for this replicate, "
+                        "then rerun analysis. Use --recompute only after trajectory files exist."
+                    ),
+                )
+            )
+        return layout.trajectory_paths
+
+
+def parse_time_string(time_str: str) -> tuple[float, str]:
+    """Parse a time string with units into value and unit.
+
+    Parameters
+    ----------
+    time_str : str
+        Time string like "100ns", "5000ps", "100 ns", etc.
+
+    Returns
+    -------
+    tuple of (float, str)
+        Numeric value and unit string
+
+    Examples
+    --------
+    >>> parse_time_string("100ns")
+    (100.0, "ns")
+    >>> parse_time_string("5000 ps")
+    (5000.0, "ps")
+    >>> parse_time_string("100")  # Default to ns
+    (100.0, "ns")
+    """
+    time_str = time_str.strip()
+
+    # Try to extract number and unit
+    match = re.match(r"^([\d.]+)\s*([a-zA-Z]*)$", time_str)
+    if not match:
+        raise ValueError(f"Cannot parse time string: {time_str}")
+
+    value = float(match.group(1))
+    unit = match.group(2).lower() if match.group(2) else "ns"
+
+    if unit not in ("ns", "ps", "fs"):
+        raise ValueError(f"Unknown time unit: {unit}. Use 'ns', 'ps', or 'fs'.")
+
+    return value, unit
+
+
+def convert_time(value: float, from_unit: str, to_unit: str) -> float:
+    """Convert time between units.
+
+    Parameters
+    ----------
+    value : float
+        Time value
+    from_unit : str
+        Source unit ("fs", "ps", "ns")
+    to_unit : str
+        Target unit ("fs", "ps", "ns")
+
+    Returns
+    -------
+    float
+        Converted time value
+    """
+    # Convert to picoseconds first
+    to_ps = {"fs": 0.001, "ps": 1.0, "ns": 1000.0}
+    from_ps = {"fs": 1000.0, "ps": 1.0, "ns": 0.001}
+
+    if from_unit not in to_ps or to_unit not in from_ps:
+        raise ValueError(f"Unknown unit: {from_unit} or {to_unit}")
+
+    ps_value = value * to_ps[from_unit]
+    return ps_value * from_ps[to_unit]

@@ -1,0 +1,313 @@
+# Install PolyzyMD with pixi
+
+Use this page when you want a working PolyzyMD install quickly.
+
+By the end of this guide, you will have a pixi-managed environment where
+`polyzymd --help` and `polyzymd info` run successfully.
+
+```{note}
+PolyzyMD's simulation stack depends on packages distributed through
+conda-forge. [pixi](https://pixi.sh) handles that solver stack for you, so you
+do not need conda or mamba installed separately.
+```
+
+## Before You Start
+
+- Linux x86-64 and Pixi 0.72.2 or newer for CUDA simulation environments
+- Git
+- a shell where you can install `pixi`
+
+```{note}
+macOS is supported for non-CUDA setup, development, and trajectory analysis
+where the required dependencies solve. The CUDA simulation environments
+(`sim-cuda-12-0`, `sim-cuda-12-4`, and `sim-cuda-12-6`) are for NVIDIA GPUs on
+Linux, on a cluster or on this machine.
+```
+
+```{note}
+AmberTools/AM1-BCC support in PolyzyMD's pixi workflow is Linux-focused.
+AmberTools is not part of the default v1.3 NumPy 2 build/analysis/test solve,
+and it is not expected to be available in all macOS solves. Use the recommended
+NAGL/OpenFF charging path or provide pre-charged molecules. If you need
+AmberTools/AM1-BCC, please open an issue so a dedicated environment can be
+designed for that platform.
+```
+
+If you are setting up PolyzyMD on a GPU cluster, read this page first and then
+use the short HPC section below.
+
+## 1. Install pixi
+
+If `pixi` is not already available on your system:
+
+```bash
+curl -fsSL https://pixi.sh/install.sh | sh
+source ~/.bashrc
+```
+
+Check that it is available:
+
+```bash
+pixi --version
+```
+
+## 2. Install on a Local Machine
+
+The default local setup uses the `build` environment. This is the right choice
+for project scaffolding, validation, system building, documentation work, and
+most local development tasks.
+
+```bash
+git clone https://github.com/joelaforet/polyzymd.git
+cd polyzymd
+
+pixi install -e build
+pixi shell -e build
+
+polyzymd --help
+polyzymd info
+```
+
+If those last two commands work, your install is ready.
+
+(install-local-gpu)=
+### Run on the NVIDIA GPU of this machine
+
+`build` builds the systems and runs them on the CPU. To run OpenMM on an
+NVIDIA GPU of this machine, also install one `sim-cuda-*` environment. Pick
+the newest one whose CUDA version does not exceed the `CUDA Version` that
+`nvidia-smi` prints (see [Choose the CUDA environment](#choose-the-cuda-environment)):
+
+```bash
+nvidia-smi | head -4
+pixi install -e sim-cuda-12-6
+pixi run -e sim-cuda-12-6 polyzymd info
+```
+
+You then build in `build` and run in `sim-cuda-12-6`. See
+{ref}`the local GPU recipe <local-nvidia-gpu>`.
+
+(install-gromacs)=
+### GROMACS
+
+PolyzyMD does not install GROMACS. To run a config with `engine: gromacs`,
+put a `gmx` executable on `PATH`, or give its path with `--gmx-path`. Get it
+from your cluster's module (`module load gromacs`), from the conda-forge
+`gromacs` package, or by building it from source. Check it:
+
+```bash
+gmx --version
+```
+
+PolyzyMD 1.3 was tested with GROMACS 2024.2 and 2026.0. The `.mdp` files it
+writes use the c-rescale barostat, which needs GROMACS 2021 or newer. The
+`gromacs:` settings `ntmpi` and `ntomp` become `-ntmpi` and `-ntomp`, so a
+thread-MPI build (`gmx`, not `gmx_mpi`) runs a config as written. For
+clusters and MPI builds, see {doc}`../how_to/run_gromacs`.
+
+<!-- IMAGE OPPORTUNITY: Add a terminal screenshot showing `pixi install -e
+build`, `pixi shell -e build`, and a successful `polyzymd info` output. -->
+
+## 3. If You Are Installing on HPC
+
+PolyzyMD v1.3 uses a split environment workflow on clusters:
+
+- Use `build` on a login/build node to prepare and validate systems.
+- Run `polyzymd submit` from `build`. For known sites, `--pixi-env auto`
+  selects the site's fixed `sim-cuda-12-*` runtime when it generates the job.
+- Use `analysis` after trajectories are produced to run comparisons and plots.
+
+In short: `build` for `validate`, `build`, `submit`, `status` and `cancel`;
+a `sim-cuda-*` environment only inside the jobs (or for `polyzymd run` on a
+local GPU); `analysis` or `build` for `analyze`.
+
+```{important}
+Before you submit, on a cluster:
+
+- **You do not need a CUDA module.** Each `sim-cuda-*` environment brings its
+  own CUDA runtime. The GPU node needs only an NVIDIA driver new enough for
+  it.
+- **Install the environment your jobs use before you submit.** The job
+  script activates it with `pixi shell-hook`, which would install a missing
+  environment on the compute node, and compute nodes often have no internet.
+  With `--pixi-env auto`, install all three `sim-cuda-*` environments.
+  Installing downloads and unpacks several GB: run `pixi install` in a
+  compile or compute job if your site asks for that (on CU Boulder Alpine,
+  the `acompile` partition; see {doc}`../how_to/site_cu_boulder`).
+- **Mind your disk quota.** The `build` environment takes about 4 GB, and the
+  pixi package cache several GB more (a `build` environment, the three
+  `sim-cuda-*` environments and the cache took 11 GB on Alpine). The
+  environments live in `.pixi/envs/` of the clone, so clone PolyzyMD to
+  project storage if your home quota is small, and point the cache there too.
+- **Set cache locations in `~/.bashrc`, not only in your shell.** Jobs start
+  from your login profile (`--export=NONE`), not from the shell you submit
+  from, so a `PIXI_CACHE_DIR` you exported by hand does not reach them. Put
+  `export PIXI_CACHE_DIR=/projects/$USER/pixi-cache` (your project storage)
+  in `~/.bashrc`. A job also writes into `XDG_CACHE_HOME` if your profile
+  sets it.
+- **Make `pixi` available to job shells.** `polyzymd submit` starts each job
+  with `sbatch --export=NONE`, and the job script calls `pixi` by name. Put
+  `export PATH="$HOME/.pixi/bin:$PATH"` in `~/.bashrc` *above* any line that
+  returns early for non-interactive shells, such as
+  `[ -z "$PS1" ] && return`. Check it with a short job:
+  `sbatch --export=NONE --wrap 'command -v pixi'` (add your partition and
+  account), then read the `slurm-<jobid>.out` file it writes. It must print
+  the path of `pixi`.
+```
+
+The environments are separate because the CUDA 12.4 OpenMM builds require a
+NumPy 1.x runtime, while package development and analysis use Python 3.12
+with NumPy 2. Your project directory, prepared system files,
+checkpoints, and trajectories are shared across environments.
+
+Install the system-preparation environment first:
+
+```bash
+git clone https://github.com/joelaforet/polyzymd.git
+cd polyzymd
+
+pixi install -e build
+pixi run -e build polyzymd validate -c config.yaml
+pixi run -e build polyzymd build -c config.yaml
+```
+
+Then install the simulation runtime assigned to your cluster:
+
+```bash
+# Pick the environment that matches your cluster
+pixi install -e sim-cuda-12-6
+# or
+pixi install -e sim-cuda-12-4
+# or
+pixi install -e sim-cuda-12-0
+
+pixi run -e sim-cuda-12-6 polyzymd info
+```
+
+Built-in presets include configurations for CU Boulder Alpine/Blanca and PSC
+Bridges-2. Known-site presets select a fixed runtime. The allocated node must
+still pass the driver probe and CUDA execution test.
+For submission details and cluster-specific notes, see
+{doc}`../how_to/hpc_slurm`.
+
+`pixi run` and `pixi shell` look for `pixi.toml` in the current folder and
+its parent folders. In a project folder outside the clone, they stop with
+`could not find pixi.toml`. Give them the clone's `pixi.toml` with
+`--manifest-path`:
+
+```bash
+pixi run --manifest-path ~/polyzymd/pixi.toml -e build polyzymd validate -c config.yaml
+```
+
+Or start `pixi shell -e build` once in the clone and then `cd` to your
+project. The shell keeps its environment in every folder. To build in `build`
+and run in a `sim-cuda-*` environment on the same machine, open one shell for
+each environment, or use `--manifest-path`.
+
+After simulations finish, switch to the analysis environment:
+
+```bash
+pixi install -e analysis
+pixi run -e analysis polyzymd analyze rmsf -c config.yaml --eq 10ns
+```
+
+### Choose the CUDA Environment
+
+On a GPU node, check the driver version:
+
+```bash
+nvidia-smi | head -1
+```
+
+Use the environment assigned to the site, or pick one from the driver:
+
+| Where you run | Environment |
+|-------------|-------------|
+| PSC Bridges-2 | `sim-cuda-12-6` |
+| CU Boulder Blanca | `sim-cuda-12-4` |
+| Validated older CUDA site | `sim-cuda-12-0` |
+| Your own machine, or another cluster | The newest of `sim-cuda-12-6`, `sim-cuda-12-4` and `sim-cuda-12-0` whose CUDA version does not exceed the `CUDA Version` that `nvidia-smi` prints |
+
+For example, a driver that prints `CUDA Version: 12.2` takes `sim-cuda-12-0`,
+and one that prints `13.1` takes `sim-cuda-12-6`.
+
+Generated Slurm scripts query `nvidia-smi` before Pixi activation and reject
+missing, malformed, or unsupported GPU capabilities. They then create a CUDA
+Context, calculate an energy, and run one integration step. An explicit
+`--pixi-env` override is checked against the allocated driver. CUDA failure is
+fatal; PolyzyMD uses CPU only when `openmm.platform: CPU` is explicitly
+configured.
+The standard OpenMM SLURM template is NVIDIA-only in version 1.3. CPU and AMD
+OpenCL use need a site-managed environment and batch wrapper. See
+{doc}`../how_to/hardware_platforms` for examples.
+
+## 4. Verify the Commands You Can Use
+
+In the `build` environment, these commands should work directly:
+
+| Command | Works in `build`? | Notes |
+|---------|-------------------|-------|
+| `polyzymd project init` | Yes | Project scaffolding |
+| `polyzymd build` | Yes | System building |
+| `polyzymd validate` | Yes | Config validation |
+| `polyzymd clean-pdb` | Yes | Convenience PDB cleanup, not biological-system selection |
+| `polyzymd info` | Yes | Version/dependency summary |
+| `polyzymd submit --engine openmm` | Yes | The generated Slurm job activates the selected `sim-cuda-*` runtime |
+| `polyzymd submit --engine gromacs` | Yes | GROMACS submission can run from `build`; SLURM runs GROMACS in the external cluster environment |
+| `polyzymd run` | Yes | Builds and runs a simulation on this machine, on the OpenMM platform of the config, such as `CPU`. For a local NVIDIA GPU, build here and run in a `sim-cuda-*` environment: see {doc}`../how_to/hardware_platforms` |
+| `polyzymd run-segment` | No | Runs one segment of a SLURM chain. The job scripts run it in a `sim-cuda-*` environment |
+
+`polyzymd analyze` runs in the `build` environment, which includes the
+analysis tools, and in the smaller `analysis` environment. The `analysis`
+environment contains MDAnalysis, MDTraj, pandas, SciPy, scikit-learn,
+matplotlib, seaborn, Python 3.12, and NumPy 2 without the CUDA runtime pins.
+
+PolyzyMD also prints advisory CLI warnings when pixi reports an active
+environment that does not match the split workflow. These warnings go to stderr,
+do not change exit codes, and are not emitted when PolyzyMD is imported as a
+library. If a site-specific workflow intentionally differs, suppress them with:
+
+```bash
+export POLYZYMD_DISABLE_ENV_WARNINGS=1
+```
+
+## Common Installation Checks
+
+If something looks wrong, try these first:
+
+### `pixi: command not found`
+
+```bash
+curl -fsSL https://pixi.sh/install.sh | sh
+source ~/.bashrc
+which pixi
+```
+
+### `polyzymd: command not found`
+
+```bash
+pixi shell -e build
+which polyzymd
+```
+
+### OpenMM cannot see CUDA
+
+Make sure you activated the CUDA environment that matches your cluster:
+
+```bash
+pixi shell -e sim-cuda-12-6
+python -c "import openmm; print(openmm.Platform.getPlatformByName('CUDA').getName())"
+```
+
+For broader installation and workflow issues, see {doc}`../how_to/troubleshooting`.
+
+## Contributor Setup
+
+If you are modifying PolyzyMD itself, use the contributor environment guide:
+
+- {doc}`../contributor_guide/setup`
+
+## Next Step
+
+Continue to {doc}`quickstart` to create a project scaffold and run your first
+simulation.

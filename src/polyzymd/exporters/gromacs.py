@@ -16,13 +16,17 @@ Made by PolyzyMD, by Joseph R. Laforet Jr.
 from __future__ import annotations
 
 import logging
+import math
 import re
+import shlex
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from polyzymd.core.branding import FULL_CREDIT_LINE, SHORT_CREDIT_LINE
+from polyzymd.utils.templates import render_package_template
+from polyzymd.workflow.slurm import _validate_script_value
 
 if TYPE_CHECKING:
     from openff.interchange import Interchange
@@ -33,7 +37,7 @@ if TYPE_CHECKING:
         SimulationConfig,
         SimulationPhaseConfig,
     )
-    from polyzymd.core.atom_groups import AtomGroupResolver, SystemComponentInfo
+    from polyzymd.core.atom_groups import SystemComponentInfo
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +45,23 @@ logger = logging.getLogger(__name__)
 # Constants and Mappings
 # =============================================================================
 
-# Thermostat mapping: PolyzyMD -> GROMACS
+# Thermostat mapping: PolyzyMD -> GROMACS (integrator, tcoupl). OpenMM's
+# Langevin integrators are Langevin dynamics with friction 1/tau; GROMACS's
+# stochastic-dynamics integrator "sd" integrates the same equation with
+# tau-t = tau (its splitting differs at order dt^2), and does its own
+# temperature coupling. See docs/source/reference/gromacs_openmm.md.
 THERMOSTAT_MAP = {
-    "LangevinMiddle": "v-rescale",
-    "Langevin": "v-rescale",
-    "NoseHoover": "nose-hoover",
-    "Andersen": "andersen",
+    "LangevinMiddle": ("sd", "no"),
+    "Langevin": ("sd", "no"),
+    "NoseHoover": ("md", "nose-hoover"),
+    "Andersen": ("md-vv", "andersen"),
 }
+#: Thermostats the OpenMM engine does not implement, so the engines differ.
+NOT_IN_OPENMM = {"NoseHoover", "Andersen"}
 
-# Barostat mapping: PolyzyMD -> GROMACS (tcoupl, pcoupltype)
+# Barostat mapping: PolyzyMD -> GROMACS (pcoupl, pcoupltype). GROMACS has no
+# Monte Carlo barostat; stochastic cell rescaling samples the same NPT
+# ensemble with another algorithm, so the mapping is approximate.
 BAROSTAT_MAP = {
     "MC": ("c-rescale", "isotropic"),
     "MCA": ("c-rescale", "anisotropic"),
@@ -79,6 +91,58 @@ WATER_COMPRESSIBILITY = 4.5e-5
 
 # Branding
 POLYZYMD_BRANDING = FULL_CREDIT_LINE
+_GROMACS_TEMPLATE_PACKAGE = "polyzymd.engines.gromacs"
+_LOCAL_RUN_TEMPLATE = "run_gromacs.sh.jinja"
+
+
+def _is_hydrogen_atom_name(name: str) -> bool:
+    """Return whether an atom name denotes hydrogen.
+
+    Leading digits are ignored because PDB-derived and force-field atom names
+    can place numeric disambiguators before hydrogen labels, such as ``1H``,
+    ``2HA``, or ``3HD1``.
+
+    Parameters
+    ----------
+    name : str
+        Atom name from a topology or ITP atom record.
+
+    Returns
+    -------
+    bool
+        ``True`` when the digit-stripped atom name starts with ``H``.
+    """
+    return name.lstrip("0123456789").upper().startswith("H")
+
+
+def _validate_local_shell_token(value: str, field_name: str) -> str:
+    """Reject unsafe local run-script values expanded as shell tokens.
+
+    Parameters
+    ----------
+    value : str
+        The configured value to validate.
+    field_name : str
+        Name of the field for error messages.
+
+    Returns
+    -------
+    str
+        The validated value unchanged.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe shell characters or whitespace.
+    """
+
+    _validate_script_value(value, field_name)
+    if any(char.isspace() for char in value):
+        raise ValueError(
+            f"Local GROMACS script field '{field_name}' contains whitespace: {value!r}. "
+            "Values expanded as shell tokens must not contain whitespace."
+        )
+    return value
 
 
 # =============================================================================
@@ -152,6 +216,9 @@ class MDPParameters:
     gen_vel: bool = False
     gen_temp: float = 300.0
     gen_seed: int = -1
+    #: Random seed of the stochastic-dynamics noise (integrator sd); each
+    #: stage gets its own, so no stage repeats another's noise. -1 is random.
+    ld_seed: int = -1
 
     # Energy minimization specific
     emtol: float = 500.0
@@ -187,6 +254,15 @@ class MDPParameters:
 
         return "\n".join(lines)
 
+    def _nstcalcenergy(self) -> int:
+        """Return the largest divisor of nstenergy and nstlog that is at most 100.
+
+        grompp stops with a warning when nstenergy is not a multiple of
+        nstcalcenergy, whose default is 100.
+        """
+        interval = math.gcd(self.nstenergy, self.nstlog) or 100
+        return max(n for n in range(1, min(interval, 100) + 1) if interval % n == 0)
+
     def _generate_em_section(self) -> List[str]:
         """Generate MDP content for energy minimization."""
         lines = []
@@ -197,6 +273,8 @@ class MDPParameters:
         lines.append(f"emtol           = {self.emtol}")
         lines.append(f"emstep          = {self.emstep}")
         lines.append(f"nsteps          = {self.nsteps}")
+        if self.define:
+            lines.append(f"define          = {self.define}")
         lines.append("")
 
         # Output
@@ -239,6 +317,7 @@ class MDPParameters:
         lines.append(f"nstvout         = {self.nstvout}")
         lines.append(f"nstlog          = {self.nstlog}")
         lines.append(f"nstenergy       = {self.nstenergy}")
+        lines.append(f"nstcalcenergy   = {self._nstcalcenergy()}")
         lines.append(f"nstxout-compressed = {self.nstxout_compressed}")
         if self.compressed_x_grps:
             lines.append(f"compressed-x-grps = {self.compressed_x_grps}")
@@ -263,6 +342,8 @@ class MDPParameters:
         # Temperature coupling
         lines.append("; Temperature coupling")
         lines.append(f"tcoupl          = {self.tcoupl}")
+        if self.integrator == "sd" or self.ld_seed != -1:
+            lines.append(f"ld_seed         = {self.ld_seed}")
         lines.append(f"tc-grps         = {self.tc_grps}")
         lines.append(f"tau_t           = {self.tau_t}")
         lines.append(f"ref_t           = {self.ref_t}")
@@ -285,6 +366,10 @@ class MDPParameters:
             lines.append(f"tau_p           = {self.tau_p}")
             lines.append(f"ref_p           = {self.ref_p}")
             lines.append(f"compressibility = {self.compressibility}")
+            if self.define:
+                # Restrained NPT: scale the reference center of mass with the
+                # box, as grompp asks; it refuses absolute references here.
+                lines.append("refcoord-scaling = com")
         else:
             lines.append("pcoupl          = no")
         lines.append("")
@@ -369,27 +454,82 @@ class MDPGenerator:
         >>> prod_mdp = generator.generate_production()
     """
 
-    def __init__(self, config: "SimulationConfig"):
+    def __init__(self, config: "SimulationConfig", replicate: int | None = None):
         """Initialize the MDP generator.
 
         Args:
             config: PolyzyMD SimulationConfig object containing all simulation
                 parameters including thermodynamics, simulation phases, etc.
+            replicate: The replicate number. It seeds the initial velocities
+                (``gen_seed``) and each stage's stochastic-dynamics noise
+                (``ld_seed``), one seed per stage from
+                :func:`polyzymd.simulation.seeds.dynamics_seed`, as the
+                OpenMM engine does. ``None`` leaves GROMACS's random seeds (-1).
         """
         self._config = config
+        self._replicate = replicate
         self._temperature = config.thermodynamics.temperature
         self._pressure = config.thermodynamics.pressure
+        self._warned: set[str] = set()
+
+    def _dynamics(self, thermostat: str) -> tuple[str, str]:
+        """Return GROMACS's integrator and tcoupl for a PolyzyMD thermostat, warning where they differ.
+
+        The Langevin thermostats map 1:1 to the stochastic-dynamics integrator.
+        Nose-Hoover and Andersen run in GROMACS, but the OpenMM engine runs
+        them as LangevinMiddle, so the two engines would not simulate the same
+        dynamics; a warning says so once.
+        """
+        if thermostat in NOT_IN_OPENMM and thermostat not in self._warned:
+            self._warned.add(thermostat)
+            logger.warning(
+                "Thermostat %s runs in GROMACS but not in PolyzyMD's OpenMM engine, which runs "
+                "LangevinMiddle instead: the same config gives different dynamics on the two "
+                "engines.",
+                thermostat,
+            )
+        return THERMOSTAT_MAP.get(thermostat, THERMOSTAT_MAP["LangevinMiddle"])
+
+    def _barostat(self, barostat: str, frequency: int | None = None) -> tuple[str, str]:
+        """Return GROMACS's pcoupl and pcoupltype for a PolyzyMD barostat, noting once that it is approximate.
+
+        The substitution is the expected one for every GROMACS run, so it is an
+        INFO note, not a warning: c-rescale samples the same NPT ensemble.
+        ``barostat_frequency`` sets how often OpenMM's MC barostat tries a volume
+        move; c-rescale keeps GROMACS's own coupling interval, so a value other
+        than the default 25 gives a warning once, since that setting is dropped.
+        """
+        if frequency not in (None, 25) and "barostat_frequency" not in self._warned:
+            self._warned.add("barostat_frequency")
+            logger.warning(
+                "barostat_frequency %d sets how often OpenMM's MC barostat moves the volume; "
+                "GROMACS's c-rescale barostat keeps its own coupling interval (nstpcouple).",
+                frequency,
+            )
+        if "barostat" not in self._warned:
+            self._warned.add("barostat")
+            logger.info(
+                "GROMACS has no Monte Carlo barostat; barostat %s runs as c-rescale, which samples "
+                "the same NPT ensemble with a different algorithm. See the GROMACS and OpenMM "
+                "page of the PolyzyMD docs.",
+                barostat,
+            )
+        return BAROSTAT_MAP.get(barostat, ("c-rescale", "isotropic"))
 
     def generate_energy_minimization(
         self,
         nsteps: int = 50000,
         emtol: float = 500.0,
+        define: str = "",
     ) -> MDPParameters:
         """Generate MDP parameters for energy minimization.
 
         Args:
             nsteps: Maximum number of minimization steps.
             emtol: Energy tolerance (kJ/mol/nm) for convergence.
+            define: Preprocessor defines, such as ``"-DPOSRES_EM"`` when the
+                topology holds the minimization restraints that
+                :class:`PositionRestraintGenerator` writes.
 
         Returns:
             MDPParameters configured for steepest descent minimization.
@@ -403,6 +543,7 @@ class MDPGenerator:
             emstep=0.01,
             nstlog=500,
             nstenergy=500,
+            define=define,
         )
 
     def generate_equilibration_stages(self) -> List[Tuple[str, MDPParameters]]:
@@ -453,7 +594,7 @@ class MDPGenerator:
 
                 params = self._create_equilibration_params(
                     name=stage.name,
-                    duration_ns=stage.duration,
+                    duration_ns=stage.resolved_duration,
                     samples=stage.samples,
                     time_step_fs=stage.time_step or 2.0,
                     temperature=temperature,
@@ -461,11 +602,13 @@ class MDPGenerator:
                     thermostat=(stage.thermostat.value if stage.thermostat else "LangevinMiddle"),
                     thermostat_timescale=stage.thermostat_timescale or 1.0,
                     barostat=stage.barostat.value if stage.barostat else None,
+                    barostat_frequency=stage.barostat_frequency,
                     is_first_stage=is_first,
                     continuation=not is_first,
                     posres_defines=posres_defines,
                 )
 
+            self._seed(params, f"equilibration:{i}")
             filename = f"eq_{stage_num:02d}_{stage.name}.mdp"
             result.append((filename, params))
 
@@ -485,6 +628,7 @@ class MDPGenerator:
         is_first_stage: bool,
         continuation: bool,
         posres_defines: str = "",
+        barostat_frequency: int | None = None,
     ) -> MDPParameters:
         """Create MDPParameters for an equilibration stage.
 
@@ -501,6 +645,8 @@ class MDPGenerator:
             is_first_stage: Whether this is the first equilibration stage.
             continuation: Whether continuing from previous simulation.
             posres_defines: Position restraint defines string.
+            barostat_frequency: The stage's barostat_frequency, for the warning
+                that GROMACS keeps its own coupling interval.
 
         Returns:
             Configured MDPParameters object.
@@ -510,12 +656,12 @@ class MDPGenerator:
         output_interval = max(1, nsteps // samples) if samples > 0 else 5000
 
         # Map thermostat
-        tcoupl = THERMOSTAT_MAP.get(thermostat, "v-rescale")
+        integrator, tcoupl = self._dynamics(thermostat)
 
         # Map barostat
         is_npt = ensemble == "NPT"
         if is_npt and barostat:
-            pcoupl, pcoupltype = BAROSTAT_MAP.get(barostat, ("c-rescale", "isotropic"))
+            pcoupl, pcoupltype = self._barostat(barostat, barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
@@ -525,7 +671,7 @@ class MDPGenerator:
         return MDPParameters(
             title=f"{ensemble} Equilibration: {name}",
             stage_type="eq",
-            integrator="md",
+            integrator=integrator,
             dt=dt_ps,
             nsteps=nsteps,
             nstxout=output_interval,
@@ -565,39 +711,60 @@ class MDPGenerator:
         """
         time_step_fs = stage.time_step or 2.0
         dt_ps = time_step_fs / 1000.0
-        nsteps = int(stage.duration * 1e6 / time_step_fs)
+        nsteps = int(round(stage.resolved_duration * 1e6 / time_step_fs))
         samples = stage.samples
         output_interval = max(1, nsteps // samples) if samples > 0 else 5000
 
         # Temperature ramping parameters
-        t_start = stage.temperature_start
-        t_end = stage.temperature_end
-        duration_ps = stage.duration * 1000  # ns to ps
+        t_start = stage.get_start_temperature()
+        t_end = stage.get_final_temperature()
+        increment = stage.temperature_increment
+        interval_steps = stage.temperature_interval_steps
+        assert increment is not None
+        assert interval_steps is not None
+        logger.info(
+            f"GROMACS temperature ramp '{stage.name}': {t_start:g} K -> {t_end:g} K "
+            f"by {increment:g} K every {interval_steps} steps; derived duration "
+            f"{stage.resolved_duration:.6f} ns ({stage.temperature_ramp_updates} updates, "
+            f"{nsteps} total steps at {time_step_fs:g} fs)"
+        )
 
         # Map thermostat
         thermostat = stage.thermostat.value if stage.thermostat else "LangevinMiddle"
-        tcoupl = THERMOSTAT_MAP.get(thermostat, "v-rescale")
+        integrator, tcoupl = self._dynamics(thermostat)
 
         # Map barostat
         is_npt = stage.ensemble.value == "NPT"
         barostat = stage.barostat.value if stage.barostat else None
         if is_npt and barostat:
-            pcoupl, pcoupltype = BAROSTAT_MAP.get(barostat, ("c-rescale", "isotropic"))
+            pcoupl, pcoupltype = self._barostat(barostat, stage.barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
         ref_p = self._pressure * 1.01325
 
-        # GROMACS annealing: simple linear ramp
-        # annealing-time: times in ps
-        # annealing-temp: temperatures at those times
-        annealing_time = [0.0, duration_ps]
-        annealing_temp = [t_start, t_end]
+        # GROMACS annealing is piecewise linear. Pair each hold point with the
+        # following boundary so the reference temperature stays constant and
+        # changes over exactly one MD timestep, matching OpenMM at every
+        # integration step.
+        interval_ps = interval_steps * dt_ps
+        annealing_time = [0.0]
+        annealing_temp = [t_start]
+        for update in range(1, stage.temperature_ramp_updates + 1):
+            boundary_ps = update * interval_ps
+            hold_end_ps = boundary_ps - dt_ps
+            previous_temp = min(t_end, t_start + (update - 1) * increment)
+            next_temp = min(t_end, t_start + update * increment)
+            if hold_end_ps > annealing_time[-1]:
+                annealing_time.append(hold_end_ps)
+                annealing_temp.append(previous_temp)
+            annealing_time.append(boundary_ps)
+            annealing_temp.append(next_temp)
 
         return MDPParameters(
             title=f"Temperature Ramping: {stage.name} ({t_start}K -> {t_end}K)",
             stage_type="eq",
-            integrator="md",
+            integrator=integrator,
             dt=dt_ps,
             nsteps=nsteps,
             nstxout=output_interval,
@@ -607,7 +774,7 @@ class MDPGenerator:
             nstxout_compressed=output_interval,
             continuation=not is_first_stage,
             tcoupl=tcoupl,
-            tau_t=stage.thermostat_timescale or 0.5,
+            tau_t=stage.thermostat_timescale or 1.0,
             ref_t=t_end,  # Reference temp is final temp
             pcoupl=pcoupl,
             pcoupltype=pcoupltype,
@@ -615,7 +782,7 @@ class MDPGenerator:
             gen_vel=is_first_stage,
             gen_temp=t_start,  # Generate velocities at start temp
             annealing="single",
-            annealing_npoints=2,
+            annealing_npoints=len(annealing_time),
             annealing_time=annealing_time,
             annealing_temp=annealing_temp,
             define=posres_defines,
@@ -657,6 +824,15 @@ class MDPGenerator:
 
         return " ".join(unique_defines)
 
+    def _seed(self, params: MDPParameters, phase: str) -> None:
+        """Set the velocity and noise seeds of one stage from the replicate number."""
+        if self._replicate is None:
+            return
+        from polyzymd.simulation.seeds import dynamics_seed
+
+        params.ld_seed = dynamics_seed(self._replicate, phase)
+        params.gen_seed = dynamics_seed(self._replicate, f"velocities:{phase}")
+
     def generate_production(self) -> MDPParameters:
         """Generate MDP parameters for production MD.
 
@@ -671,22 +847,22 @@ class MDPGenerator:
 
         # Map thermostat
         thermostat = prod.thermostat.value if prod.thermostat else "LangevinMiddle"
-        tcoupl = THERMOSTAT_MAP.get(thermostat, "v-rescale")
+        integrator, tcoupl = self._dynamics(thermostat)
 
         # Map barostat
         is_npt = prod.ensemble.value == "NPT"
         barostat = prod.barostat.value if prod.barostat else None
         if is_npt and barostat:
-            pcoupl, pcoupltype = BAROSTAT_MAP.get(barostat, ("c-rescale", "isotropic"))
+            pcoupl, pcoupltype = self._barostat(barostat, prod.barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
         ref_p = self._pressure * 1.01325  # GROMACS uses bar internally, convert from atm
 
-        return MDPParameters(
+        params = MDPParameters(
             title=f"Production MD ({prod.duration} ns)",
             stage_type="prod",
-            integrator="md",
+            integrator=integrator,
             dt=dt_ps,
             nsteps=nsteps,
             nstxout=0,  # Don't write full precision coords
@@ -704,11 +880,24 @@ class MDPGenerator:
             ref_p=ref_p,
             gen_vel=False,
         )
+        self._seed(params, "production:0")
+        return params
 
 
 # =============================================================================
 # Position Restraint Generator
 # =============================================================================
+
+
+@dataclass(frozen=True)
+class _ComponentItpAssignment:
+    """Topology-derived component assignment for one molecule ITP."""
+
+    component_type: str
+    mol_name: str
+    itp_path: Path
+    atom_count: int
+    n_copies: int
 
 
 class PositionRestraintGenerator:
@@ -718,24 +907,30 @@ class PositionRestraintGenerator:
     using local atom indices (1 to N within each molecule), which is required
     by GROMACS.
 
-    For protein and ligand components (single molecule type each), it uses the
-    AtomGroupResolver to identify restrained atoms by global index and maps
-    them to local indices within that molecule's ITP.
-
-    For polymers, OpenFF Interchange may create multiple unique molecule types
-    (one per unique monomer sequence). This class discovers ALL polymer ITP
-    files and adds position restraints to each by parsing the ITP's [ atoms ]
-    section to identify heavy (non-hydrogen) atoms directly, rather than
-    relying on global-to-local index mapping.
+    Component ITPs are classified from the exported topology molecule layout
+    and SystemComponentInfo atom counts. Each selected ITP is restrained using
+    atom indices parsed from that ITP's own [ atoms ] section, so homodimers
+    and other multi-protein layouts do not generate global atom indices inside
+    molecule-local restraint blocks.
 
     GROMACS requires position restraints to be:
+
     1. Inside the [ moleculetype ] section of each molecule
     2. Using local atom indices (1 to N) within that molecule
 
-    Example:
-        >>> generator = PositionRestraintGenerator(topology, component_info)
-        >>> generator.add_posres_to_itp_files(config, output_dir, "MySystem")
+    Examples
+    --------
+    >>> generator = PositionRestraintGenerator(topology, component_info)
+    >>> generator.add_posres_to_itp_files(config, output_dir, "MySystem")
     """
+
+    #: Restraint force constant during minimization, in kJ/mol/nm^2. With it,
+    #: a typical steepest-descent force moves a restrained heavy atom by
+    #: about 0.01 nm, so the solute holds its place as OpenMM's frozen
+    #: minimization holds it.
+    MINIMIZATION_FORCE_CONSTANT = 1.0e5
+    #: Define of the minimization restraints on the protein and ligand heavy atoms.
+    MINIMIZATION_DEFINE = "POSRES_EM"
 
     # Maps atom group names to (component_type, posres_define)
     GROUP_MAPPING: Dict[str, Tuple[str, str]] = {
@@ -753,15 +948,15 @@ class PositionRestraintGenerator:
     ):
         """Initialize the position restraint generator.
 
-        Args:
-            topology: OpenMM Topology object from Interchange.
-            component_info: SystemComponentInfo with atom counts/chain assignments.
+        Parameters
+        ----------
+        topology : OpenMMTopology
+            OpenMM Topology object from Interchange.
+        component_info : SystemComponentInfo
+            SystemComponentInfo with atom counts and chain assignments.
         """
-        from polyzymd.core.atom_groups import AtomGroupResolver
-
         self._topology = topology
         self._component_info = component_info
-        self._resolver = AtomGroupResolver(topology, component_info)
 
     def add_posres_to_itp_files(
         self,
@@ -771,27 +966,50 @@ class PositionRestraintGenerator:
     ) -> Dict[str, str]:
         """Add position restraint sections to molecule .itp files.
 
-        For each restraint group in the config's equilibration stages:
-        1. Determines the component type (protein, ligand, or polymer)
-        2. Finds the relevant ITP file(s)
-        3. Identifies restrained atoms (heavy atoms for *_heavy groups)
-        4. Appends #ifdef POSRES blocks to each ITP
+        For each restraint group in the config's equilibration stages, the
+        exporter determines the component type, finds topology-classified ITP
+        files, parses local restrained atoms from each ITP, and appends
+        ``#ifdef POSRES`` blocks.
 
-        For protein/ligand, there is exactly one ITP per component. For
-        polymers, there may be many unique molecule types (one per unique
-        monomer sequence), and ALL polymer ITPs receive position restraints.
+        Parameters
+        ----------
+        config : SimulationConfig
+            Simulation configuration with equilibration stages.
+        output_dir : Path
+            Directory containing exported ITP files.
+        prefix : str
+            Filename prefix used for exported files.
 
-        Args:
-            config: SimulationConfig with equilibration stages.
-            output_dir: Directory containing .itp files.
-            prefix: Filename prefix used for .itp files.
-
-        Returns:
-            Dictionary mapping component types to POSRES define names used.
-            E.g., {"protein": "POSRES_PROTEIN", "polymer": "POSRES_POLYMER"}
+        Returns
+        -------
+        dict[str, str]
+            Mapping of component types to POSRES define names used, such as
+            ``{"protein": "POSRES_PROTEIN", "polymer": "POSRES_POLYMER"}``.
         """
         phases = config.simulation_phases
         posres_defines: Dict[str, str] = {}
+
+        # With freeze_solute, minimization restrains the protein and ligand
+        # heavy atoms, whatever the equilibration stages restrain: OpenMM
+        # freezes those atoms.
+        if phases.minimization.freeze_solute:
+            written = sum(
+                self._add_posres_to_component_itps(
+                    output_dir,
+                    prefix,
+                    component_type,
+                    group_name,
+                    self.MINIMIZATION_FORCE_CONSTANT,
+                    self.MINIMIZATION_DEFINE,
+                )
+                for component_type, group_name in (
+                    ("protein", "protein_heavy"),
+                    ("ligand", "ligand_heavy"),
+                )
+                if self._find_component_itps(output_dir, prefix, component_type)
+            )
+            if written:
+                posres_defines["minimization"] = self.MINIMIZATION_DEFINE
 
         # Collect all unique (group, force_constant) pairs, keeping max fc
         restraints_needed: Dict[str, float] = {}
@@ -812,34 +1030,29 @@ class PositionRestraintGenerator:
         for group_name, force_constant in restraints_needed.items():
             component_type, posres_define = self.GROUP_MAPPING.get(group_name, (None, None))
             if component_type is None or posres_define is None:
-                logger.warning(f"Cannot determine component for group '{group_name}' - skipping")
-                continue
+                raise ValueError(
+                    f"Position restraint group '{group_name}' names no component GROMACS can "
+                    f"restrain (it restrains {', '.join(self.GROUP_MAPPING)})."
+                )
 
-            if component_type == "polymer":
-                count = self._add_posres_to_polymer_itps(
-                    output_dir, prefix, force_constant, posres_define, group_name
-                )
-                if count > 0:
-                    posres_defines[component_type] = posres_define
-            else:
-                added = self._add_posres_to_single_itp(
-                    output_dir,
-                    prefix,
-                    component_type,
-                    group_name,
-                    force_constant,
-                    posres_define,
-                )
-                if added:
-                    posres_defines[component_type] = posres_define
+            count = self._add_posres_to_component_itps(
+                output_dir,
+                prefix,
+                component_type,
+                group_name,
+                force_constant,
+                posres_define,
+            )
+            if count > 0:
+                posres_defines[component_type] = posres_define
 
         return posres_defines
 
     # ------------------------------------------------------------------
-    # Single-ITP path (protein / ligand)
+    # Component ITP discovery and classification
     # ------------------------------------------------------------------
 
-    def _add_posres_to_single_itp(
+    def _add_posres_to_component_itps(
         self,
         output_dir: Path,
         prefix: str,
@@ -847,60 +1060,262 @@ class PositionRestraintGenerator:
         group_name: str,
         force_constant: float,
         posres_define: str,
-    ) -> bool:
-        """Add position restraints to a single-molecule-type ITP (protein or ligand).
+    ) -> int:
+        """Add position restraints to every ITP assigned to a component.
 
-        Uses global-to-local index mapping via the AtomGroupResolver.
+        Parameters
+        ----------
+        output_dir : Path
+            Directory containing exported topology and ITP files.
+        prefix : str
+            Export filename prefix.
+        component_type : str
+            Component type to restrain, such as ``"protein"`` or ``"polymer"``.
+        group_name : str
+            Restraint atom group name.
+        force_constant : float
+            Position restraint force constant in kJ/mol/nm^2.
+        posres_define : str
+            Preprocessor define wrapping the generated restraints.
 
-        Returns:
-            True if restraints were added, False otherwise.
+        Returns
+        -------
+        int
+            Number of ITP files that received position restraints.
         """
-        global_indices = self._resolver.resolve(group_name)
-        if not global_indices:
-            logger.warning(f"No atoms found for group '{group_name}' - skipping")
-            return False
+        itp_paths = self._find_component_itps(output_dir, prefix, component_type)
+        if not itp_paths:
+            # A restraint the config asks for must not silently vanish from the run.
+            raise RuntimeError(
+                f"The equilibration stages restrain '{group_name}', but no {component_type} "
+                f"molecule type was found in the exported topology {prefix}.top, so GROMACS "
+                "would run those stages unrestrained."
+            )
+
+        count = 0
+        for itp_path in itp_paths:
+            local_indices = self._get_local_atom_indices_from_itp(itp_path, group_name)
+            if not local_indices:
+                raise RuntimeError(
+                    f"Position restraint group '{group_name}' selects no atom of "
+                    f"{itp_path.name}, so GROMACS would leave that molecule unrestrained."
+                )
+
+            atom_count = self._get_atom_count_from_itp(itp_path)
+            if atom_count <= 0 or max(local_indices) > atom_count:
+                raise RuntimeError(
+                    f"Position restraints for '{group_name}' in {itp_path.name} name atoms "
+                    f"beyond its {atom_count} atoms; the ITP is not the molecule expected."
+                )
+
+            self._append_posres_to_itp(
+                itp_path, local_indices, force_constant, posres_define, group_name
+            )
+            count += 1
+            logger.info(
+                f"Added {len(local_indices)} position restraints to "
+                f"{itp_path.name} (#ifdef {posres_define})"
+            )
+
+        return count
+
+    def _find_component_itps(
+        self,
+        output_dir: Path,
+        prefix: str,
+        component_type: str,
+    ) -> List[Path]:
+        """Find ITP files assigned to a component.
+
+        The topology layout path is preferred because it can distinguish
+        homodimers from ligand or polymer molecule types. If no topology file is
+        available, this method falls back to the historical filename-order
+        helpers.
+
+        Parameters
+        ----------
+        output_dir : Path
+            Directory containing exported topology and ITP files.
+        prefix : str
+            Export filename prefix.
+        component_type : str
+            Component type to locate.
+
+        Returns
+        -------
+        list[Path]
+            ITP paths for the requested component.
+        """
+        assignments = self._classify_itps_by_topology_layout(output_dir, prefix)
+        if assignments is not None:
+            component_itps = []
+            seen_itps = set()
+            for assignment in assignments.get(component_type, []):
+                if assignment.itp_path in seen_itps:
+                    continue
+                seen_itps.add(assignment.itp_path)
+                component_itps.append(assignment.itp_path)
+            return component_itps
+
+        if component_type == "polymer":
+            return self._find_all_polymer_itps(output_dir, prefix)
 
         itp_path = self._find_single_itp(output_dir, prefix, component_type)
-        if itp_path is None:
+        return [itp_path] if itp_path is not None else []
+
+    def _classify_itps_by_topology_layout(
+        self,
+        output_dir: Path,
+        prefix: str,
+    ) -> Dict[str, List[_ComponentItpAssignment]] | None:
+        """Classify component ITPs from topology order and atom counts.
+
+        Parameters
+        ----------
+        output_dir : Path
+            Directory containing ``{prefix}.top`` and molecule ITP files.
+        prefix : str
+            Export filename prefix.
+
+        Returns
+        -------
+        dict[str, list[_ComponentItpAssignment]] | None
+            Component assignments, or ``None`` when no topology layout is
+            available and fallback discovery should be used.
+        """
+        top_path = output_dir / f"{prefix}.top"
+        if not top_path.exists():
+            return None
+
+        mol_layout = GromacsExporter._parse_molecules_from_top(top_path)
+        if not mol_layout:
             logger.warning(
-                f"Cannot find ITP file for {component_type} - skipping position restraints"
+                f"No [ molecules ] layout found in {top_path.name} - skipping topology-based "
+                "position restraint classification"
             )
-            return False
+            return {"protein": [], "ligand": [], "polymer": []}
 
-        local_indices = self._global_to_local_indices(global_indices, component_type)
-        if not local_indices:
-            logger.warning(f"No local indices for group '{group_name}' - skipping")
-            return False
+        component_targets = self._component_atom_targets()
+        assignments: Dict[str, List[_ComponentItpAssignment]] = {
+            "protein": [],
+            "ligand": [],
+            "polymer": [],
+        }
+        if not component_targets:
+            return assignments
 
-        self._append_posres_to_itp(
-            itp_path, local_indices, force_constant, posres_define, group_name
-        )
-        logger.info(
-            f"Added {len(local_indices)} position restraints to "
-            f"{itp_path.name} (#ifdef {posres_define})"
-        )
-        return True
+        target_idx = 0
+        remaining = component_targets[target_idx][1]
+
+        for mol_name, n_copies in mol_layout:
+            if target_idx >= len(component_targets):
+                break
+
+            while remaining == 0:
+                target_idx += 1
+                if target_idx >= len(component_targets):
+                    break
+                remaining = component_targets[target_idx][1]
+            if target_idx >= len(component_targets):
+                break
+
+            itp_path = output_dir / f"{prefix}_{mol_name}.itp"
+            if not itp_path.exists():
+                logger.warning(
+                    f"Cannot classify {mol_name}: missing ITP file {itp_path.name}. "
+                    "Skipping remaining topology-based position restraints"
+                )
+                return assignments
+
+            atom_count = self._get_atom_count_from_itp(itp_path)
+            entry_atoms = atom_count * n_copies
+            if atom_count <= 0 or entry_atoms <= 0:
+                logger.warning(
+                    f"Cannot classify {mol_name}: invalid atom count in {itp_path.name}. "
+                    "Skipping remaining topology-based position restraints"
+                )
+                return assignments
+
+            component_type, component_atoms = component_targets[target_idx]
+            if entry_atoms > remaining:
+                logger.warning(
+                    f"Topology/count mismatch while classifying {mol_name}: entry has "
+                    f"{entry_atoms} atoms but {remaining}/{component_atoms} atoms remain for "
+                    f"{component_type}. Skipping questionable component restraints"
+                )
+                assignments[component_type] = []
+                return assignments
+
+            assignments[component_type].append(
+                _ComponentItpAssignment(
+                    component_type=component_type,
+                    mol_name=mol_name,
+                    itp_path=itp_path,
+                    atom_count=atom_count,
+                    n_copies=n_copies,
+                )
+            )
+            remaining -= entry_atoms
+
+        while target_idx < len(component_targets) and remaining == 0:
+            target_idx += 1
+            if target_idx < len(component_targets):
+                remaining = component_targets[target_idx][1]
+
+        if target_idx < len(component_targets):
+            incomplete_component, component_atoms = component_targets[target_idx]
+            if remaining > 0:
+                logger.warning(
+                    f"Topology/count mismatch: {remaining}/{component_atoms} atoms remain "
+                    f"unmatched for {incomplete_component}. Skipping its restraints"
+                )
+                assignments[incomplete_component] = []
+
+        return assignments
+
+    def _component_atom_targets(self) -> List[Tuple[str, int]]:
+        """Return non-empty component atom targets in topology order.
+
+        Returns
+        -------
+        list[tuple[str, int]]
+            Component names and atom counts in PolyzyMD build order.
+        """
+        return [
+            (component_type, atom_count)
+            for component_type, atom_count in (
+                ("protein", getattr(self._component_info, "n_protein_atoms", 0)),
+                ("ligand", getattr(self._component_info, "n_substrate_atoms", 0)),
+                ("polymer", getattr(self._component_info, "n_polymer_atoms", 0)),
+            )
+            if atom_count > 0
+        ]
 
     def _find_single_itp(
         self,
         output_dir: Path,
         prefix: str,
         component_type: str,
-    ) -> Optional[Path]:
-        """Find the ITP file for a single-instance component (protein or ligand).
+    ) -> Path | None:
+        """Find a component ITP by historical filename order.
 
-        OpenFF Interchange names molecule types MOL0, MOL1, ... based on
-        PolyzyMD's building order:
-        - MOL0 = protein
-        - MOL1 = substrate/ligand (if protein present, else MOL0)
+        This fallback is used only when ``{prefix}.top`` is unavailable. When
+        the topology layout exists, component classification uses molecule
+        order and atom counts instead.
 
-        Args:
-            output_dir: Directory containing ITP files.
-            prefix: Filename prefix.
-            component_type: "protein" or "ligand"
+        Parameters
+        ----------
+        output_dir : Path
+            Directory containing ITP files.
+        prefix : str
+            Filename prefix.
+        component_type : str
+            Component type, either ``"protein"`` or ``"ligand"``.
 
-        Returns:
-            Path to the ITP file, or None if not found.
+        Returns
+        -------
+        Path | None
+            Path to the ITP file, or ``None`` if not found.
         """
         if component_type == "protein":
             mol_index = 0
@@ -916,112 +1331,33 @@ class PositionRestraintGenerator:
         logger.warning(f"ITP file not found: {itp_path}")
         return None
 
-    def _global_to_local_indices(
-        self,
-        global_indices: List[int],
-        component_type: str,
-    ) -> List[int]:
-        """Convert global atom indices to local 1-indexed indices.
-
-        Args:
-            global_indices: 0-indexed global atom indices.
-            component_type: "protein" or "ligand"
-
-        Returns:
-            Sorted list of 1-indexed local atom indices for GROMACS.
-        """
-        if component_type == "protein":
-            start_index = 0
-            n_atoms = self._component_info.n_protein_atoms
-        elif component_type == "ligand":
-            start_index = self._component_info.n_protein_atoms
-            n_atoms = self._component_info.n_substrate_atoms
-        else:
-            return []
-
-        end_index = start_index + n_atoms
-        local_indices = [
-            global_idx - start_index + 1
-            for global_idx in global_indices
-            if start_index <= global_idx < end_index
-        ]
-        return sorted(local_indices)
-
     # ------------------------------------------------------------------
     # Multi-ITP path (polymers)
     # ------------------------------------------------------------------
-
-    def _add_posres_to_polymer_itps(
-        self,
-        output_dir: Path,
-        prefix: str,
-        force_constant: float,
-        posres_define: str,
-        group_name: str,
-    ) -> int:
-        """Add position restraints to ALL polymer ITP files.
-
-        OpenFF Interchange creates one molecule type (and ITP file) per unique
-        polymer sequence. For random copolymers, 25 chains might produce 12+
-        unique molecule types. Every polymer ITP needs its own position
-        restraints.
-
-        Instead of mapping global indices (which requires knowing the exact
-        molecule ordering), this method parses each ITP's [ atoms ] section
-        directly and identifies heavy atoms by atom name (names NOT starting
-        with 'H' are heavy atoms).
-
-        Args:
-            output_dir: Directory containing ITP files.
-            prefix: Filename prefix.
-            force_constant: Force constant in kJ/mol/nm^2.
-            posres_define: POSRES define name (e.g., "POSRES_POLYMER").
-            group_name: Atom group name for comment headers.
-
-        Returns:
-            Number of ITP files that received position restraints.
-        """
-        polymer_itps = self._find_all_polymer_itps(output_dir, prefix)
-        if not polymer_itps:
-            logger.warning("No polymer ITP files found - skipping polymer position restraints")
-            return 0
-
-        count = 0
-        for itp_path in polymer_itps:
-            heavy_indices = self._get_heavy_atom_indices_from_itp(itp_path)
-            if not heavy_indices:
-                logger.warning(f"No heavy atoms found in {itp_path.name} - skipping")
-                continue
-
-            self._append_posres_to_itp(
-                itp_path, heavy_indices, force_constant, posres_define, group_name
-            )
-            count += 1
-            logger.info(
-                f"Added {len(heavy_indices)} position restraints to "
-                f"{itp_path.name} (#ifdef {posres_define})"
-            )
-
-        logger.info(f"Position restraints added to {count}/{len(polymer_itps)} polymer ITP files")
-        return count
 
     def _find_all_polymer_itps(
         self,
         output_dir: Path,
         prefix: str,
     ) -> List[Path]:
-        """Discover all polymer molecule ITP files in the output directory.
+        """Discover polymer molecule ITP files without topology classification.
 
-        Polymer ITPs start at the first MOL index after protein and ligand.
-        We glob for all ``{prefix}_MOL*.itp`` files, exclude known non-polymer
-        molecules (water, ions), and return the rest sorted by MOL index.
+        This fallback is used only when ``{prefix}.top`` is unavailable. When
+        the topology layout exists, polymer ITPs are classified by molecule
+        order and SystemComponentInfo atom counts to avoid treating retained
+        protein ITPs as polymer.
 
-        Args:
-            output_dir: Directory containing ITP files.
-            prefix: Filename prefix (e.g., "FnIII_OEGMA-SBMA-1-1").
+        Parameters
+        ----------
+        output_dir : Path
+            Directory containing ITP files.
+        prefix : str
+            Filename prefix.
 
-        Returns:
-            Sorted list of polymer ITP file paths.
+        Returns
+        -------
+        list[Path]
+            Sorted list of fallback-discovered polymer ITP file paths.
         """
         # Determine the first polymer MOL index
         first_polymer_mol = 0
@@ -1093,7 +1429,13 @@ class PositionRestraintGenerator:
                     if parts:
                         return parts[0]
             return None
-        except Exception:
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(
+                "Could not read molecule name from %s (%s). "
+                "The exporter will fall back to filename-based molecule ordering.",
+                itp_path,
+                exc,
+            )
             return None
 
     @staticmethod
@@ -1101,10 +1443,12 @@ class PositionRestraintGenerator:
         """Parse an ITP file and return 1-indexed local indices of heavy atoms.
 
         Heavy atoms are identified by atom name: any atom whose name does NOT
-        start with 'H' is considered heavy. This convention is universal across
-        AMBER, CHARMM, OPLS, and SMIRNOFF force fields. It is also invariant
-        to hydrogen mass repartitioning (HMR), which changes atom masses but
-        never changes atom names.
+        start with ``H`` after stripping leading digits is considered heavy.
+        This handles digit-prefixed hydrogen names such as ``1H``, ``2HA``,
+        and ``3HD1``. This convention is universal across AMBER, CHARMM, OPLS,
+        and SMIRNOFF force fields. It is also invariant to hydrogen mass
+        repartitioning (HMR), which changes atom masses but never changes atom
+        names.
 
         The ITP [ atoms ] section format (from OpenFF Interchange) is::
 
@@ -1112,37 +1456,116 @@ class PositionRestraintGenerator:
                  1 MOL2_0       1 RES1     C1      1  -0.123456789012  12.010780000000
 
         Column indices (0-based, whitespace-split):
+
         - 0: atom index (1-indexed)
         - 4: atom name
 
-        Args:
-            itp_path: Path to the ITP file.
+        Parameters
+        ----------
+        itp_path : Path
+            Path to the ITP file.
 
-        Returns:
+        Returns
+        -------
+        list[int]
             Sorted list of 1-indexed atom indices for non-hydrogen atoms.
         """
         heavy_indices: List[int] = []
         try:
-            in_atoms_section = False
-            for line in itp_path.read_text().splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith(";"):
-                    continue
-                if stripped.startswith("["):
-                    section = stripped.strip("[] \t").lower()
-                    in_atoms_section = section == "atoms"
-                    continue
-                if in_atoms_section:
-                    parts = stripped.split()
-                    if len(parts) >= 5 and parts[0].isdigit():
-                        atom_index = int(parts[0])
-                        atom_name = parts[4]
-                        if not atom_name.startswith("H"):
-                            heavy_indices.append(atom_index)
-        except Exception as e:
-            logger.warning(f"Failed to parse ITP file {itp_path}: {e}")
+            lines = itp_path.read_text().splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f"Failed to read ITP file {itp_path}: {exc}")
             return []
+
+        in_atoms_section = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            if stripped.startswith("["):
+                section = stripped.strip("[] \t").lower()
+                in_atoms_section = section == "atoms"
+                continue
+            if in_atoms_section:
+                parts = stripped.split()
+                if len(parts) >= 5 and parts[0].isdigit():
+                    atom_index = int(parts[0])
+                    atom_name = parts[4]
+                    if not _is_hydrogen_atom_name(atom_name):
+                        heavy_indices.append(atom_index)
         return sorted(heavy_indices)
+
+    @classmethod
+    def _get_local_atom_indices_from_itp(cls, itp_path: Path, group_name: str) -> List[int]:
+        """Parse local atom indices for a restraint group from one ITP.
+
+        Parameters
+        ----------
+        itp_path : Path
+            Path to the molecule ITP file.
+        group_name : str
+            Restraint group name such as ``"protein_heavy"``,
+            ``"protein_backbone"``, or ``"ligand_heavy"``.
+
+        Returns
+        -------
+        list[int]
+            Sorted 1-indexed atom indices local to the ITP molecule type.
+        """
+        if group_name.endswith("_heavy"):
+            return cls._get_heavy_atom_indices_from_itp(itp_path)
+
+        atom_indices: List[int] = []
+        for atom_index, atom_name in cls._iter_itp_atom_names(itp_path):
+            atom_name_upper = atom_name.upper()
+            if group_name == "protein_backbone" and atom_name_upper in {
+                "N",
+                "CA",
+                "C",
+                "O",
+                "OXT",
+            }:
+                atom_indices.append(atom_index)
+            elif group_name == "protein_calpha" and atom_name_upper == "CA":
+                atom_indices.append(atom_index)
+
+        return sorted(atom_indices)
+
+    @staticmethod
+    def _iter_itp_atom_names(itp_path: Path) -> List[Tuple[int, str]]:
+        """Return local atom indices and names from an ITP [ atoms ] section.
+
+        Parameters
+        ----------
+        itp_path : Path
+            Path to the molecule ITP file.
+
+        Returns
+        -------
+        list[tuple[int, str]]
+            Pairs of 1-indexed atom index and atom name.
+        """
+        atom_names: List[Tuple[int, str]] = []
+        try:
+            lines = itp_path.read_text().splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f"Failed to read ITP file {itp_path}: {exc}")
+            return atom_names
+
+        in_atoms_section = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            if stripped.startswith("["):
+                section = stripped.strip("[] \t").lower()
+                in_atoms_section = section == "atoms"
+                continue
+            if in_atoms_section:
+                parts = stripped.split()
+                if len(parts) >= 5 and parts[0].isdigit():
+                    atom_names.append((int(parts[0]), parts[4]))
+        return atom_names
 
     # ------------------------------------------------------------------
     # Shared helpers
@@ -1161,24 +1584,26 @@ class PositionRestraintGenerator:
             Number of atoms in the molecule type, or 0 on error.
         """
         try:
-            in_atoms_section = False
-            atom_count = 0
-            for line in itp_path.read_text().splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith(";"):
-                    continue
-                if stripped.startswith("["):
-                    section = stripped.strip("[] \t").lower()
-                    in_atoms_section = section == "atoms"
-                    continue
-                if in_atoms_section:
-                    parts = stripped.split()
-                    if parts and parts[0].isdigit():
-                        atom_count += 1
-            return atom_count
-        except Exception as e:
-            logger.warning(f"Failed to parse ITP file {itp_path}: {e}")
+            lines = itp_path.read_text().splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f"Failed to read ITP file {itp_path}: {exc}")
             return 0
+
+        in_atoms_section = False
+        atom_count = 0
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            if stripped.startswith("["):
+                section = stripped.strip("[] \t").lower()
+                in_atoms_section = section == "atoms"
+                continue
+            if in_atoms_section:
+                parts = stripped.split()
+                if parts and parts[0].isdigit():
+                    atom_count += 1
+        return atom_count
 
     @staticmethod
     def _append_posres_to_itp(
@@ -1240,6 +1665,7 @@ class RunScriptGenerator:
         prefix: str,
         equilibration_mdps: List[str],
         gmx_command: str = "gmx",
+        mdrun_flags: Optional[Dict[str, str]] = None,
     ):
         """Initialize the run script generator.
 
@@ -1247,64 +1673,75 @@ class RunScriptGenerator:
             prefix: System prefix for file naming.
             equilibration_mdps: List of equilibration MDP filenames.
             gmx_command: GROMACS command (default "gmx", can be path).
+            mdrun_flags: Extra ``gmx mdrun`` flags by stage (``em``, ``eq``,
+                ``prod``), as ``polyzymd run`` passes them
+                (``GromacsEngine.local_mdrun_flags``): ``-ntmpi``, ``-ntomp``,
+                GPU offload and the config's ``mdrun_flags``.
         """
         self._prefix = prefix
         self._eq_mdps = equilibration_mdps
         self._gmx = gmx_command
+        self._mdrun_flags = dict(mdrun_flags or {})
+
+    def _flags(self, stage: str) -> str:
+        """The mdrun flags of ``stage``, with a leading space, or an empty string."""
+        flags = self._mdrun_flags.get(stage, "")
+        return f" {flags}" if flags else ""
 
     def generate(self, output_path: Path) -> Path:
         """Generate the GROMACS run script.
 
-        Args:
-            output_path: Path to write the script.
+        Parameters
+        ----------
+        output_path : Path
+            Path to write the script.
 
-        Returns:
+        Returns
+        -------
+        Path
             Path to the generated script.
         """
-        lines = self._generate_header()
-        lines.extend(self._generate_energy_minimization())
-        lines.extend(self._generate_equilibration())
-        lines.extend(self._generate_production())
-        lines.extend(self._generate_postprocessing())
-        lines.extend(self._generate_footer())
-
-        content = "\n".join(lines)
+        self._validate_script_values()
+        content = render_package_template(
+            _GROMACS_TEMPLATE_PACKAGE,
+            _LOCAL_RUN_TEMPLATE,
+            {
+                "branding": POLYZYMD_BRANDING,
+                "short_credit_line": SHORT_CREDIT_LINE,
+                "generated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "gmx_command": self._gmx,
+                "prefix": self._prefix,
+                "script_name": output_path.name,
+                "energy_minimization_block": "\n".join(
+                    self._generate_energy_minimization()
+                ).rstrip(),
+                "equilibration_block": "\n".join(self._generate_equilibration()).rstrip(),
+                "production_block": "\n".join(self._generate_production()).rstrip(),
+                "postprocessing_block": "\n".join(self._generate_postprocessing()).rstrip(),
+                "footer_block": "\n".join(self._generate_footer()).rstrip(),
+            },
+        ).rstrip("\n")
         output_path.write_text(content)
         output_path.chmod(0o755)  # Make executable
 
         logger.info(f"Generated GROMACS run script: {output_path}")
         return output_path
 
-    def _generate_header(self) -> List[str]:
-        """Generate script header with configuration."""
-        return [
-            "#!/bin/bash",
-            "# GROMACS Workflow Script",
-            f"# {POLYZYMD_BRANDING}",
-            f"# Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            "#",
-            "# Usage: ./run_gromacs.sh",
-            "#",
-            "# This script runs the complete MD workflow:",
-            "#   1. Energy minimization",
-            "#   2. Equilibration (multiple stages if configured)",
-            "#   3. Production MD",
-            "#   4. Trajectory post-processing",
-            "",
-            "set -e  # Exit on error",
-            "",
-            "# Configuration",
-            f'GMX="{self._gmx}"',
-            f'PREFIX="{self._prefix}"',
-            "",
-            'echo "========================================"',
-            'echo "GROMACS Workflow for ${PREFIX}"',
-            'echo "========================================"',
-            f'echo "{SHORT_CREDIT_LINE}"',
-            'echo "Using GROMACS: $GMX"',
-            'echo ""',
-            "",
-        ]
+    def _validate_script_values(self) -> None:
+        """Validate values interpolated into the local GROMACS shell script.
+
+        Raises
+        ------
+        ValueError
+            If a configured value contains unsafe shell metacharacters.
+        """
+        _validate_local_shell_token(self._gmx, "gmx_command")
+        _validate_local_shell_token(self._prefix, "prefix")
+        for mdp_name in self._eq_mdps:
+            _validate_local_shell_token(mdp_name, "equilibration_mdp")
+        for flags in self._mdrun_flags.values():
+            for token in shlex.split(flags):
+                _validate_local_shell_token(token, "mdrun_flags")
 
     def _generate_energy_minimization(self) -> List[str]:
         """Generate energy minimization commands."""
@@ -1312,18 +1749,30 @@ class RunScriptGenerator:
             "# ========================================",
             "# Step 1: Energy Minimization",
             "# ========================================",
-            'echo "=== Step 1: Energy Minimization ==="',
-            "",
-            "$GMX grompp -f em.mdp -c ${PREFIX}.gro -p ${PREFIX}.top -o em.tpr -maxwarn 1",
-            "$GMX mdrun -deffnm em -v",
-            "",
-            "# Check if minimization succeeded",
             "if [ ! -f em.gro ]; then",
-            '    echo "ERROR: Energy minimization failed!"',
-            "    exit 1",
+            '    echo "=== Step 1: Energy Minimization ==="',
+            "",
+            "    $GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro -p ${PREFIX}.top -o em.tpr",
+            f"    $GMX mdrun -deffnm em -v{self._flags('em')}",
+            "",
+            "    # Check if standard minimization succeeded",
+            "    if [ ! -f em.gro ]; then",
+            '        echo "ERROR: Energy minimization failed!"',
+            "        exit 1",
+            "    fi",
+            "",
+            "    # Verify energy minimization health",
+            '    if grep -qi "force.*not finite\\|inf.*atom" em.log 2>/dev/null; then',
+            '        echo "FATAL: Energy minimization failed — infinite forces detected in em.log"',
+            '        echo "This usually indicates severe atomic overlaps in the initial structure."',
+            '        echo "Try increasing packing padding or box size."',
+            "        exit 1",
+            "    fi",
+            '    echo "Minimization complete: em.gro"',
+            '    echo ""',
+            "else",
+            '    echo "Skipping energy minimization (em.gro exists)."',
             "fi",
-            'echo "Minimization complete: em.gro"',
-            'echo ""',
             "",
         ]
 
@@ -1354,12 +1803,12 @@ class RunScriptGenerator:
             grompp_cmd = f"$GMX grompp -f {mdp_file} -c {prev_output}.gro -r em.gro"
             if prev_output != "em":
                 grompp_cmd += f" -t {prev_output}.cpt"
-            grompp_cmd += f" -p ${{PREFIX}}.top -o {output_name}.tpr -maxwarn 1"
+            grompp_cmd += f" -p ${{PREFIX}}.top -o {output_name}.tpr"
 
             lines.extend(
                 [
                     grompp_cmd,
-                    f"$GMX mdrun -deffnm {output_name} -v",
+                    f"$GMX mdrun -deffnm {output_name} -v{self._flags('eq')}",
                     "",
                     f"if [ ! -f {output_name}.gro ]; then",
                     f'    echo "ERROR: Equilibration stage {stage_num} failed!"',
@@ -1387,8 +1836,8 @@ class RunScriptGenerator:
             "# ========================================",
             'echo "=== Step 3: Production MD ==="',
             "",
-            "$GMX grompp -f prod.mdp -c ${LAST_EQ}.gro -t ${LAST_EQ}.cpt -p ${PREFIX}.top -o prod.tpr -maxwarn 1",
-            "$GMX mdrun -deffnm prod -v",
+            "$GMX grompp -f prod.mdp -c ${LAST_EQ}.gro -t ${LAST_EQ}.cpt -p ${PREFIX}.top -o prod.tpr",
+            f"$GMX mdrun -deffnm prod -v{self._flags('prod')}",
             "",
             'echo "Production complete: prod.xtc"',
             'echo ""',
@@ -1464,6 +1913,7 @@ class GromacsExporter:
         interchange: "Interchange",
         config: "SimulationConfig",
         component_info: Optional["SystemComponentInfo"] = None,
+        replicate: int | None = None,
     ):
         """Initialize the GROMACS exporter.
 
@@ -1472,10 +1922,12 @@ class GromacsExporter:
             config: PolyzyMD SimulationConfig with simulation parameters.
             component_info: Optional SystemComponentInfo for position restraints.
                 If not provided, position restraints will be skipped.
+            replicate: The replicate number, which seeds the dynamics in the MDP files.
         """
         self._interchange = interchange
         self._config = config
         self._component_info = component_info
+        self._replicate = replicate
 
     def export(
         self,
@@ -1500,11 +1952,15 @@ class GromacsExporter:
             - "posres": Dictionary of position restraint files
             - "run_script": Run script path
         """
+        # GROMACS drops restraints that an OpenMM config may name.
+        self._config.require_engine_restraints("gromacs")
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         if prefix is None:
-            prefix = self._generate_prefix()
+            from polyzymd.analyses.shared.gromacs import system_prefix
+
+            prefix = system_prefix(self._config)
 
         result: Dict[str, any] = {}
 
@@ -1516,7 +1972,7 @@ class GromacsExporter:
 
         # Step 2: Generate MDP files
         logger.info("Generating MDP files...")
-        mdp_generator = MDPGenerator(self._config)
+        mdp_generator = MDPGenerator(self._config, replicate=self._replicate)
 
         # Energy minimization
         em_params = mdp_generator.generate_energy_minimization()
@@ -1550,6 +2006,10 @@ class GromacsExporter:
                 self._config, output_dir, prefix
             )
             result["posres_defines"] = posres_defines
+            em_define = posres_defines.get("minimization")
+            if em_define:
+                em_params = mdp_generator.generate_energy_minimization(define=f"-D{em_define}")
+                em_path.write_text(em_params.to_mdp_string())
 
             # Track which components have posres for user info
             if posres_defines:
@@ -1559,7 +2019,15 @@ class GromacsExporter:
         # Step 4: Generate run script
         logger.info("Generating run script...")
         eq_mdp_names = [p.name for p in eq_paths]
-        script_generator = RunScriptGenerator(prefix, eq_mdp_names, gmx_command)
+        mdrun_flags = None
+        if getattr(self._config, "gromacs", None) is not None:
+            from polyzymd.engines import create_engine
+
+            # The same flags polyzymd run passes: threads, ranks, GPU offload.
+            mdrun_flags = create_engine(
+                self._config, override="gromacs", defer_binary=True
+            ).local_mdrun_flags(gmx_command)
+        script_generator = RunScriptGenerator(prefix, eq_mdp_names, gmx_command, mdrun_flags)
         script_path = output_dir / f"run_{prefix}_gromacs.sh"
         script_generator.generate(script_path)
         result["run_script"] = script_path
@@ -1831,26 +2299,29 @@ class GromacsExporter:
         """
         molecules: List[Tuple[str, int]] = []
         try:
-            in_molecules = False
-            for line in top_path.read_text().splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith(";"):
-                    continue
-                if stripped.startswith("["):
-                    section = stripped.strip("[] \t").lower()
-                    in_molecules = section == "molecules"
-                    continue
-                if in_molecules:
-                    parts = stripped.split()
-                    if len(parts) >= 2:
-                        mol_name = parts[0]
-                        try:
-                            n_copies = int(parts[1])
-                        except ValueError:
-                            continue
-                        molecules.append((mol_name, n_copies))
-        except Exception as e:
-            logger.warning(f"Failed to parse molecules from {top_path}: {e}")
+            lines = top_path.read_text().splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f"Failed to read molecules from {top_path}: {exc}")
+            return molecules
+
+        in_molecules = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            if stripped.startswith("["):
+                section = stripped.strip("[] \t").lower()
+                in_molecules = section == "molecules"
+                continue
+            if in_molecules:
+                parts = stripped.split()
+                if len(parts) >= 2:
+                    mol_name = parts[0]
+                    try:
+                        n_copies = int(parts[1])
+                    except ValueError:
+                        continue
+                    molecules.append((mol_name, n_copies))
         return molecules
 
     @staticmethod
@@ -1868,26 +2339,28 @@ class GromacsExporter:
         n_atoms = 0
         residue_indices: set = set()
         try:
-            in_atoms = False
-            for line in itp_path.read_text().splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith(";"):
-                    continue
-                if stripped.startswith("["):
-                    section = stripped.strip("[] \t").lower()
-                    in_atoms = section == "atoms"
-                    continue
-                if in_atoms:
-                    parts = stripped.split()
-                    if len(parts) >= 3 and parts[0].isdigit():
-                        n_atoms += 1
-                        try:
-                            residue_indices.add(int(parts[2]))
-                        except ValueError:
-                            pass
-        except Exception as e:
-            logger.warning(f"Failed to parse ITP file {itp_path}: {e}")
+            lines = itp_path.read_text().splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f"Failed to read ITP file {itp_path}: {exc}")
             return 0, 1
+
+        in_atoms = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            if stripped.startswith("["):
+                section = stripped.strip("[] \t").lower()
+                in_atoms = section == "atoms"
+                continue
+            if in_atoms:
+                parts = stripped.split()
+                if len(parts) >= 3 and parts[0].isdigit():
+                    n_atoms += 1
+                    try:
+                        residue_indices.add(int(parts[2]))
+                    except ValueError:
+                        pass
         return n_atoms, max(len(residue_indices), 1)
 
     def _fix_zero_indexed_residues(self) -> None:
@@ -1926,18 +2399,6 @@ class GromacsExporter:
                             pass
                     else:
                         atom.metadata["residue_number"] = residue_num + 1
-
-    def _generate_prefix(self) -> str:
-        """Generate filename prefix from config."""
-        parts = []
-
-        if self._config.enzyme:
-            parts.append(self._config.enzyme.name)
-
-        if self._config.polymers and self._config.polymers.enabled:
-            parts.append(self._config.polymers.type_prefix)
-
-        return "_".join(parts) if parts else "system"
 
     def _log_summary(self, result: Dict[str, any], output_dir: Path) -> None:
         """Log summary of generated files."""
@@ -1980,6 +2441,41 @@ class GromacsError(Exception):
         super().__init__(f"GROMACS command failed: {command} (exit code {returncode})")
 
 
+def postprocessing_needed(working_dir: Path) -> bool:
+    """Whether a finished ``prod.xtc`` lacks its post-processed trajectories.
+
+    True when ``prod_nojump.xtc`` or ``prod_centered.xtc`` is missing or
+    older than ``prod.xtc``, as after a stop during post-processing.
+    """
+    production = Path(working_dir) / "prod.xtc"
+    if not production.is_file():
+        return False
+    written = production.stat().st_mtime
+    for name in ("prod_nojump.xtc", "prod_centered.xtc"):
+        path = Path(working_dir) / name
+        if not path.is_file() or path.stat().st_mtime < written:
+            return True
+    return False
+
+
+class GromacsInterrupted(Exception):
+    """Raised when a signal stopped a local GROMACS step after mdrun shut down cleanly.
+
+    mdrun received one ``SIGTERM``, stopped at the next neighbour-search step
+    and wrote its checkpoint, so the step can be continued with ``-cpi``.
+    """
+
+    def __init__(self, description: str, signal_number: int) -> None:
+        self.description = description
+        self.signal_number = signal_number
+        super().__init__(f"{description} stopped by signal {signal_number}")
+
+
+#: Minutes between production checkpoints of a local run, so a hard kill
+#: loses at most this much work (mdrun's own default is 15).
+PRODUCTION_CHECKPOINT_MINUTES = "5"
+
+
 class GromacsRunner:
     """Execute GROMACS workflow from exported files with streaming output.
 
@@ -2010,6 +2506,7 @@ class GromacsRunner:
         prefix: str,
         equilibration_mdps: List[str],
         gmx_command: str = "gmx",
+        mdrun_flags: Optional[Dict[str, str]] = None,
     ):
         """Initialize the GROMACS runner.
 
@@ -2018,14 +2515,64 @@ class GromacsRunner:
             prefix: System prefix for filenames (e.g., "lysozyme_PEG").
             equilibration_mdps: List of equilibration MDP filenames in order.
             gmx_command: Path to GROMACS executable (default: "gmx").
+            mdrun_flags: Extra mdrun flags by stage (``em``, ``eq``, ``prod``),
+                such as ``-ntmpi 1 -ntomp 4``; none when left out.
         """
         self._working_dir = Path(working_dir)
         self._prefix = prefix
         self._eq_mdps = equilibration_mdps
         self._gmx = gmx_command
+        self._mdrun_flags = dict(mdrun_flags or {})
 
         # Track state for workflow
         self._last_eq_output: Optional[str] = None
+
+    def _checkpoint_flags(self) -> List[str]:
+        """The production mdrun arguments: ``-cpt`` unless the config's flags set it."""
+        flags = self._flags("prod")
+        if "-cpt" in flags:
+            return flags
+        return ["-cpt", PRODUCTION_CHECKPOINT_MINUTES, *flags]
+
+    def continue_production(self) -> None:
+        """Continue a started production from ``prod.cpt``, then post-process.
+
+        Runs ``mdrun -deffnm prod -cpi prod.cpt -append``, which extends
+        ``prod.xtc``, ``prod.edr`` and ``prod.log`` from the checkpoint's step.
+
+        Raises:
+            GromacsError: If ``prod.tpr`` or ``prod.cpt`` is missing, or a command fails.
+        """
+        missing = [n for n in ("prod.tpr", "prod.cpt") if not (self._working_dir / n).is_file()]
+        if missing:
+            raise GromacsError(
+                command="mdrun -deffnm prod -cpi prod.cpt -append",
+                returncode=1,
+                message=f"Cannot continue production: {', '.join(missing)} missing",
+            )
+        self._print_banner("Continue production MD", "from prod.cpt")
+        self._run_command(
+            [
+                self._gmx,
+                "mdrun",
+                "-deffnm",
+                "prod",
+                "-cpi",
+                "prod.cpt",
+                "-append",
+                "-v",
+                *self._checkpoint_flags(),
+            ],
+            "Continuing production MD from prod.cpt (mdrun -cpi)",
+        )
+        self._run_postprocessing()
+        self._print_summary()
+
+    def _flags(self, stage: str) -> List[str]:
+        """The extra mdrun arguments of one stage."""
+        import shlex
+
+        return shlex.split(self._mdrun_flags.get(stage) or "")
 
     def run_full_workflow(self) -> None:
         """Run the complete GROMACS workflow.
@@ -2087,13 +2634,17 @@ class GromacsRunner:
         Raises:
             GromacsError: If command returns non-zero exit code.
         """
+        import signal
         import subprocess
         import sys
+        import threading
 
         logger.info(f"\n>>> {description}")
         logger.info(f">>> Command: {' '.join(cmd)}")
         logger.info("-" * 60)
 
+        received: list[int] = []
+        previous: dict[int, object] = {}
         try:
             process = subprocess.Popen(
                 cmd,
@@ -2103,7 +2654,26 @@ class GromacsRunner:
                 stdin=subprocess.PIPE if stdin_input else None,
                 text=True,
                 bufsize=1,  # Line buffered
+                # Its own session: Ctrl-C reaches only PolyzyMD, which passes on
+                # one signal. Two would make mdrun stop without a checkpoint.
+                start_new_session=True,
             )
+
+            def forward(signum: int, _frame: object) -> None:
+                if not received:
+                    received.append(signum)
+                    logger.warning(
+                        f"Received signal {signum}; asking GROMACS to stop at its next "
+                        "checkpoint-safe step and waiting for it to write the checkpoint"
+                    )
+                    try:
+                        process.send_signal(signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+
+            if threading.current_thread() is threading.main_thread():
+                for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGUSR1, signal.SIGHUP):
+                    previous[signum] = signal.signal(signum, forward)
 
             # If we have stdin input, write it and close
             if stdin_input:
@@ -2116,6 +2686,11 @@ class GromacsRunner:
                 sys.stdout.flush()
 
             process.wait()
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+            previous.clear()
+            if received:
+                raise GromacsInterrupted(description, received[0])
 
             if process.returncode != 0:
                 raise GromacsError(
@@ -2134,33 +2709,38 @@ class GromacsRunner:
                 message=f"GROMACS executable not found: {self._gmx}. "
                 "Ensure GROMACS is installed and in your PATH, or use --gmx-path.",
             )
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
 
     def _run_energy_minimization(self) -> None:
         """Run energy minimization step."""
         self._print_banner("Step 1: Energy Minimization")
 
         # grompp
+        grompp_cmd = [
+            self._gmx,
+            "grompp",
+            "-f",
+            "em.mdp",
+            "-c",
+            f"{self._prefix}.gro",
+            "-r",
+            f"{self._prefix}.gro",
+            "-p",
+            f"{self._prefix}.top",
+            "-o",
+            "em.tpr",
+        ]
+
         self._run_command(
-            [
-                self._gmx,
-                "grompp",
-                "-f",
-                "em.mdp",
-                "-c",
-                f"{self._prefix}.gro",
-                "-p",
-                f"{self._prefix}.top",
-                "-o",
-                "em.tpr",
-                "-maxwarn",
-                "1",
-            ],
+            grompp_cmd,
             "Preparing energy minimization (grompp)",
         )
 
         # mdrun
         self._run_command(
-            [self._gmx, "mdrun", "-deffnm", "em", "-v"],
+            [self._gmx, "mdrun", "-deffnm", "em", "-v", *self._flags("em")],
             "Running energy minimization (mdrun)",
         )
 
@@ -2170,6 +2750,28 @@ class GromacsRunner:
                 command="mdrun -deffnm em",
                 returncode=1,
                 message="Energy minimization failed: em.gro not produced",
+            )
+
+        self._check_energy_minimization_health()
+
+    def _check_energy_minimization_health(self) -> None:
+        """Check EM log for non-finite force failures.
+
+        Raises
+        ------
+        RuntimeError
+            If the EM log reports non-finite forces.
+        """
+        em_log_path = self._working_dir / "em.log"
+        if not em_log_path.exists():
+            return
+
+        em_log_text = em_log_path.read_text(errors="ignore")
+        if re.search(r"force.*not finite|inf.*atom", em_log_text, flags=re.IGNORECASE):
+            raise RuntimeError(
+                "Energy minimization failed — infinite forces detected in em.log. "
+                "This usually indicates severe atomic overlaps in the initial structure. "
+                "Try increasing packing padding or box size."
             )
 
     def _run_equilibration(self) -> None:
@@ -2201,8 +2803,6 @@ class GromacsRunner:
                 f"{self._prefix}.top",
                 "-o",
                 f"{output_name}.tpr",
-                "-maxwarn",
-                "1",
             ]
 
             # Add checkpoint from previous stage (except after EM)
@@ -2216,7 +2816,7 @@ class GromacsRunner:
 
             # mdrun
             self._run_command(
-                [self._gmx, "mdrun", "-deffnm", output_name, "-v"],
+                [self._gmx, "mdrun", "-deffnm", output_name, "-v", *self._flags("eq")],
                 f"Running equilibration stage {stage_num} (mdrun)",
             )
 
@@ -2254,15 +2854,13 @@ class GromacsRunner:
                 f"{self._prefix}.top",
                 "-o",
                 "prod.tpr",
-                "-maxwarn",
-                "1",
             ],
             "Preparing production MD (grompp)",
         )
 
-        # mdrun
+        # mdrun, with a checkpoint every few minutes so a hard kill loses little
         self._run_command(
-            [self._gmx, "mdrun", "-deffnm", "prod", "-v"],
+            [self._gmx, "mdrun", "-deffnm", "prod", "-v", *self._checkpoint_flags()],
             "Running production MD (mdrun)",
         )
 
@@ -2274,8 +2872,17 @@ class GromacsRunner:
                 message="Production MD failed: prod.xtc not produced",
             )
 
+    def run_postprocessing(self) -> None:
+        """Write ``prod_nojump.xtc`` and ``prod_centered.xtc`` from a finished ``prod.xtc``."""
+        self._run_postprocessing()
+
     def _run_postprocessing(self) -> None:
-        """Run trajectory post-processing with trjconv."""
+        """Run trajectory post-processing with trjconv.
+
+        Each file is written under a temporary name and renamed when trjconv
+        succeeds, so a stop part-way never leaves a truncated trajectory under
+        the name analysis reads.
+        """
         self._print_banner("Step 4: Trajectory Post-processing")
 
         logger.info("Removing periodic boundary jumps and centering trajectory...")
@@ -2291,13 +2898,14 @@ class GromacsRunner:
                 "-f",
                 "prod.xtc",
                 "-o",
-                "prod_nojump.xtc",
+                "prod_nojump.part.xtc",
                 "-pbc",
                 "nojump",
             ],
             "Removing PBC jumps (trjconv)",
             stdin_input="System\n",
         )
+        (self._working_dir / "prod_nojump.part.xtc").replace(self._working_dir / "prod_nojump.xtc")
 
         # Step 2: Center on protein and make molecules whole
         # echo -e "Protein\nSystem" | gmx trjconv -s prod.tpr -f prod_nojump.xtc -o prod_centered.xtc -center -pbc mol -ur compact
@@ -2310,7 +2918,7 @@ class GromacsRunner:
                 "-f",
                 "prod_nojump.xtc",
                 "-o",
-                "prod_centered.xtc",
+                "prod_centered.part.xtc",
                 "-center",
                 "-pbc",
                 "mol",
@@ -2319,6 +2927,9 @@ class GromacsRunner:
             ],
             "Centering trajectory (trjconv)",
             stdin_input="Protein\nSystem\n",
+        )
+        (self._working_dir / "prod_centered.part.xtc").replace(
+            self._working_dir / "prod_centered.xtc"
         )
 
     def _print_banner(self, title: str, subtitle: str = "") -> None:

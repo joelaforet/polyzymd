@@ -8,17 +8,67 @@ for checkpoint/restart capabilities.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 
-from openmm import unit as openmm_unit
-from openmm.unit import Quantity
+if TYPE_CHECKING:
+    from openmm.unit import Quantity
 
 # =============================================================================
 # Unit Serialization Helpers
 # =============================================================================
+
+
+def _get_openmm_unit() -> ModuleType:
+    """Return the lazily imported OpenMM unit module.
+
+    Returns
+    -------
+    module
+        The :mod:`openmm.unit` module.
+    """
+    from openmm import unit as openmm_unit
+
+    return openmm_unit
+
+
+def _openmm_quantity(value: float, unit_name: str) -> Quantity:
+    """Create an OpenMM quantity from a named unit.
+
+    Parameters
+    ----------
+    value : float
+        Quantity magnitude.
+    unit_name : str
+        Attribute name on :mod:`openmm.unit`.
+
+    Returns
+    -------
+    Quantity
+        OpenMM quantity with the requested unit.
+    """
+    openmm_unit = _get_openmm_unit()
+    return value * getattr(openmm_unit, unit_name)
+
+
+def _inverse_openmm_quantity(value: float, unit_name: str) -> Quantity:
+    """Create an inverse OpenMM quantity from a named unit.
+
+    Parameters
+    ----------
+    value : float
+        Quantity denominator magnitude.
+    unit_name : str
+        Attribute name on :mod:`openmm.unit`.
+
+    Returns
+    -------
+    Quantity
+        Inverse OpenMM quantity.
+    """
+    openmm_unit = _get_openmm_unit()
+    return 1.0 / (value * getattr(openmm_unit, unit_name))
 
 
 def quantity_to_dict(q: Quantity) -> Dict[str, Any]:
@@ -54,6 +104,8 @@ def quantity_from_dict(d: Dict[str, Any]) -> Quantity:
     values = d.get("__values__", d)
     value = values["value"]
     unit_str = values["unit"]
+
+    openmm_unit = _get_openmm_unit()
 
     # Map common unit strings to OpenMM units
     unit_mapping = {
@@ -103,8 +155,8 @@ class ThermostatParameters:
         thermostat: Type of thermostat to use
     """
 
-    temperature: Quantity = field(default_factory=lambda: 300.0 * openmm_unit.kelvin)
-    timescale: Quantity = field(default_factory=lambda: 1.0 / openmm_unit.picosecond)
+    temperature: Quantity = field(default_factory=lambda: _openmm_quantity(300.0, "kelvin"))
+    timescale: Quantity = field(default_factory=lambda: _inverse_openmm_quantity(1.0, "picosecond"))
     thermostat: str = "LangevinMiddle"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -140,8 +192,8 @@ class BarostatParameters:
         barostat: Type of barostat to use
     """
 
-    pressure: Quantity = field(default_factory=lambda: 1.0 * openmm_unit.atmosphere)
-    temperature: Quantity = field(default_factory=lambda: 300.0 * openmm_unit.kelvin)
+    pressure: Quantity = field(default_factory=lambda: _openmm_quantity(1.0, "atmosphere"))
+    temperature: Quantity = field(default_factory=lambda: _openmm_quantity(300.0, "kelvin"))
     update_frequency: int = 25
     barostat: str = "MC"
 
@@ -221,8 +273,8 @@ class IntegratorParameters:
         num_samples: Number of frames to save
     """
 
-    time_step: Quantity = field(default_factory=lambda: 2.0 * openmm_unit.femtosecond)
-    total_time: Quantity = field(default_factory=lambda: 1.0 * openmm_unit.nanosecond)
+    time_step: Quantity = field(default_factory=lambda: _openmm_quantity(2.0, "femtosecond"))
+    total_time: Quantity = field(default_factory=lambda: _openmm_quantity(1.0, "nanosecond"))
     num_samples: int = 100
 
     @property
@@ -357,18 +409,6 @@ class SimulationParameters:
             reporter_params=ReporterParameters.from_dict(values["reporter_params"]),
         )
 
-    def to_json(self, path: Union[str, Path]) -> None:
-        """Save parameters to JSON file."""
-        with open(path, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
-
-    @classmethod
-    def from_json(cls, path: Union[str, Path]) -> "SimulationParameters":
-        """Load parameters from JSON file."""
-        with open(path, "r") as f:
-            data = json.load(f)
-        return cls.from_dict(data)
-
 
 @dataclass
 class SimulationPhase:
@@ -390,85 +430,3 @@ class SimulationPhase:
     def from_dict(cls, d: Dict[str, Any]) -> "SimulationPhase":
         """Deserialize from dictionary."""
         return cls(name=d["name"], parameters=SimulationParameters.from_dict(d["parameters"]))
-
-
-def create_nvt_parameters(
-    temperature: float,
-    duration: float,
-    samples: int,
-    time_step: float = 2.0,
-    thermostat_timescale: float = 1.0,
-) -> SimulationParameters:
-    """Factory function to create NVT simulation parameters.
-
-    Args:
-        temperature: Temperature in Kelvin
-        duration: Simulation duration in nanoseconds
-        samples: Number of trajectory frames to save
-        time_step: Integration time step in femtoseconds
-        thermostat_timescale: Thermostat timescale in picoseconds
-
-    Returns:
-        Configured SimulationParameters for NVT
-    """
-    return SimulationParameters(
-        thermo_params=ThermoParameters(
-            thermostat_params=ThermostatParameters(
-                temperature=temperature * openmm_unit.kelvin,
-                timescale=1.0 / (thermostat_timescale * openmm_unit.picosecond),
-                thermostat="LangevinMiddle",
-            )
-        ),
-        integ_params=IntegratorParameters(
-            time_step=time_step * openmm_unit.femtosecond,
-            total_time=duration * openmm_unit.nanosecond,
-            num_samples=samples,
-        ),
-        reporter_params=ReporterParameters(),
-    )
-
-
-def create_npt_parameters(
-    temperature: float,
-    pressure: float,
-    duration: float,
-    samples: int,
-    time_step: float = 2.0,
-    thermostat_timescale: float = 1.0,
-    barostat_frequency: int = 25,
-) -> SimulationParameters:
-    """Factory function to create NPT simulation parameters.
-
-    Args:
-        temperature: Temperature in Kelvin
-        pressure: Pressure in atmospheres
-        duration: Simulation duration in nanoseconds
-        samples: Number of trajectory frames to save
-        time_step: Integration time step in femtoseconds
-        thermostat_timescale: Thermostat timescale in picoseconds
-        barostat_frequency: Steps between barostat updates
-
-    Returns:
-        Configured SimulationParameters for NPT
-    """
-    return SimulationParameters(
-        thermo_params=ThermoParameters(
-            thermostat_params=ThermostatParameters(
-                temperature=temperature * openmm_unit.kelvin,
-                timescale=1.0 / (thermostat_timescale * openmm_unit.picosecond),
-                thermostat="LangevinMiddle",
-            ),
-            barostat_params=BarostatParameters(
-                pressure=pressure * openmm_unit.atmosphere,
-                temperature=temperature * openmm_unit.kelvin,
-                update_frequency=barostat_frequency,
-                barostat="MC",
-            ),
-        ),
-        integ_params=IntegratorParameters(
-            time_step=time_step * openmm_unit.femtosecond,
-            total_time=duration * openmm_unit.nanosecond,
-            num_samples=samples,
-        ),
-        reporter_params=ReporterParameters(),
-    )

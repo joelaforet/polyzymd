@@ -15,18 +15,13 @@ Typical usage in MD equilibration protocols:
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
-from openmm import CustomExternalForce, System
-from openmm.unit import Quantity, kilojoule_per_mole, nanometer
+if TYPE_CHECKING:
+    from openmm import CustomExternalForce, System
+    from openmm.unit import Quantity
 
 logger = logging.getLogger(__name__)
-
-# Unit conversion constant
-# 1.0 kcal/mol/A^2 = 4.184 kJ/mol/A^2 = 418.4 kJ/mol/nm^2
-# But we typically express as kJ/mol/nm^2, so:
-# 1.0 kcal/mol/A^2 = 4184.0 kJ/mol/nm^2
-KCAL_MOL_ANGSTROM2_TO_KJ_MOL_NM2 = 4184.0
 
 
 class PositionalRestraintForce:
@@ -52,7 +47,7 @@ class PositionalRestraintForce:
         particle_count: Number of particles added to the restraint
 
     Example:
-        >>> restraint = PositionalRestraintForce(4184.0)  # 1 kcal/mol/A^2
+        >>> restraint = PositionalRestraintForce(4184.0)  # 10 kcal/mol/A^2
         >>> restraint.add_particles_from_positions([0, 1, 2], positions)
         >>> force_idx = system.addForce(restraint.force)
     """
@@ -62,7 +57,7 @@ class PositionalRestraintForce:
 
         Args:
             default_force_constant: Default force constant in kJ/mol/nm^2.
-                                   Common value: 4184.0 = 1.0 kcal/mol/A^2
+                                   Common value: 4184.0 = 10 kcal/mol/A^2
                                    Can be overridden per-particle when adding atoms.
         """
         self._default_force_constant = default_force_constant
@@ -72,6 +67,8 @@ class PositionalRestraintForce:
         # All parameters are per-particle to avoid global parameter conflicts
         # Use periodicdistance() to correctly handle atoms that may be outside
         # the primary periodic box (e.g., after minimization or NPT equilibration)
+        from openmm import CustomExternalForce
+
         expression = "0.5*k*periodicdistance(x, y, z, x0, y0, z0)^2"
         self._force = CustomExternalForce(expression)
 
@@ -138,6 +135,8 @@ class PositionalRestraintForce:
         Returns:
             Number of particles added
         """
+        from openmm.unit import nanometer
+
         k = force_constant if force_constant is not None else self._default_force_constant
         count = 0
         for idx in atom_indices:

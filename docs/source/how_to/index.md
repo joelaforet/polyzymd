@@ -1,64 +1,138 @@
-# How-To Guides
+# How-to guides
 
-How-to guides help you accomplish a specific task. Use this section when you
-already know your goal and need the shortest practical route to it.
+Each guide solves one task. Use a guide when you know what you want to do.
+If you are new to PolyzyMD, do the {doc}`../get_started/quickstart` first.
 
-## Core Simulation Tasks
+::::{grid} 2
+:gutter: 3
 
-- [Run PolyzyMD on SLURM Clusters](../tutorials/hpc_slurm.md)
-- [Add Distance Restraints](../tutorials/restraints.md)
-- [Set Up Equilibration Stages](../tutorials/equilibration.md)
-- [Add Polymers to a Simulation](../tutorials/polymers.md)
-- [Generate Polymers from SMILES](../tutorials/dynamic_polymers.md)
-- [Export a System to GROMACS](../tutorials/gromacs_export.md)
-- [Troubleshoot Common Problems](../tutorials/troubleshooting.md)
+:::{grid-item-card} Set up a simulation
+:link: howto-set-up
+:link-type: ref
 
-## Analysis Tasks
+Add polymers, co-solvents, a ligand, restraints and equilibration stages. Fix a
+PDB that OpenFF refuses.
+:::
 
-Stable workflows:
+:::{grid-item-card} Run on a cluster
+:link: hpc_slurm
+:link-type: doc
 
-- [Run RMSF Analysis](../tutorials/analysis_rmsf_quickstart.md)
-- [Run Distance Analysis](../tutorials/analysis_distances_quickstart.md)
-- [Run Contacts Analysis](../tutorials/analysis_contacts_quickstart.md)
-- [Compare Simulation Conditions](../tutorials/analysis_compare_conditions.md)
-- [Run Catalytic Triad Analysis](../tutorials/analysis_triad_quickstart.md)
+Submit simulations and analysis jobs with SLURM, and monitor them.
+:::
 
-Experimental workflows:
+:::{grid-item-card} Organize and publish studies
+:link: howto-organize
+:link-type: ref
 
-- [Experimental: Analyze Binding Preference](../tutorials/analysis_binding_preference.md)
-- [Experimental: Analyze Binding Free Energy](../tutorials/analysis_binding_free_energy.md)
-- [Experimental: Analyze Polymer Affinity](../tutorials/analysis_polymer_affinity.md)
-- [Experimental: Analyze Exposure Dynamics](../tutorials/analysis_exposure_dynamics.md)
+Make a study folder for each set of compared conditions, group studies into
+a project, and freeze them for publication.
+:::
 
-## Recipe Collections
+:::{grid-item-card} Analyze trajectories
+:link: analysis_chooser
+:link-type: doc
 
-- [Contacts Cookbook](../tutorials/analysis_contacts_cookbook.md)
-- [Broken Molecule Debugging](../tutorials/broken_molecules_debugging.md)
+Choose an analysis, run it on a study, and measure your own quantity.
+:::
 
-<!-- IMAGE OPPORTUNITY: Add an annotated comparison project tree showing
-`comparison.yaml`, `results/`, and `figures/`, or an example SLURM submission
-flow diagram for HPC users. -->
+::::
+
+(howto-set-up)=
+## Set up a simulation
 
 ```{toctree}
-:hidden:
+:caption: Set up a simulation
 :maxdepth: 1
 
-Run PolyzyMD on SLURM Clusters <../tutorials/hpc_slurm>
-Add Distance Restraints <../tutorials/restraints>
-Set Up Equilibration Stages <../tutorials/equilibration>
-Add Polymers to a Simulation <../tutorials/polymers>
-Generate Polymers from SMILES <../tutorials/dynamic_polymers>
-Export a System to GROMACS <../tutorials/gromacs_export>
-Troubleshoot Common Problems <../tutorials/troubleshooting>
-Run RMSF Analysis <../tutorials/analysis_rmsf_quickstart>
-Run Distance Analysis <../tutorials/analysis_distances_quickstart>
-Run Contacts Analysis <../tutorials/analysis_contacts_quickstart>
-Compare Simulation Conditions <../tutorials/analysis_compare_conditions>
-Run Catalytic Triad Analysis <../tutorials/analysis_triad_quickstart>
-Experimental: Analyze Binding Preference <../tutorials/analysis_binding_preference>
-Experimental: Analyze Binding Free Energy <../tutorials/analysis_binding_free_energy>
-Experimental: Analyze Polymer Affinity <../tutorials/analysis_polymer_affinity>
-Experimental: Analyze Exposure Dynamics <../tutorials/analysis_exposure_dynamics>
-Contacts Cookbook <../tutorials/analysis_contacts_cookbook>
-Broken Molecule Debugging <../tutorials/broken_molecules_debugging>
+rewrite_config_rc5
+polymers
+dynamic_polymers
+cosolvents
+ligand
+restraints
+equilibration
+troubleshoot_openff_pdb_ingestion
+```
+
+## Run simulations
+
+```{toctree}
+:caption: Run simulations
+:maxdepth: 1
+
+hpc_slurm
+monitor_simulations
+run_longer
+hardware_platforms
+run_gromacs
+own_protocol
+site_cu_boulder
+```
+
+(howto-organize)=
+## Organize and publish studies
+
+```{toctree}
+:caption: Organize and publish studies
+:maxdepth: 1
+
+study_folder
+study_yaml
+project
+reuse_condition
+move_studies_into_project
+study_freeze
+```
+
+## Analyze trajectories
+
+```{toctree}
+:caption: Analyze trajectories
+:maxdepth: 1
+
+analysis_chooser
+analysis_agent_protocol
+analysis_compare_conditions
+study_api
+own_analysis
+hpc_execution
+```
+
+## Analyses
+
+```{toctree}
+:caption: Analyses
+:maxdepth: 1
+
+analysis_rmsd_quickstart
+analysis_rg_quickstart
+analysis_rmsf_quickstart
+analysis_distances_quickstart
+analysis_contacts_quickstart
+analysis_sasa_quickstart
+analysis_secondary_structure_quickstart
+analysis_native_contacts_quickstart
+hydrogen_bonds
+analysis_triad_quickstart
+```
+
+## Figures
+
+```{toctree}
+:caption: Figures
+:maxdepth: 1
+
+plot_stored_results
+publication_plots
+custom_artifact_plotting
+```
+
+## Fix problems
+
+```{toctree}
+:caption: Fix problems
+:maxdepth: 1
+
+troubleshooting
 ```

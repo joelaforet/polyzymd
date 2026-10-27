@@ -27,8 +27,9 @@ Usage
 For library solvents (dmso, ethanol, etc.), pre-computed charges are loaded
 instantly from bundled SDF files.
 
-For custom solvents, AM1BCC charges are computed once and cached in
-~/.polyzymd/solvent_cache/ for future use.
+For custom solvents, charges are computed once and cached in
+~/.polyzymd/solvent_cache/ for future use, one file per SMILES and charge
+method.
 
 Adding New Solvents
 -------------------
@@ -38,13 +39,14 @@ solvents to the library.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
-from openff.toolkit import Molecule
-from openff.units import unit as offunit
+if TYPE_CHECKING:
+    from openff.toolkit import Molecule
 
 LOGGER = logging.getLogger(__name__)
 
@@ -68,20 +70,11 @@ TIP3P_CHARGES = {
     "H": 0.417,
 }
 
-# SPC/E water charges (Berendsen et al., 1987)
-SPCE_CHARGES = {
-    "O": -0.8476,
-    "H": 0.4238,
-}
 
-# TIP4P-Ew charges (Horn et al., 2004)
-# Note: TIP4P models have a virtual site, but for basic use we can
-# approximate with 3-site model or let the force field handle it
-TIP4PEW_CHARGES = {
-    "O": 0.0,  # Charge on virtual site
-    "H": 0.52422,
-    "M": -1.04844,  # Virtual site
-}
+def is_bundled_solvent(name: str) -> bool:
+    """Return whether ``name`` has charges shipped with PolyzyMD (a water model or a bundled SDF)."""
+    key = name.lower().strip()
+    return key in ("tip3p", "water_tip3p", "water") or (_SOLVENTS_DIR / f"{key}.sdf").exists()
 
 
 def get_solvent_molecule(
@@ -89,6 +82,8 @@ def get_solvent_molecule(
     smiles: Optional[str] = None,
     residue_name: Optional[str] = None,
     cache: bool = True,
+    charge_method: Optional[str] = None,
+    nagl_model: Optional[str] = None,
 ) -> Molecule:
     """Get a solvent molecule with pre-computed partial charges.
 
@@ -96,17 +91,28 @@ def get_solvent_molecule(
     with consistent partial charges. It follows this lookup order:
 
     1. In-memory cache (already loaded this session)
-    2. Bundled library SDFs (src/polyzymd/data/solvents/)
-    3. User cache (~/.polyzymd/solvent_cache/)
-    4. Generate from SMILES, compute AM1BCC charges, cache for future use
+    2. Bundled library SDFs (src/polyzymd/data/solvents/), when no SMILES
+       is given or the SMILES is the library molecule's
+    3. User cache (~/.polyzymd/solvent_cache/), keyed by the name, the
+       canonical SMILES and the charge method
+    4. Generate from SMILES, assign charges with ``charge_method``, cache for future use
 
     Args:
         name: Solvent identifier (e.g., "dmso", "ethanol", "tip3p").
-              For water models, use "tip3p", "spce", etc.
+              For water, use "tip3p".
         smiles: SMILES string. Required if solvent is not in the library.
         residue_name: 3-letter residue name for topology. If not provided,
                      uses first 3 characters of name (uppercase).
         cache: If True, cache newly generated molecules to disk.
+        charge_method: ``preset`` returns the bundled library molecule with its
+            shipped charges, and raises if there is none for this name and
+            SMILES. ``nagl``, ``am1bcc`` or ``espaloma`` generate the molecule
+            and charge it with that method, even when a library molecule
+            exists. None (the default) keeps the shipped charges of a library
+            molecule and charges any other with NAGL. Water keeps its
+            literature charges either way.
+        nagl_model: NAGL model for ``charge_method`` nagl; the default model
+            when None. It is part of the cache key.
 
     Returns:
         OpenFF Molecule with partial charges assigned.
@@ -128,44 +134,35 @@ def get_solvent_molecule(
     # Normalize name
     name_key = name.lower().strip()
 
-    # Check in-memory cache first
-    if name_key in _loaded_molecules:
-        LOGGER.debug(f"Returning {name_key} from in-memory cache")
-        return _loaded_molecules[name_key]
+    from rdkit import Chem
 
-    # Handle water models specially (hardcoded literature charges)
+    # Water models (hardcoded literature charges)
     if name_key in ("tip3p", "water_tip3p", "water"):
-        mol = _create_tip3p_water()
-        _loaded_molecules[name_key] = mol
-        return mol
-
-    if name_key in ("spce", "spc_e", "spc/e"):
-        mol = _create_spce_water()
-        _loaded_molecules[name_key] = mol
-        return mol
+        if name_key not in _loaded_molecules:
+            _loaded_molecules[name_key] = _create_tip3p_water()
+        return _loaded_molecules[name_key]
 
     # Set default residue name
     if residue_name is None:
         residue_name = name[:3].upper()
 
-    # Try bundled library
+    # The bundled library molecule, unless a different SMILES is given
     library_path = _SOLVENTS_DIR / f"{name_key}.sdf"
-    if library_path.exists():
-        LOGGER.info(f"Loading {name_key} from library: {library_path}")
-        mol = _load_molecule_from_sdf(library_path)
-        _loaded_molecules[name_key] = mol
-        return mol
+    if library_path.exists() and charge_method in (None, "preset"):
+        if name_key not in _loaded_molecules:
+            LOGGER.info(f"Loading {name_key} from library: {library_path}")
+            _loaded_molecules[name_key] = _load_molecule_from_sdf(library_path)
+        library = _loaded_molecules[name_key]
+        if smiles is None or Chem.CanonSmiles(smiles) == Chem.CanonSmiles(library.to_smiles()):
+            return library
+    if charge_method == "preset":
+        raise ValueError(
+            f"Solvent '{name}': charges preset reads the charges PolyzyMD ships, and it ships "
+            "none for this molecule (or its SMILES differs from the shipped one); use nagl, "
+            "am1bcc or espaloma"
+        )
+    charge_method = charge_method or "nagl"
 
-    # Try user cache
-    _USER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = _USER_CACHE_DIR / f"{name_key}.sdf"
-    if cache_path.exists():
-        LOGGER.info(f"Loading {name_key} from user cache: {cache_path}")
-        mol = _load_molecule_from_sdf(cache_path)
-        _loaded_molecules[name_key] = mol
-        return mol
-
-    # Need to generate - requires SMILES
     if smiles is None:
         # Try to get from cosolvent library
         from polyzymd.data.cosolvent_library import get_cosolvent
@@ -180,16 +177,40 @@ def get_solvent_molecule(
                 f"Please provide a SMILES string to generate the molecule."
             )
 
+    # A generated molecule depends on its SMILES, charge method and NAGL
+    # model, so all of them are part of every cache key.
+    method = str(charge_method).lower().strip()
+    method_key = method
+    if method == "nagl":
+        from polyzymd.utils.charging import DEFAULT_NAGL_MODEL
+
+        nagl_model = nagl_model or DEFAULT_NAGL_MODEL
+        method_key = f"nagl:{nagl_model}"
+    digest = hashlib.sha256(f"{Chem.CanonSmiles(smiles)} {method_key}".encode()).hexdigest()[:12]
+    cache_key = f"{name_key}.{method}.{digest}"
+    if cache_key in _loaded_molecules:
+        LOGGER.debug(f"Returning {cache_key} from in-memory cache")
+        return _loaded_molecules[cache_key]
+
+    # Try user cache
+    _USER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = _USER_CACHE_DIR / f"{cache_key}.sdf"
+    if cache_path.exists():
+        LOGGER.info(f"Loading {name_key} from user cache: {cache_path}")
+        mol = _load_molecule_from_sdf(cache_path)
+        _loaded_molecules[cache_key] = mol
+        return mol
+
     # Generate molecule with charges
-    LOGGER.info(f"Generating {name_key} from SMILES and computing AM1BCC charges...")
-    mol = _generate_charged_molecule(smiles, residue_name)
+    LOGGER.info(f"Generating {name_key} from SMILES and assigning {method_key} charges...")
+    mol = _generate_charged_molecule(smiles, residue_name, method, nagl_model)
 
     # Cache to disk if requested
     if cache:
         LOGGER.info(f"Caching {name_key} to: {cache_path}")
         _save_molecule_to_sdf(mol, cache_path)
 
-    _loaded_molecules[name_key] = mol
+    _loaded_molecules[cache_key] = mol
     return mol
 
 
@@ -202,6 +223,9 @@ def _create_tip3p_water() -> Molecule:
     Returns:
         OpenFF Molecule for TIP3P water.
     """
+    from openff.toolkit import Molecule
+    from openff.units import unit as offunit
+
     water = Molecule.from_smiles("O")
     water.name = "water_TIP3P"
 
@@ -219,54 +243,34 @@ def _create_tip3p_water() -> Molecule:
     return water
 
 
-def _create_spce_water() -> Molecule:
-    """Create an SPC/E water molecule with literature charges.
-
-    SPC/E charges are from:
-    Berendsen, H.J.C., et al. J. Phys. Chem. 91, 6269 (1987)
-
-    Returns:
-        OpenFF Molecule for SPC/E water.
-    """
-    water = Molecule.from_smiles("O")
-    water.name = "water_SPCE"
-
-    # Assign literature charges
-    charges = []
-    for atom in water.atoms:
-        charges.append(SPCE_CHARGES[atom.symbol])
-    water.partial_charges = charges * offunit.elementary_charge
-
-    # Set residue metadata
-    for atom in water.atoms:
-        atom.metadata["residue_name"] = "HOH"
-
-    LOGGER.debug("Created SPC/E water with literature charges")
-    return water
-
-
-def _generate_charged_molecule(smiles: str, residue_name: str) -> Molecule:
-    """Generate a molecule from SMILES and compute AM1BCC charges.
+def _generate_charged_molecule(
+    smiles: str, residue_name: str, method: str = "nagl", nagl_model: Optional[str] = None
+) -> Molecule:
+    """Generate a molecule from SMILES and assign partial charges with ``method``.
 
     This is used for custom solvents not in the library. The charges are
-    computed once and can be cached for future use.
+    computed once and cached for future use. The methods are those of the
+    substrate (:func:`polyzymd.utils.get_charger`): ``nagl``, ``am1bcc``
+    (needs AmberTools) and ``espaloma``.
 
     Args:
         smiles: SMILES string for the molecule.
         residue_name: 3-letter residue name.
+        method: Charge assignment method.
+        nagl_model: NAGL model for method nagl; the default when None.
 
     Returns:
-        OpenFF Molecule with AM1BCC partial charges.
+        OpenFF Molecule with partial charges.
     """
-    # Create molecule from SMILES
+    from openff.toolkit import Molecule
+
+    from polyzymd.utils import get_charger
+
     mol = Molecule.from_smiles(smiles)
-
-    # Generate a 3D conformer (required for AM1BCC)
+    # A conformer places the molecule; AM1-BCC also needs one to compute charges.
     mol.generate_conformers(n_conformers=1)
-
-    # Compute AM1BCC charges
-    # This uses the OpenFF toolkit's charge assignment
-    mol.assign_partial_charges(partial_charge_method="am1bcc")
+    kwargs = {"model_name": nagl_model} if method == "nagl" and nagl_model else {}
+    mol = get_charger(method, **kwargs).charge_molecule(mol)
 
     # Set residue metadata
     for atom in mol.atoms:
@@ -278,6 +282,38 @@ def _generate_charged_molecule(smiles: str, residue_name: str) -> Molecule:
     )
 
     return mol
+
+
+def split_counter_ions(smiles: str, name: str = "") -> tuple[str, int, int]:
+    """Split Na+ and Cl- counter-ions off a co-solvent SMILES.
+
+    Returns the SMILES of the molecule and the numbers of Na+ and Cl- written
+    with it: ``CCCCCCCCCCCCOS(=O)(=O)[O-].[Na+]`` gives the dodecyl sulfate
+    SMILES, 1 and 0. A SMILES with one part is returned unchanged.
+
+    Raises:
+        ValueError: If RDKit cannot read the SMILES, or the SMILES holds a
+            part that is neither Na+ nor Cl- besides the molecule. The message
+            names the co-solvent ``name``.
+    """
+    from rdkit import Chem
+
+    if "." not in smiles:
+        return smiles, 0, 0
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError(f"Co-solvent {name!r}: RDKit cannot read the SMILES {smiles!r}.")
+    fragments = Chem.GetMolFrags(mol, asMols=True)
+    parts = [Chem.MolToSmiles(part) for part in fragments]
+    molecules = [part for part in parts if part not in ("[Na+]", "[Cl-]")]
+    if len(molecules) != 1:
+        raise ValueError(
+            f"Co-solvent {name!r}: SMILES {smiles!r} has the parts {', '.join(parts)}. Only "
+            "Na+ and Cl- may be written beside the molecule. Give each other molecule its own "
+            "co_solvents entry, and leave other counter-ions out: solvent.ions.neutralize adds "
+            "Na+ or Cl-."
+        )
+    return molecules[0], parts.count("[Na+]"), parts.count("[Cl-]")
 
 
 def _load_molecule_from_sdf(path: Path) -> Molecule:
@@ -292,6 +328,8 @@ def _load_molecule_from_sdf(path: Path) -> Molecule:
     Returns:
         OpenFF Molecule with charges and metadata restored.
     """
+    from openff.toolkit import Molecule
+
     mol = Molecule.from_file(str(path), file_format="sdf")
 
     # Restore metadata from SDF properties
@@ -347,7 +385,6 @@ def list_available_solvents() -> Dict[str, str]:
 
     # Water models (always available)
     available["tip3p"] = "built-in"
-    available["spce"] = "built-in"
 
     # Library solvents
     if _SOLVENTS_DIR.exists():
@@ -372,13 +409,13 @@ def clear_cache(name: Optional[str] = None) -> None:
     if name is not None:
         # Clear specific solvent
         name_key = name.lower().strip()
-        if name_key in _loaded_molecules:
-            del _loaded_molecules[name_key]
-
-        cache_path = _USER_CACHE_DIR / f"{name_key}.sdf"
-        if cache_path.exists():
-            cache_path.unlink()
-            LOGGER.info(f"Removed {name_key} from cache")
+        # Cache keys are the name, or "<name>.<method>.<hash>".
+        for key in [k for k in _loaded_molecules if name_key in (k, k.rsplit(".", 2)[0])]:
+            del _loaded_molecules[key]
+        for cache_path in _USER_CACHE_DIR.glob(f"{name_key}.*.sdf"):
+            if cache_path.stem.rsplit(".", 2)[0] == name_key:
+                cache_path.unlink()
+                LOGGER.info(f"Removed {cache_path.name} from cache")
     else:
         # Clear all
         _loaded_molecules.clear()

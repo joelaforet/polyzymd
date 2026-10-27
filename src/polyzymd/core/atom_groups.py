@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, List, Optional, Set
+from typing import TYPE_CHECKING, Dict, FrozenSet, List, Optional, Set
 
-from openmm.app import Topology as OpenMMTopology
+if TYPE_CHECKING:
+    from openmm.app import Topology as OpenMMTopology
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,10 @@ PREDEFINED_GROUPS: FrozenSet[str] = frozenset(
         "ligand_heavy",
         # Polymer groups
         "polymer_heavy",
+        # Everything Packmol treated as the fixed solute (protein + substrate, all atoms)
+        "solute",
+        # The solute without its hydrogens: the set frozen during minimization
+        "solute_heavy",
         # Solvent groups
         "solvent",
         "water_only",
@@ -56,6 +61,157 @@ WATER_RESIDUE_NAMES: FrozenSet[str] = frozenset(
         "SPC",
         "SPCE",
         "OPC",
+    }
+)
+
+#: Residue names MDAnalysis's ``protein`` selection matches (MDAnalysis 2.10), kept here so
+#: the simulation environments, which have no MDAnalysis, can check co-solvent names.
+PROTEIN_SELECTION_RESIDUE_NAMES: FrozenSet[str] = frozenset(
+    {
+        "ACE",
+        "ALA",
+        "ALAD",
+        "ARG",
+        "ARGN",
+        "ASF",
+        "ASH",
+        "ASN",
+        "ASN1",
+        "ASP",
+        "ASPH",
+        "CALA",
+        "CARG",
+        "CASF",
+        "CASN",
+        "CASP",
+        "CCYS",
+        "CCYX",
+        "CGLN",
+        "CGLU",
+        "CGLY",
+        "CHID",
+        "CHIE",
+        "CHIP",
+        "CILE",
+        "CLEU",
+        "CLYS",
+        "CME",
+        "CMET",
+        "CPHE",
+        "CPRO",
+        "CSER",
+        "CTHR",
+        "CTRP",
+        "CTYR",
+        "CVAL",
+        "CYM",
+        "CYS",
+        "CYS1",
+        "CYS2",
+        "CYSH",
+        "CYX",
+        "DAB",
+        "GLH",
+        "GLN",
+        "GLU",
+        "GLUH",
+        "GLY",
+        "HID",
+        "HIE",
+        "HIP",
+        "HIS",
+        "HIS1",
+        "HIS2",
+        "HISA",
+        "HISB",
+        "HISD",
+        "HISE",
+        "HISH",
+        "HSD",
+        "HSE",
+        "HSP",
+        "HYP",
+        "ILE",
+        "LEU",
+        "LYN",
+        "LYS",
+        "LYSH",
+        "MET",
+        "MSE",
+        "NALA",
+        "NARG",
+        "NASN",
+        "NASP",
+        "NCYS",
+        "NCYX",
+        "NGLN",
+        "NGLU",
+        "NGLY",
+        "NHID",
+        "NHIE",
+        "NHIP",
+        "NILE",
+        "NLEU",
+        "NLYS",
+        "NME",
+        "NMET",
+        "NPHE",
+        "NPRO",
+        "NSER",
+        "NTHR",
+        "NTRP",
+        "NTYR",
+        "NVAL",
+        "ORN",
+        "PGLU",
+        "PHE",
+        "PRO",
+        "QLN",
+        "SER",
+        "THR",
+        "TRP",
+        "TYR",
+        "VAL",
+    }
+)
+
+#: Residue names MDAnalysis's ``nucleic`` selection matches (MDAnalysis 2.10).
+NUCLEIC_SELECTION_RESIDUE_NAMES: FrozenSet[str] = frozenset(
+    {
+        "A",
+        "ADE",
+        "C",
+        "CYT",
+        "DA",
+        "DA3",
+        "DA5",
+        "DC",
+        "DC3",
+        "DC5",
+        "DG",
+        "DG3",
+        "DG5",
+        "DT",
+        "DT3",
+        "DT5",
+        "G",
+        "GUA",
+        "RA",
+        "RA3",
+        "RA5",
+        "RC",
+        "RC3",
+        "RC5",
+        "RG",
+        "RG3",
+        "RG5",
+        "RU",
+        "RU3",
+        "RU5",
+        "T",
+        "THY",
+        "U",
+        "URA",
     }
 )
 
@@ -185,11 +341,10 @@ class SystemComponentInfo:
                 "Ensure the PDB was built by PolyzyMD with proper chain assignments."
             )
 
-        logger.info(
-            f"Parsed topology: {n_protein} protein atoms (chain A), "
-            f"{n_substrate} substrate atoms (chain B), "
-            f"{n_polymer} polymer atoms (chain C)"
-        )
+        parsed = f"{n_protein} protein atoms (chain A), {n_substrate} substrate atoms (chain B)"
+        if n_polymer:
+            parsed += f", {n_polymer} polymer atoms (chain C)"
+        logger.info(f"Parsed topology: {parsed}")
 
         return cls(
             n_protein_atoms=n_protein,
@@ -299,6 +454,10 @@ class AtomGroupResolver:
             return self._get_ligand_heavy()
         elif group_name == "polymer_heavy":
             return self._get_polymer_heavy()
+        elif group_name == "solute":
+            return self._get_solute()
+        elif group_name == "solute_heavy":
+            return self._get_solute_heavy()
         elif group_name == "solvent":
             return self._get_solvent()
         elif group_name == "water_only":
@@ -383,6 +542,39 @@ class AtomGroupResolver:
 
         logger.debug(f"Resolved 'ligand_heavy': {len(heavy_atoms)} atoms")
         return heavy_atoms
+
+    def _get_solute(self) -> List[int]:
+        """Get every protein and substrate atom, hydrogens included.
+
+        This is the set of atoms that Packmol held fixed while packing polymers
+        and solvent, and the set frozen during energy minimisation so that the
+        prepared structure enters equilibration with its coordinates unchanged.
+        """
+        atoms: List[int] = []
+        if self._info.has_protein:
+            atoms.extend(self._get_chain_atoms(self._info.protein_chain_id))
+        if self._info.has_substrate:
+            atoms.extend(self._get_chain_atoms(self._info.substrate_chain_id))
+        logger.debug(f"Resolved 'solute': {len(atoms)} atoms")
+        return sorted(atoms)
+
+    def _get_solute_heavy(self) -> List[int]:
+        """Get every non-hydrogen protein and substrate atom.
+
+        This is ``protein_heavy`` union ``ligand_heavy``: the set held fixed
+        during energy minimisation.  Solute hydrogens are deliberately excluded
+        so that the minimiser can pull them onto the force field's X-H
+        constraint lengths; freezing them as well leaves the input PDB's bond
+        lengths in place and hands equilibration a state whose constraints are
+        violated (see ``SimulationRunner.minimize``).
+        """
+        atoms: List[int] = []
+        if self._info.has_protein:
+            atoms.extend(self._get_protein_heavy())
+        if self._info.has_substrate:
+            atoms.extend(self._get_ligand_heavy())
+        logger.debug(f"Resolved 'solute_heavy': {len(atoms)} atoms")
+        return sorted(atoms)
 
     def _get_polymer_heavy(self) -> List[int]:
         """Get all non-hydrogen polymer atoms."""

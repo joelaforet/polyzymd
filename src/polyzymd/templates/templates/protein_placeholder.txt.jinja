@@ -1,0 +1,27 @@
+# ============================================================================
+# PLACEHOLDER: Place your protein PDB file here
+# ============================================================================
+#
+# This directory holds the input structures named in config.yaml.
+#
+# PROTEIN PDB FILE (required):
+#   - Standard amino acid residue names (no nonstandard residues)
+#   - Hydrogens for your simulation pH
+#   - No missing heavy atoms in regions of interest
+#   - Name it as the `pdb_path` of the `type: protein` entry under
+#     `solutes:` in config.yaml, for example:
+#
+#       solutes:
+#         - type: protein
+#           name: "protein_X"
+#           pdb_path: "structures/protein_X.pdb"
+#
+#   The file must end in .pdb.
+#
+# PREPARATION:
+#   Use `polyzymd clean-pdb -i your_protein.pdb` or another PDB
+#   preparation tool to replace nonstandard residues and add
+#   missing hydrogens before building your system.
+#
+# Delete this placeholder file after adding your protein structure.
+# ============================================================================

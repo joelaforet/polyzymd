@@ -1,0 +1,41 @@
+name: Engine parity and physics audit
+
+# The checks that make a PolyzyMD build trustworthy, on every pull request:
+# OpenMM and GROMACS exports of one system must hold the same terms, every
+# physics check must pass a correct build and fail each way a build has gone
+# wrong, and GROMACS must compile the staged position restraints PolyzyMD
+# writes. GROMACS comes from Ubuntu, so grompp runs without changing pixi.lock.
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev, "feature/**", "feat/**"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  parity:
+    name: Engine parity and physics audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GROMACS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gromacs
+          gmx --version | head -n 3
+
+      - uses: prefix-dev/setup-pixi@v0
+        with:
+          environments: test
+
+      - name: Physics audit, engine parity and GROMACS restraints
+        run: |
+          pixi run -e test pytest -v --color=yes \
+            tests/audit \
+            tests/exporters/test_gromacs_staged_restraints.py \
+            tests/config/test_solutes.py

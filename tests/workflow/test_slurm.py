@@ -1,0 +1,1386 @@
+"""Tests for SLURM job script generation and preset configuration.
+
+Covers:
+- SlurmConfig.from_preset() for all named presets
+- Conditional SBATCH directive generation (gpu_line, qos_line, mem_line,
+  nodes_line, account_line, mail_line)
+- Bridges2-specific GPU type, directive style
+- BRIDGES2_GPU_TYPES registry
+- Job name generation for self-resubmitting model
+- Pixi environment activation in generated scripts
+"""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+import polyzymd.workflow.slurm as slurm_module
+from polyzymd.workflow.slurm import (
+    BRIDGES2_GPU_TYPES,
+    SlurmConfig,
+    SlurmScriptGenerator,
+    sbatch_lines,
+)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_generator(config: SlurmConfig) -> SlurmScriptGenerator:
+    return SlurmScriptGenerator(config, pixi_env="sim-cuda-12-4")
+
+
+# ---------------------------------------------------------------------------
+# SlurmConfig.from_preset — all presets load without error
+# ---------------------------------------------------------------------------
+
+
+def test_job_script_paths_have_no_dot_dot(tmp_path, monkeypatch):
+    """A study's runs/ folder is reached through conditions/x/../../..; the script names it plainly."""
+    monkeypatch.setattr(slurm_module, "_discover_manifest_path", lambda: "/ws/pixi.toml")
+    (tmp_path / "conditions" / "water").mkdir(parents=True)
+    up = tmp_path / "conditions" / "water" / ".." / ".."
+    script = SlurmScriptGenerator(SlurmConfig()).generate_job_script(
+        config_path="/ws/config.yaml",
+        replicate=1,
+        working_dir=str(up / "runs" / "run_1"),
+        output_file=str(up / "runs" / "slurm_logs" / "job.%j.out"),
+    )
+
+    runs = (tmp_path / "runs").resolve()
+    assert f"#SBATCH --output={runs}/slurm_logs/job.%j.out" in script
+    assert f'#SBATCH --chdir="{runs}/run_1"' in script
+    assert "/../" not in script
+
+
+class TestPresetLoading:
+    """SlurmConfig.from_preset() creates valid configs for every named preset."""
+
+    def test_aa100_preset(self):
+        cfg = SlurmConfig.from_preset("aa100")
+        assert cfg.partition == "aa100"
+        assert cfg.qos == "gpu-normal"
+        assert cfg.account == "ucb-general"
+        assert cfg.time_limit == "23:59:59"
+        assert cfg.memory == "3G"
+        assert cfg.gpu_directive_style == "gres"
+        assert cfg.gpu_type is None
+
+    def test_al40_preset(self):
+        cfg = SlurmConfig.from_preset("al40")
+        assert cfg.partition == "al40"
+        assert cfg.qos == "gpu-normal"
+        assert cfg.account == "ucb-general"
+        assert cfg.gpu_directive_style == "gres"
+
+    def test_blanca_shirts_preset(self):
+        cfg = SlurmConfig.from_preset("blanca-shirts")
+        assert cfg.partition == "blanca,blanca-shirts"
+        assert cfg.qos == "preemptable"
+        assert cfg.account == "blanca-shirts"
+        assert cfg.exclude == "bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24"
+
+    def test_testing_preset(self):
+        cfg = SlurmConfig.from_preset("testing")
+        assert cfg.partition == "aa100"
+        assert cfg.qos == "gpu-testing"
+        assert cfg.account == "ucb-general"
+        assert cfg.time_limit == "0:05:59"
+        lines = sbatch_lines(cfg)
+        assert lines["gpu_line"] == "#SBATCH --gres=gpu:a100_3g.20gb:1"
+        assert lines["reservation_line"] == "#SBATCH --reservation=a100_test"
+
+    def test_no_alpine_preset_uses_a_retired_value(self):
+        """CURC retired QoS normal on the GPU partitions, amilan, atesting_a100 and ucb625_asc1."""
+        for name in ("aa100", "al40", "testing"):
+            cfg = SlurmConfig.from_preset(name)
+            assert cfg.qos.startswith("gpu-")
+            assert cfg.partition not in ("amilan", "atesting_a100")
+            assert cfg.account == "ucb-general"
+
+    def test_bridges2_preset(self):
+        cfg = SlurmConfig.from_preset("bridges2")
+        assert cfg.partition == "GPU-shared"
+        assert cfg.qos == ""  # No QoS on Bridges2
+        assert cfg.account == ""  # Inferred from login; omit directive
+        assert cfg.time_limit == "24:00:00"
+        assert cfg.memory is None  # Per-GPU allocation; omit --mem
+        assert cfg.gpu_type == "v100-32"
+        assert cfg.gpu_directive_style == "gpus"
+
+    def test_preset_accepts_email(self):
+        cfg = SlurmConfig.from_preset("aa100", email="user@example.com")
+        assert cfg.email == "user@example.com"
+
+    def test_unknown_preset_raises_value_error(self):
+        """Unrecognised preset names raise ValueError with available presets."""
+        with pytest.raises(ValueError, match="Unknown SLURM preset 'nonexistent'"):
+            SlurmConfig.from_preset("nonexistent")  # type: ignore[arg-type]
+
+    def test_unknown_preset_error_lists_valid_presets(self):
+        """The ValueError message includes all valid preset names."""
+        with pytest.raises(ValueError, match="aa100") as exc_info:
+            SlurmConfig.from_preset("bogus")  # type: ignore[arg-type]
+        msg = str(exc_info.value)
+        for name in ("aa100", "al40", "blanca-shirts", "bridges2", "testing"):
+            assert name in msg, f"Missing preset {name!r} from error message"
+
+
+# ---------------------------------------------------------------------------
+# Blanca excluded-node list (old NVIDIA drivers)
+# ---------------------------------------------------------------------------
+
+
+# bgpu-g4-u20 and bgpu-g4-u24 run driver 525.147, which is too old for the
+# pinned sim-cuda-12-4 builds; bgpu-bortz1 is a pre-existing exclusion.
+_EXPECTED_BLANCA_EXCLUDES = ("bgpu-bortz1", "bgpu-g4-u20", "bgpu-g4-u24")
+
+
+class TestBlancaExcludedNodes:
+    """Both shirts presets exclude the old-driver Blanca GPU nodes."""
+
+    @pytest.mark.parametrize("preset", ["blanca-shirts", "blanca-chbe-rdi"])
+    def test_preset_excludes_all_known_bad_nodes(self, preset):
+        cfg = SlurmConfig.from_preset(preset)
+        assert cfg.exclude is not None
+        listed = cfg.exclude.split(",")
+        assert listed == list(_EXPECTED_BLANCA_EXCLUDES)
+
+    @pytest.mark.parametrize("preset", ["blanca-shirts", "blanca-chbe-rdi"])
+    def test_rendered_script_has_single_exclude_line(self, preset, monkeypatch):
+        """Exactly one #SBATCH --exclude= line, listing all three nodes."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        script = SlurmScriptGenerator(
+            SlurmConfig.from_preset(preset), pixi_env="sim-cuda-12-4"
+        ).generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=1,
+            working_dir="/scratch/user/run_1",
+        )
+        exclude_lines = [
+            line for line in script.splitlines() if line.startswith("#SBATCH --exclude=")
+        ]
+        assert exclude_lines == ["#SBATCH --exclude=bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24"]
+
+    def test_explicit_override_replaces_preset_value(self):
+        """An explicit exclude replaces the preset list rather than appending."""
+        cfg = SlurmConfig.from_preset("blanca-shirts")
+        cfg.exclude = "some-other-node"
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["exclude_line"] == "#SBATCH --exclude=some-other-node"
+        assert "bgpu-bortz1" not in sbatch_lines(gen.config)["exclude_line"]
+
+    def test_preset_without_exclude_renders_no_directive(self, monkeypatch):
+        """bridges2 has no excluded nodes, so no --exclude line is emitted."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        script = SlurmScriptGenerator(
+            SlurmConfig.from_preset("bridges2"), pixi_env="sim-cuda-12-6"
+        ).generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=1,
+            working_dir="/scratch/user/run_1",
+        )
+        assert "#SBATCH --exclude=" not in script
+
+
+# ---------------------------------------------------------------------------
+# BRIDGES2_GPU_TYPES registry
+# ---------------------------------------------------------------------------
+
+
+class TestBridges2GpuTypes:
+    """BRIDGES2_GPU_TYPES list is the single source of truth for valid GPU types."""
+
+    def test_registry_is_non_empty_list(self):
+        assert isinstance(BRIDGES2_GPU_TYPES, list)
+        assert len(BRIDGES2_GPU_TYPES) > 0
+
+    def test_registry_contains_expected_types(self):
+        for gpu in ("v100-16", "v100-32", "l40s-48", "h100-80"):
+            assert gpu in BRIDGES2_GPU_TYPES, f"{gpu} missing from BRIDGES2_GPU_TYPES"
+
+    def test_registry_contains_only_strings(self):
+        assert all(isinstance(t, str) for t in BRIDGES2_GPU_TYPES)
+
+
+# ---------------------------------------------------------------------------
+# Conditional directive helpers
+# ---------------------------------------------------------------------------
+
+
+class TestConditionalDirectives:
+    """All conditional SBATCH helper methods produce correct output."""
+
+    # --- GPU line ---
+
+    def test_gpu_line_gres_style(self):
+        """Default (Alpine) style emits --gres=gpu:N."""
+        cfg = SlurmConfig.from_preset("aa100")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gres=gpu:1"
+
+    def test_gpu_line_gres_style_multi_gpu(self):
+        cfg = SlurmConfig(gpu_directive_style="gres", gpus=4)
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gres=gpu:4"
+
+    def test_gpu_line_gpus_style_bridges2_default(self):
+        """Bridges2 preset emits --gpus=v100-32:1."""
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gpus=v100-32:1"
+
+    def test_gpu_line_gpus_style_custom_type(self):
+        cfg = SlurmConfig(gpu_directive_style="gpus", gpu_type="h100-80", gpus=2)
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gpus=h100-80:2"
+
+    def test_gpu_line_gpus_style_without_gpu_type_falls_back_to_gres(self):
+        """If gpu_directive_style=='gpus' but gpu_type is None, fall back to gres."""
+        cfg = SlurmConfig(gpu_directive_style="gpus", gpu_type=None, gpus=1)
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gres=gpu:1"
+
+    def test_gpu_line_gres_style_with_gpu_type_emits_typed_gres(self):
+        """gres style with gpu_type should emit typed --gres directive."""
+        cfg = SlurmConfig(gpu_directive_style="gres", gpu_type="a100", gpus=2)
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gres=gpu:a100:2"
+
+    # --- Nodes line ---
+
+    def test_nodes_line_alpine_emits_two_directives(self):
+        """Alpine (gres) style emits --nodes and --ntasks on separate lines."""
+        cfg = SlurmConfig.from_preset("aa100")
+        gen = _make_generator(cfg)
+        line = sbatch_lines(gen.config)["nodes_line"]
+        assert "#SBATCH --nodes=1" in line
+        assert "#SBATCH --ntasks=1" in line
+
+    def test_nodes_line_bridges2_emits_single_N_flag(self):
+        """Bridges2 (gpus) style emits only '#SBATCH -N N'."""
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        line = sbatch_lines(gen.config)["nodes_line"]
+        assert line == "#SBATCH -N 1"
+        assert "--nodes" not in line
+        assert "--ntasks" not in line
+
+    # --- QoS line ---
+
+    def test_qos_line_present_when_non_empty(self):
+        cfg = SlurmConfig(qos="normal")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["qos_line"] == "#SBATCH --qos=normal"
+
+    def test_qos_line_omitted_when_empty(self):
+        """Bridges2 sets qos='' so the directive must be absent."""
+        cfg = SlurmConfig(qos="")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["qos_line"] == ""
+
+    def test_qos_line_bridges2_preset(self):
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["qos_line"] == ""
+
+    # --- Memory line ---
+
+    def test_mem_line_present_when_set(self):
+        cfg = SlurmConfig(memory="4G")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["mem_line"] == "#SBATCH --mem=4G"
+
+    def test_mem_line_omitted_when_none(self):
+        """Bridges2 sets memory=None so the directive must be absent."""
+        cfg = SlurmConfig(memory=None)
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["mem_line"] == ""
+
+    def test_mem_line_bridges2_preset(self):
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["mem_line"] == ""
+
+    # --- Account line ---
+
+    def test_account_line_present_when_non_empty(self):
+        cfg = SlurmConfig(account="ucb625_asc1")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["account_line"] == "#SBATCH --account=ucb625_asc1"
+
+    def test_account_line_omitted_when_empty(self):
+        """Bridges2 infers allocation from login; account line must be absent."""
+        cfg = SlurmConfig(account="")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["account_line"] == ""
+
+    def test_account_line_bridges2_preset_omitted(self):
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["account_line"] == ""
+
+    def test_account_line_bridges2_with_user_account(self):
+        """User-supplied account via --account flag appears in directive."""
+        cfg = SlurmConfig.from_preset("bridges2")
+        cfg.account = "chm250017p"
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["account_line"] == "#SBATCH --account=chm250017p"
+
+    # --- Mail line ---
+
+    def test_mail_line_present_when_email_set(self):
+        cfg = SlurmConfig(email="user@pitt.edu")
+        gen = _make_generator(cfg)
+        line = sbatch_lines(gen.config)["mail_line"]
+        assert "#SBATCH --mail-type=FAIL" in line
+        assert "#SBATCH --mail-user=user@pitt.edu" in line
+
+    def test_mail_line_omitted_when_no_email(self):
+        """Both --mail-type and --mail-user omitted when email is empty."""
+        cfg = SlurmConfig(email="")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["mail_line"] == ""
+
+    # --- Exclude line ---
+
+    def test_exclude_line_present(self):
+        cfg = SlurmConfig.from_preset("blanca-shirts")
+        gen = _make_generator(cfg)
+        assert (
+            sbatch_lines(gen.config)["exclude_line"]
+            == "#SBATCH --exclude=bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24"
+        )
+
+    def test_exclude_line_absent(self):
+        cfg = SlurmConfig.from_preset("aa100")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["exclude_line"] == ""
+
+    def test_nodelist_line_present(self):
+        """Configured nodelist should render as SBATCH directive."""
+        cfg = SlurmConfig(nodelist="node123")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["nodelist_line"] == "#SBATCH --nodelist=node123"
+
+    def test_nodelist_line_absent(self):
+        """nodelist SBATCH line should be omitted when unset."""
+        cfg = SlurmConfig(nodelist=None)
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["nodelist_line"] == ""
+
+
+class TestConstraintDirective:
+    """Tests for the --constraint SBATCH directive."""
+
+    def test_constraint_none_omits_line(self):
+        """When constraint is None, no --constraint line appears."""
+        cfg = SlurmConfig(constraint=None)
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["constraint_line"] == ""
+
+    def test_constraint_single_value(self):
+        """A single constraint value renders correctly."""
+        cfg = SlurmConfig(constraint="A40")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["constraint_line"] == "#SBATCH --constraint=A40"
+
+    def test_constraint_or_expression(self):
+        """SLURM OR expressions (pipe) are accepted."""
+        cfg = SlurmConfig(constraint="A40|A100")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["constraint_line"] == "#SBATCH --constraint=A40|A100"
+
+    def test_constraint_and_expression(self):
+        """SLURM AND expressions (ampersand) are accepted."""
+        cfg = SlurmConfig(constraint="avx2&rh8")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["constraint_line"] == "#SBATCH --constraint=avx2&rh8"
+
+    def test_constraint_complex_expression(self):
+        """Mixed constraint expressions are accepted."""
+        cfg = SlurmConfig(constraint="A40|A100|H100")
+        gen = _make_generator(cfg)
+        assert sbatch_lines(gen.config)["constraint_line"] == "#SBATCH --constraint=A40|A100|H100"
+
+
+# ---------------------------------------------------------------------------
+# Exit code handling in JOB_TEMPLATE
+# ---------------------------------------------------------------------------
+
+
+class TestJobTemplateExitCodeHandling:
+    """Verify that JOB_TEMPLATE handles exit codes correctly.
+
+    The bash wrapper must:
+    - Exit code 2 (concurrent): terminate cleanly without resubmitting
+    - Exit code 0 or 99: proceed to check-progress / resubmit logic
+    - Other non-zero: abort with error
+    """
+
+    def test_template_contains_exit_code_2_guard(self):
+        """JOB_TEMPLATE must intercept exit code 2 before the generic fatal check."""
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        assert "if [ $RC -eq 2 ]" in template
+
+    def test_exit_code_2_does_not_resubmit(self):
+        """The exit-code-2 block must exit 0 (no resubmit) and log CONCURRENT."""
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        # Find the exit-code-2 block
+        lines = template.splitlines()
+        in_block = False
+        block_lines = []
+        for line in lines:
+            if "if [ $RC -eq 2 ]" in line:
+                in_block = True
+            if in_block:
+                block_lines.append(line)
+                if line.strip() == "fi":
+                    break
+
+        block = "\n".join(block_lines)
+        assert "exit 0" in block, "Exit code 2 block must exit 0 (clean termination)"
+        assert "CONCURRENT" in block, "Exit code 2 block must log CONCURRENT message"
+
+    def test_exit_code_2_guard_precedes_fatal_check(self):
+        """Exit code 2 handling must appear BEFORE the generic non-zero check.
+
+        If the order were reversed, exit code 2 would be caught by the
+        'RC -ne 0 && RC -ne 99' guard and treated as a fatal error.
+        """
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        pos_concurrent = template.index("if [ $RC -eq 2 ]")
+        pos_fatal = template.index("if [ $RC -ne 0 ] && [ $RC -ne 99 ]")
+        message = "Exit code 2 guard must appear before the generic fatal-error guard"
+        assert pos_concurrent < pos_fatal, message
+
+    def test_template_fatal_check_excludes_code_2(self):
+        """The fatal-error guard checks 'RC -ne 0 && RC -ne 99'.
+
+        Since exit code 2 is intercepted earlier, it never reaches this guard.
+        This test documents the expected pattern.
+        """
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]" in template
+
+    def test_signal_resubmits_before_forwarding(self):
+        """TERM/USR1 must queue one dependent successor before child signaling."""
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        handler = template[template.index("forward_signal()") : template.index("trap '")]
+        assert handler.index("resubmit_once") < handler.index('kill -"$1"')
+        assert '--dependency="afterany:$SLURM_JOB_ID"' in template
+        assert 'if [ -s "$SUCCESSOR_RECEIPT" ]' in template
+
+
+class TestGeneratedOpenMMScript:
+    """Tests for rendered OpenMM self-resubmitting SLURM scripts."""
+
+    @staticmethod
+    def _render_script(monkeypatch: pytest.MonkeyPatch) -> str:
+        """Render a deterministic generated script for semantic assertions.
+
+        Parameters
+        ----------
+        monkeypatch : pytest.MonkeyPatch
+            Pytest monkeypatch fixture used to pin the pixi manifest path.
+
+        Returns
+        -------
+        str
+            Rendered SLURM script text.
+        """
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="sim-cuda-12-4")
+        return generator.generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=3,
+            working_dir="/scratch/user/run_3",
+            job_name="r3_test",
+            output_file="slurm_logs/r3_test.%j.out",
+        )
+
+    def test_rendered_script_has_no_unresolved_jinja_markers(self, monkeypatch):
+        """Rendered scripts should not leak package-template syntax."""
+        script = self._render_script(monkeypatch)
+
+        for marker in ("{{", "}}", "{%", "%}"):
+            assert marker not in script
+
+    def test_rendered_script_preserves_openmm_semantics(self, monkeypatch):
+        """Key self-resubmission and OpenMM environment semantics remain unchanged."""
+        script = self._render_script(monkeypatch)
+
+        assert "#SBATCH --partition=aa100" in script
+        assert "#SBATCH --job-name=r3_test" in script
+        assert f"#SBATCH --output={Path.cwd()}/slurm_logs/r3_test.%j.out" in script
+        assert '#SBATCH --chdir="/scratch/user/run_3"' in script
+        assert "REQUESTED_PIXI_ENV=sim-cuda-12-4" in script
+        assert (
+            '_pixi_hook="$(pixi shell-hook -e "$PIXI_ENV" '
+            '--manifest-path /projects/user/polyzymd/pixi.toml)"' in script
+        )
+        assert 'eval "$_pixi_hook"' in script
+        assert "nvidia-smi --query-gpu=driver_version,compute_cap" in script
+        assert 'openmm.Platform.getPlatformByName("CUDA")' in script
+        assert "openmm.NonbondedForce()" in script
+        assert "state = context.getState(getEnergy=True)" in script
+        assert "integrator.step(1)" in script
+        assert 'if selected != "CUDA"' in script
+        assert "resubmit_after_routing_failure" in script
+        assert '--dependency="afterany:$SLURM_JOB_ID"' in script
+        assert '--exclude="$excluded_node"' in script
+        assert "POLYZYMD_ROUTING_RETRY_COUNT=$next_count" in script
+        assert "POLYZYMD_ROUTING_FAILED_NODES=$failed_nodes" in script
+        assert "ROUTING_RETRY_LIMIT=3" in script
+        assert "runtime_platform.json" in script
+        assert 'PIXI_ENV="$RECORDED_PIXI_ENV"' in script
+        assert "reusing recorded environment" in script
+        assert "differs from recorded" in script
+        assert "export INTERCHANGE_EXPERIMENTAL=1" in script
+        assert "CONFIG_PATH=/projects/user/run/config.yaml" in script
+        assert "REPLICATE=3" in script
+        assert "WORKING_DIR=/scratch/user/run_3" in script
+        assert "polyzymd run-segment \\" in script
+        assert '    --scratch-dir "$WORKING_DIR" &' in script
+        assert "if [ $RC -eq 2 ]; then" in script
+        assert "exit 0" in script
+        assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]; then" in script
+        assert 'polyzymd check-progress -c "$CONFIG_PATH" -r "$REPLICATE"' in script
+        assert '--export="ALL,POLYZYMD_ROUTING_RETRY_COUNT=0,POLYZYMD_ROUTING_FAILED_NODES="' in (
+            script
+        )
+        assert 'STOP_FILE="${POLYZYMD_STOP_FILE:-$WORKING_DIR/STOP}"' in script
+        assert "stop_requested" in script
+
+    def test_routing_retry_preserves_configured_exclusions(self, monkeypatch):
+        """A routing retry excludes the failed node and configured exclusions."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        config = SlurmConfig.from_preset("aa100")
+        config.exclude = "known-bad-node"
+        script = SlurmScriptGenerator(config, pixi_env="auto").generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=1,
+            working_dir="/scratch/user/run_1",
+        )
+
+        assert "CONFIGURED_EXCLUDE=known-bad-node" in script
+        assert 'excluded_node="$(merge_node_list "$CONFIGURED_EXCLUDE" "$failed_nodes")"' in script
+
+    def test_failed_probe_resubmits_and_exits(self, monkeypatch, tmp_path):
+        """A failed node probe queues one successor before this job exits."""
+        script = self._render_script(monkeypatch)
+        script_path = tmp_path / "job.sh"
+        script_path.write_text(script)
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "nvidia-smi").write_text("#!/bin/bash\nexit 1\n")
+        (bin_dir / "sbatch").write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$SBATCH_LOG"\n')
+        (bin_dir / "nvidia-smi").chmod(0o755)
+        (bin_dir / "sbatch").chmod(0o755)
+        sbatch_log = tmp_path / "sbatch.log"
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{bin_dir}:{env['PATH']}",
+                "SBATCH_LOG": str(sbatch_log),
+                "SLURM_JOB_ID": "1234",
+                "SLURMD_NODENAME": "bad-gpu-2",
+                "SLURM_JOB_SCRIPT": str(script_path),
+                "POLYZYMD_ROUTING_RETRY_COUNT": "1",
+                "POLYZYMD_ROUTING_FAILED_NODES": "bad-gpu-1",
+            }
+        )
+
+        result = subprocess.run(["bash", str(script_path)], env=env, capture_output=True, text=True)
+
+        assert result.returncode == 0
+        submitted = sbatch_log.read_text()
+        assert "--dependency=afterany:1234" in submitted
+        assert "--exclude=bad-gpu-1,bad-gpu-2" in submitted
+        assert "POLYZYMD_ROUTING_RETRY_COUNT=2" in submitted
+        assert "POLYZYMD_ROUTING_FAILED_NODES=bad-gpu-1,bad-gpu-2" in submitted
+        assert "successor submitted; exiting current job" in result.stderr
+
+    def test_incompatible_driver_excludes_node_before_pixi(self, monkeypatch, tmp_path):
+        """A node below the pinned runtime threshold should be replaced."""
+        script_path = tmp_path / "job.sh"
+        script_path.write_text(self._render_script(monkeypatch))
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "nvidia-smi").write_text("#!/bin/bash\necho '525.60.13, 8.0'\n")
+        (bin_dir / "sbatch").write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$SBATCH_LOG"\n')
+        (bin_dir / "pixi").write_text("#!/bin/bash\necho pixi-must-not-run >&2\nexit 70\n")
+        for command in ("nvidia-smi", "sbatch", "pixi"):
+            (bin_dir / command).chmod(0o755)
+        sbatch_log = tmp_path / "sbatch.log"
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{bin_dir}:{env['PATH']}",
+                "SBATCH_LOG": str(sbatch_log),
+                "SLURM_JOB_ID": "5678",
+                "SLURMD_NODENAME": "old-driver-node",
+                "SLURM_JOB_SCRIPT": str(script_path),
+            }
+        )
+
+        result = subprocess.run(["bash", str(script_path)], env=env, capture_output=True, text=True)
+
+        assert result.returncode == 0
+        assert "pixi-must-not-run" not in result.stderr
+        assert "sim-cuda-12-4 is incompatible with driver 525.60" in result.stderr
+        assert "--exclude=old-driver-node" in sbatch_log.read_text()
+
+    def test_routing_retry_limit_stops_resubmission(self, monkeypatch, tmp_path):
+        """An unsupported partition cannot create an unlimited job chain."""
+        script_path = tmp_path / "job.sh"
+        script_path.write_text(self._render_script(monkeypatch))
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "nvidia-smi").write_text("#!/bin/bash\nexit 1\n")
+        (bin_dir / "nvidia-smi").chmod(0o755)
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{bin_dir}:{env['PATH']}",
+                "SLURM_JOB_ID": "1234",
+                "SLURMD_NODENAME": "bad-gpu-4",
+                "SLURM_JOB_SCRIPT": str(script_path),
+                "POLYZYMD_ROUTING_RETRY_COUNT": "3",
+            }
+        )
+
+        result = subprocess.run(["bash", str(script_path)], env=env, capture_output=True, text=True)
+
+        assert result.returncode == 1
+        assert "CUDA routing failed after 3 retries" in result.stderr
+
+    @staticmethod
+    def _fake_cluster_bin(tmp_path, *, driver="560.35.03", compute="8.0"):
+        """Create a bin/ directory with fake cluster commands on PATH.
+
+        Parameters
+        ----------
+        tmp_path : pathlib.Path
+            Test scratch directory.
+        driver : str
+            Driver version reported by the fake ``nvidia-smi``.
+        compute : str
+            Compute capability reported by the fake ``nvidia-smi``.
+
+        Returns
+        -------
+        pathlib.Path
+            The populated ``bin`` directory.
+        """
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        (bin_dir / "nvidia-smi").write_text(f"#!/bin/bash\necho '{driver}, {compute}'\n")
+        (bin_dir / "sbatch").write_text(
+            '#!/bin/bash\nprintf "%s\\n" "$@" >> "$SBATCH_LOG"\necho "Submitted batch job 42"\n'
+        )
+        # `pixi shell-hook` must emit shell code; emitting nothing keeps the
+        # surrounding environment intact for the rest of the script.
+        (bin_dir / "pixi").write_text("#!/bin/bash\nexit 0\n")
+        # Two heredoc scripts are piped to python: the CUDA preflight (no
+        # positional arguments) and the runtime-metadata writer (published +
+        # temporary path).  FAKE_METADATA_RC only affects the latter.
+        (bin_dir / "python").write_text(
+            "#!/bin/bash\n"
+            "cat > /dev/null\n"
+            'if [ -n "$3" ]; then\n'
+            '  if [ -n "${FAKE_METADATA_RC:-}" ]; then exit "$FAKE_METADATA_RC"; fi\n'
+            '  printf \'{"pixi_environment": "sim-cuda-12-4"}\\n\' > "$3"\n'
+            "fi\n"
+            'exit "${FAKE_PYTHON_RC:-0}"\n'
+        )
+        (bin_dir / "polyzymd").write_text(
+            "#!/bin/bash\n"
+            'if [ "$1" = "check-progress" ]; then exit "${FAKE_PROGRESS_RC:-1}"; fi\n'
+            'exit "${FAKE_SEGMENT_RC:-0}"\n'
+        )
+        for command in ("nvidia-smi", "sbatch", "pixi", "python", "polyzymd"):
+            (bin_dir / command).chmod(0o755)
+        return bin_dir
+
+    @classmethod
+    def _run_script(cls, script_path, bin_dir, tmp_path, **env_overrides):
+        """Execute a rendered script with fake cluster commands on PATH.
+
+        Returns
+        -------
+        tuple
+            ``(CompletedProcess, sbatch_log_text)``.
+        """
+        sbatch_log = tmp_path / "sbatch.log"
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{bin_dir}:{env['PATH']}",
+                "SBATCH_LOG": str(sbatch_log),
+                "SLURM_JOB_ID": "1000",
+                "SLURMD_NODENAME": "gpu-node-a",
+                "SLURM_JOB_SCRIPT": str(script_path),
+            }
+        )
+        env.update({key: str(value) for key, value in env_overrides.items()})
+        result = subprocess.run(["bash", str(script_path)], env=env, capture_output=True, text=True)
+        log = sbatch_log.read_text() if sbatch_log.exists() else ""
+        return result, log
+
+    @classmethod
+    def _render_to(cls, monkeypatch, tmp_path, working_dir):
+        """Render a script whose WORKING_DIR points at *working_dir*."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="sim-cuda-12-4")
+        script = generator.generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=3,
+            working_dir=str(working_dir),
+            job_name="r3_test",
+            output_file="slurm_logs/r3_test.%j.out",
+        )
+        script_path = tmp_path / "job.sh"
+        script_path.write_text(script)
+        return script_path
+
+    def test_runtime_mismatch_reroutes_instead_of_dying(self, monkeypatch, tmp_path):
+        """A runtime-provenance mismatch must reroute, not kill the chain.
+
+        The immutability guard used to raise under ``set -e`` before any trap
+        was installed, so the chain died with no successor queued.
+        """
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        (working_dir / "runtime_platform.json").write_text('{"pixi_environment": "sim-cuda-12-4"}')
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path)
+
+        result, log = self._run_script(
+            script_path,
+            bin_dir,
+            tmp_path,
+            FAKE_METADATA_RC="3",
+            SLURMD_NODENAME="mismatch-node",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "cannot reproduce the recorded run runtime" in result.stderr
+        assert "--exclude=mismatch-node" in log
+        assert "POLYZYMD_ROUTING_RETRY_COUNT=1" in log
+
+    def test_successful_segment_resets_routing_state(self, monkeypatch, tmp_path):
+        """A successor queued after a good segment starts with a fresh budget."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path)
+
+        result, log = self._run_script(
+            script_path,
+            bin_dir,
+            tmp_path,
+            POLYZYMD_ROUTING_RETRY_COUNT="2",
+            POLYZYMD_ROUTING_FAILED_NODES="bad-1,bad-2",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "POLYZYMD_ROUTING_RETRY_COUNT=0" in log
+        assert "POLYZYMD_ROUTING_FAILED_NODES=" in log
+        assert "POLYZYMD_ROUTING_FAILED_NODES=bad-1" not in log
+
+    def test_consecutive_routing_failures_accumulate_nodes(self, monkeypatch, tmp_path):
+        """Two routing failures in a row exclude both offending nodes."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path, driver="525.147")
+
+        first, first_log = self._run_script(
+            script_path, bin_dir, tmp_path, SLURMD_NODENAME="bgpu-g4-u20"
+        )
+        assert first.returncode == 0
+        assert "--exclude=bgpu-g4-u20" in first_log
+
+        second, second_log = self._run_script(
+            script_path,
+            bin_dir,
+            tmp_path,
+            SLURMD_NODENAME="bgpu-g4-u24",
+            POLYZYMD_ROUTING_RETRY_COUNT="1",
+            POLYZYMD_ROUTING_FAILED_NODES="bgpu-g4-u20",
+        )
+        assert second.returncode == 0
+        assert "--exclude=bgpu-g4-u20,bgpu-g4-u24" in second_log
+        assert "POLYZYMD_ROUTING_FAILED_NODES=bgpu-g4-u20,bgpu-g4-u24" in second_log
+
+    def test_repeated_failure_on_same_node_is_not_duplicated(self, monkeypatch, tmp_path):
+        """The excluded-node list is a set, not an append-only log."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path, driver="525.147")
+
+        result, log = self._run_script(
+            script_path,
+            bin_dir,
+            tmp_path,
+            SLURMD_NODENAME="bgpu-g4-u20",
+            POLYZYMD_ROUTING_RETRY_COUNT="1",
+            POLYZYMD_ROUTING_FAILED_NODES="bgpu-g4-u20",
+        )
+
+        assert result.returncode == 0
+        assert "--exclude=bgpu-g4-u20\n" in log
+
+    def test_routing_limit_message_names_every_excluded_node(self, monkeypatch, tmp_path):
+        """The terminal routing message lists every node the chain tried."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path, driver="525.147")
+
+        result, _ = self._run_script(
+            script_path,
+            bin_dir,
+            tmp_path,
+            SLURMD_NODENAME="bgpu-g4-u30",
+            POLYZYMD_ROUTING_RETRY_COUNT="3",
+            POLYZYMD_ROUTING_FAILED_NODES="bgpu-g4-u20,bgpu-g4-u24",
+        )
+
+        assert result.returncode == 1
+        assert "bgpu-g4-u20,bgpu-g4-u24,bgpu-g4-u30" in result.stderr
+
+    def test_stop_file_prevents_successor_submission(self, monkeypatch, tmp_path):
+        """A STOP file in the run directory halts the chain before sbatch."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        (working_dir / "STOP").write_text("stopped by tester at 2026-09-09T00:00:00+00:00\n")
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path)
+
+        result, log = self._run_script(script_path, bin_dir, tmp_path)
+
+        assert result.returncode == 0, result.stderr
+        assert log == ""
+        assert "STOP" in result.stdout
+        assert "stopped by tester" in result.stdout
+
+    def test_stop_env_override_prevents_successor_submission(self, monkeypatch, tmp_path):
+        """POLYZYMD_STOP_CHAIN=1 stops a chain without touching the filesystem."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path)
+
+        result, log = self._run_script(script_path, bin_dir, tmp_path, POLYZYMD_STOP_CHAIN="1")
+
+        assert result.returncode == 0, result.stderr
+        assert log == ""
+        assert "POLYZYMD_STOP_CHAIN=1" in result.stdout
+
+    def test_stop_file_prevents_routing_resubmission(self, monkeypatch, tmp_path):
+        """A stopped chain does not reroute to another node either."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        (working_dir / "STOP").write_text("stopped\n")
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path, driver="525.147")
+
+        result, log = self._run_script(script_path, bin_dir, tmp_path)
+
+        assert result.returncode == 0
+        assert log == ""
+
+    def test_rendered_script_quotes_pixi_args_with_spaces(self, monkeypatch):
+        """Pixi environment and manifest values render as single shell arguments."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/PolyzyMD Run/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(
+            SlurmConfig.from_preset("aa100"),
+            pixi_env="sim-cuda-12-4 --manifest-path /tmp/evil",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=3,
+            working_dir="/scratch/user/run_3",
+            job_name="r3_test",
+            output_file="slurm_logs/r3_test.%j.out",
+        )
+
+        assert "REQUESTED_PIXI_ENV='sim-cuda-12-4 --manifest-path /tmp/evil'" in script
+        assert "--manifest-path '/projects/user/PolyzyMD Run/pixi.toml'" in script
+
+    def test_rendered_script_preserves_setup_order(self, monkeypatch):
+        """Pixi activation, strict mode, and OpenFF export keep their ordering."""
+        script = self._render_script(monkeypatch)
+
+        probe_pos = script.index("nvidia-smi")
+        metadata_pos = script.index('RUNTIME_METADATA="$WORKING_DIR/runtime_platform.json"')
+        pixi_pos = script.index("pixi shell-hook")
+        strict_pos = script.index("set -e")
+        export_pos = script.index("export INTERCHANGE_EXPERIMENTAL=1")
+        run_pos = script.index("polyzymd run-segment")
+
+        assert metadata_pos < probe_pos < pixi_pos < strict_pos < export_pos < run_pos
+
+
+class TestScriptValueValidation:
+    """C8-H4: SLURM script values should reject shell metacharacters."""
+
+    def test_semicolon_injection_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("gpu; rm -rf /", "partition")
+
+    def test_pipe_injection_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("gpu | cat /etc/passwd", "partition")
+
+    def test_dollar_injection_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("$HOME", "pixi_env")
+
+    def test_bare_dollar_in_path_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("/scratch/user/run$1", "working_dir")
+
+    def test_backslash_in_path_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value(r"C:\scratch\run_1", "working_dir")
+
+    def test_backtick_injection_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("`whoami`", "job_name")
+
+    def test_newline_injection_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("job\n#SBATCH --partition=evil", "job_name")
+
+    def test_valid_partition_accepted(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        assert _validate_script_value("blanca-shirts", "partition") == "blanca-shirts"
+
+    def test_comma_partition_accepted(self):
+        """Comma-separated partitions like 'blanca,blanca-shirts' should work."""
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        assert _validate_script_value("blanca,blanca-shirts", "partition") == "blanca,blanca-shirts"
+
+    def test_valid_path_accepted(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        assert (
+            _validate_script_value("/home/user/project/config.yaml", "config_path")
+            == "/home/user/project/config.yaml"
+        )
+
+    def test_empty_string_accepted(self):
+        """Empty strings should pass validation (e.g. empty mdrun_flags)."""
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        assert _validate_script_value("", "mdrun_flags") == ""
+
+    def test_generate_rejects_bare_dollar_in_config_path(self, monkeypatch):
+        """Path validation should run before the Jinja template is rendered."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"))
+
+        with pytest.raises(ValueError, match="config_path"):
+            generator.generate_job_script(
+                config_path="/projects/user/run$config.yaml",
+                replicate=1,
+                working_dir="/scratch/user/run_1",
+            )
+
+    def test_generate_rejects_backslash_in_working_dir(self, monkeypatch):
+        """Backslash paths are rejected rather than shell-escaped by Jinja."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"))
+
+        with pytest.raises(ValueError, match="working_dir"):
+            generator.generate_job_script(
+                config_path="/projects/user/run/config.yaml",
+                replicate=1,
+                working_dir=r"C:\scratch\run_1",
+            )
+
+    @pytest.mark.parametrize("replicate", [0, -1, "1", 1.5, True])
+    def test_generate_rejects_non_positive_or_unsafe_replicate(self, monkeypatch, replicate):
+        """Replicate values must be positive integers before shell rendering."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"))
+
+        with pytest.raises(ValueError, match="replicate must be a positive integer"):
+            generator.generate_job_script(
+                config_path="/projects/user/run/config.yaml",
+                replicate=replicate,
+                working_dir="/scratch/user/run_1",
+                job_name="safe_name",
+            )
+
+    def test_constraint_pipe_accepted(self):
+        """Pipe is valid in constraint expressions (OR)."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        assert _validate_constraint_value("A40|A100", "constraint") == "A40|A100"
+
+    def test_constraint_ampersand_accepted(self):
+        """Ampersand is valid in constraint expressions (AND)."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        assert _validate_constraint_value("avx2&rh8", "constraint") == "avx2&rh8"
+
+    def test_constraint_semicolon_rejected(self):
+        """Semicolons are still rejected in constraint values."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("A40; rm -rf /", "constraint")
+
+    def test_constraint_dollar_rejected(self):
+        """Dollar signs are rejected in constraint values."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("$HOME", "constraint")
+
+    def test_constraint_backtick_rejected(self):
+        """Backticks are rejected in constraint values."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("`whoami`", "constraint")
+
+    def test_constraint_space_rejected(self):
+        """Spaces are rejected in constraint values (not valid in SLURM constraints)."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("A40 A100", "constraint")
+
+
+class TestNodelistValidation:
+    """Tests for SLURM nodelist validation."""
+
+    def test_simple_nodename_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("bgpu-shirts3") == "bgpu-shirts3"
+
+    def test_bracket_hostlist_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("node[01-04]") == "node[01-04]"
+
+    def test_comma_hostlist_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("node01,node02,node03") == "node01,node02,node03"
+
+    def test_complex_bracket_hostlist_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("gpu[01-04,07]") == "gpu[01-04,07]"
+
+    def test_semicolon_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node01;rm -rf /")
+
+    def test_pipe_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node01|cat /etc/passwd")
+
+    def test_backtick_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node`whoami`")
+
+    def test_dollar_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node${HOME}")
+
+    def test_space_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node01 node02")
+
+
+class TestGpuTypeValidation:
+    """Tests for GPU type value validation used in SBATCH rendering."""
+
+    def test_gpu_type_a100_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("a100") == "a100"
+
+    def test_gpu_type_a40_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("a40") == "a40"
+
+    def test_gpu_type_mi100_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("mi100") == "mi100"
+
+    def test_gpu_type_v100_32_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("v100-32") == "v100-32"
+
+    def test_gpu_type_semicolon_rejected(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_gpu_type_value("a100;rm -rf /")
+
+    def test_gpu_type_dollar_rejected(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_gpu_type_value("$HOME")
+
+
+def test_openmm_and_gromacs_scripts_request_the_same_resources(monkeypatch):
+    """Both engines write every resource line of the config; GROMACS also mails at the end."""
+    from polyzymd.engines.gromacs.slurm import GromacsSlurmScriptGenerator
+
+    manifest = lambda: "/projects/user/polyzymd/pixi.toml"  # noqa: E731
+    monkeypatch.setattr(slurm_module, "_discover_manifest_path", manifest)
+    monkeypatch.setattr("polyzymd.engines.gromacs.slurm._discover_manifest_path", manifest)
+    cfg = SlurmConfig.from_preset("blanca-shirts", email="me@example.org")
+    cfg.constraint = "A40|A100"
+    cfg.nodelist = "node1"
+    cfg.cpus_per_task = 4
+
+    openmm = _make_generator(cfg).generate_job_script("/c.yaml", 1, "/run_1").splitlines()
+    gromacs = (
+        GromacsSlurmScriptGenerator(cfg)
+        .generate_job_script("/c.yaml", 1, "/run_1", "LipA", ["eq_01_nvt.mdp"])
+        .splitlines()
+    )
+    resources = [
+        "#SBATCH --qos=preemptable",
+        "#SBATCH --nodes=1",
+        "#SBATCH --ntasks=1",
+        "#SBATCH --cpus-per-task=4",
+        "#SBATCH --gres=gpu:1",
+        "#SBATCH --mail-user=me@example.org",
+        "#SBATCH --account=blanca-shirts",
+        "#SBATCH --nodelist=node1",
+        "#SBATCH --constraint=A40|A100",
+    ]
+
+    assert set(resources) <= set(openmm) and set(resources) <= set(gromacs)
+    assert "#SBATCH --mail-type=FAIL" in openmm
+    assert "#SBATCH --mail-type=FAIL,END" in gromacs
+
+
+def test_openmm_job_ignores_user_site_packages(monkeypatch):
+    """The job sets PYTHONNOUSERSITE before its first Python process."""
+    monkeypatch.setattr(slurm_module, "_discover_manifest_path", lambda: "/ws/pixi.toml")
+    lines = _make_generator(SlurmConfig.from_preset("blanca-shirts")).generate_job_script(
+        "/c.yaml", 1, "/run_1"
+    )
+    lines = lines.splitlines()
+
+    first_python = next(i for i, line in enumerate(lines) if line.startswith("if ! python"))
+    assert lines.index("export PYTHONNOUSERSITE=1") < first_python
+
+
+class TestDiscoverManifestPath:
+    """The pixi manifest is found when the environments live outside the workspace."""
+
+    def test_uses_the_manifest_of_the_active_pixi_workspace(self, monkeypatch, tmp_path):
+        manifest = tmp_path / "ws" / "pixi.toml"
+        manifest.parent.mkdir()
+        manifest.write_text("")
+        monkeypatch.setenv("PIXI_PROJECT_MANIFEST", str(manifest))
+        monkeypatch.setenv("CONDA_PREFIX", sys.prefix)
+        monkeypatch.setattr(slurm_module.shutil, "which", lambda name: "/opt/elsewhere/polyzymd")
+
+        assert slurm_module._discover_manifest_path() == str(manifest)
+
+    def test_ignores_the_manifest_of_another_active_environment(self, monkeypatch, tmp_path):
+        other = tmp_path / "other" / "pixi.toml"
+        other.parent.mkdir()
+        other.write_text("")
+        workspace = tmp_path / "ws"
+        (workspace / ".pixi" / "envs" / "build" / "bin").mkdir(parents=True)
+        (workspace / "pixi.toml").write_text("")
+        exe = workspace / ".pixi" / "envs" / "build" / "bin" / "polyzymd"
+        exe.write_text("")
+        monkeypatch.setenv("PIXI_PROJECT_MANIFEST", str(other))
+        monkeypatch.setenv("CONDA_PREFIX", str(tmp_path / "other" / ".pixi" / "envs" / "x"))
+        monkeypatch.setattr(slurm_module.shutil, "which", lambda name: str(exe))
+
+        assert slurm_module._discover_manifest_path() == str(workspace / "pixi.toml")
+
+    def test_finds_the_workspace_through_a_symlinked_pixi_folder(self, monkeypatch, tmp_path):
+        workspace = tmp_path / "ws"
+        envs = tmp_path / "scratch" / "pixi-envs"
+        (envs / "envs" / "build" / "bin").mkdir(parents=True)
+        (envs / "envs" / "build" / "bin" / "polyzymd").write_text("")
+        workspace.mkdir()
+        (workspace / "pixi.toml").write_text("")
+        (workspace / ".pixi").symlink_to(envs)
+        monkeypatch.delenv("PIXI_PROJECT_MANIFEST", raising=False)
+        exe = workspace / ".pixi" / "envs" / "build" / "bin" / "polyzymd"
+        monkeypatch.setattr(slurm_module.shutil, "which", lambda name: str(exe))
+
+        assert slurm_module._discover_manifest_path() == str(workspace / "pixi.toml")
+
+
+def _activation(tmp_path, pixi_body: str) -> subprocess.CompletedProcess:
+    """Run the pixi activation block with a fake ``pixi`` and report what follows it."""
+    from polyzymd.workflow.slurm import pixi_activation_block
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "pixi").write_text("#!/bin/bash\n" + pixi_body)
+    (bin_dir / "pixi").chmod(0o755)
+    script = tmp_path / "activate.sh"
+    script.write_text(
+        "set -e\n"
+        + pixi_activation_block('"sim-cuda-12-4"', "/projects/user/polyzymd/pixi.toml")
+        + '\necho "after activation: ${POLYZYMD_ENV_ACTIVE:-no}"\n'
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "POLYZYMD_PIXI_RETRY_SLEEP": "0",
+        "COUNT_FILE": str(tmp_path / "count"),
+    }
+    return subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+
+
+def test_a_failing_pixi_shell_hook_is_tried_again(tmp_path):
+    """A hook that fails while another job updates the environment is retried."""
+    result = _activation(
+        tmp_path,
+        'n=$(cat "$COUNT_FILE" 2>/dev/null || echo 0); echo $((n + 1)) > "$COUNT_FILE"\n'
+        'if [ "$n" -lt 2 ]; then exit 1; fi\n'
+        'echo "export POLYZYMD_ENV_ACTIVE=yes"\n',
+    )
+    assert result.returncode == 0, result.stderr
+    assert "after activation: yes" in result.stdout
+    assert result.stderr.count("pixi shell-hook failed") == 2
+
+
+def test_a_job_whose_environment_never_activates_stops(tmp_path):
+    """The job stops with an error instead of running without its environment."""
+    result = _activation(tmp_path, "exit 1\n")
+    assert result.returncode == 1
+    assert "FATAL: cannot activate the pixi environment of /projects/user/polyzymd/pixi.toml" in (
+        result.stderr
+    )
+    assert "after activation" not in result.stdout
+
+
+def test_an_openmm_job_without_its_environment_does_not_run(monkeypatch, tmp_path):
+    """The rendered OpenMM job stops before any PolyzyMD command when pixi cannot activate."""
+    working_dir = tmp_path / "run_3"
+    working_dir.mkdir()
+    script_path = TestGeneratedOpenMMScript._render_to(monkeypatch, tmp_path, working_dir)
+    bin_dir = TestGeneratedOpenMMScript._fake_cluster_bin(tmp_path)
+    (bin_dir / "pixi").write_text("#!/bin/bash\nexit 1\n")
+    (bin_dir / "polyzymd").write_text('#!/bin/bash\necho "polyzymd ran $1"\n')
+
+    result, log = TestGeneratedOpenMMScript._run_script(
+        script_path, bin_dir, tmp_path, POLYZYMD_PIXI_RETRY_SLEEP="0"
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "polyzymd ran" not in result.stdout
+    assert log == ""
+
+
+def test_preempted_jobs_go_back_to_the_queue(monkeypatch):
+    """Both engines let SLURM requeue a job it preempts.
+
+    Whether a preempted job gets SIGTERM and a grace period first is the
+    site's choice, so the chain cannot rely on its SIGTERM handler to submit a
+    successor; with --no-requeue, a job killed without one stopped the chain.
+    A requeued job resumes from the replicate's restart state.
+    """
+    from polyzymd.engines.gromacs.slurm import GromacsSlurmScriptGenerator
+
+    manifest = lambda: "/projects/user/polyzymd/pixi.toml"  # noqa: E731
+    monkeypatch.setattr(slurm_module, "_discover_manifest_path", manifest)
+    monkeypatch.setattr("polyzymd.engines.gromacs.slurm._discover_manifest_path", manifest)
+    cfg = SlurmConfig.from_preset("blanca-shirts")
+    openmm = _make_generator(cfg).generate_job_script("/c.yaml", 1, "/run_1").splitlines()
+    gromacs = (
+        GromacsSlurmScriptGenerator(cfg)
+        .generate_job_script("/c.yaml", 1, "/run_1", "LipA", ["eq_01_nvt.mdp"])
+        .splitlines()
+    )
+    for script in (openmm, gromacs):
+        assert "#SBATCH --requeue" in script
+        assert "#SBATCH --no-requeue" not in script

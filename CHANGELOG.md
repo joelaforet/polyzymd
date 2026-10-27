@@ -5,6 +5,1230 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-24
+
+### What changed for you (read this first)
+
+Coming from 1.2? These are the changes you will notice. The documentation's
+"New in 1.3" cards link to each; the sections below give every detail.
+
+- **Rewrite your config once.** Each component (protein, ligand, polymers,
+  solvent) names its own force field and charges, with no hidden defaults.
+  A 1.2 config stops with an error that links to the rewrite guide
+  (`docs/source/how_to/rewrite_config_rc5.md`). Later 1.3 releases only add keys.
+- **Every build is checked against its config.** The physics audit compares the
+  built system, term by term, with what the config names, and a failed audit
+  stops the build. `build_provenance.md` lists what each build used and what to
+  cite.
+- **Projects, studies and conditions.** `polyzymd project init` makes a folder
+  for a paper; `study add-condition` adds conditions to a study. Copying a
+  condition's config into another study reuses its runs, without running them
+  again.
+- **Analysis by study.** `polyzymd analyze NAME --study ...` runs an analysis on
+  every replicate and compares the conditions, one value per replicate; verdicts
+  need three replicates per condition, and a report with an unfinished replicate
+  is partial (exit code 3). Your own Python function runs the same way
+  (`Study.timeseries`).
+- **Your own protocol.** A build can be run outside PolyzyMD (PLUMED, your own
+  `.mdp` or OpenMM script) and brought back for analysis
+  (`docs/source/how_to/own_protocol.md`).
+- **Publish.** `polyzymd project freeze` writes a deposit from which a reader can
+  redraw the figures and rerun the analyses.
+- **Polymers from SMILES.** Each monomer is written as a star-sited SMILES and
+  built with mBuild; caps and tacticity are part of the config.
+- **Stop, continue, run longer.** An interrupted run continues with the same
+  command; a finished OpenMM run can be extended. `polyzymd status` says what to
+  do with each replicate.
+- **Reproducible runs.** The replicate number seeds the starting structure, the
+  velocities and the thermostat noise.
+
+The entries below describe changes made before 1.3.0rc5 and use the key names
+of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
+
+
+### Added
+
+- **Reuse a condition's runs in another study.**  Copying a config whose runs exist, with `polyzymd study add-condition --config` or `study init --condition`, now keeps the copy's `scratch_directory` on those runs instead of starting an empty `runs/` folder. So copying the config of another study's condition analyzes that condition's trajectories in the new study, with its own equilibration window, control and factors, without running them again, and `status`, `run` and `submit` of either config see the same replicates. `add-condition --from`, which copies a condition to make another, still gives the copy runs of its own. `study check` warns when two conditions read the same runs but their configs differ. Freeze lists a replicate that several conditions share once in `deposit/trajectories.csv` and the upload table of `UPLOAD.md`, named for every condition that uses it, and records a config elsewhere in the project by its relative path, never by this machine's. The docs page `how_to/reuse_condition.md` shows the steps.
+- **Dynamic polymers from star-sited SMILES.**  A `generation_mode: dynamic` polymer gives each monomer as its repeat unit with `*` on its two linking atoms (`[*]CC([*])(C)C(=O)OC` for methyl methacrylate) and, in the required `end_groups: {head: [...], tail: [...]}`, the caps each chain end can get: SMILES with one `*` (`[*][H]`, or a whole monomer that kept its C=C, `[*]C=C(C)C(=O)OC`, as at the ends of the Paper 1 chains) with probabilities that sum to 1 per end, drawn per chain. `length` counts the two ends (`length: 5` is an end, three repeat units and an end); a chain's sequence is its head cap's label, its repeat units' labels and its tail cap's label, so the Paper 1 SBMA-EGMA chemistry builds the same 5-mers and file names as the Paper 1 library. A cap with a `residue_name` is its own residue. Stereoisomers of one monomer may share a residue name, so tacticity is set by giving each backbone configuration its own label. Chains are built with mBuild (github.com/joelaforet/mbuild, tag `biopolymers-v0.1.0`), charged, relaxed in vacuum with the polymer's force field, and checked for pierced rings and atoms closer than 1.0 Å. Methacrylates such as MMA, HEMA and methoxyethyl methacrylate now build. `validate` reads every monomer and cap SMILES and checks the number of `*`; `reactions:` is refused with a link to the rewrite guide. A dynamic chain keeps the direction of its drawn sequence; cached libraries keep their canonical names, cached mode also finds a chain named in the other direction, and it checks a config's monomer SMILES and caps against the build metadata of cached chains that dynamic generation made. Monomer labels and names must be unique. The notebook `star_sited_monomers.ipynb`, which `polyzymd project init` puts in the project's `notebooks/` folder, draws a monomer with its atom indices and writes its repeat unit and chain-end form. The build record names the mBuild version and commit, records the seed of the sequence draw (`polymer_sequence_seed`), and lists mBuild under "Methods to cite". Chains cached by earlier releases are built again.
+- **Each OpenFF release cited by its own DOI.**  "Methods to cite" gives the OpenFF Toolkit, Interchange and openff-forcefields releases a build used with the Zenodo DOI of that release, from a table PolyzyMD ships (`polyzymd/data/openff_release_dois.json`, written by `scripts/update_openff_release_dois.py`). A version newer than the table is given with the DOI of every release, as before. The build record now also records `openff_forcefields_version`.
+- **Analyze the trajectories with your own tools.**  A docs page says which files of an OpenMM or GROMACS replicate to read, the residue, atom, segment and chain names of a built system and the selections that match them, how production segments join and how their frame times are laid out, how to load a replicate in MDAnalysis and use `gmx` tools, and how to bring the results back into a project as a `function:` analysis or a `stats/` script. The notebook `load_replicates.ipynb`, which `polyzymd project init` puts in the project's `notebooks/` folder, loads a replicate of the project with PolyzyMD's loader and by hand from its files, and measures a quantity over its frames.
+- **`force_field.nagl_model`.**  Names the NAGL model for every molecule charged with `charge_method: nagl`: the substrate, co-solvents generated from SMILES and dynamically generated polymers. The default is the production model `openff-gnn-am1bcc-1.0.0.pt`, the one OpenFF Sage 2.3.0 names; the release candidates used `openff-gnn-am1bcc-0.1.0-rc.3.pt`, which a config can name to rebuild as they did. A config without the key keeps its build hash. Co-solvent charge caches are keyed by the model, and dynamic polymers are charged by PolyzyMD's own NAGL charger, because Polymerist's always used rc.3. `validate` refuses a model that is not installed, the build manifest records the model, its file SHA-256 and the openff-nagl-models version, and molecules charged with NAGL carry the model name into their SDFs. With openff-nagl-models 2025.9.0 the 1.0.0 and rc.3 models give the same charges to within 1e-7 e on the molecules tested, so a rebuild with the new default matches an rc build.
+- **`solvent.ions.ionic_strength`.**  Sets the ionic strength of the whole box, counter-ions included, in place of `nacl_concentration`. Na+ and Cl- split the solute charge, (N - Q)/2 and (N + Q)/2 (Machado and Pantano, J. Chem. Theory Comput. 2020), so the box is neutral and a buffer can be matched by its ionic strength; `nacl_concentration` still adds neutralizing ions on top of the pairs. The build logs the ionic strength it reached and warns when counter-ions and charged co-solvents alone exceed the target. A config without the key keeps its build hash. Charged co-solvents such as surfactants, and counter-ions in their SMILES, count toward the ionic strength with their charge squared; NaCl fills the rest. It needs `neutralize: true`.
+
+- **`enzyme.custom_substructures_path`.**  A JSON file of residue templates for residues OpenFF's template matcher does not know, such as the N-terminal cystine of 4CHA. The path is relative to the config, checked for shape on load, passed to `Topology.from_pdb(_custom_substructures=...)`, and part of the config hash. The docs described this key before any code read it.
+
+- **Seeded dynamics.**  The replicate number now seeds the initial velocities and the thermostat noise, on both engines. Each equilibration stage and production segment gets its own seed from `polyzymd.simulation.seeds.dynamics_seed(replicate, phase)`, so no stage repeats another's noise. OpenMM sets `integrator.setRandomNumberSeed` and `setVelocitiesToTemperature(T, seed)`; GROMACS MDP files get `gen_seed` and `ld_seed`. A replicate run again gives the same trajectory only on the same platform, precision and software versions.
+
+- **Dead chains in `polyzymd status` carry an action.**  `resubmit` or `inspect`, decided from the
+  last error line. The resubmit footer no longer suggests restarting chains that died on a NaN, a
+  build refusal or a missing package, and gives a chain that failed CUDA routing `--exclude` with
+  the preset's nodes and the ones it names. A preemption or node failure outranks the FATAL lines
+  a job prints after it, and the specific "Segment N failed" cause outranks the generic
+  "FATAL: run-segment failed" line.
+
+- **Systems without polymers.**
+  - Co-solvents take `charge_method` (default `nagl`; `am1bcc` needs AmberTools), and the build asks you to check the default.
+  - Co-solvents take `count:` for a number of molecules.
+  - A SMILES with several parts (`...[O-].[Na+]`) is charged part by part, so NAGL handles the sodium.
+  - The config hash includes the co-solvents, so a water and an SDS condition never share one.
+  - `polyzymd build` follows the config's `engine`, and `polyzymd run` takes it from the config when `--engine` is left out.
+  - The build dry run lists co-solvents and ions, and says what the replicate number seeds.
+  - `examples/quickstart/` ships Trp-cage with one config per engine. `tests/test_quickstart_example.py` runs it from config to `analyze rg`.
+  - A `polyzymd-simulate` agent skill covers setup, build, run and submit.
+
+- **Trajectory hashes, and `polyzymd hash-trajectories`.**  Each completed
+  OpenMM production segment records its trajectory's SHA-256 and size in
+  `progress.json` (`trajectory_sha256`, `trajectory_bytes`) after flushing the
+  reporters' buffered files.  `polyzymd hash-trajectories (-c CONFIG ... |
+  --study PATH) [--replicates] [--verify] [--dry-run] [--rehash-changed]`
+  records the hashes of finished trajectories of any engine that has none
+  (older OpenMM runs, downsampled copies, GROMACS runs) in
+  `trajectory_hashes.json` beside the run's files, and never writes
+  `progress.json`.  It is idempotent, writes atomically, and never overwrites
+  a recorded hash (a disagreement is a `conflict:` and exits 2;
+  `--rehash-changed` records again a file of its own that was extended).
+  `freeze` names the conditions whose runs still lack hashes.  Engines say
+  which files are their finished trajectories with
+  `SimulationEngine.trajectory_files`.
+
+- **`polyzymd analyze NAME -c ... --submit`.**  Runs the same command as a
+  SLURM array: one task per condition and replicate, each measuring and
+  storing its replicate's result with `--no-plots`, and a report job,
+  submitted with `--dependency=afterany`, that runs the full command, reads
+  every stored result, measures any replicate a task left unmeasured and
+  writes the report and figures.  The scripts go to
+  `<output-dir>/slurm/<analysis>_<YYYYmmdd-HHMMSS>/` (`tasks.tsv`,
+  `replicates.sbatch`, `report.sbatch`, `logs/`, and `report.txt`,
+  `report.json` with `--format json`, or the `-o` path).  `--preset` takes `alpine-cpu`, `blanca-shirts`,
+  `blanca-chbe-rdi` or `bridges2-rm`; `--partition`, `--account`, `--qos`,
+  `--time` (default `12:00:00`), `--mem` (`16G`) and `--cpus` (`2`) override
+  it; `--dry-run` writes the scripts without submitting.  The jobs run the
+  submitting Python interpreter and `PYTHONPATH` in the submitting directory
+  (`polyzymd.workflow.analysis_submit`).  On Blanca, two LipA conditions of
+  five replicates each gave the same report as one job.
+
+- **Hydrogen-bond functions on the study API.**  `polyzymd.analyses.functions`
+  gains `hbond_atoms` (the hydrogens bonded to N, O or S that can be donated,
+  and the acceptors: every O, and N or S bonded to at most two atoms),
+  `hydrogen_bonds` (MDAnalysis `HydrogenBondAnalysis` with those selections,
+  3.5 Å and 150° by default, giving per replicate the mean hydrogen bonds and
+  hydrogen-bonded residue pairs per frame and the fraction of frames with
+  any), `hbond_lifetimes` (the Kaplan-Meier lifetime of each residue pair's or
+  atom pair's hydrogen bonds, with `tolerance_ps`), `residue_hbond_occupancy`
+  (each residue's fraction of frames with a hydrogen bond),
+  `residue_pair_hbond_occupancy` (every residue pair joined by a hydrogen bond
+  and its fraction of frames) and `hbond_count` (the hydrogen bonds at the
+  current frame, for `Study.timeseries`).  `polyzymd analyze hydrogen_bonds -c
+  A/config.yaml -c B/config.yaml` runs them for the `groups` and `summaries`
+  settings, with `--run <summary>_mean_hbonds`, `_mean_residue_pairs`,
+  `_any_fraction`, `_mean_lifetime`, `_lifetime_events`, `_censored_fraction`,
+  `_residues` and `_pairs`, and draws `hbonds_<run>_comparison`, `_profile` and
+  `_difference`.
+
+- **Per-residue RMSF, offset and `rmsd_per_residue` on the study API.**
+  `polyzymd.analyses.functions` gains `rmsf` (`gmx rmsf -o`), `rmsd_per_residue`
+  (each residue's root mean square over frames of its atoms' distance from
+  the reference, `gmx rmsf -od`) and `rms_decomposition` (both with the
+  offset of the mean position, and their mean squares, in one pass, with
+  `rmsd_per_residue² = rmsf² + offset²`).  `rmsd_per_residue` is one number per
+  residue; `rmsd` stays one number per frame.  `polyzymd analyze rmsf` and
+  `polyzymd analyze rmsd_per_residue` report `core_`, `<region>_` and `mean_`
+  values and the per-residue profiles.
+
+- **Force-field charges and bonds in the analysis loader.**  The loader reads
+  the OpenMM system XML that PolyzyMD saves beside each run's first segment
+  (`production_0/production_0_system.xml`) and gives the universe its partial
+  charges and replaces its bonds with the system's bonds and constraints,
+  without the H-H constraint of rigid water, when the system has one particle
+  per atom.  The topology PDB records bonds only for non-standard residues,
+  so hydrogen-bond donors can now be found from the bonds of every residue.
+
+- **`Study.per_replicate(..., labels="returned")`.**  For a function that
+  returns `(labels, values)`, such as `residue_pair_hbond_occupancy`, whose
+  entries are known only once measured.  Each replicate's labels are stored in
+  `labels.json` beside its values, the labels of every replicate are lined up
+  in order of first appearance, and `missing=` fills a label a replicate
+  lacks; without `missing`, replicates with different labels are refused.
+
+- **`system.prmtop`, a bond-complete analysis topology.**  `polyzymd build`
+  now writes `system.prmtop` beside `solvated_system.pdb` and `system.xml`,
+  built from the OpenMM topology and System together with ParmEd.  It carries
+  every atom, residue, element, mass, charge and bond, including constrained
+  bonds, with no column widths and no atom limit, and MDAnalysis reads it with
+  bonds taken from the file.  The analysis loader prefers it when present and
+  falls back to the PDB for older runs.  The PDB stays for viewers: above
+  99,999 atoms OpenMM writes hex serials that MDAnalysis cannot read in CONECT
+  records, and it carries CONECT records for non-standard residues only.  A
+  new `polyzymd analysis-topology RUN_DIR...` writes the file for existing
+  runs from the two files they already have.  The build manifest records its
+  hash when it is written.  GROMACS runs get the same treatment with the file
+  they already have: analyses prefer `prod.tpr`, the compiled run input, over
+  the PDB and the GRO.
+
+- **`polyzymd status --unfinished` and per-condition counts.**  `--unfinished` omits completed
+  replicates and collapses finished systems to one line, halving agent output on a 63-replicate
+  campaign.  System headers now end with `done/total completed`, and dead chains whose log holds
+  no error line report their SLURM end state from a single `sacct` call.
+
+- **`polyzymd status --format agent|json`.**  `status` accepts repeated `-c`
+  and `--all DIR`, makes one `squeue` call, and prints one line per replicate
+  with a fixed verdict (`COMPLETED`, `RUNNING`, `QUEUED`, `DEAD`,
+  `NOT_STARTED`, `NOT_FOUND`), the live job, ns/day, an ETA, and for dead
+  chains the last `FATAL` line of the newest SLURM log plus a resubmit
+  command.  The default table output is unchanged.
+
+- **`polyzymd cancel` stops a self-resubmitting chain, and `--resume` hands it
+  back.**  `scancel` alone could not stop a chain: SLURM sends `SIGTERM`,
+  `run-segment` exits 99, and the job wrapper reads that as "interrupted, work
+  remains" and queues a successor within seconds, each attempt also creating a
+  new `production_N` directory.  The only reliable stop was
+  `scancel --batch --signal=KILL`.  `polyzymd cancel -c config.yaml -r 1-3`
+  now writes a plain-text `STOP` marker into each replicate working directory
+  (who stopped the chain, on which host, when, with which config, and how to
+  undo it) and then cancels the matching queued and running jobs by name.  The
+  job wrapper checks for the marker before submitting any successor and at the
+  start of every job, and also honours `POLYZYMD_STOP_CHAIN=1` and
+  `POLYZYMD_STOP_FILE`.  `--stop-only` leaves the running job alone so the
+  chain stops after the current segment, `--dry-run` reports without acting,
+  and `--resume` removes the marker.
+
+- **`polyzymd submit --exclude <nodelist>`** overrides the preset's SLURM
+  `--exclude` value (replacing it, not appending), so a node can be re-tested
+  without editing the preset.  Omitting the flag keeps the preset default; pass
+  an empty string to exclude nothing.
+- **Frozen-solute energy minimisation.**  `SimulationRunner.minimize()` now holds
+  every protein and substrate atom fixed (new `solute` atom group) and relaxes only
+  solvent and polymers, so the prepared structure enters equilibration with its
+  coordinates unchanged; the runner verifies a zero solute displacement and records
+  it in `minimization/phase.json`.  Implemented by minimising on a copy of the
+  System with massless solute atoms and their constraints removed (OpenMM fixes
+  massless particles but forbids constraints on them); the real System is untouched.
+  Configurable via `simulation_phases.minimization` (`freeze_solute`, default
+  `true`; `max_iterations`; `tolerance`), a runtime-only block that is excluded
+  from the build-manifest config hash so existing bundles remain valid.
+  Motivation: waters packed inside the protein by the pre-d96b1fcd builds were
+  "accommodated" by protein inflation during minimisation before heating.
+- **Packmol seeding by replicate.**  `build_packmol_input()`,
+  `solvate_with_packmol()`, `pack_polymers()`, `SolventBuilder.solvate()` and
+  `SystemBuilder.pack_polymers()` accept `seed`; `build_from_config()` passes
+  the replicate index to both packing stages so replicates start from
+  independent coordinates (Packmol is deterministic for identical inputs).
+  The seeds are recorded under `provenance` in `build_manifest.json`, which
+  also gains `polyzymd_version`.
+- **Per-segment runtime provenance.**  `SegmentRecord` and
+  `EquilibrationStageRecord` carry optional `polyzymd_version`,
+  `openmm_version` and `pixi_environment` fields (older `progress.json` files
+  still load), and `production_N_parameters.json` gains a `provenance` block
+  with those values plus hostname and SLURM job id.  New helpers
+  `polyzymd.utils.version.runtime_provenance()` / `record_provenance()`;
+  `get_polyzymd_version()` moved there.
+
+### Fixed
+
+- **Counter-ions of a charged co-solvent counted as salt.**  The `ions.salt` row of the build record counted the Na+ that come with SDS as NaCl pairs ("6 NaCl pairs ... expected 5"). It now counts them separately ("5 NaCl pairs (7 Na+, 6 Cl-: 2 counter-ions of charged co-solvents, 1 neutralizing)"). The ions built do not change.
+- **Running a simulation longer.**  Raising `production.duration` (and `samples` by the same factor) of a finished OpenMM replicate continues it to the new total, with `polyzymd run` on a workstation or `polyzymd submit` on a cluster. `run` checks the build against the config with the production length the chain started with, which `progress.json` now records as `started_total_steps` and `started_total_samples` (and `production_0_parameters.json` for runs started before). A change that would alter the frame spacing is refused with the `samples` value that keeps it. With `{duration}` in `output.naming_template` (the default), the old length written into the template keeps the replicate's folder, and `run` accepts that change too. Stored analysis results are measured again, since the trajectory files they record changed. OpenMM only. New how-to page "Run a simulation longer". The exit-code table of the CLI reference is per command: 3 is an error for `check-progress` and a partial report for `analyze`.
+
+- **Continuation segments under OpenMM 8.2 and later have the right frame times.**  From OpenMM 8.2 on, `DCDReporter` writes the frame interval as the first step of every new DCD, whatever step the simulation is at. Every production segment after the first, written by `run-segment` after a finished or an interrupted segment, then read in MDAnalysis as if its times started again at the first frame interval, and `analyze` refused the replicate with `TrajectoryLineageError`. Production segments now write the step of their first frame, as OpenMM 8.1 did. The coordinates were always right; only the header times were wrong. The analysis loader reads the times of segments already written this way from the `production_N_state_data.csv` beside them, with a warning, and still refuses a segment without that CSV. Chains run with OpenMM 8.1.2 (the `sim-cuda-12-0` and `sim-cuda-12-4` environments) were not affected. A lineage error no longer suggests checking the topology.
+
+- **`polyzymd run` continues an interrupted OpenMM production.**  Run again on a replicate whose production had started, it restarted production from the end of equilibration, wrote over the finished steps and exited 0. It now continues from the saved state, as `run-segment` does in a SLURM chain, and prints `already complete; nothing to do` for a complete replicate. A run stopped by `SIGTERM` or `SIGUSR1` exits with code 99 (was 1) and prints the command that continues it. It continues only when the build still matches the config, apart from the production duration and samples, which a chain may change; otherwise it refuses, gives the reason and says to restore the config or use a new output directory. A segment that runs from its first step moves the `INTERRUPTED` marker and saved states of an earlier attempt into `earlier-attempt-<time>/`, and a filesystem scan reads a segment whose `INTERRUPTED` marker is older than its final state as completed.
+
+- **Local GROMACS runs stop cleanly and continue.**  `Ctrl+C` or `SIGTERM` left no `prod.cpt` (mdrun got two signals, or PolyzyMD exited without waiting) and exited 130 or 143. PolyzyMD now runs each `gmx` step in its own session, passes one `SIGTERM` to `mdrun`, waits for its checkpoint and exits 99. Production writes a checkpoint every 5 minutes. SIGHUP is passed on like SIGTERM, and the exit message says what each stage left (only production has a checkpoint). Post-processing writes `prod_nojump.xtc` and `prod_centered.xtc` under temporary names and renames them when `trjconv` succeeds; `run` on a complete replicate whose post-processed files are missing or older than `prod.xtc` writes them again. `polyzymd run` continues a started production from `prod.cpt` after the audit checks; without a checkpoint it says how many steps ran and how to start production again, instead of suggesting `-cpi`.
+
+- **A refused `run` writes nothing, and a raised length is shown as such.**  A `polyzymd run` refused for a frame-spacing change or a changed config had already rewritten `progress.json` (new totals, status `running`), so `status` then showed an untouched complete replicate as DEAD. The checks now run before anything is written; the frame-spacing refusal gives the `samples` value and no `run-segment` flag, and the config refusal says the build keeps only a hash and recommends a new condition. After `production.duration` is raised, `status` shows the replicate as `EXTENDABLE` (the table says it finished its old length), `check-progress` says `work remains`, and `run --dry-run` says it would continue from step N to M or why it would be refused. Printed folders are shown as the operating system resolves them; the folders that are used are left as the config gives them, so a config reached through a symlinked folder keeps finding its runs.
+
+- **`--run` views do not replace the stored report.**  `analyze NAME --study S --run X` replaced `results/NAME/report.json` with the result it showed, so the stored report held whichever result was looked at last. A `--run` view is now printed and not saved.
+
+- **Analysis warns about replicates built from another config.**  A replicate whose build record names another config hash than the condition's config (a changed salt concentration, for example) was analysed silently. The report now warns and names the replicates; a raised production length of a started replicate is not counted as a change. The analysis identity hash is unchanged.
+
+- **Unfinished replicates make an analysis partial.**  A replicate short of its configured production was counted as complete. The report is now `partial` (exit 3) with a `problem:` line giving how far it got; an OpenMM replicate's frames so far are read, and a GROMACS replicate whose production did not finish is left out (`excluded_replicates`).
+
+- **Local GROMACS `run` no longer repeats a started production.**  `polyzymd run --engine gromacs` on a started or finished replicate ran minimization, equilibration and production again, wrote over the trajectory and skipped the checks of the audited files and of the config. A complete replicate now prints `already complete; nothing to do`. A started production that is not complete is refused with the commands that continue it from its checkpoint. A run that stopped before production passes the same checks as a new one: a build without an audit record (made before 1.3.0rc5) is now refused there, where it used to run again from minimization.
+
+- **`polyzymd run` in a `sim-cuda-*` environment says where to build.**  A replicate without a usable build failed with `No module named 'rdkit'` and left a run folder holding only `progress.json`. It now stops before writing anything and prints the `polyzymd build` command to run in the `build` environment.
+
+- **Analysis leaves out replicate folders that were never run.**  One such folder dropped its whole condition from `analyze`. A replicate folder with no production output is now left out when the replicates are discovered: the report lists it under `excluded_replicates` with the reason, names it in `problems` and has `status: partial`. Replicates named in the study are still all used. With `--format json`, `analyze --project` and `analyze --study` print the `== study` and `== run` lines on stderr, so stdout holds only the report.
+
+- **Errors and untested rows in `analyze --format json`.**  An error before any report (an unknown analysis, a bad option) printed nothing on stdout; it now prints `{"status": "failed", "error": ..., "fix": ...}`, and a failed run inside the `--project`/`--study` document carries its error and fix. A comparison that was not tested has `direction: not testable` and `significant: null`, not `no significant change`.
+
+- **`run --dry-run` says what the run would do.**  It reported "build -> minimize -> ..." for every replicate. It now says whether each replicate would reuse its audited build, continue production, do nothing (complete) or need a build, and exits 1 when a replicate needs a build this environment cannot make. The box estimate no longer prints `No module named 'openff'`.
+
+- **OpenMM platform errors in `run`.**  An OpenMM error such as `CUDA_ERROR_UNSUPPORTED_PTX_VERSION` ended with a bare `Error:` line. `run` now says to use a `sim-cuda-*` environment for that error, and records the error that stopped a local run in `polyzymd_run_error.txt`, which `status` shows. Printed replicate folders no longer contain `..`, and the `pixi run -e build` hint carries `--manifest-path` when pixi set it.
+
+- **Trajectory hash of an interrupted segment.**  A segment stopped by a signal recorded no trajectory hash, so `freeze` warned about every resumed replicate. The hash is recorded when the next segment starts.
+
+- **`polyzymd status` sees local runs.**  A `polyzymd run` alive on this machine showed as `DEAD`; a replicate whose lock a process holds is now `RUNNING` with the note `local run` (`lock held (local run or job)` when `squeue` could not be asked). A local run stopped by a signal is `INTERRUPTED` with `action: continue` and the `polyzymd run` command that continues it. RUNNING rows print their note. Rows of systems that share a folder-name template carry their config path in the footer and in `--unfinished`, the JSON gives each system's `config_name`, and a system without replicate folders says `not started` instead of `0/0 completed`.
+- **Restraints on ligand atoms name the atoms the built system has.**  An SDF usually has no atom names, so OpenFF names a small molecule's atoms `C1x`, `C2x`, ..., `H1x` (element, count in the SDF's order, `x`), and every example's `name C1` matched nothing; the build failed after solvation with `No atoms match selection`. `validate` (and `build`, before it packs anything) now checks each `name` in a restraint selection on a small molecule against its SDF and, when none of the names exists (and the selection has no `not` or pattern), lists the names the molecule will have. A selection that matches nothing in the built system lists the atom names of its component. An SDF that names every atom (`atom.prop._Name`) keeps its names, and the check follows them. The restraints how-to, the 181L tutorial, the configuration reference, the template and the example configs say so and select `name C1x`.
+
+- **A refused rebuild says what to do.**  After a run has written output, `build` and `run` refuse to rebuild its folder; the message now names the folder to remove (`rm -r <folder>`) to discard that run, and `--scratch-dir` (or `output.scratch_directory`) to build elsewhere and keep it.
+
+- **The `structures/` placeholders of `study add-condition --new` use the rc.5 keys.**  They named `enzyme.pdb_path`, `substrate.sdf_path` and a `substrate` section, and offered MOL2. They now show the `solutes:` entries (`type: protein` with `pdb_path`, `type: small_molecule` with `sdf_path` and `conformer_index`), say that only SDF is read, and give the ligand atom names.
+
+- **Docs that contradicted each other.**  The glossary defines the analysis config hash (with the force fields, charges, water model, ions, box and restraints it covers once #260 is merged) and the build config hash of `build_provenance.json` separately. The configuration reference no longer calls force-field "key collisions" harmless or says which force fields PolyzyMD uses: it explains how the build applies the protein's file and the small-molecule file. The physics-audit page no longer refers to "Paper 1". The README overview and command table list the commands `polyzymd --help` shows, and describe the physics audit and the build record.
+
+- **`validate` warns when equilibration ends at another temperature than production.**  Production runs at `thermodynamics.temperature`. A constant-temperature equilibration stage at another temperature, or a last stage that ramps to another `temperature_end`, now gives a warning that names the key to change, and the summary marks the stage and prints each constant stage's temperature. A condition copied to a new temperature with only `thermodynamics.temperature` changed was valid with no word. It stays a warning: an equilibration at another temperature can be intended.
+
+- **`study add-condition --from` names the copy after its folder.**  The copy kept the `name:` of the condition it came from, so two conditions of a study had the same name. It now sets `name:` to the new condition's folder name, as `--new` does, and prints it. A copy made with `--config` keeps its name.
+
+- **Docs for a first run.**  The README quick start builds the replicates before `submit`, which does not build, and its tables list the default `aa100` preset, the other presets, `sim-cuda-12-0` and `analyze --project`. The README, the installation pages, the local GPU recipe and the own-system tutorial say that `pixi run -e ...` outside the clone needs `--manifest-path <clone>/pixi.toml`, or a `pixi shell` started in the clone; the own-system tutorial sends a laptop with an NVIDIA GPU to the local GPU recipe, not to the CPU. The config template selects ligand atoms as `C1x`, no longer offers `NVE`, gives the unit of `checkpoint_interval` and says how to shorten equilibration for a test run. The equilibration and troubleshooting pages explain the `Minimized state violates a constraint` warning, and the rc5 rewrite guide says when a ligand selection by crystal atom name still works.
+
+- **Proteins get ff14SB parameters, not only ff14SB charges.**  `SystemBuilder.create_interchange` loaded `ForceField(protein, small_molecule)`. SMIRNOFF applies the last matching parameter, and Sage's generic SMIRKS match every protein atom, so every protein bond, angle, proper and improper torsion and Lennard-Jones term came from the small-molecule force field (`openff-2.0.0.offxml` by default); only the ff14SB library charges survived. The archived `system.xml` of Paper 1 CALB, RML and LipA runs, built from the 1.3.0 development line, matches this term for term and shares no bonded term with ff14SB. Reversing the load order is no fix: ff14SB's cap and backbone SMIRKS then match acetyl groups and amides, such as acetone, acetate esters and acrylamide polymers. The combined call is kept for every molecule other than the protein, and the protein is then parameterized with ff14SB alone and every bonded, Lennard-Jones and constraint term inside it replaced by the ff14SB term, under a name prefixed with the protein force field so no potential of another molecule is overwritten. The build fails if ff14SB does not cover a protein bond, angle, proper torsion or Lennard-Jones term; impropers are taken as ff14SB defines them. Bonds to hydrogen in the protein are constrained at their ff14SB lengths. Polymers, substrates, co-solvents, water and ions keep exactly the parameters they had. Every system built with an earlier PolyzyMD (since 1.0) has the hybrid protein and must be rebuilt to simulate ff14SB. `tests/builders/test_force_field_precedence.py` checks where each term of trp-cage plus an acetylated amide substrate comes from.
+
+- **OpenMM production follows the config's dynamics.**  OpenMM production ran NPT with LangevinMiddle, friction 1/ps and a barostat move every 25 steps whatever `simulation_phases.production` said: `ensemble: NVT`, `thermostat: Langevin`, `thermostat_timescale` and `barostat_frequency` were not read. It now runs the configured ensemble (no barostat in NVT), thermostat, friction (1/`thermostat_timescale`) and barostat frequency, and so do the later segments of a chain. A later segment keeps the dynamics its chain started with and warns when the config now says otherwise; production refuses a thermostat OpenMM does not run. Equilibration stages run their `thermostat:` (`Langevin` ran as LangevinMiddle). Configs with the default production settings, such as every Paper 1 config, run as before. GROMACS warns that `barostat_frequency` does not apply to its c-rescale barostat.
+
+- **Config errors that say how to fix them.**  Every command that reads a config (`validate`, `build`, `run`, `submit`, `recover`, `cancel`, `status`, `hash-trajectories`, `study check` and `study locate`, and the job-side `run-segment` and `check-progress`) prints the same `error:` and `fix:` lines for an invalid one, from `polyzymd.cli.config_errors`; before, `build` and `run` printed a bare `Configuration error:` list, the others `Failed to load config:` with pydantic's text, and `submit` and `hash-trajectories` a traceback for a schema error. A bad config makes `hash-trajectories` exit 2, as a bad study does. An unknown key names the closest field anywhere in the schema (`pdb: unknown key; did you mean enzyme.pdb_path?`, and key by key under an unknown section such as `system:`), or lists the keys of its section when none is close. A missing section says what it holds and points to the commented template of `polyzymd study add-condition LABEL --new`. A value of the wrong type names the shape the field expects (`simulation_phases: expected a mapping with minimization, equilibration_stages and production, not text`). Validation itself is unchanged.
+
+- **A user install of PolyzyMD shadowing the environment's.**  `polyzymd info` prints the folder `polyzymd` was imported from. Every command warns when that folder is a `pip install --user` copy (in `site.getusersitepackages()`, or put on `sys.path` by a `.pth` file there, as an editable user install does), which Python loads ahead of the pixi environment's own, and gives the fix: run with `PYTHONNOUSERSITE=1`, or `pip uninstall --user polyzymd`.
+
+- **Jobs that cannot activate their pixi environment stop.**  The OpenMM and GROMACS job scripts ran `eval "$(pixi shell-hook ...)"`, which hides a failed hook from `set -e`: on Blanca, 2 of 6 GROMACS quickstart jobs started while another job updated the environment, ran without it, wrote no `gromacs/progress.json` and still completed. The scripts now try the hook three times, ten seconds apart, and stop with `FATAL: cannot activate the pixi environment of <pixi.toml>` if it never succeeds. Both templates take the lines from `polyzymd.workflow.slurm.pixi_activation_block`.
+
+- **Status ETAs no longer spike after a wall-time rollover.**  OpenMM rates come from segment file
+  timestamps instead of the progress record, whose start time was rewritten at segment end. A job
+  that has not yet written its running record is not timed across the queue gap.
+
+- **Residue numbers of chains joined by disulfides.**  Chains linked by a disulfide load as one protein molecule (insulin A and B). The build numbered their residues by input number and name only, so residues of equal number and name in the two chains (insulin A7 and B7 CYS, A9 and B9 SER) became one residue in `solvated_system.pdb`: 51 residues got 49 numbers. The input chain is now part of the residue identity, so chain B follows chain A (insulin: 1-21, then 22-51), as for separate molecules.
+
+- **Loading analysis functions slowed down over a session.**  Each load of a study's analysis file checked every imported module against every study folder loaded before in the process, resolving the module's path each time, so a long notebook session or the test suite spent seconds per load. Each module's path is now resolved once and its folders looked up in a set.
+
+- **Stray files in study and project folders.** PolyzyMD reads, hashes and deposits only files whose names it chooses in advance:
+  - A function's stored results depend on the Python files of its folder and the files of `data/` beside it. Notes, figures or a copied trajectory in `analyses/` recompute nothing; the analysis log names the files it leaves out.
+  - `freeze` deposits only `study.yaml`, `project.yaml`, `README*`, `LICENSE*`, the files it writes, and the folders `study init` and `project init` make (`conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`, `results/`, `environment/`), with or without git, and prints one `not deposited:` warning for the rest.
+  - GROMACS runs use `<prefix>.top`, the files it includes, `prod.tpr` and PolyzyMD's `.mdp` names, so a `backup.top` neither stops an analysis nor is deposited. `gromacs.analysis_topology` names another `.top`.
+
+- **Hydrogen placement, local runs, GROMACS cancellation and help text.**
+  - `polyzymd clean-pdb` places hydrogens on the CPU platform, so a GPU with an older driver no longer stops it with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Set `OPENMM_DEFAULT_PLATFORM` to choose another platform.
+  - A local `polyzymd run` with OpenMM writes `progress.json`, so it records each segment and its trajectory hash, as a SLURM run does.
+  - `polyzymd cancel` stops GROMACS chains: the GROMACS job script checks the `STOP` file at start and before each resubmission.
+  - The `study freeze` help says that freeze refuses uncommitted inputs. The build message names `polyzymd run`, and the "write a function" hint links to the study API how-to.
+
+- **Console and messages.**
+  - The uncommitted-inputs warning prints once per command, with a count and the first five files.
+  - Freeze merges a warning that several conditions share into one line naming them.
+  - The GROMACS TPR fallback warns once per command.
+  - `project check --production` passes `--production` to each study's check.
+  - `study check` and `project check` list the metadata gaps instead of counting them.
+  - A narrow 95 % interval prints with enough digits to show both ends.
+  - `status` shows ps for runs shorter than 1 ns, and says "SLURM not queried" with `--no-slurm` instead of "squeue unavailable".
+  - `submit --dry-run` shows the partition, QOS, time limit, account and GPUs, and warns when a CPU-platform config would go to a GPU preset.
+  - A pair that cannot be tested says why: too few replicates, or no variance.
+  - A missing Packmol is named as such.
+  - The `hash-trajectories` advice says that it writes beside the trajectories.
+  - The scaffold YAML puts comments above `{}` stubs, so filling a stub leaves no stray comment.
+  - The `init` template names its relaxation stage without "polymer", lists only thermostats both engines run, and links the quickstart page where it is.
+
+- **Simulation correctness.**
+  - Ions get atom names (`NA`, `CL`) in the built system and in `system.prmtop`. Their blank names made MDAnalysis refuse the Amber topology, so analysis of any system with ions failed. `analysis-topology --overwrite` repairs older runs.
+  - A topology that cannot be loaded is reported as such, not as an equilibration-window problem.
+  - `neutralize` counts the charge of co-solvents. A charged SMILES (`...OS(=O)(=O)[O-]`) gets counter-ions; one that carries its counter-ion (`...[O-].[Na+]`) needs none. A system left charged is an error with `neutralize: true` and a warning without it.
+  - `gmx grompp` gets no blanket `-maxwarn 1`, which hid the net-charge warning. Set `grompp_flags: "-maxwarn 1"` to accept a warning you have read.
+  - GROMACS runs the Langevin thermostats as Langevin dynamics (`integrator = sd`, `tau-t` = the thermostat timescale), as OpenMM does, not as `v-rescale`. Approximate mappings (the Monte Carlo barostat as `c-rescale`) and thermostats OpenMM does not implement are warned about. The new reference page "GROMACS and OpenMM" records how each setting runs on each engine.
+  - Solvent chain IDs never repeat those of the solute. A system that would need more chain IDs is refused, instead of solvent being labelled as protein or polymer.
+  - `pdbindex N` selects the N-th atom of the system in analyses (`bynum`), as it does in restraints.
+  - `projects_directory` and `scratch_directory` are relative to the config's folder, so commands find the runs from any folder.
+  - `checkpoint_interval` defaults to 60 s, and the quickstart config validates.
+  - Every config section refuses keys it does not define, so a misspelled key is an error instead of a silent default. Older configs with `simulation_phases.segments` must drop it.
+  - `freeze` recognises co-solvents, names a build file `build_manifest.json` lists that is missing, asks GROMACS studies to state the GROMACS version instead of reporting a missing OpenMM version, and mentions polymer parameters in the checklist only for systems with polymers.
+
+- **Stored results and replicate tables.**
+  - Reordering `parts:` recomputes instead of giving one part the values of another; `parts` is now part of the stored record.
+  - `replicate_table` keeps a `name` column, so two quantities stored in one run (two hydrogen-bond summaries) are no longer counted as two replicates.
+  - It also fills each label a replicate lacks with the run's `missing` value, as the report does, so its n and mean match the report's.
+  - A shipped analysis's record hashes its module's file and the PolyzyMD modules that file imports. A fix to a helper it calls recomputes its results.
+  - `rmsd` and `rmsf` take a given `reference_file` as the reference when `reference_mode` is left out. A file with a mode that ignores it is refused.
+  - Relative file settings of shipped analyses are relative to `study.yaml`, not to the shell's folder.
+  - `--set` values from `study.yaml` keep their type (`1e-05` stays a number).
+  - Repeated `distances` pair labels are refused.
+- **Freeze.**
+  - `freeze` refuses while inputs are uncommitted, and names them. The manifest therefore describes exactly the tagged and deposited files.
+  - It also refuses when git has no user name and email, before writing anything that names a tag.
+  - `study freeze` on a study of a project refuses and points to `project freeze`.
+  - In a project, each study's manifest lists the files git tracks and the project's commit.
+  - Manifests and reports carry no path of the machine.
+  - Configs written in flow style lose their machine paths too.
+  - The manifest no longer reports frames analysed: each analysis has its own window, and its report has `frames_per_replicate`.
+  - `CITATION.cff` carries no commit; the tag is the version.
+- **Projects and `--label`.**
+  - A project's studies must be folders directly inside it.
+  - An analysis entry that is not a mapping gets a message instead of a traceback.
+  - `analyze --study S --label L` prints its report but never saves it as the run's `report.json`. The `--submit` report job gets the same labels as its tasks, and `until: common` is resolved over the whole study.
+  - `analyze --project` writes one log, in the project's `logs/`. Log names carry the array task or process ID.
+- **`study init` and `study locate`.**
+  - `study init` records a relative scratch directory relative to its config.
+  - `study locate` no longer maps two conditions whose runs are named alike to one folder. It tells them apart by folder name or by `manifest.json`, and otherwise refuses with a fix.
+
+- **A control without polymer reports zero contact.**  In `contacts` and
+  `hydrogen_bonds`, a replicate whose polymer (a summary's second group)
+  matches no atoms has no contact and no hydrogen bond: its values are 0 (0
+  events, no lifetime), it stays in the statistics and is compared, and a
+  warning names it.  It was left out, so a no-polymer control was never
+  compared.  The measuring functions return 0 for an empty group instead of
+  `nan`; stored `contacts` and `hydrogen_bonds` results are recomputed once.
+- **`contacts` reports every monomer of the study, the same in every task.**
+  The per-monomer rows came from the polymer of one replicate, so `--submit`
+  tasks of conditions with different monomers stored different results from
+  the report job's.  `polymer_types` now names the monomers reported (default:
+  every residue name of the polymer in any condition, resolved once and passed
+  to every task), 0 in a replicate without one; it no longer narrows the
+  polymer selection, which `polymer_selection` does.
+
+- **Continuation segments record their software provenance.**  Only segment 0
+  recorded `polyzymd_version`, `openmm_version` and `pixi_environment`;
+  segments 1 and later now do too.
+- **Segment trajectory hashes survive progress reconciliation.**
+  `run-segment`, `status`, `check-progress` and `recover` re-check
+  `progress.json` and dropped each segment's recorded hash.
+- **`hash-trajectories` no longer makes runs without `progress.json`
+  unanalysable.**  It wrote a `progress.json` built from a scan of the run,
+  which marked segments of downsampled copies as failed, so `analyze` then
+  found no trajectories.  It now writes only `trajectory_hashes.json`.
+
+- **The correlation estimator every analysis plugin called was wrong.**
+  `estimate_correlation_time(method="integration")` trapezoid-integrated the
+  normalised autocorrelation function from lag zero, so applying
+  `g = 1 + 2*tau/dt` counted the lag-zero term twice, and it then floored tau
+  at one timestep.  White noise came back with `g = 3.00` instead of `1.00`,
+  and correlated series came back about `+2` too high, which inflated every
+  `sem_rmsd`, `sem_rg`, `sem_sasa`, `sem_distance` and `n_independent_frames`
+  written to an artifact.  The estimator now sums
+  `g = 1 + 2*sum C(t)*(1 - t/N)` over positive lags with the first
+  non-positive cutoff, following Chodera et al. (2007) as implemented in
+  pymbar, and derives `tau = (g - 1)/2 * dt`.  The estimator is now pymbar's own
+  `timeseries.statistical_inefficiency`, so pymbar (>= 4.0, from PyPI) is a new
+  dependency of PolyzyMD.  White noise with N = 20000 now
+  gives `g = 1.04`, AR(1) with phi = 0.5 gives `3.02` against an analytic
+  `3.00`, and phi = 0.9 gives `19.8` against an analytic `19.0`.
+
+- **RMSF is computed from every production frame.**  RMSF previously fed the
+  accumulator only autocorrelation-spaced frames, which discarded at least
+  half the production window and usually far more.  Thinning does not remove
+  the finite-sample bias of a fluctuation, it only raises the variance of the
+  profile, so all frames now reach the accumulator.  The correlation time and
+  effective sample count stay as recorded diagnostics and the uncertainty on
+  RMSF is still the standard error across replicates.  The
+  `statistical_policy` `frame_strategy` value changes from
+  `subsample_by_autocorrelation_when_estimated` to `all_production_frames`.
+
+- **Hydrogen bonds counted C-H donors and carbon acceptors.**  The plugin
+  passed the union of the configured groups to MDAnalysis as both `donors_sel`
+  and `acceptors_sel`.  MDAnalysis treats any selected heavy atom within 1.2 A
+  of a selected hydrogen as a donor, so every carbon bearing a hydrogen donated
+  and every selected atom accepted, and C-H...O and N-H...C contacts were
+  counted as hydrogen bonds.  Because the share of those geometries depends on
+  polymer chemistry, the error differed between conditions rather than
+  offsetting them equally.  Donors and acceptors are now the group union
+  intersected with the new `donor_acceptor_elements` setting, which defaults to
+  `["N", "O"]` and accepts further elements such as `"S"`.  Element spellings
+  are read from the topology, so a topology that writes `CL` is matched.  The
+  effective donor, acceptor, and hydrogen selection strings are recorded in
+  artifact provenance and metadata.  Results cached before this change are
+  invalidated by the settings fingerprint and are recomputed.
+
+- **Hydrogen bonds no longer report zero for a selection that matches
+  nothing.**  `allow_empty_groups` now defaults to `false`, so an empty group
+  selection raises `SelectionError` naming the group and its selection instead
+  of producing a zero-hydrogen-bond summary, and a donor and acceptor selection
+  that matches no atoms raises the same error.  A topology without element
+  metadata raises rather than falling back to a selection that admits every
+  atom.  Set `allow_empty_groups: true` to keep the previous warn-and-skip
+  behaviour.
+
+- **A segment resumes from the state of the last written trajectory frame.**
+  `restart_state.xml` used to be written only on a wall-clock timer, so after
+  a hard kill the next segment resumed from a state up to one timer period
+  older than the last frame and wrote that frame's step a second time from a
+  new trajectory branch (eight CALB 343 K and RML 333 K replicates, September
+  2026).  A new reporter, placed after the DCD, state-data and checkpoint
+  reporters, now rewrites `restart_state.xml` at every frame.  When choosing
+  the state to resume from, `run-segment` reads each candidate's `stepCount`
+  and takes the latest one that does not pass a frame no segment wrote.  The
+  interrupted and restart state files are written through a temporary file
+  and `os.replace`.
+- **A failed trajectory write no longer loses the frame.**  When a DCD write
+  raised (`OSError: [Errno 116] Stale file handle`), the crash handler saved
+  `interrupted_state.xml` at the step whose frame had failed, and the next
+  segment started one frame later (five replicates, 14 September 2026).  The
+  handler now saves the interrupted state only when every frame up to the
+  current step was written; otherwise it writes the `INTERRUPTED` marker
+  alone and the next segment resumes from the report-aligned
+  `restart_state.xml`.  The marker and `progress.json` count the steps up to
+  the state the next segment loads.
+- **`progress.json` records each segment's frames and resume point**:
+  `report_interval`, `start_step`, `last_reported_step`, `samples_written`
+  (frames actually written), `resumed_from`, and `overlap_frames` /
+  `gap_frames` with a warning when a segment's first frame repeats or skips a
+  report step.  A segment's `parameters.json` records the interval it ran
+  with instead of the previous segment's.
+- **`run-segment` refuses to change the frame interval part-way through a
+  chain** (LipA 363 K 50:50 run 1 switched from 40 ps to 400 ps frames after
+  a configuration change).  Pass `--allow-report-interval-change` to accept
+  the change.
+- **The hard-kill guard no longer trusts a truncated `restart_state.xml`.**
+  `run-segment` kept a segment whenever `restart_state.xml` existed, so a
+  zero-byte file left by a power loss sent the restart down the
+  binary-checkpoint path instead of retiring the segment and retrying from
+  the previous good state.  The guard now requires the file to be complete.
+
+- **Recovery skips truncated state or system XML.**  A hard kill could leave
+  `interrupted_system.xml` at zero bytes; recovery paired it with the intact
+  `interrupted_state.xml` and the next segment died in OpenMM with
+  `Invalid input string`.  Candidates must now be non-empty and end with their
+  closing root tag; a truncated system falls back to `production_N_system.xml`
+  and a truncated state is skipped for the next candidate.
+
+- **Routing exclusions accumulate and the retry budget resets.**  A job that
+  landed on a GPU node whose driver is too old for the pinned pixi environment
+  resubmitted itself excluding that node, but the retry counter was never
+  cleared after a segment ran and the accumulated exclusions were dropped, so
+  a chain that drew bad nodes on non-consecutive attempts died with
+  `FATAL: CUDA routing failed after 3 retries` (observed 2026-09-09 on an RML
+  control chain: bgpu-g4-u20 and bgpu-g4-u24, driver 525.147).  The failed-node
+  list is now a de-duplicated union carried into `--exclude` on every routing
+  resubmit, the terminal message names every node tried, and a successor
+  queued after a segment that reached `run-segment` starts with a reset
+  counter and an empty exclusion list.
+- **A runtime-provenance mismatch reroutes instead of killing the chain.**  The
+  wrapper's runtime-immutability guard raised under `set -e` before
+  `run-segment` and before any trap was installed, so no successor was queued
+  and the chain ended silently.  It now exits with code 3 and is routed
+  through the existing routing-failure path, excluding the offending node.
+- **A checkpoint written by another OpenMM build is no longer trusted
+  silently.**  Recovery-source selection in `ContinuationManager` is
+  portable-first by construction (`production_N_state.xml`, then
+  `interrupted_state.xml`, then `restart_state.xml`, each with its matching
+  system XML), and the binary `.chk` cases are reached only when no portable
+  state survived.  In that case the previous segment's recorded
+  `openmm_version` and `pixi_environment` are compared with the running
+  process, the decision is logged either way, and a `loadCheckpoint()` failure
+  under a changed runtime is re-raised as an actionable error.
+- **A hard-killed segment directory is renamed, not deleted.**  The hard-kill
+  guard called `shutil.rmtree()` on a partially written `production_N`
+  directory whenever the last segment was interrupted with no `INTERRUPTED`
+  marker — a heuristic, and one that destroyed frames that cost GPU-hours.
+  The guard is now skipped entirely when `restart_state.xml` shows the segment
+  is recoverable, and otherwise renames the directory to
+  `production_N.hardkilled-<ISO timestamp>`, which the progress scanner
+  ignores.
+- **`progress.json` is published atomically.**  It was written through a fixed
+  `progress.json.tmp`, which two concurrent writers could interleave into and
+  rename half-written over the progress file.  It now goes through
+  `artifact_integrity._atomic_write` (unique temporary file, fsync, rename).
+- **The replicate run lock is always released.**  `run-segment` acquired the
+  lock with `__enter__()` and never exited the context manager, so the
+  `flock` leaked on every exit path.  The command body moved into
+  `_run_segment_locked()`, called inside a `try`/`finally`.
+- **Segment provenance survives a progress rebuild.**  After a chain was
+  cancelled and resubmitted, `progress.json` was reconciled from a filesystem
+  scan and every segment's `polyzymd_version`, `openmm_version` and
+  `pixi_environment` came back `null` even though
+  `production_N/production_N_parameters.json` still carried them (observed
+  2026-09-09 on all nine control runs).  The scanner now reads the
+  `provenance` block, and reconciliation prefers the value already in the
+  progress file and falls back to the parameters JSON.
+
+- **The `blanca-shirts` and `blanca-chbe-rdi` presets now exclude the
+  old-driver Blanca GPU nodes `bgpu-g4-u20` and `bgpu-g4-u24`** (alongside the
+  pre-existing `bgpu-bortz1`).  Both run NVIDIA driver 525.147, which is too
+  old for the pinned `sim-cuda-12-4` environment (CUDA 12.4 requires driver
+  >= 550).  A job that landed there logged
+  `ROUTING: sim-cuda-12-4 is incompatible with driver 525.147`, excluded that
+  one node and resubmitted; because the excluded-node list does not accumulate
+  across resubmissions, a chain that drew these two nodes on consecutive
+  attempts exhausted the three-attempt routing budget and died with
+  `FATAL: CUDA routing failed after 3 retries` (one RML control replicate out
+  of 57 in the 2026-09 campaign).  Only newly rendered job scripts pick up the
+  new list; chains already running keep their current exclusions until their
+  next submit.
+- **Frozen-solute minimization now freezes the solute heavy atoms only, so the
+  hydrogens satisfy their constraints.**  Since the frozen-minimization feature
+  landed, `SimulationRunner.minimize()` made *every* protein and substrate atom
+  massless, hydrogens included, and dropped every constraint touching a frozen
+  atom (OpenMM forbids constraints on massless particles).  With
+  `constraints=HBonds` the force field emits no harmonic term for an X-H bond,
+  so the solute hydrogens simply kept the input PDB's bond lengths, which are
+  not the force field's.  In the minimized states of the 2026-09 rebuild all
+  1994 RML protein X-H constraints were violated (mean 0.113 A, max 0.234 A, 950
+  of them by more than 0.1 A) while polymer and water constraints were exact
+  (0.000 A).  Heating then set those positions on a constrained integrator,
+  assigned 60 K velocities and stepped with ~2000 violated constraints; CCMA
+  occasionally diverged on the first step and OpenMM raised
+  "Particle coordinate is NaN" within seconds, so protein-identical replicates
+  failed or survived on the luck of the velocity seed (RML 0:100 r1 ran while r2
+  and r5 died; the RML control lost r1 and kept r2-r5).  The frozen set is now
+  the new `solute_heavy` atom group (`protein_heavy` union `ligand_heavy`);
+  solute hydrogens stay mobile and each frozen-heavy/mobile-hydrogen constraint
+  is carried into the minimization copy as a stiff harmonic surrogate bond at
+  the constraint length, because OpenMM rejects a constraint with any massless
+  participant.  Heavy-atom coordinates remain bit-identical.  After
+  minimization the runner measures the largest constraint violation of the real
+  System, logs it, and projects the coordinates with
+  `Context.applyConstraints(1e-6)` if it exceeds 0.01 A.
+  `minimization/phase.json` now also records
+  `hydrogen_max_displacement_angstrom`, and `frozen_atoms` counts heavy atoms.
+- **Polymers no longer overlap their own periodic images.**  Polymer chains used
+  to be packed into a rectangular box of `solute bbox + 2 * packing.padding`,
+  and the periodic cell was only derived afterwards from the packed topology.
+  The rhombic-dodecahedron brick is `sqrt(2)/2` (0.707) times shorter along `z`
+  than that padded extent, so chains protruded through the brick faces and
+  landed on top of themselves across the `c` lattice vector — invisible to
+  PACKMOL, which runs without periodicity.  The audited builds carried 11-169
+  atom pairs closer than 1.5 A to a periodic image, down to 0.10 A (CALB run5:
+  17 pairs below 2 A, 11 below 1.5 A, 2.1 % of polymer atoms outside the brick);
+  such an overlap is singular, minimisation cannot resolve it and the runs died
+  with NaN.  Chains are now packed inside the brick of the final cell, shrunk by
+  the PACKMOL tolerance, so every image pair is at least one tolerance apart.
+- **Periodic-image assertion at build time.**  New
+  `_assert_periodic_image_separation()` translates every atom by each of the 26
+  non-zero lattice vectors and raises `PeriodicImageClashError` when any atom
+  lies within half the PACKMOL tolerance of an image (count, minimum distance,
+  worst pair and lattice vector in the message); contacts between half the
+  tolerance and the tolerance only warn.  It runs after polymer packing and
+  after solvation.  `PeriodicImageClashError` and `SolvationClashError` are
+  exported from `polyzymd.utils`.
+- **Solvation no longer re-centres an already-framed topology.**
+  `solvate_with_packmol()` takes `center_solute` (default `True`); the system
+  builder passes `False` when the packed topology is already framed in the
+  brick.  Re-centring it by centre of geometry is a rigid translation that
+  pushed 0.02-0.38 % of polymer atoms back outside the brick.
+- **Build-time solute/solvent separation assertion.**  `solvate_with_packmol()`
+  and `pack_polymers()` now raise `SolvationClashError` when any packed atom
+  lies within half the Packmol tolerance of the fixed solute, and
+  `SolventBuilder.validate()` repeats the check on the stored topology.  Every
+  build before d96b1fcd combined a brick-centred solvent with a
+  triclinic-centred solute, so hundreds of waters started inside the protein
+  while Packmol reported success; the Paper-1 audit found 54 of 118 RML/CALB
+  builds affected (823 waters within 2 Å of protein heavy atoms in one CALB
+  control).  Such a build is now a hard failure before any PDB is written.
+  The failure threshold is `SOLVATION_CLASH_ATOM_LIMIT` (20) packed atoms below
+  half the tolerance: imperfect Packmol runs (exit 173) leave a handful of such
+  contacts that minimisation resolves and now only warn, whereas a frame mismatch
+  leaves hundreds to thousands.
+- **Trajectory segment lineage check.**  `TrajectoryLoader.load_universe()`
+  verifies that daisy-chained segments share one frame interval and that each
+  segment starts exactly one interval after its predecessor ends before
+  concatenating them, raising `TrajectoryLineageError` otherwise
+  (`verify_lineage=False` opts out).  A duplicated SLURM resubmission had
+  produced overlapping, backwards-running segments that the loader silently
+  concatenated.
+
+### Changed
+
+- **Run folder names of new configs.**  The config template that `polyzymd study add-condition --new` writes names run folders `{enzyme}_{substrate}_{polymer_type}_run{replicate}`, without `{duration}` and `{temperature}`: each condition has its own runs folder, and with them in the name, running longer or changing the temperature pointed the config at a new, empty folder. A config that sets no `naming_template` keeps the old default, so existing runs keep their folders.
+- **What PolyzyMD vouches for.**  The docs now say it plainly: PolyzyMD checks and vouches for the files it generates (builds, runs, results of its analyses and your `function:` analyses). Files you bring, such as scripts and their outputs in `stats/`, are deposited by `freeze` as you wrote them, unchecked. The freeze page also lists `notebooks/` among the project folders it deposits.
+- **Comparisons and trends need three replicates per condition.**  A comparison with fewer than three replicates in a condition is `not testable`: it has no p value, interval or effect size, and its verdict reads `not testable (n < 3)` with both condition means. A trend needs three replicates in every condition. Two replicates gave a t test with about one degree of freedom, and `analyze` called such a difference significant. A one-condition summary of fewer than three replicates gives the mean without an interval. Figures draw no error bar or band for a condition of fewer than three replicates, and clip drawn intervals to the metric's bounds (an RMSD band no longer goes below 0, a fraction's error bar no longer passes 1); the footnote says so. `study check` and `project check` name a stored report made before this rule (one with a p value for a condition of fewer than three replicates).
+- **One-off `--set` runs are printed, not saved.**  With `--study` or `--project`, a `--set` that changes the settings the study file gives the run printed its answer and replaced the stored `results/<run>/report.json`, and `study check` and `project check` still called it the study's settings. Such a run now writes nothing to the study's results; `--output-dir` keeps it elsewhere, and a named analysis keeps it in the study; with `--submit` or `--dry-run` such a run needs `--output-dir`. A file named relative to the folder and the study's absolute path to the same file count as the same setting. `study check` names a stored report made with other settings.
+- **`analyze` exits 3 for a partial report.**  A report that left a condition or a replicate folder out exited 0. It now exits 3; 0 means every report is complete. The `--submit` report job treats 3 as success and logs that the report is partial.
+- **One JSON document for `--project` and `--study`.**  With `--format json`, `analyze --project`, and `analyze --study` without a run name, print `{"status": ..., "studies": {study: {run: report}}}` instead of one report after another, and `-o` writes that document. A study that fails before its runs is `{"status": "failed", ...}` and makes the document failed.
+- **"Methods to cite" lists what the build used.**  The build record's `cite` list, printed under "Methods to cite" in `build_provenance.md`, now gives PolyzyMD itself at its version, the engine (the OpenMM 8 paper, or the GROMACS paper of Abraham et al. 2015), the OpenFF Toolkit, OpenFF Interchange and the Open Force Field Initiative as OpenFF's how-to-cite page asks (the Toolkit paper and release DOI, the Interchange release DOI, the Initiative paper, with the versions used), a reference for each force-field file (ff14SB for the Amber port, the Sage paper for `openff-2.*` and also the Sage 2.3.0 paper for `openff-2.3.0*`, the Parsley paper for `openff-1.*`, with the openff-forcefields release DOI for OpenFF files, or a note to cite the source of any other file), TIP3P, Joung and Cheatham for the Na+ and Cl- parameters of the OpenFF files, AshGC (the NAGL model `openff-gnn-am1bcc-1.*`, cited by the Sage 2.3.0 paper) or another NAGL model with the AM1-BCC papers (or AM1-BCC, or EspalomaCharge), Packmol, and Machado and Pantano when `ionic_strength` set the ions. Each part comes from one function in `polyzymd.simulation.build_citations`. `build_provenance.md` links the physics-audit page. Every DOI was checked against Crossref or DataCite.
+
+- **`polymers: {enabled: false}` alone turns polymers off.**  A disabled `polymers:` section no longer needs `type_prefix`, `monomers`, `length` and `count`; it means the same as `polymers: null`, and a warning names any other key it does not read. A disabled section with every required key is kept as written, so existing configs keep their hash.
+
+- **Stored analysis results identify their inputs by content.**  Records name
+  trajectory and topology files by path relative to the runs folder, size and
+  SHA-256, with no modification time, so moved, copied or downloaded data
+  reuses its results.  Hashes come from the runner's segment record or
+  `trajectory_hashes.json` when the recorded size matches, otherwise from a
+  per-file cache in `$POLYZYMD_CACHE_DIR/hashes` (default
+  `~/.cache/polyzymd/hashes`), valid while size and modification time are
+  unchanged; `freeze` uses the same cache.  **Every stored result recomputes
+  once** after upgrading, because the record identity changed.
+
+- **Unread config keys warn.**  `output.save_checkpoint`, `output.save_state_data` and `output.trajectory_format` are read by no code (both engines always write checkpoints and energies; OpenMM writes dcd, GROMACS xtc). Configs that give them still load, with one warning per key, and the templates and examples no longer list them. Config sections name such keys in `UNREAD_FIELDS`; `save_config` leaves them out when they hold their default, so a saved config keeps its hash.
+
+- **The periodic box is computed first, from the protein and substrate alone.**
+  `SolventBuilder.compute_box_vectors()` derives the cell from the solute
+  bounding box plus `2 * (polymers.packing.padding + solvent.box.padding)`
+  before anything is packed, and both the polymer-packing and the solvation
+  stage use it.  The box used to be a function of where PACKMOL happened to put
+  the chains, so replicates of one condition differed: an RML replicate came out
+  with a 23 % smaller box, 18,865 waters instead of ~25,000 and 56/47 ions
+  instead of 72/63.  Replicates now share box, water count and ion count.
+  Builds without polymers keep the previous behaviour exactly (box computed from
+  the solute at solvation time), so existing control bundles remain valid.
+  Setting `polymers.packing.box_vectors` opts out of the deterministic cell and
+  is now actually honoured by `build_from_config()` (it was silently ignored).
+  The cell, brick and sphere radius are recorded under `provenance` in
+  `build_manifest.json` (`box_vectors_nm`, `brick_nm`, `deterministic_box`,
+  `polymer_sphere_radius_nm`).
+  **Polymer bundles built before this change must be rebuilt.**  The larger,
+  correctly-sized cell raises the water count by about 7 % for CALB and about
+  7-9 % for a normal RML replicate, and by up to 50 % for the under-filled
+  replicates that had shrunken boxes; controls are unchanged.
+- **Polymers are packed inside a sphere around the solute.**  `pack_polymers()`
+  adds a PACKMOL `inside sphere` constraint (centre = solute centre in the
+  brick, radius = half the solute bounding-box diagonal + `packing.padding`) on
+  top of the brick-sized `inside box`, so chains stay in a shell around the
+  protein instead of filling the brick corners (mean polymer-to-protein distance
+  19 A with the sphere, 23 A without).  New `polymers.packing.confine_to_sphere`
+  key (default `true`) turns it off.  `build_packmol_input()` gained the
+  matching `inside_sphere_angstrom` argument.  Note that these keys change the
+  build-manifest config hash of polymer configs.
+- **Polymer packing no longer confines chains to a bounding-box annulus.**
+  `pack_polymers()` used to add a PACKMOL `outside box` constraint equal to the
+  solute bounding box, forcing all chains into a rectangular shell that was often
+  thinner than the chains themselves (13 Å shell vs 22-32 Å pentamers in the
+  Paper-1 systems); PACKMOL then ran to its loop limit (6-12 min per replicate)
+  and exited 173.  Chains now pack anywhere in the box and the PACKMOL tolerance
+  against the fixed solute prevents overlap.  New `polymers.packing` keys:
+  `exclude_solute_bbox` (default `false`; `true` restores the shell) and `nloop`
+  (default 200).  Note: this changes the build-manifest config hash of polymer
+  configs, so polymer systems built earlier must be rebuilt before `submit`.
+
+- **Modules moved out of the plugin framework.**  `UniverseProvider`,
+  `UniverseProvenance` and `FileIdentity` are in `polyzymd.analyses.universe`;
+  `compute_config_hash` is in `polyzymd.analyses.identity`, with the same
+  hash, so stored study results stay valid; `PlotSettings`, `PlotTheme`, the
+  semantic colour models and `AnalysisDefaults` are in
+  `polyzymd.config.analysis_settings` (`polyzymd.config` still exports
+  `PlotSettings` and `PlotTheme`).
+
+- **`PlotSettings` takes no per-analysis blocks and no `output_dir`.**  It
+  holds `format`, `dpi`, `style`, `color_palette`, `theme` and
+  `semantic_colors`, and refuses any other key.
+
+- **`scripts/convert_legacy.py --print-commands`** replaces
+  `--generate-comparison`, `--comparison-name` and `--enzyme-pdb`.  It groups
+  the converted runs into conditions and prints the `polyzymd analyze -c`
+  commands for rmsf, distances and contacts, control first, without writing
+  `comparison.yaml`; `--triad-pairs PATH` writes the CalB triad pairs the
+  distances command reads.
+
+- **`n_independent_frames` is now a real number, not a truncated integer.**
+  It is `N/g`, so a replicate with 9000 frames and `g = 260.4` reports
+  `34.6` rather than `34`.
+
+- **The `first_zero` and `exponential_fit` correlation-time methods were
+  withdrawn.**  Neither estimates the integrated correlation time; on an
+  AR(1) series with phi = 0.9 they were off by factors of five and two.
+  `estimate_correlation_time(..., method=...)` accepts only `"integration"`
+  and raises `ValueError` for the withdrawn names.  `get_independent_indices`
+  and the `CorrelationTimeMethod` enum were removed with them.
+
+- **Stale analysis artifacts are refused instead of silently averaged.**
+  Replicate artifacts from RMSD, Rg, SASA, distances and catalytic-triad now
+  carry `autocorrelation_estimator_version`, and RMSF artifacts carry
+  `rmsf_profile_version` `"2"`.  Aggregation raises `MDAAggregationError` when
+  a replicate is missing the key or records an older value, because the
+  settings fingerprint does not change when the estimator does.  The RMSF
+  profile version is also folded into the RMSF settings fingerprint, so RMSF
+  caches from before this change are invalidated.
+
+### Removed
+
+- **The analysis plugin framework.**  `polyzymd.analyses.base`,
+  `discovery`, `orchestrator`, `stats`, `polyzymd.analyses._framework`, the
+  `polyzymd.analyses.mda` package (jobs, collectors, artifacts, artifact
+  store, aggregation and comparison), `polyzymd.analyses.shared.selectors`,
+  `shared.paths` and `shared.multi_run_formatting` are removed, with
+  `protocols.build_report`, `run_protocol` and `get_analysis_class` and the
+  stored plugin comparison artifacts under `tests/data/comparison_artifacts/`.
+  So are the `shared` helpers only plugins called: from `shared.plotting`
+  `load_canonical_plot_artifacts`, `plugin_plot_settings`, `resolve_error_bar`,
+  `get_theme`, `get_condition_colors`, `annotate_cells`, `symmetric_clim`,
+  `annotate_uncertainty`, `suppress_singleton_errors`,
+  `scatter_stacked_segment_replicates` and `has_replicate_uncertainty`; from
+  `shared.statistics` `compute_sem`, `StatResult`, `PerResidueStats`,
+  `aggregate_per_residue_stats`, `aggregate_region_stats`,
+  `weighted_mean_with_sem`, `uncertainty_block` and `metric_summary_payload`;
+  the amino acid class tables and helpers of `shared.aa_classification`
+  (`get_max_asa` and its tables stay); `CustomGrouping`; and the exceptions
+  `PluginContractError`, `ReplicateSkippedError`, `ReplicateError`,
+  `AggregationError`, `ComparisonError`, `PlotError`, `DependencyError`,
+  `StaleCacheError` and `SelectionError`.
+  Every analysis is a function of an MDAnalysis `Universe` run with
+  `Study.timeseries` or `Study.per_replicate`
+  (https://polyzymd.readthedocs.io/en/latest/explanation/analysis_api.html).
+  `polyzymd analyze` refuses a name outside `FUNCTION_ANALYSES` with the list
+  of names, and `--stride` applies to every analysis.
+
+- **`polyzymd compare`.**  `init`, `validate`, `run`, `plot-all`, `run-all`,
+  `submit`, `submit-all`, `status`, `finalize` and the hidden worker
+  commands are removed.  A hidden `polyzymd compare` accepts any arguments,
+  exits 2 and prints `polyzymd analyze NAME -c config.yaml ... --eq 10ns`,
+  `polyzymd analyze ... --submit --preset <cluster>`,
+  https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html
+  and `.claude/skills/polyzymd-analyze/SKILL.md`.
+
+- **`polyzymd new-analysis` and its plugin scaffold.**  A hidden
+  `polyzymd new-analysis` accepts any arguments, exits 2 and points to the
+  study API page, `Study.per_replicate` and `Study.timeseries`, and the
+  agent skill.
+
+- **`comparison.yaml` and `polyzymd.config.comparison`.**  `ComparisonConfig`,
+  `ConditionConfig`, `PluginSettingsContainer`, `MDABackendPolicyConfig`,
+  `generate_comparison_template` and the comparison template are removed;
+  `polyzymd analyze -f comparison.yaml` still prints the equivalent `-c`
+  command.
+
+- **`polyzymd.workflow.analysis_slurm`**, the SLURM jobs of
+  `polyzymd compare submit`.  `polyzymd analyze --submit` replaces it.
+
+- **The `contacts` comparison plugin (`polyzymd.analyses.contacts`).**
+  `polyzymd analyze contacts -c A/config.yaml -c B/config.yaml` measures
+  polymer-protein contacts instead, through
+  `polyzymd.analyses.functions.residue_occlusion` (the default,
+  `--set method=occlusion`: a residue is in contact when the polymer occludes
+  its SASA), `residue_contacts` (`--set method=distance`: a polymer atom within
+  `cutoff` Å) and `contact_lifetimes` (`--run mean_lifetime`,
+  `lifetime_events` and `censored_fraction`, how long contacts last).
+  `--set method=distance --set cutoff=4.5 --set heavy_atoms=false` gives the
+  coverage and contact fractions the plugin computed.
+
+- **The `hydrogen_bonds` comparison plugin (`polyzymd.analyses.hydrogen_bonds`,
+  `HydrogenBondsAnalysis`).**  `polyzymd analyze hydrogen_bonds -c
+  A/config.yaml -c B/config.yaml` measures hydrogen bonds instead, through the
+  functions listed under Added.  Given the plugin's donor and acceptor atoms
+  and a 3.0 Å cutoff, it reproduces the plugin's 8.849 bonds per frame on a
+  real replicate.
+
+- **`polyzymd analyze catalytic_triad`.**  The catalytic triad is a routine on
+  the study API: count each triad hydrogen bond with `functions.hbond_count`
+  and combine them with `Timeseries.transform`, as
+  https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html
+  shows, and measure the triad distances with `polyzymd analyze distances
+  --set pairs=pairs.yaml`.  `polyzymd analyze catalytic_triad` and
+  `analyze("catalytic_triad", ...)` raise a `ProtocolError` pointing to both.
+
+- **`polyzymd analyze -f comparison.yaml`.**  Every analysis reads the
+  simulation configs given with `-c`, control first.  `-f` now exits 2 with a
+  message that says `comparison.yaml` is no longer read, prints the equivalent
+  `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq
+  ...` command built from the file, and points to
+  https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html
+  and to `.claude/skills/polyzymd-analyze/SKILL.md` for an agent.  It reads
+  only the file's `conditions` and `defaults.equilibration_time`.
+
+### Release-candidate history (v1.3.0-rc.1 to rc.4, April 2026)
+
+These notes were written for the April 2026 release candidates, which were tagged `v1.3.0-rc.1` to `v1.3.0-rc.4` but never released. Where they describe the analysis plugin framework (`polyzymd.analyses.base`, discovery, the orchestrator, `polyzymd compare` and `polyzymd new-analysis`), that framework was later replaced: see "Removed" above. They are kept for the history of the release candidates.
+
+Large-scale refactoring of the analysis and comparison subsystems to achieve
+Open-Closed Principle compliance.  New analysis types can now be added by
+dropping a module or package in `analyses/` with no modifications to core code.
+
+#### Breaking Changes
+
+- **Python 3.12 is now required.**  Python 3.10 and 3.11 support has been
+  dropped for v1.3 and later.  Project metadata, CI, Read the Docs, legacy conda
+  environment files, and the build, analysis, test, and CUDA 12.6 pixi
+  environments now target Python 3.12 with NumPy 2. The `sim-cuda-12-4`
+  environment intentionally uses NumPy 1.26 and OpenMM 8.1.x for CUDA 12.4
+  compatibility.
+- **Scalar Measurement API removed.**  The obsolete alternate scalar
+  measurement abstraction (`MetricSpec`, `CacheIdentity`, `Measurement`,
+  `ScalarMeasurement`, and `ScalarMeasurementAnalysis`) was deleted now that
+  the MDAnalysis job/artifact lifecycle is the true contributor extension path.
+  Catalytic triad now inherits directly from `Analysis` and exposes its primary
+  comparison metric through `extract_metrics()`.
+- **`compare/` package removed.**  The entire `compare/` package (lazy-export
+  facade, re-export layer, registries, plotters, formatters, comparators) has
+  been deleted.  Analysis-specific code now lives in each plugin's package under
+  `analyses/<name>/`.  Shared statistics live in `analyses/stats.py` and
+  `analyses/shared/inferential_statistics.py`.  No external downstream consumers
+  existed.
+- **Three dead registries removed.**  `AnalyzerRegistry`,
+  `AnalysisSettingsRegistry`, and `ComparisonSettingsRegistry` (plus all 16
+  `@register` decorators) were deleted from `compare/registries.py` during
+  the initial OCP refactor.
+- **`compare/plotters/` directory removed.**  All per-analysis plotting code
+  now lives in each plugin's `_plotters.py` module.  The orchestrator
+  (`analyses/orchestrator.py`) delegates plotting to each plugin's `plot()`
+  method.
+- **`compare/formatters.py` removed.**  RMSF-specific formatters moved to
+  `analyses/rmsf/`.
+- **`compare/comparators/` directory removed.**  All 11 old comparator files
+  deleted; comparison logic lives in each plugin's `compare()` method.
+- **Contacts plugin slimmed.**  Obsolete binding-preference and surface-exposure
+  experiments were archived out of the active runtime instead of being exposed
+  as reusable shared compute utilities.  Contacts-specific implementation
+  details now remain private to the contacts plugin, while cross-plugin helpers
+  live only in the documented shared utility modules.
+
+#### Added
+
+- **`polyzymd new-analysis <name>` scaffold CLI command.**  Generates a complete
+  single-file MDAnalysis-native plugin at `src/polyzymd/analyses/<name>.py` and
+  test file (`tests/analyses/plugins/test_<name>.py`) with working discovery,
+  compute, aggregate, extract_metrics, format, and plot implementations.
+  Advanced/package scaffolds are available with `--advanced`, `--style dict`,
+  or `--style pydantic` and create package files such as
+  `src/polyzymd/analyses/<name>/__init__.py`.  Supports `--class-name`,
+  `--force`, `--dry-run`, `--style`, and `--project-root` options.  Validates
+  plugin names (snake_case, no collisions) and class names (PascalCase, valid
+  identifiers).  (`cli/scaffold.py`, `cli/main.py`)
+- **Analysis plugin framework.**  `Analysis` ABC (`analyses/base.py`),
+  `pkgutil`-based auto-discovery (`analyses/discovery.py`), lifecycle
+  orchestrator (`analyses/orchestrator.py`), and default scalar comparison
+  pipeline (`analyses/stats.py`).  Active v1.3 plugins are contacts,
+  distances, hydrogen bonds, RMSD, RMSF, radius of gyration, SASA, secondary
+  structure, and catalytic triad.  Archived experiments such as exposure,
+  binding free energy, and polymer affinity are not active runtime plugins.
+- **Shared analysis utilities.**  `analyses/shared/` package with reusable
+  `TrajectoryLoader`, alignment helpers, autocorrelation/statistics helpers,
+  selection utilities, path helpers, SASA compatibility utilities, multi-run
+  comparison helpers, convergence helpers, and plot utilities used by the
+  active plugin set.
+- **Framework hardening.**  `compute_replicate()` return values are validated
+  (None rejected).  `ComparisonContext` gains `failed_conditions` and
+  `aggregated_results` fields.  Orchestrator warns on undeclared plugin
+  dependencies.
+- **`cohens_d()` default corrected.**  `rmsf_mode` default changed from `True`
+  to `False` in `analyses/shared/inferential_statistics.py` so the
+  general-purpose function is not biased toward one analysis type.
+- **Multi-engine simulation architecture.**  New `SimulationEngine` ABC
+  (`engines/base.py`) and `match/case` dispatch (`engines/__init__.py`) allow
+  multiple MD engines to coexist behind a shared interface.  Each engine
+  provides trajectory layout resolution, SLURM script generation, submission,
+  progress tracking, and recovery.  OpenMM is wrapped as the default engine
+  (`engines/openmm/`).
+- **GROMACS engine with GPU support.**  Full GROMACS simulation lifecycle —
+  energy minimization, multi-stage equilibration with checkpoint resume,
+  production MD, and trajectory post-processing — driven entirely from the
+  existing `config.yaml`.  GPU acceleration is enabled via `gpu: true` in
+  `GromacsEngineConfig`, which auto-composes `-nb gpu -pme gpu -update gpu`
+  offload flags and requests GPU GRES in SLURM scripts.  Supports both
+  thread-MPI (`gmx`) and real-MPI (`gmx_mpi`) binaries with automatic flag
+  adjustment.  (`engines/gromacs/engine.py`, `engines/gromacs/slurm.py`,
+  `engines/gromacs/binary.py`, `engines/gromacs/progress.py`)
+- **GROMACS configuration model.**  `GromacsEngineConfig` Pydantic v2 model
+  with 16 validated fields covering binary selection, GPU/MPI hardware,
+  thread counts, mdrun flags (global, equilibration-only, production-only),
+  environment exports, setup commands, and `command_prefix` for custom
+  launchers.  Includes cross-field validators that warn on contradictory
+  settings (e.g., `gpu: true` with `gmx_mpi`, explicit `ntmpi` conflicting
+  with `mdrun_flags`).  (`config/schema.py`)
+- **GROMACS SLURM script generator.**  Self-resubmitting Bash scripts with
+  `SIGTERM` trap for preemption resilience.  On receiving SIGTERM the script
+  forwards the signal to `gmx mdrun`, waits for checkpoint flush, then
+  resubmits itself via `sbatch`.  Generates EM, equilibration, and production
+  stages with checkpoint-aware resume.  Supports `env_exports`,
+  `setup_commands`, `module_load`, and `-maxh` wall-time safety.
+  (`engines/gromacs/slurm.py`)
+- **`--constraint` CLI option.**  Maps to `#SBATCH --constraint` in generated
+  scripts, supporting single values (`"A40"`), OR expressions (`"A40|A100"`),
+  and AND expressions (`"avx2&rh8"`).  Available on both `submit` and
+  `recover`.  (`cli/main.py`, `workflow/slurm.py`)
+- **`--nodelist` CLI option.**  Pins jobs to specific SLURM nodes.  Validates
+  bracket-style hostlists (e.g., `node[01-04]`).  (`cli/main.py`,
+  `workflow/slurm.py`)
+- **`--partition`, `--qos`, `--email` CLI overrides.**  Runtime overrides for
+  SLURM partition, QoS, and email notifications on `submit` and `recover`
+  commands.  (`cli/main.py`)
+- **Engine-aware CLI commands.**  `submit`, `recover`, `status`, and
+  `check-progress` all accept `--engine gromacs|openmm` and resolve
+  engine-specific working directories, progress files, and recovery logic
+  automatically.  (`cli/main.py`)
+- **Unified `run` command.**  `polyzymd run --engine gromacs|openmm` replaces the
+  old `run-gromacs` command.  OpenMM engine runs simulations locally using the
+  existing runner infrastructure.  (`cli/main.py`)
+- **`TrajectoryLayout` model.**  Engine-neutral description of topology and
+  trajectory file locations, consumed by `TrajectoryLoader` for analysis.
+  Each engine provides its own resolver.  (`engines/base.py`,
+  `analyses/shared/loader.py`)
+- **Shared `run_sbatch()` helper.**  Centralizes `sbatch` invocation with
+  optional `module load` preloading (e.g., `slurm/blanca`), used by both
+  `submit` and `recover`.  (`workflow/slurm_submit.py`)
+- **`submit --generate-only` flag.**  Generates SLURM scripts without submitting,
+  replacing the previous `--dry-run` behavior for script generation.
+  (`cli/main.py`, `workflow/daisy_chain.py`)
+- **RMSD convergence detection.**  Always-on sliding-window slope diagnostic
+  integrated into the RMSD analysis plugin.  Detects when RMSD timeseries have
+  plateaued.  Configurable via `convergence_window_size_ns`,
+  `convergence_step_size_ns`, `convergence_slope_threshold`, and
+  `convergence_sustained_for_ns` settings.  (`analyses/rmsd/`)
+- **Shared convergence utility.**  `analyses/shared/convergence.py` provides
+  `find_convergence_time()` for any timeseries — reusable across plugins.
+  (`analyses/shared/convergence.py`)
+- **Convergence diagnostic plots.**  Dual-axis panels showing RMSD timeseries
+  with sliding slope and convergence markers.  Controlled via
+  `show_convergence_plots` plot setting.  (`analyses/rmsd/_plotters.py`)
+- **"Establishing Convergence" documentation.**  New Explanation page covering
+  convergence concepts, the sliding-window algorithm, parameter tuning, and
+  limitations.  (`docs/source/explanation/convergence_detection.md`)
+- **Benjamini-Hochberg FDR correction.**  Pairwise t-tests are now corrected
+  for multiple comparisons across the full family of tests.  Configurable via
+  `fdr_alpha` in `comparison.yaml` defaults.  (`analyses/stats.py`,
+  `analyses/shared/inferential_statistics.py`)
+- **Configurable t-test method.**  `ttest_method` in `comparison.yaml` defaults
+  selects Student's (`"student"`, default) or Welch's (`"welch"`) t-test for
+  pairwise comparisons.  (`analyses/shared/defaults.py`, `analyses/stats.py`)
+- **Tukey's HSD post-hoc testing.**  `posthoc_method` in `comparison.yaml`
+  defaults selects either `"ttest_bh"` (default, pairwise t-tests with
+  Benjamini-Hochberg correction) or `"tukey_hsd"` (Tukey's Honestly
+  Significant Difference).  Tukey HSD uses a single studentized range
+  distribution for FWER control without requiring separate FDR correction.
+  (`analyses/shared/defaults.py`, `analyses/shared/inferential_statistics.py`,
+  `analyses/stats.py`, `analyses/base.py`)
+- **Post-hoc testing reference page.**  New documentation page at
+  `docs/source/reference/posthoc_testing.md` covering both post-hoc methods,
+  configuration, output fields, CLI significance markers, and edge cases.
+  Cross-linked from comparison YAML reference, statistics best practices,
+  comparison tutorial, and analysis comparison reference.
+- **Structured exception hierarchy.**  `AnalysisError`, `ReplicateError`,
+  `AggregationError`, `ComparisonError`, `PlotError`, and
+  `PluginContractError` in `analyses/exceptions.py` replace generic
+  `Exception` raises throughout the orchestrator.
+
+#### Changed
+
+- **Scientific dependency stack updated for NumPy 2.**  Runtime metadata now
+  requires `numpy>=2,<3` with Python 3.12-compatible lower bounds for SciPy,
+  pandas, scikit-learn, matplotlib, seaborn, MDAnalysis, and MDTraj.  Pixi CUDA
+  environments retain separate CUDA 12.4 and CUDA 12.6 targets. `sim-cuda-12-6`
+  uses the current NumPy 2/OpenMM stack, while `sim-cuda-12-4` intentionally
+  stays on NumPy 1.26 and OpenMM 8.1.x for CUDA 12.4 compatibility.
+- **Bundled v1.3 analyses are package-organized.**  Active bundled plugins live
+  in `analyses/<name>/` with `__init__.py` (plugin class) and optional private
+  modules (`_plotters.py`, `_results.py`, `_comparison_results.py`,
+  `_formatters.py`, `_aggregator.py`) as needed.  Contributor plugins and
+  discovery still support both single-file modules and packages.
+- **Plugin contract enforcement hardened.**  `compute_replicate()` returning
+  `None` is now a hard `PluginContractError` (not a soft skip).
+  `PluginContractError` propagates without being wrapped.  `compare()` and
+  `plot()` return values are validated (dict/BaseModel/None for compare;
+  `list[Path]` for plot).  `run_comparison()` fails fast on contract
+  violations.  (`analyses/orchestrator.py`)
+- **Discovery skip logic checks all path components.**  `_should_skip_module()`
+  now checks ALL path components (not just the last one), so shared utility
+  modules and private helper packages are skipped instead of being probed as
+  plugins.  (`analyses/discovery.py`)
+- **Settings fingerprint canonicalized.**  `settings_fingerprint()` now uses
+  `json.dumps(settings.model_dump(mode="json"), sort_keys=True)` for
+  deterministic hashing across Pydantic versions and Python dict ordering.
+  (`analyses/shared/config_hash.py`)
+- **`PlotContext.plot_settings` always materialised.**  `__post_init__`
+  now creates a real `PlotSettings()` when `None` is passed, eliminating
+  null-guard boilerplate in every plugin's `plot()` method.
+  (`analyses/base.py`)
+- **Plugin-specific code co-located.**  Result models, formatters, plotters, and
+  settings that were previously scattered across `compare/results/`,
+  `compare/formatters.py`, `compare/plotters/`, and `compare/comparators/` now
+  live inside each plugin's package.
+- **`compare/` package dissolved.**  Statistics moved to `analyses/stats.py` and
+  `analyses/shared/inferential_statistics.py`.  ComparisonConfig/PlotSettings/
+  PlotTheme moved to `config/comparison.py`.  CLI commands remain in `cli/`.
+  Per-analysis result models, formatters, and plotters now live in each plugin's
+  package.
+- **`submit --dry-run` is now preview-only.**  Validates configuration and
+  previews the submission plan without writing any files.  Use `--generate-only`
+  for script generation.  (`cli/main.py`, `workflow/daisy_chain.py`)
+- **RMSD cache identity.**  Per-replicate and aggregated cache filenames now
+  include a settings fingerprint, preventing stale results when analysis
+  parameters change.  (`analyses/rmsd/`)
+- **RMSD `overall_median` computation.**  Fixed to use `np.median()` instead of
+  `np.mean()` for correctness.  (`analyses/rmsd/`)
+- **RMSD comparison statistics.**  t-test and ANOVA are now guarded for
+  insufficient replicates (n < 2), reporting "not testable" instead of NaN
+  statistics.  (`analyses/rmsd/`)
+- **RMSD comparison resilience.**  Comparison now gracefully handles missing
+  run-condition combinations instead of raising `KeyError`.  (`analyses/rmsd/`)
+- **Convergence input validation.**  `find_convergence_time()` rejects NaN/inf
+  inputs with clear `ValueError` messages.  (`analyses/shared/convergence.py`)
+- **Job naming consistency.**  `create_job_name()` now uses rounding (matching
+  directory naming) instead of truncation for polymer percentages.
+  (`workflow/slurm.py`)
+- **`SubmissionResult` state model.**  Added `is_generated_only` field to
+  distinguish generate-only from dry-run submissions.
+  (`workflow/daisy_chain.py`)
+- **CLI exception handling.**  `run` and `submit` commands now catch specific
+  operational exceptions instead of broad `except Exception`.  (`cli/main.py`)
+- **`fdr_alpha` unified across both post-hoc methods.**  `fdr_alpha` is now
+  used as the significance threshold for both `"ttest_bh"` (BH FDR) and
+  `"tukey_hsd"` (FWER), and is also threaded to ANOVA significance.
+  Significance markers and formatter footnotes dynamically use
+  `result.fdr_alpha` instead of hardcoded `0.05`.  (`analyses/stats.py`)
+- **`ttest_method` scoped to `ttest_bh` only.**  `ttest_method` is now
+  explicitly documented and enforced as only relevant when `posthoc_method` is
+  `"ttest_bh"`.  Tukey HSD ignores `ttest_method` entirely.
+- **Tukey `p_value_adjusted` mirrors `p_value`.**  For Tukey HSD results,
+  `p_value_adjusted` is set to the same value as `p_value` (Tukey p-values are
+  already family-wise corrected) instead of being left `null`.
+  (`analyses/stats.py`)
+- **`PlotContext.plot_settings` typing strengthened.**  Field type changed from
+  `PlotSettings | None = None` to `PlotSettings = field(default_factory=...)`.
+  A `__post_init__` backstop materializes a default `PlotSettings()` if
+  explicit `None` is passed, guaranteeing non-null for all plugin code.
+  (`analyses/base.py`)
+- **`PluginContractError` propagation hardened.**  `run_all_comparisons()` now
+  has an explicit `except PluginContractError: raise` before the broader
+  `except AnalysisError` catch, ensuring contract violations fail fast.
+  (`analyses/orchestrator.py`)
+- **`save_result()` errors reclassified.**  All 5 `save_result()` call sites in
+  the orchestrator now wrap `OSError` as the appropriate lifecycle error
+  (`ReplicateError`, `AggregationError`, or `ComparisonError`).
+  (`analyses/orchestrator.py`)
+- **Foreign condition filtering in orchestrator.**  `_prepare_conditions_with_filter()`
+  now discards (not just warns about) foreign conditions returned by a plugin's
+  `filter_conditions()` method.  (`analyses/orchestrator.py`)
+- **Discovery import classification.**  `_OPTIONAL_HEAVY_DEPS` allowlist
+  (openmm, MDAnalysis, parmed, etc.) governs skip-vs-reraise for
+  `ImportError` during plugin discovery.  Known heavy deps are skip+warn;
+  unknown `ImportError`s re-raise immediately.  (`analyses/discovery.py`)
+- **Cache identity with settings fingerprint.**  Contact artifact path
+  resolution now includes settings fingerprints where applicable.
+  Fingerprinted files are searched first, legacy files as fallback.
+  `find_enzyme_pdb()` sorts glob results and warns on ambiguity.
+  (`analyses/contacts/_paths.py`)
+
+#### Removed
+
+- **Welch ANOVA removed entirely.**  Only classical one-way ANOVA
+  (`scipy.stats.f_oneway`) remains.  The `anova_method` field was removed
+  from all models and configuration.  Welch's ANOVA was deemed unnecessary
+  given that ANOVA is used only as an omnibus gate before post-hoc tests.
+
+- **`run-gromacs` command.**  Replaced by `polyzymd run --engine gromacs`.  All
+  references updated across CLI, docs, and configuration.  (`cli/main.py`)
+
+#### Fixed
+
+- **Co-solvent mole-fraction naming no longer uses stale volume-fraction
+  access.**  Solvent composition placeholders now render DMSO mole fractions
+  correctly as `molpct` tokens, fixing the DMSO `mole_fraction` naming
+  regression.  (`config/schema.py`)
+- **`"default"` reaction template paths no longer rejected during config
+  loading.**  When a user specified `initiation: "default"` (or
+  `polymerization` / `termination`) in the YAML config, `_expand_paths()`
+  unconditionally treated the string as a relative filesystem path and
+  prepended the config directory, producing e.g.
+  `/ocean/projects/.../default`.  The Pydantic field validator in
+  `ReactionConfig` then rejected it because the path lacked a `.rxn`
+  extension.  The loader now recognises `"default"` as a sentinel value
+  and passes it through untouched so the validator can resolve it to the
+  bundled ATRP reaction templates.  (`config/loader.py`)
+- **Dead code removed.**  `catalytic_triad/_formatters.py` (427 lines, zero
+  imports), `rmsf/_comparison_results_legacy.py`, ghost `compare/plotters/`
+  directory, stale `__pycache__/` files.
+- **`validate_name()` exception handling narrowed.**  `except Exception:` changed
+  to `except ImportError:` in the scaffold's collision-check path.
+- **NPZ sidecar lookup.**  RMSD plotters now load NPZ paths from result metadata
+  instead of reconstructing filenames, preventing stale sidecar binding.
+  (`analyses/rmsd/_plotters.py`)
+- **File descriptor leaks.**  NPZ file loading in RMSD plotters now uses context
+  managers.  (`analyses/rmsd/_plotters.py`)
+- **Scaffold test path corrected.**  `new-analysis` now generates test files at
+  `tests/analyses/plugins/test_<name>.py` matching the project's test layout.
+  (`cli/scaffold.py`)
+- **Cache ambiguity detection.**  `contacts/_paths.py` now raises `ValueError`
+  on ambiguous glob matches (>1 file) instead of silently picking the last
+  alphabetical match.  (`analyses/contacts/_paths.py`)
+- **GROMACS trajectory resolution order corrected.**  `resolve_trajectory_layout()`
+  now prefers post-processed trajectories: `prod_centered.xtc` (whole molecules,
+  centered protein) before `prod_nojump.xtc` before raw `prod.xtc`.
+  Previously the raw trajectory could be selected first, breaking analyses that
+  expect unwrapped coordinates.  (`engines/gromacs/engine.py`)
+- **GROMACS topology resolution skips build artifacts.**  Generic `*.pdb` glob
+  removed from topology search; resolver now uses explicit candidates
+  (`solvated_system.pdb`, `<prefix>.pdb`, `<prefix>.gro`) to avoid selecting
+  `_PACKING_MOLECULE*.pdb` build artifacts left by Packmol.
+  (`engines/gromacs/engine.py`)
+- **TrajectoryLoader resolves engine subdirectory.**  `_resolve_layout()` now
+  calls `engine.resolve_engine_working_directory()` before layout resolution,
+  so GROMACS files in the `gromacs/` subdirectory are found correctly.
+  Previously the loader passed the run-level directory directly, missing the
+  engine-specific subdirectory.  (`analyses/shared/loader.py`)
+- **Unused imports removed.**  Cleaned up stale imports across `cli/main.py`,
+  `workflow/daisy_chain.py`, and several analysis plugins.
+- **`Optional[X]` → `X | None` migration.**  Updated type annotations in
+  `cli/main.py` and `workflow/daisy_chain.py` to use Python 3.10+ union syntax.
+- **Tukey HSD graceful degradation on n<2.**  `tukey_hsd()` now returns an
+  empty list instead of raising `ValueError` when fewer than 2 groups or
+  fewer than 2 observations per group are provided, matching the NaN-return
+  pattern used by other statistical functions.
+  (`analyses/shared/inferential_statistics.py`)
+- **Cohen's d direction for d==0.0.**  Now returns `direction="unchanged"`
+  instead of `"lower"` when the effect size is exactly zero.
+  (`analyses/shared/inferential_statistics.py`)
+- **ANOVA <2 groups guard.**  Explicit guard returns NaN result when fewer
+  than 2 groups are provided, instead of letting SciPy raise.
+  (`analyses/shared/inferential_statistics.py`)
+- **`ConditionSummary.n_replicates` validated across metrics.**  Now uses
+  the minimum replicate count across all metrics and warns on mismatch.
+  (`analyses/stats.py`)
+- **Control label log messages corrected.**  Orchestrator now uses
+  `original_control` in log messages before reassignment to prevent
+  misleading "not found" messages that name the wrong label.
+  (`analyses/orchestrator.py`)
+- **`fdr_alpha` validation for all post-hoc methods.**  `pairwise_comparisons()`
+  validates `fdr_alpha` is in `(0, 1]` and not `NaN` for both `"ttest_bh"`
+  and `"tukey_hsd"`, raising `ValueError` on invalid input.
+  (`analyses/stats.py`)
+
+#### Documentation
+
+- Corrected `posthoc_testing.md` — Tukey HSD significance now documented as
+  using `fdr_alpha` (not hardcoded 0.05); `p_value_adjusted` accurately
+  described as mirroring `p_value` for Tukey results; ANOVA significance
+  documented as using `fdr_alpha`; Tukey n<2 edge case documented as graceful
+  empty-result return.
+- Corrected `comparison_yaml.md` — `fdr_alpha` description updated to reflect
+  unified behavior across both post-hoc methods.
+- Corrected `analysis_comparison_reference.md` — `rmsd` and `rg` correctly
+  listed as custom compare (not default); `fdr_alpha` description updated for
+  both post-hoc methods.
+- Corrected `analysis_statistics_best_practices.md` — added Tukey HSD
+  subsection alongside BH; `fdr_alpha` described as configurable at both
+  `defaults:` and per-plugin level; multiple comparisons table updated to
+  reference both correction methods.
+
+- Added `docs/source/reference/posthoc_testing.md` — post-hoc testing methods
+  reference page covering t-test+BH vs Tukey HSD, configuration, output fields,
+  CLI significance markers, and edge cases.
+- Added `posthoc_method` and `ttest_method` fields to `comparison_yaml.md`
+  defaults reference table.
+- Cross-linked post-hoc testing page from `analysis_comparison_reference.md`,
+  `analysis_statistics_best_practices.md`, and `analysis_compare_conditions.md`.
+- Updated `docs/source/contributor_guide/extending_analyses.md` with scaffold
+  command as the primary entry point for contributors.
+- Updated `AGENTS.md` and `.opencode/instructions/` for refactored layout.
+- Removed stale `api/compare.md` API page (module no longer exists).
+- Added `docs/source/how_to/gromacs_export.md` — comprehensive GROMACS HPC
+  how-to covering GPU/CPU configuration, SLURM submission, preemption
+  resilience, constraint-based GPU targeting, recovery, and monitoring.
+  (~700 lines with copy-paste recipes for common HPC workflows.)
+- Added GROMACS engine config and CLI options to `cli_reference.md` and
+  `configuration.md` reference pages.
+- Updated `quickstart.md` with GROMACS-tabbed submission and monitoring steps.
+- Added `scancel --signal=KILL` warning to both `gromacs_export.md` and
+  `hpc_slurm.md` for stopping preemption-resilient jobs permanently.
+
+#### Tests
+
+- Expanded regression coverage substantially from the branch baseline.
+- Added GROMACS engine tests: binary resolution (`test_gromacs_binary.py`),
+  engine adapter (`test_gromacs_engine.py`), SLURM script generation
+  (`test_gromacs_slurm.py`), progress tracking (`test_gromacs_progress.py`),
+  trajectory layout (`test_gromacs_layout.py`), and engine dispatch
+  (`test_dispatch.py`, `test_base.py`), with expanded engine/workflow/cli/config
+  coverage.  (`tests/engines/`)
+- Added GROMACS smoke tests for the active analysis plugin set, verifying that
+  plugins resolve trajectory layouts from the GROMACS engine correctly.
+  (`tests/analyses/plugins/test_*_gromacs_smoke.py`)
+- Added `run_sbatch()` tests (`test_slurm_submit.py`) and engine-aware CLI
+  tests for submit, recover, status, and check-progress.
+- Added scaffold tests (name validation, class-name validation, file
+  generation, code quality, CliRunner integration).
+- Added Tukey HSD tests (basic operation, single-condition edge case,
+  insufficient-replicate edge case, format integration).
+- Added plugin contract enforcement tests (`TestContractEnforcement` in
+  `test_orchestrator.py`).
+- Added discovery robustness tests (shared descendant skip, getattr logging).
+- Added contacts cache identity/path regression tests and archived setting
+  rejection coverage.
+- Added settings fingerprint canonicalization tests (`test_config_hash.py`).
+- Added Phase 14 test hardening: exact Tukey pair assertions, BH/Tukey boundary
+  tests, ANOVA alpha threading tests, `fdr_alpha` validation tests, cache
+  precedence tests, fail-fast verification, and import classification tests.
+  (`tests/analyses/shared/`, `tests/analyses/test_stats.py`,
+  `tests/analyses/test_orchestrator.py`, `tests/analyses/test_discovery.py`,
+  `tests/analyses/plugins/test_contacts.py`)
+- Full test suite reorganized to mirror source layout (`tests/analyses/plugins/`,
+  `tests/analyses/shared/`, `tests/cli/`, etc.).
+- Removed obsolete registry and smoke tests.
+
+#### Known Limitations
+
+- **Config hash mismatch warning prints 66+ times.**  The warning should print
+  once per analysis run but currently fires per-frame.  Does not affect results.
+
 ## [1.2.1] - 2026-04-01
 
 ### Fixed
@@ -27,20 +1251,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Analysis workflow and CLI.** Added the `polyzymd analyze` command family with
   YAML-driven setup and execution for RMSF, contacts, distances, catalytic triad,
   and secondary-structure analyses, plus shared loading, alignment, PBC handling,
-  result models, and aggregation helpers. (`src/polyzymd/analysis/`)
+  result models, and aggregation helpers. (`src/polyzymd/analyses/`)
 - **Comparison engine for multi-condition studies.** Added registry-based
   comparators, typed comparison result models, shared statistical utilities, and
   a generic `polyzymd compare run` workflow for RMSF, contacts, distances,
-  catalytic triad, exposure dynamics, binding free energy, polymer affinity,
-  and secondary structure. (`src/polyzymd/compare/`)
+  catalytic triad, secondary structure, and historical experimental metrics
+  that were later archived from the v1.3 active runtime. (`src/polyzymd/compare/`)
 - **Config-driven plotting stack.** Added `polyzymd compare plot-all`,
   registry-based plot discovery, shared plot themes, and publication-oriented
   plotters for RMSF, contacts, distances, catalytic triad, secondary structure,
-  binding free energy, exposure, and polymer affinity. (`src/polyzymd/compare/plotter.py`,
+  and historical experimental metrics that were later archived from the v1.3
+  active runtime. (`src/polyzymd/compare/plotter.py`,
   `src/polyzymd/compare/plotters/`)
 - **Secondary-structure comparison support.** Added DSSP-backed secondary
   structure analysis, comparison results, and plotting so secondary structure is
-  part of the stable release analysis stack. (`src/polyzymd/analysis/secondary_structure/`,
+  part of the stable release analysis stack. (`src/polyzymd/analyses/secondary_structure.py`,
   `src/polyzymd/compare/comparators/secondary_structure.py`,
   `src/polyzymd/compare/plotters/secondary_structure.py`)
 - **Comprehensive analysis documentation.** Added end-to-end tutorials,
@@ -51,10 +1276,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Release presentation labeling for debated metrics.** Binding preference,
-  exposure dynamics, binding free energy, and polymer affinity remain available
-  from the CLI and plotting pipeline, but PolyzyMD now marks them explicitly as
-  experimental in command output, plot listings, generated text reports, figure
-  annotations, config templates, and user-facing docs. (`src/polyzymd/core/experimental.py`,
+  exposure dynamics, binding free energy, and polymer affinity were historical
+  v1.2 experimental metrics; they were later archived from the v1.3 active
+  runtime. At the time, PolyzyMD marked them explicitly as experimental in
+  command output, plot listings, generated text reports, figure annotations,
+  config templates, and user-facing docs. (`src/polyzymd/core/experimental.py`,
   `src/polyzymd/compare/cli.py`, `src/polyzymd/compare/plotter.py`, `README.md`)
 - **Stable release scope for analysis demos.** The presentation-ready stable
   comparison stack is now RMSF, contacts, distances, catalytic triad, and
@@ -66,11 +1292,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Comparison result and plotting reliability.** Fixed multiple comparison and
   plotting issues uncovered while building the release branch, including cached
-  result discovery, condition-specific result paths, partition-aware BFE plots,
-  shared-path bugs in the plot orchestrator, contacts/distances comparison edge
-  cases, and corrupted-trajectory handling in contacts/exposure workflows.
-  (`src/polyzymd/compare/`, `src/polyzymd/analysis/contacts/`,
-   `src/polyzymd/analysis/distances/`)
+  result discovery, condition-specific result paths, partition-aware historical
+  BFE plots, shared-path bugs in the plot orchestrator, contacts/distances
+  comparison edge cases, and corrupted-trajectory handling in historical
+  contacts/exposure workflows.
+   (`src/polyzymd/compare/`, `src/polyzymd/analyses/contacts.py`,
+    `src/polyzymd/analyses/distances.py`)
 
 ### Known Limitations
 
@@ -195,8 +1422,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pixi shell-hook -e <env> --manifest-path <path>` instead of
   `module load` + `conda activate`. The manifest path is auto-detected
   from the `polyzymd` binary location at submission time.
-- `pixi.toml` trimmed to actual runtime dependencies with three environments:
-  `build` (no CUDA), `cuda-12-4` (CU Boulder Blanca), `cuda-12-6`
+- `pixi.toml` trimmed to actual runtime dependencies with separate environments:
+  `build` (no CUDA), `sim-cuda-12-4` (CU Boulder Blanca), and `sim-cuda-12-6`
   (PSC Bridges2).
 - Added `openbabel` to `pixi.toml` conda dependencies. Required at import
   time by `polymerist.polymers.building.mbconvert`, which `polyzymd build`
@@ -421,7 +1648,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rewrote installation guide for pixi (replaces conda/mamba instructions).
 - Removed phantom `polyzymd run` and `polyzymd continue` CLI references
   (these commands never existed in the code).
-- Added `polyzymd run-gromacs` section to CLI reference.
+- Added `polyzymd run` section to CLI reference.
 - Updated HPC guide with pixi shell-hook activation examples.
 - Fixed stale `polymerist-env` environment name references.
 - Updated troubleshooting guide for pixi workflow.

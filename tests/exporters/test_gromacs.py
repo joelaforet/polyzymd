@@ -1,0 +1,1717 @@
+"""Tests for GROMACS exporter bug fixes.
+
+Covers:
+- Bug 1: Position restraints applied to ALL polymer ITP files
+  (not just the first one)
+- Bug 2: GRO residue numbering for multi-residue molecule copies
+  (globally sequential instead of sliding offset)
+- ITP parsing helpers (_get_heavy_atom_indices_from_itp,
+  _get_atom_count_from_itp, _get_molecule_name_from_itp,
+  _extract_mol_index, _find_all_polymer_itps)
+- GRO residue fix helpers (_parse_molecules_from_top,
+  _parse_itp_atom_and_residue_counts, _fix_gro_residue_numbering)
+"""
+
+import shutil
+from bisect import bisect_right
+from importlib import resources
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from polyzymd.exporters.gromacs import (
+    GromacsExporter,
+    GromacsRunner,
+    MDPGenerator,
+    PositionRestraintGenerator,
+    RunScriptGenerator,
+)
+
+
+def _assert_no_unresolved_jinja(script: str) -> None:
+    """Assert generated shell content has no unresolved Jinja syntax."""
+    assert "{{" not in script
+    assert "}}" not in script
+    assert "{%" not in script
+    assert "%}" not in script
+
+
+# ---------------------------------------------------------------------------
+# Fixtures — synthetic ITP content
+# ---------------------------------------------------------------------------
+
+# Minimal ITP for a polymer with 10 atoms (5 heavy + 5 hydrogen), 3 residues
+POLYMER_ITP_TEMPLATE = """\
+[ moleculetype ]
+{mol_name}           3
+
+[ atoms ]
+;index, atom type, resnum, resname, name, cgnr, charge, mass
+     1 {mol_name}_0       1 RES1     C1      1  -0.100000000000  12.010780000000
+     2 {mol_name}_1       1 RES1     H1      2   0.050000000000   1.007940000000
+     3 {mol_name}_2       1 RES1     O1      3  -0.200000000000  15.999430000000
+     4 {mol_name}_3       2 RES2     C2      4  -0.100000000000  12.010780000000
+     5 {mol_name}_4       2 RES2     H2      5   0.050000000000   1.007940000000
+     6 {mol_name}_5       2 RES2     N1      6  -0.150000000000  14.006720000000
+     7 {mol_name}_6       2 RES2     H3      7   0.050000000000   1.007940000000
+     8 {mol_name}_7       3 RES3     C3      8  -0.100000000000  12.010780000000
+     9 {mol_name}_8       3 RES3     H4      9   0.050000000000   1.007940000000
+    10 {mol_name}_9       3 RES3     S1     10  -0.050000000000  32.065000000000
+
+[ bonds ]
+;ai    aj   funct r k
+     1      2      1    0.10900  284512.000
+"""
+
+# Minimal ITP for protein with 6 atoms, 2 residues
+PROTEIN_ITP_CONTENT = """\
+[ moleculetype ]
+MOL0           3
+
+[ atoms ]
+     1 MOL0_0       1 ALA      N       1  -0.300000000000  14.006720000000
+     2 MOL0_1       1 ALA      CA      2   0.100000000000  12.010780000000
+     3 MOL0_2       1 ALA      H       3   0.200000000000   1.007940000000
+     4 MOL0_3       2 GLY      N       4  -0.300000000000  14.006720000000
+     5 MOL0_4       2 GLY      CA      5   0.100000000000  12.010780000000
+     6 MOL0_5       2 GLY      H       6   0.200000000000   1.007940000000
+
+[ bonds ]
+     1      2      1    0.14900  224262.400
+"""
+
+# Water ITP (3 atoms, 1 residue)
+WATER_ITP_CONTENT = """\
+[ moleculetype ]
+water           2
+
+[ atoms ]
+     1 water_0       1 HOH      OW      1  -0.834000000000  15.999430000000
+     2 water_1       1 HOH      HW1     2   0.417000000000   1.007940000000
+     3 water_2       1 HOH      HW2     3   0.417000000000   1.007940000000
+
+[ settles ]
+     1      1    0.09572    0.15139
+"""
+
+LIGAND_ITP_TEMPLATE = """\
+[ moleculetype ]
+{mol_name}           3
+
+[ atoms ]
+     1 {mol_name}_0       1 LIG      C1      1  -0.100000000000  12.010780000000
+     2 {mol_name}_1       1 LIG      O1      2  -0.200000000000  15.999430000000
+     3 {mol_name}_2       1 LIG      H1      3   0.100000000000   1.007940000000
+     4 {mol_name}_3       1 LIG      N1      4  -0.100000000000  14.006720000000
+
+[ bonds ]
+     1      2      1    0.14900  224262.400
+"""
+
+
+def _write_itp(directory: Path, prefix: str, mol_name: str, content: str) -> Path:
+    """Write an ITP file and return its path."""
+    path = directory / f"{prefix}_{mol_name}.itp"
+    path.write_text(content)
+    return path
+
+
+def _write_top(directory: Path, prefix: str, molecules: list[tuple[str, int]]) -> Path:
+    """Write a minimal topology file with a [ molecules ] layout."""
+    molecule_lines = [f"{mol_name}    {count}" for mol_name, count in molecules]
+    path = directory / f"{prefix}.top"
+    path.write_text("[ system ]\ntest\n\n[ molecules ]\n" + "\n".join(molecule_lines) + "\n")
+    return path
+
+
+def _protein_itp_content(mol_name: str) -> str:
+    """Return the synthetic protein ITP content with the requested molecule name."""
+    return PROTEIN_ITP_CONTENT.replace("MOL0", mol_name)
+
+
+def _posres_config(groups: list[str], freeze_solute: bool = False) -> SimpleNamespace:
+    """Build a minimal config object with position restraint groups."""
+    restraints = [SimpleNamespace(group=group, force_constant=1000.0) for group in groups]
+    stage = SimpleNamespace(position_restraints=restraints)
+    return SimpleNamespace(
+        simulation_phases=SimpleNamespace(
+            equilibration_stages=[stage],
+            minimization=SimpleNamespace(freeze_solute=freeze_solute),
+        )
+    )
+
+
+def _component_info(
+    n_protein_atoms: int = 0,
+    n_substrate_atoms: int = 0,
+    n_polymer_atoms: int = 0,
+) -> SimpleNamespace:
+    """Build minimal SystemComponentInfo-like counts for synthetic tests."""
+    return SimpleNamespace(
+        n_protein_atoms=n_protein_atoms,
+        n_substrate_atoms=n_substrate_atoms,
+        n_polymer_atoms=n_polymer_atoms,
+        has_protein=n_protein_atoms > 0,
+        has_substrate=n_substrate_atoms > 0,
+        has_polymers=n_polymer_atoms > 0,
+    )
+
+
+def _posres_generator(component_info: SimpleNamespace) -> PositionRestraintGenerator:
+    """Create a PositionRestraintGenerator without OpenMM topology dependencies."""
+    generator = PositionRestraintGenerator.__new__(PositionRestraintGenerator)
+    generator._component_info = component_info
+    return generator
+
+
+def _posres_indices(itp_path: Path, define: str) -> list[int]:
+    """Read local atom indices from a generated position restraint block."""
+    indices = []
+    in_define = False
+    in_posres = False
+    for line in itp_path.read_text().splitlines():
+        stripped = line.strip()
+        if stripped == f"#ifdef {define}":
+            in_define = True
+            continue
+        if in_define and stripped == "#endif":
+            break
+        if in_define and stripped.startswith("["):
+            in_posres = stripped.strip("[] ").lower() == "position_restraints"
+            continue
+        if in_define and in_posres and stripped and not stripped.startswith(";"):
+            parts = stripped.split()
+            if parts and parts[0].isdigit():
+                indices.append(int(parts[0]))
+    return indices
+
+
+class TestTemperatureRampMDP:
+    """Verify GROMACS annealing uses the schema-derived ramp duration."""
+
+    @staticmethod
+    def _interpolated_temperature(params, time_ps: float) -> float:
+        """Evaluate GROMACS' piecewise-linear reference temperature."""
+        index = bisect_right(params.annealing_time, time_ps) - 1
+        if index >= len(params.annealing_time) - 1:
+            return params.annealing_temp[-1]
+        left_time = params.annealing_time[index]
+        right_time = params.annealing_time[index + 1]
+        fraction = (time_ps - left_time) / (right_time - left_time)
+        return params.annealing_temp[index] + fraction * (
+            params.annealing_temp[index + 1] - params.annealing_temp[index]
+        )
+
+    def test_annealing_duration_and_steps_are_derived_from_rate(self, caplog):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        caplog.set_level("INFO")
+        stage = EquilibrationStageConfig(
+            name="heating",
+            temperature_start=60.0,
+            temperature_end=300.0,
+            temperature_increment=1.0,
+            temperature_interval_steps=600,
+            time_step=2.0,
+            samples=20,
+        )
+        generator = MDPGenerator.__new__(MDPGenerator)
+        generator._pressure = 1.0
+
+        params = generator._create_annealing_params(
+            stage=stage,
+            stage_num=1,
+            is_first_stage=True,
+        )
+
+        assert params.nsteps == 144000
+        assert params.annealing_time[0] == 0.0
+        assert params.annealing_time[1] == pytest.approx(1.198)
+        assert params.annealing_time[2] == pytest.approx(1.2)
+        assert params.annealing_npoints == 481
+        assert params.annealing_time[-1] == pytest.approx(288.0)
+        assert params.annealing_temp[0] == 60.0
+        assert params.annealing_temp[-1] == 300.0
+        assert params.tau_t == pytest.approx(1.0)
+        assert "1 K every 600 steps" in caplog.text
+        assert "derived duration 0.288000 ns" in caplog.text
+
+    def test_matches_openmm_temperature_at_every_integration_step(self):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        stage = EquilibrationStageConfig(
+            name="heating",
+            temperature_start=100.0,
+            temperature_end=112.0,
+            temperature_increment=5.0,
+            temperature_interval_steps=3,
+            time_step=2.0,
+            samples=3,
+        )
+        generator = MDPGenerator.__new__(MDPGenerator)
+        generator._pressure = 1.0
+        params = generator._create_annealing_params(
+            stage=stage,
+            stage_num=1,
+            is_first_stage=True,
+        )
+
+        for step in range(params.nsteps + 1):
+            gromacs_temperature = self._interpolated_temperature(
+                params,
+                time_ps=step * params.dt,
+            )
+            openmm_temperature = stage.temperature_at_step(step, params.nsteps)
+            assert gromacs_temperature == pytest.approx(openmm_temperature)
+
+
+def _assert_posres_indices_within_atom_count(itp_path: Path, define: str) -> None:
+    """Assert generated position restraint indices are local to their ITP."""
+    indices = _posres_indices(itp_path, define)
+    atom_count = PositionRestraintGenerator._get_atom_count_from_itp(itp_path)
+    assert indices
+    assert max(indices) <= atom_count
+
+
+# ---------------------------------------------------------------------------
+# Bug 1: ITP parsing helpers
+# ---------------------------------------------------------------------------
+
+
+class TestGetHeavyAtomIndicesFromItp:
+    """_get_heavy_atom_indices_from_itp identifies non-H atoms by name."""
+
+    def test_polymer_heavy_atoms(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "MOL2", POLYMER_ITP_TEMPLATE.format(mol_name="MOL2"))
+        heavy = PositionRestraintGenerator._get_heavy_atom_indices_from_itp(itp)
+        # Atoms: C1(1), H1(2), O1(3), C2(4), H2(5), N1(6), H3(7), C3(8), H4(9), S1(10)
+        # Non-H: 1, 3, 4, 6, 8, 10
+        assert heavy == [1, 3, 4, 6, 8, 10]
+
+    def test_protein_heavy_atoms(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "MOL0", PROTEIN_ITP_CONTENT)
+        heavy = PositionRestraintGenerator._get_heavy_atom_indices_from_itp(itp)
+        # N(1), CA(2), H(3), N(4), CA(5), H(6) -> non-H: 1, 2, 4, 5
+        assert heavy == [1, 2, 4, 5]
+
+    def test_water_heavy_atoms(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "water", WATER_ITP_CONTENT)
+        heavy = PositionRestraintGenerator._get_heavy_atom_indices_from_itp(itp)
+        # OW(1), HW1(2), HW2(3) -> non-H: 1 only
+        # Wait — HW1 starts with 'H', so only OW is heavy
+        assert heavy == [1]
+
+    def test_digit_prefixed_hydrogen_names_are_excluded(self, tmp_path):
+        content = """\
+[ moleculetype ]
+MOLX           3
+
+[ atoms ]
+     1 MOLX_0       1 RES      H       1   0.100000000000   1.007940000000
+     2 MOLX_1       1 RES      1H      2   0.100000000000   1.007940000000
+     3 MOLX_2       1 RES      2HA     3   0.100000000000   1.007940000000
+     4 MOLX_3       1 RES      3HD1    4   0.100000000000   1.007940000000
+     5 MOLX_4       1 RES      C1      5  -0.100000000000  12.010780000000
+     6 MOLX_5       1 RES      O1      6  -0.200000000000  15.999430000000
+     7 MOLX_6       1 RES      1C      7  -0.100000000000  12.010780000000
+
+[ bonds ]
+     1      5      1    0.10900  284512.000
+"""
+        itp = _write_itp(tmp_path, "sys", "MOLX", content)
+
+        heavy = PositionRestraintGenerator._get_heavy_atom_indices_from_itp(itp)
+
+        assert heavy == [5, 6, 7]
+
+    def test_nonexistent_file(self, tmp_path):
+        path = tmp_path / "nope.itp"
+        heavy = PositionRestraintGenerator._get_heavy_atom_indices_from_itp(path)
+        assert heavy == []
+
+
+class TestGetAtomCountFromItp:
+    """_get_atom_count_from_itp counts all atoms in [ atoms ] section."""
+
+    def test_polymer_atom_count(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "MOL2", POLYMER_ITP_TEMPLATE.format(mol_name="MOL2"))
+        count = PositionRestraintGenerator._get_atom_count_from_itp(itp)
+        assert count == 10
+
+    def test_protein_atom_count(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "MOL0", PROTEIN_ITP_CONTENT)
+        count = PositionRestraintGenerator._get_atom_count_from_itp(itp)
+        assert count == 6
+
+    def test_water_atom_count(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "water", WATER_ITP_CONTENT)
+        count = PositionRestraintGenerator._get_atom_count_from_itp(itp)
+        assert count == 3
+
+
+class TestGetMoleculeNameFromItp:
+    """_get_molecule_name_from_itp extracts the moleculetype name."""
+
+    def test_polymer_name(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "MOL2", POLYMER_ITP_TEMPLATE.format(mol_name="MOL2"))
+        assert PositionRestraintGenerator._get_molecule_name_from_itp(itp) == "MOL2"
+
+    def test_water_name(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "water", WATER_ITP_CONTENT)
+        assert PositionRestraintGenerator._get_molecule_name_from_itp(itp) == "water"
+
+
+class TestExtractMolIndex:
+    """_extract_mol_index parses the MOL index from filenames."""
+
+    def test_normal_cases(self):
+        assert PositionRestraintGenerator._extract_mol_index(Path("sys_MOL0.itp")) == 0
+        assert PositionRestraintGenerator._extract_mol_index(Path("sys_MOL12.itp")) == 12
+
+    def test_no_match(self):
+        assert PositionRestraintGenerator._extract_mol_index(Path("sys_water.itp")) is None
+
+
+class TestFindAllPolymerItps:
+    """_find_all_polymer_itps discovers polymer ITPs, skipping protein/ligand/water."""
+
+    def _setup_system(self, tmp_path, has_protein=True, has_substrate=False):
+        """Create a mock system with protein + 3 polymer types + water."""
+        from unittest.mock import MagicMock
+
+        prefix = "sys"
+
+        # Create ITP files
+        if has_protein:
+            _write_itp(tmp_path, prefix, "MOL0", PROTEIN_ITP_CONTENT)
+
+        mol_offset = (1 if has_protein else 0) + (1 if has_substrate else 0)
+        for i in range(3):
+            mol_name = f"MOL{mol_offset + i}"
+            _write_itp(
+                tmp_path,
+                prefix,
+                mol_name,
+                POLYMER_ITP_TEMPLATE.format(mol_name=mol_name),
+            )
+
+        # Water ITP should be skipped (too few atoms)
+        _write_itp(tmp_path, prefix, f"MOL{mol_offset + 3}", WATER_ITP_CONTENT)
+
+        # Mock component_info
+        component_info = MagicMock()
+        component_info.has_protein = has_protein
+        component_info.has_substrate = has_substrate
+
+        gen = PositionRestraintGenerator.__new__(PositionRestraintGenerator)
+        gen._component_info = component_info
+        return gen, prefix
+
+    def test_finds_all_polymer_itps_with_protein(self, tmp_path):
+        gen, prefix = self._setup_system(tmp_path, has_protein=True)
+        itps = gen._find_all_polymer_itps(tmp_path, prefix)
+        names = [p.name for p in itps]
+        assert names == ["sys_MOL1.itp", "sys_MOL2.itp", "sys_MOL3.itp"]
+
+    def test_finds_all_polymer_itps_no_protein(self, tmp_path):
+        gen, prefix = self._setup_system(tmp_path, has_protein=False)
+        itps = gen._find_all_polymer_itps(tmp_path, prefix)
+        names = [p.name for p in itps]
+        assert names == ["sys_MOL0.itp", "sys_MOL1.itp", "sys_MOL2.itp"]
+
+    def test_skips_water_itp(self, tmp_path):
+        gen, prefix = self._setup_system(tmp_path, has_protein=True)
+        itps = gen._find_all_polymer_itps(tmp_path, prefix)
+        water_itps = [
+            p
+            for p in itps
+            if "water" in (PositionRestraintGenerator._get_molecule_name_from_itp(p) or "").lower()
+        ]
+        assert len(water_itps) == 0
+
+    def test_empty_directory(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        component_info = MagicMock()
+        component_info.has_protein = True
+        component_info.has_substrate = False
+
+        gen = PositionRestraintGenerator.__new__(PositionRestraintGenerator)
+        gen._component_info = component_info
+        itps = gen._find_all_polymer_itps(tmp_path, "sys")
+        assert itps == []
+
+
+class TestTopologyLayoutPositionRestraints:
+    """Topology layout classification keeps homodimer restraints local and typed."""
+
+    def test_identical_homodimer_mol0_two_plus_ligand(self, tmp_path):
+        """MOL0 with two copies should be one protein ITP, not protein plus ligand."""
+        prefix = "sys"
+        protein_itp = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        ligand_itp = _write_itp(
+            tmp_path,
+            prefix,
+            "MOL1",
+            LIGAND_ITP_TEMPLATE.format(mol_name="MOL1"),
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 2), ("MOL1", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=12, n_substrate_atoms=4))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config(["protein_heavy", "ligand_heavy"]),
+            tmp_path,
+            prefix,
+        )
+
+        assert defines == {"protein": "POSRES_PROTEIN", "ligand": "POSRES_LIGAND"}
+        assert _posres_indices(protein_itp, "POSRES_PROTEIN") == [1, 2, 4, 5]
+        assert _posres_indices(ligand_itp, "POSRES_LIGAND") == [1, 2, 4]
+        _assert_posres_indices_within_atom_count(protein_itp, "POSRES_PROTEIN")
+        _assert_posres_indices_within_atom_count(ligand_itp, "POSRES_LIGAND")
+
+    def test_minimization_restrains_solute_heavy_atoms_without_stage_restraints(self, tmp_path):
+        """POSRES_EM covers the protein and ligand heavy atoms even when no stage restrains them."""
+        prefix = "sys"
+        protein_itp = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        ligand_itp = _write_itp(
+            tmp_path, prefix, "MOL1", LIGAND_ITP_TEMPLATE.format(mol_name="MOL1")
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 1), ("MOL1", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=6, n_substrate_atoms=4))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config([], freeze_solute=True), tmp_path, prefix
+        )
+
+        assert defines == {"minimization": "POSRES_EM"}
+        assert _posres_indices(protein_itp, "POSRES_EM") == [1, 2, 4, 5]
+        assert _posres_indices(ligand_itp, "POSRES_EM") == [1, 2, 4]
+
+    def test_distinct_dimer_mol0_mol1_plus_ligand_mol2(self, tmp_path):
+        """Distinct protein ITPs should both receive protein restraints."""
+        prefix = "sys"
+        protein_a = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        protein_b = _write_itp(tmp_path, prefix, "MOL1", _protein_itp_content("MOL1"))
+        ligand_itp = _write_itp(
+            tmp_path,
+            prefix,
+            "MOL2",
+            LIGAND_ITP_TEMPLATE.format(mol_name="MOL2"),
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 1), ("MOL1", 1), ("MOL2", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=12, n_substrate_atoms=4))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config(["protein_heavy", "ligand_heavy"]),
+            tmp_path,
+            prefix,
+        )
+
+        assert defines == {"protein": "POSRES_PROTEIN", "ligand": "POSRES_LIGAND"}
+        assert _posres_indices(protein_a, "POSRES_PROTEIN") == [1, 2, 4, 5]
+        assert _posres_indices(protein_b, "POSRES_PROTEIN") == [1, 2, 4, 5]
+        assert _posres_indices(ligand_itp, "POSRES_LIGAND") == [1, 2, 4]
+        for itp_path, define in (
+            (protein_a, "POSRES_PROTEIN"),
+            (protein_b, "POSRES_PROTEIN"),
+            (ligand_itp, "POSRES_LIGAND"),
+        ):
+            _assert_posres_indices_within_atom_count(itp_path, define)
+
+    def test_ligand_after_multiple_proteins_is_not_second_protein(self, tmp_path):
+        """Ligand restraints should start after all topology-classified proteins."""
+        prefix = "sys"
+        protein_a = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        protein_b = _write_itp(tmp_path, prefix, "MOL1", _protein_itp_content("MOL1"))
+        ligand_itp = _write_itp(
+            tmp_path,
+            prefix,
+            "MOL2",
+            LIGAND_ITP_TEMPLATE.format(mol_name="MOL2"),
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 1), ("MOL1", 1), ("MOL2", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=12, n_substrate_atoms=4))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config(["ligand_heavy"]),
+            tmp_path,
+            prefix,
+        )
+
+        assert defines == {"ligand": "POSRES_LIGAND"}
+        assert "POSRES_LIGAND" not in protein_a.read_text()
+        assert "POSRES_LIGAND" not in protein_b.read_text()
+        assert _posres_indices(ligand_itp, "POSRES_LIGAND") == [1, 2, 4]
+        _assert_posres_indices_within_atom_count(ligand_itp, "POSRES_LIGAND")
+
+    def test_polymer_after_multiple_proteins_is_not_second_protein(self, tmp_path):
+        """Polymer discovery should not classify retained protein ITPs as polymer."""
+        prefix = "sys"
+        protein_itp = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        polymer_itp = _write_itp(
+            tmp_path,
+            prefix,
+            "MOL1",
+            POLYMER_ITP_TEMPLATE.format(mol_name="MOL1"),
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 2), ("MOL1", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=12, n_polymer_atoms=10))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config(["polymer_heavy"]),
+            tmp_path,
+            prefix,
+        )
+
+        assert defines == {"polymer": "POSRES_POLYMER"}
+        assert "POSRES_POLYMER" not in protein_itp.read_text()
+        assert _posres_indices(polymer_itp, "POSRES_POLYMER") == [1, 3, 4, 6, 8, 10]
+        _assert_posres_indices_within_atom_count(polymer_itp, "POSRES_POLYMER")
+
+
+class TestAppendPosresToItp:
+    """_append_posres_to_itp correctly appends #ifdef POSRES block."""
+
+    def test_appends_posres_block(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "MOL2", POLYMER_ITP_TEMPLATE.format(mol_name="MOL2"))
+        PositionRestraintGenerator._append_posres_to_itp(
+            itp, [1, 3, 4, 6, 8, 10], 1000.0, "POSRES_POLYMER", "polymer_heavy"
+        )
+        content = itp.read_text()
+
+        assert "#ifdef POSRES_POLYMER" in content
+        assert "[ position_restraints ]" in content
+        assert "#endif" in content
+        # Check all 6 heavy atom indices are present
+        for idx in [1, 3, 4, 6, 8, 10]:
+            assert f"{idx:6d}  1     1000.0    1000.0    1000.0" in content
+
+    def test_does_not_duplicate_existing_content(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "MOL2", POLYMER_ITP_TEMPLATE.format(mol_name="MOL2"))
+        original_content = itp.read_text()
+        PositionRestraintGenerator._append_posres_to_itp(
+            itp, [1], 500.0, "POSRES_POLYMER", "polymer_heavy"
+        )
+        content = itp.read_text()
+        # Original content should still be there
+        assert "[ moleculetype ]" in content
+        assert "[ atoms ]" in content
+        assert "[ bonds ]" in content
+
+
+# ---------------------------------------------------------------------------
+# Bug 2: GRO residue numbering helpers
+# ---------------------------------------------------------------------------
+
+
+class TestParseMoleculesFromTop:
+    """_parse_molecules_from_top reads [ molecules ] section."""
+
+    def test_normal_top_file(self, tmp_path):
+        top = tmp_path / "sys.top"
+        top.write_text("""\
+; Topology file
+#include "sys_MOL0.itp"
+#include "sys_MOL1.itp"
+
+[ system ]
+test system
+
+[ molecules ]
+;name   number
+MOL0    1
+MOL1    4
+MOL2    3
+water   1000
+NA      10
+CL      10
+""")
+        result = GromacsExporter._parse_molecules_from_top(top)
+        assert result == [
+            ("MOL0", 1),
+            ("MOL1", 4),
+            ("MOL2", 3),
+            ("water", 1000),
+            ("NA", 10),
+            ("CL", 10),
+        ]
+
+    def test_empty_molecules_section(self, tmp_path):
+        top = tmp_path / "sys.top"
+        top.write_text("[ system ]\ntest\n\n[ molecules ]\n")
+        result = GromacsExporter._parse_molecules_from_top(top)
+        assert result == []
+
+
+class TestParseItpAtomAndResidueCounts:
+    """_parse_itp_atom_and_residue_counts gets atom and residue counts."""
+
+    def test_polymer_itp(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "MOL1", POLYMER_ITP_TEMPLATE.format(mol_name="MOL1"))
+        n_atoms, n_residues = GromacsExporter._parse_itp_atom_and_residue_counts(itp)
+        assert n_atoms == 10
+        assert n_residues == 3
+
+    def test_protein_itp(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "MOL0", PROTEIN_ITP_CONTENT)
+        n_atoms, n_residues = GromacsExporter._parse_itp_atom_and_residue_counts(itp)
+        assert n_atoms == 6
+        assert n_residues == 2
+
+    def test_water_itp(self, tmp_path):
+        itp = _write_itp(tmp_path, "sys", "water", WATER_ITP_CONTENT)
+        n_atoms, n_residues = GromacsExporter._parse_itp_atom_and_residue_counts(itp)
+        assert n_atoms == 3
+        assert n_residues == 1
+
+
+# ---------------------------------------------------------------------------
+# Bug 2: Full GRO residue renumbering
+# ---------------------------------------------------------------------------
+
+
+def _make_gro_line(resid, resname, atomname, atomnum, x=0.0, y=0.0, z=0.0):
+    """Build a single GRO atom line in the standard fixed-width format."""
+    return f"{resid:5d}{resname:<5s}{atomname:>5s}{atomnum:5d}{x:8.3f}{y:8.3f}{z:8.3f}"
+
+
+class TestFixGroResidueNumbering:
+    """_fix_gro_residue_numbering corrects multi-residue molecule copies."""
+
+    def _setup_system(self, tmp_path):
+        """Create a minimal system: 1 protein (2 res) + 2 polymer copies (3 res each) + 3 water.
+
+        The broken GRO has the OpenFF copy_index offset bug:
+        - Protein copy 0: resid 1, 1, 2, 2 (2 residues, correct)
+        - Polymer copy 0: resid 1, 1, 2, 2, 3 (3 residues, correct)
+        - Polymer copy 1: resid 2, 2, 3, 3, 4 (WRONG: offset by +1)
+        - Water copy 0: resid 1 (correct, single residue)
+        - Water copy 1: resid 2 (correct)
+        - Water copy 2: resid 3 (correct)
+        """
+        prefix = "sys"
+
+        # Write ITPs
+        _write_itp(tmp_path, prefix, "MOL0", PROTEIN_ITP_CONTENT)
+        _write_itp(
+            tmp_path,
+            prefix,
+            "MOL1",
+            POLYMER_ITP_TEMPLATE.format(mol_name="MOL1"),
+        )
+        # Water ITP with only 3 atoms for simplicity
+        _write_itp(tmp_path, prefix, "water", WATER_ITP_CONTENT)
+
+        # Write .top with molecule layout
+        top_path = tmp_path / f"{prefix}.top"
+        top_path.write_text("""\
+[ system ]
+test
+
+[ molecules ]
+MOL0    1
+MOL1    2
+water   3
+""")
+
+        # Build the broken .gro
+        # Protein: 6 atoms, 2 residues (resids 1,1,1,2,2,2) — correct
+        protein_lines = [
+            _make_gro_line(1, "ALA", "N", 1),
+            _make_gro_line(1, "ALA", "CA", 2),
+            _make_gro_line(1, "ALA", "H", 3),
+            _make_gro_line(2, "GLY", "N", 4),
+            _make_gro_line(2, "GLY", "CA", 5),
+            _make_gro_line(2, "GLY", "H", 6),
+        ]
+
+        # Polymer copy 0: 10 atoms, resids 1,1,1,2,2,2,2,3,3,3 — correct
+        poly0_lines = [
+            _make_gro_line(1, "RES1", "C1", 7),
+            _make_gro_line(1, "RES1", "H1", 8),
+            _make_gro_line(1, "RES1", "O1", 9),
+            _make_gro_line(2, "RES2", "C2", 10),
+            _make_gro_line(2, "RES2", "H2", 11),
+            _make_gro_line(2, "RES2", "N1", 12),
+            _make_gro_line(2, "RES2", "H3", 13),
+            _make_gro_line(3, "RES3", "C3", 14),
+            _make_gro_line(3, "RES3", "H4", 15),
+            _make_gro_line(3, "RES3", "S1", 16),
+        ]
+
+        # Polymer copy 1: broken — resids shifted by +1 (copy_index=1)
+        poly1_lines = [
+            _make_gro_line(2, "RES1", "C1", 17),  # Should be 4
+            _make_gro_line(2, "RES1", "H1", 18),
+            _make_gro_line(2, "RES1", "O1", 19),
+            _make_gro_line(3, "RES2", "C2", 20),  # Should be 5
+            _make_gro_line(3, "RES2", "H2", 21),
+            _make_gro_line(3, "RES2", "N1", 22),
+            _make_gro_line(3, "RES2", "H3", 23),
+            _make_gro_line(4, "RES3", "C3", 24),  # Should be 6
+            _make_gro_line(4, "RES3", "H4", 25),
+            _make_gro_line(4, "RES3", "S1", 26),
+        ]
+
+        # Water: 3 copies, single residue each — correct numbering
+        water_lines = [
+            _make_gro_line(1, "HOH", "OW", 27),
+            _make_gro_line(1, "HOH", "HW1", 28),
+            _make_gro_line(1, "HOH", "HW2", 29),
+            _make_gro_line(2, "HOH", "OW", 30),
+            _make_gro_line(2, "HOH", "HW1", 31),
+            _make_gro_line(2, "HOH", "HW2", 32),
+            _make_gro_line(3, "HOH", "OW", 33),
+            _make_gro_line(3, "HOH", "HW1", 34),
+            _make_gro_line(3, "HOH", "HW2", 35),
+        ]
+
+        all_atom_lines = protein_lines + poly0_lines + poly1_lines + water_lines
+        n_atoms = len(all_atom_lines)
+        gro_lines = (
+            ["Generated by test"]
+            + [f" {n_atoms}"]
+            + all_atom_lines
+            + ["   5.0000000   5.0000000   5.0000000"]
+        )
+        gro_path = tmp_path / f"{prefix}.gro"
+        gro_path.write_text("\n".join(gro_lines) + "\n")
+
+        return gro_path, top_path, prefix
+
+    def test_fixes_polymer_residue_numbering(self, tmp_path):
+        gro_path, top_path, prefix = self._setup_system(tmp_path)
+
+        # Create a minimal GromacsExporter (no Interchange needed for this method)
+        exporter = GromacsExporter.__new__(GromacsExporter)
+        exporter._fix_gro_residue_numbering(gro_path, top_path, tmp_path, prefix)
+
+        # Parse fixed .gro
+        lines = gro_path.read_text().splitlines()
+        atom_lines = lines[2:-1]
+
+        # Extract residue numbers
+        resids = [int(line[:5].strip()) for line in atom_lines]
+
+        # Protein (6 atoms, 2 residues): globally sequential 1, 1, 1, 2, 2, 2
+        assert resids[0:6] == [1, 1, 1, 2, 2, 2], f"Protein resids: {resids[0:6]}"
+
+        # Polymer copy 0 (10 atoms, 3 residues): continues from protein → 3, 3, 3, 4, 4, 4, 4, 5, 5, 5
+        assert resids[6:16] == [
+            3,
+            3,
+            3,
+            4,
+            4,
+            4,
+            4,
+            5,
+            5,
+            5,
+        ], f"Polymer copy 0 resids: {resids[6:16]}"
+
+        # Polymer copy 1 (10 atoms, 3 residues): continues → 6, 6, 6, 7, 7, 7, 7, 8, 8, 8
+        assert resids[16:26] == [
+            6,
+            6,
+            6,
+            7,
+            7,
+            7,
+            7,
+            8,
+            8,
+            8,
+        ], f"Polymer copy 1 resids: {resids[16:26]}"
+
+        # Water (9 atoms): single-residue, numbering preserved as-is
+        assert resids[26:35] == [1, 1, 1, 2, 2, 2, 3, 3, 3], f"Water resids: {resids[26:35]}"
+
+    def test_preserves_coordinates(self, tmp_path):
+        gro_path, top_path, prefix = self._setup_system(tmp_path)
+
+        # Read coordinates before fix
+        lines_before = gro_path.read_text().splitlines()
+        coords_before = [line[20:] for line in lines_before[2:-1]]
+
+        exporter = GromacsExporter.__new__(GromacsExporter)
+        exporter._fix_gro_residue_numbering(gro_path, top_path, tmp_path, prefix)
+
+        # Read coordinates after fix
+        lines_after = gro_path.read_text().splitlines()
+        coords_after = [line[20:] for line in lines_after[2:-1]]
+
+        assert coords_before == coords_after
+
+    def test_preserves_box_vectors(self, tmp_path):
+        gro_path, top_path, prefix = self._setup_system(tmp_path)
+
+        lines_before = gro_path.read_text().splitlines()
+        box_before = lines_before[-1]
+
+        exporter = GromacsExporter.__new__(GromacsExporter)
+        exporter._fix_gro_residue_numbering(gro_path, top_path, tmp_path, prefix)
+
+        lines_after = gro_path.read_text().splitlines()
+        box_after = lines_after[-1]
+
+        assert box_before == box_after
+
+    def test_preserves_atom_names(self, tmp_path):
+        gro_path, top_path, prefix = self._setup_system(tmp_path)
+
+        lines_before = gro_path.read_text().splitlines()
+        names_before = [line[10:15] for line in lines_before[2:-1]]
+
+        exporter = GromacsExporter.__new__(GromacsExporter)
+        exporter._fix_gro_residue_numbering(gro_path, top_path, tmp_path, prefix)
+
+        lines_after = gro_path.read_text().splitlines()
+        names_after = [line[10:15] for line in lines_after[2:-1]]
+
+        assert names_before == names_after
+
+    def test_no_op_for_single_residue_only(self, tmp_path):
+        """If all molecules are single-residue, .gro should be unchanged."""
+        prefix = "sys"
+        _write_itp(tmp_path, prefix, "water", WATER_ITP_CONTENT)
+
+        top = tmp_path / f"{prefix}.top"
+        top.write_text("[ system ]\ntest\n[ molecules ]\nwater   2\n")
+
+        gro = tmp_path / f"{prefix}.gro"
+        gro_content = (
+            "\n".join(
+                [
+                    "title",
+                    "6",
+                    _make_gro_line(1, "HOH", "OW", 1),
+                    _make_gro_line(1, "HOH", "HW1", 2),
+                    _make_gro_line(1, "HOH", "HW2", 3),
+                    _make_gro_line(2, "HOH", "OW", 4),
+                    _make_gro_line(2, "HOH", "HW1", 5),
+                    _make_gro_line(2, "HOH", "HW2", 6),
+                    "   3.0000000   3.0000000   3.0000000",
+                ]
+            )
+            + "\n"
+        )
+        gro.write_text(gro_content)
+
+        exporter = GromacsExporter.__new__(GromacsExporter)
+        exporter._fix_gro_residue_numbering(gro, top, tmp_path, prefix)
+
+        # Content should be unchanged (no multi-residue molecules)
+        assert gro.read_text() == gro_content
+
+    def test_homodimer_protein_residues_are_continuous(self, tmp_path):
+        """Duplicate protein copies should become continuous residue IDs."""
+        prefix = "sys"
+        _write_itp(tmp_path, prefix, "MOL0", PROTEIN_ITP_CONTENT)
+
+        top = tmp_path / f"{prefix}.top"
+        top.write_text("[ system ]\ntest\n[ molecules ]\nMOL0    2\n")
+
+        protein_copy_0 = [
+            _make_gro_line(1, "ALA", "N", 1),
+            _make_gro_line(1, "ALA", "CA", 2),
+            _make_gro_line(1, "ALA", "H", 3),
+            _make_gro_line(2, "GLY", "N", 4),
+            _make_gro_line(2, "GLY", "CA", 5),
+            _make_gro_line(2, "GLY", "H", 6),
+        ]
+        protein_copy_1 = [
+            _make_gro_line(2, "ALA", "N", 7),
+            _make_gro_line(2, "ALA", "CA", 8),
+            _make_gro_line(2, "ALA", "H", 9),
+            _make_gro_line(3, "GLY", "N", 10),
+            _make_gro_line(3, "GLY", "CA", 11),
+            _make_gro_line(3, "GLY", "H", 12),
+        ]
+        gro = tmp_path / f"{prefix}.gro"
+        gro.write_text(
+            "\n".join(
+                [
+                    "title",
+                    "12",
+                    *protein_copy_0,
+                    *protein_copy_1,
+                    "   3.0000000   3.0000000   3.0000000",
+                ]
+            )
+            + "\n"
+        )
+
+        exporter = GromacsExporter.__new__(GromacsExporter)
+        exporter._fix_gro_residue_numbering(gro, top, tmp_path, prefix)
+
+        atom_lines = gro.read_text().splitlines()[2:-1]
+        resids = [int(line[:5].strip()) for line in atom_lines]
+        assert resids == [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4]
+
+
+class TestFixGroMultiplePolymerTypes:
+    """Test residue numbering with multiple distinct polymer molecule types."""
+
+    def test_two_polymer_types(self, tmp_path):
+        """Two different polymer types, each with 2 copies.
+
+        Layout: protein(1) + polyA(2 copies) + polyB(2 copies)
+        polyA: 10 atoms, 3 residues
+        polyB: 10 atoms, 3 residues (different sequence, same atom count)
+        """
+        prefix = "sys"
+
+        # Protein
+        _write_itp(tmp_path, prefix, "MOL0", PROTEIN_ITP_CONTENT)
+
+        # Two polymer types
+        _write_itp(
+            tmp_path,
+            prefix,
+            "MOL1",
+            POLYMER_ITP_TEMPLATE.format(mol_name="MOL1"),
+        )
+        _write_itp(
+            tmp_path,
+            prefix,
+            "MOL2",
+            POLYMER_ITP_TEMPLATE.format(mol_name="MOL2"),
+        )
+
+        top = tmp_path / f"{prefix}.top"
+        top.write_text("[ system ]\ntest\n[ molecules ]\nMOL0    1\nMOL1    2\nMOL2    2\n")
+
+        # Build GRO with broken numbering
+        lines = ["title", "46"]
+
+        # Protein: 6 atoms
+        for i, (resid, rname, aname) in enumerate(
+            [
+                (1, "ALA", "N"),
+                (1, "ALA", "CA"),
+                (1, "ALA", "H"),
+                (2, "GLY", "N"),
+                (2, "GLY", "CA"),
+                (2, "GLY", "H"),
+            ],
+            start=1,
+        ):
+            lines.append(_make_gro_line(resid, rname, aname, i))
+
+        atom_num = 7
+        # polyA copy 0: resids 1,1,1,2,2,2,2,3,3,3
+        for resid, rname, aname in [
+            (1, "RES1", "C1"),
+            (1, "RES1", "H1"),
+            (1, "RES1", "O1"),
+            (2, "RES2", "C2"),
+            (2, "RES2", "H2"),
+            (2, "RES2", "N1"),
+            (2, "RES2", "H3"),
+            (3, "RES3", "C3"),
+            (3, "RES3", "H4"),
+            (3, "RES3", "S1"),
+        ]:
+            lines.append(_make_gro_line(resid, rname, aname, atom_num))
+            atom_num += 1
+
+        # polyA copy 1: broken (resids +1)
+        for resid, rname, aname in [
+            (2, "RES1", "C1"),
+            (2, "RES1", "H1"),
+            (2, "RES1", "O1"),
+            (3, "RES2", "C2"),
+            (3, "RES2", "H2"),
+            (3, "RES2", "N1"),
+            (3, "RES2", "H3"),
+            (4, "RES3", "C3"),
+            (4, "RES3", "H4"),
+            (4, "RES3", "S1"),
+        ]:
+            lines.append(_make_gro_line(resid, rname, aname, atom_num))
+            atom_num += 1
+
+        # polyB copy 0: resids 1,1,1,2,2,2,2,3,3,3
+        for resid, rname, aname in [
+            (1, "RES1", "C1"),
+            (1, "RES1", "H1"),
+            (1, "RES1", "O1"),
+            (2, "RES2", "C2"),
+            (2, "RES2", "H2"),
+            (2, "RES2", "N1"),
+            (2, "RES2", "H3"),
+            (3, "RES3", "C3"),
+            (3, "RES3", "H4"),
+            (3, "RES3", "S1"),
+        ]:
+            lines.append(_make_gro_line(resid, rname, aname, atom_num))
+            atom_num += 1
+
+        # polyB copy 1: broken (resids +1)
+        for resid, rname, aname in [
+            (2, "RES1", "C1"),
+            (2, "RES1", "H1"),
+            (2, "RES1", "O1"),
+            (3, "RES2", "C2"),
+            (3, "RES2", "H2"),
+            (3, "RES2", "N1"),
+            (3, "RES2", "H3"),
+            (4, "RES3", "C3"),
+            (4, "RES3", "H4"),
+            (4, "RES3", "S1"),
+        ]:
+            lines.append(_make_gro_line(resid, rname, aname, atom_num))
+            atom_num += 1
+
+        lines.append("   5.0000000   5.0000000   5.0000000")
+        gro_path = tmp_path / f"{prefix}.gro"
+        gro_path.write_text("\n".join(lines) + "\n")
+
+        # Fix
+        exporter = GromacsExporter.__new__(GromacsExporter)
+        exporter._fix_gro_residue_numbering(gro_path, top, tmp_path, prefix)
+
+        # Parse fixed
+        fixed_lines = gro_path.read_text().splitlines()
+        resids = [int(line[:5].strip()) for line in fixed_lines[2:-1]]
+
+        # Protein: 1,1,1,2,2,2 (globally sequential)
+        assert resids[0:6] == [1, 1, 1, 2, 2, 2]
+
+        # polyA copy 0: 3,3,3,4,4,4,4,5,5,5 (continues from protein resid 2)
+        assert resids[6:16] == [3, 3, 3, 4, 4, 4, 4, 5, 5, 5]
+
+        # polyA copy 1: 6,6,6,7,7,7,7,8,8,8 (continues from polyA copy 0 resid 5)
+        assert resids[16:26] == [6, 6, 6, 7, 7, 7, 7, 8, 8, 8]
+
+        # polyB copy 0: 9,9,9,10,10,10,10,11,11,11 (continues from polyA copy 1 resid 8)
+        assert resids[26:36] == [9, 9, 9, 10, 10, 10, 10, 11, 11, 11]
+
+        # polyB copy 1: 12,12,12,13,13,13,13,14,14,14
+        assert resids[36:46] == [12, 12, 12, 13, 13, 13, 13, 14, 14, 14]
+
+
+class TestEnergyMinimizationHelpers:
+    """Tests for EM health checks."""
+
+    def test_gromacs_handoff_core_files_are_gro_top_itp(self, tmp_path: Path) -> None:
+        """Build handoff contract centers on coordinates, topology, and ITP files."""
+        prefix = "system"
+        core_files = [tmp_path / f"{prefix}.gro", tmp_path / f"{prefix}.top"]
+        core_files.extend([tmp_path / f"{prefix}_MOL0.itp", tmp_path / f"{prefix}_water.itp"])
+        for path in core_files:
+            path.write_text("placeholder\n")
+
+        missing_core = [path for path in core_files if not path.exists()]
+
+        assert missing_core == []
+        assert not (tmp_path / "em.mdp").exists()
+        assert not (tmp_path / f"run_{prefix}_gromacs.sh").exists()
+
+    def test_run_script_template_resource_exists(self):
+        """Local GROMACS run template should be packaged as a resource."""
+        template = resources.files("polyzymd.engines.gromacs").joinpath(
+            "templates", "run_gromacs.sh.jinja"
+        )
+
+        assert template.is_file()
+        assert "GROMACS Workflow Script" in template.read_text()
+
+    def test_run_script_generator_uses_single_stage_em_with_health_check(self, tmp_path):
+        """Generated local run script should use single-stage EM and preserve health check."""
+        script_path = tmp_path / "run_test_gromacs.sh"
+        generator = RunScriptGenerator(prefix="system", equilibration_mdps=["eq_01_nvt.mdp"])
+
+        generator.generate(script_path)
+        script_content = script_path.read_text()
+
+        assert "em.mdp" in script_content
+        assert "em.gro" in script_content
+        assert "em.tpr" in script_content
+
+        assert "em_soft.mdp" not in script_content
+        assert "em_soft.gro" not in script_content
+        assert "em_soft.tpr" not in script_content
+
+        assert "grep -qi" in script_content
+        assert "force.*not finite" in script_content
+        _assert_no_unresolved_jinja(script_content)
+
+    def test_run_script_generator_preserves_command_semantics(self, tmp_path):
+        """Generated local run script should preserve GROMACS command sequence."""
+        script_path = tmp_path / "run_test_gromacs.sh"
+        generator = RunScriptGenerator(
+            prefix="system",
+            equilibration_mdps=["eq_01_nvt.mdp", "eq_02_npt.mdp"],
+            gmx_command="/opt/gromacs/bin/gmx",
+        )
+
+        generator.generate(script_path)
+        script_content = script_path.read_text()
+
+        assert 'GMX="/opt/gromacs/bin/gmx"' in script_content
+        assert 'PREFIX="system"' in script_content
+        assert (
+            "$GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro " "-p ${PREFIX}.top -o em.tpr"
+        ) in script_content
+        assert "$GMX mdrun -deffnm em -v" in script_content
+        assert "$GMX grompp -f eq_01_nvt.mdp -c em.gro -r em.gro" in script_content
+        assert "$GMX mdrun -deffnm eq_01 -v" in script_content
+        assert "$GMX grompp -f eq_02_npt.mdp -c eq_01.gro -r em.gro -t eq_01.cpt" in script_content
+        assert "$GMX mdrun -deffnm eq_02 -v" in script_content
+        assert "$GMX grompp -f prod.mdp -c ${LAST_EQ}.gro -t ${LAST_EQ}.cpt" in script_content
+        assert "$GMX mdrun -deffnm prod -v" in script_content
+        assert "prod_nojump.xtc" in script_content
+        assert "prod_centered.xtc" in script_content
+
+    def test_run_script_names_itself_and_passes_the_mdrun_flags(self, tmp_path):
+        """The script's usage line names its own file, and each mdrun gets polyzymd run's flags."""
+        script_path = tmp_path / "run_trpcage_gromacs.sh"
+        generator = RunScriptGenerator(
+            prefix="trpcage",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+            mdrun_flags={
+                "em": "-ntmpi 1 -ntomp 4",
+                "eq": "-ntmpi 1 -ntomp 4 -nb gpu",
+                "prod": "-ntmpi 1 -ntomp 4 -nb gpu -pme gpu",
+            },
+        )
+
+        generator.generate(script_path)
+        text = script_path.read_text()
+
+        assert "# Usage: ./run_trpcage_gromacs.sh" in text
+        assert "run_gromacs.sh" not in text
+        assert "$GMX mdrun -deffnm em -v -ntmpi 1 -ntomp 4\n" in text
+        assert "$GMX mdrun -deffnm eq_01 -v -ntmpi 1 -ntomp 4 -nb gpu\n" in text
+        assert "$GMX mdrun -deffnm prod -v -ntmpi 1 -ntomp 4 -nb gpu -pme gpu\n" in text
+        assert text.count("=== Step 1: Energy Minimization ===") == 1
+
+    def test_run_script_refuses_unsafe_mdrun_flags(self, tmp_path):
+        generator = RunScriptGenerator(
+            prefix="system", equilibration_mdps=[], mdrun_flags={"prod": "-ntomp 4; rm x"}
+        )
+
+        with pytest.raises(ValueError, match="mdrun_flags"):
+            generator.generate(tmp_path / "run.sh")
+
+    @pytest.mark.parametrize(
+        ("field", "kwargs"),
+        [
+            ("gmx_command", {"gmx_command": "/opt/gromacs/bin/gmx$1"}),
+            ("gmx_command", {"gmx_command": r"C:\gromacs\bin\gmx"}),
+            ("gmx_command", {"gmx_command": "gmx mpi"}),
+            ("prefix", {"prefix": "bad$prefix"}),
+            ("prefix", {"prefix": r"bad\prefix"}),
+            ("prefix", {"prefix": "bad prefix"}),
+            ("equilibration_mdp", {"equilibration_mdps": ["eq_$1.mdp"]}),
+            ("equilibration_mdp", {"equilibration_mdps": [r"eq\01.mdp"]}),
+            ("equilibration_mdp", {"equilibration_mdps": ["eq 01.mdp"]}),
+        ],
+    )
+    def test_run_script_generator_rejects_unsafe_shell_tokens(self, tmp_path, field, kwargs):
+        """Local run script values should reject unsafe shell tokens."""
+        script_path = tmp_path / "run_test_gromacs.sh"
+        init_kwargs = {
+            "prefix": "system",
+            "equilibration_mdps": ["eq_01_nvt.mdp"],
+            "gmx_command": "gmx",
+        }
+        init_kwargs.update(kwargs)
+        generator = RunScriptGenerator(**init_kwargs)
+
+        with pytest.raises(ValueError, match=field):
+            generator.generate(script_path)
+
+    def test_em_health_check_in_runner(self, tmp_path):
+        """Runner health check should fail on non-finite force signatures."""
+        em_log = tmp_path / "em.log"
+        em_log.write_text("force on at least one atom is not finite\n")
+
+        runner = GromacsRunner(
+            working_dir=tmp_path,
+            prefix="system",
+            equilibration_mdps=[],
+        )
+
+        with pytest.raises(RuntimeError, match="infinite forces"):
+            runner._check_energy_minimization_health()
+
+
+class TestMDPThermostatAndBarostat:
+    def _generator(self, tmp_path: Path, **production):
+        import yaml
+
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.exporters.gromacs import MDPGenerator
+        from tests._support.analysis_testkit import write_simulation_config
+
+        path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+        (tmp_path / "c" / "test.pdb").write_text("END\n")
+        data = yaml.safe_load(path.read_text())
+        data["simulation_phases"]["production"].update(production)
+        path.write_text(yaml.safe_dump(data))
+        return MDPGenerator(SimulationConfig.from_yaml(path))
+
+    def test_langevin_runs_as_stochastic_dynamics(self, tmp_path: Path) -> None:
+        """LangevinMiddle is Langevin dynamics on GROMACS too."""
+        text = self._generator(tmp_path).generate_production().to_mdp_string()
+        assert "integrator      = sd" in text and "tcoupl          = no" in text
+        assert "ld_seed" in text
+
+    def test_approximate_mappings_are_noted_once(self, tmp_path: Path, monkeypatch) -> None:
+        """The Monte Carlo barostat maps to c-rescale, with an INFO note, not a warning.
+
+        Every GROMACS run makes that substitution, the shipped GROMACS example
+        included, and c-rescale samples the same NPT ensemble.
+        """
+        from polyzymd.exporters import gromacs
+
+        notes, warnings = [], []
+        monkeypatch.setattr(gromacs.logger, "info", lambda text, *a: notes.append(text % a))
+        monkeypatch.setattr(gromacs.logger, "warning", lambda text, *a: warnings.append(text % a))
+        generator = self._generator(tmp_path, barostat="MC")
+        generator.generate_production()
+        generator.generate_production()
+        assert sum("no Monte Carlo barostat" in text for text in notes) == 1
+        assert warnings == []
+
+
+def test_grompp_gets_no_blanket_maxwarn() -> None:
+    """-maxwarn would hide a net-charge warning, so every grompp warning stops the run."""
+    import inspect
+
+    from polyzymd.config.schema import GromacsEngineConfig
+    from polyzymd.exporters import gromacs
+
+    assert GromacsEngineConfig().grompp_flags == ""
+    assert "-maxwarn" not in inspect.getsource(gromacs)
+
+
+def _seeded_generator(tmp_path: Path, replicate):
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    return MDPGenerator(SimulationConfig.from_yaml(path), replicate=replicate)
+
+
+def test_gromacs_stages_take_seeds_from_the_replicate(tmp_path: Path) -> None:
+    """Production ld_seed is the replicate's dynamics seed and differs between replicates."""
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    production = _seeded_generator(tmp_path, 2).generate_production()
+    assert production.ld_seed == dynamics_seed(2, "production:0")
+    assert f"ld_seed         = {production.ld_seed}" in production.to_mdp_string()
+    other = _seeded_generator(tmp_path / "other", 3).generate_production()
+    assert other.ld_seed != production.ld_seed
+
+
+def test_gromacs_without_a_replicate_keeps_random_seeds(tmp_path: Path) -> None:
+    """Without a replicate number, gen_seed and ld_seed stay -1 (random)."""
+    production = _seeded_generator(tmp_path, None).generate_production()
+    assert production.ld_seed == -1 and production.gen_seed == -1
+
+
+def test_gromacs_equilibration_stages_do_not_share_noise(tmp_path: Path) -> None:
+    """Two equilibration stages get different ld_seed values."""
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    (stage,) = data["simulation_phases"]["equilibration_stages"]
+    data["simulation_phases"]["equilibration_stages"] = [stage, {**stage, "name": "eq2"}]
+    path.write_text(yaml.safe_dump(data))
+    generator = MDPGenerator(SimulationConfig.from_yaml(path), replicate=1)
+    stages = [params for _, params in generator.generate_equilibration_stages()]
+    assert len(stages) == 2
+    assert stages[0].ld_seed != stages[1].ld_seed
+
+
+def _restrained_generator(tmp_path: Path, freeze_solute: bool = True):
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    (stage,) = data["simulation_phases"]["equilibration_stages"]
+    stage["position_restraints"] = [
+        {"group": "protein_heavy", "force_constant": 4184.0},
+        {"group": "polymer_heavy", "force_constant": 4184.0},
+    ]
+    data["simulation_phases"]["minimization"] = {"freeze_solute": freeze_solute}
+    path.write_text(yaml.safe_dump(data))
+    return MDPGenerator(SimulationConfig.from_yaml(path))
+
+
+def test_minimization_restraints_do_not_follow_the_stages(tmp_path: Path) -> None:
+    """em.mdp borrows no stage restraint; it takes only the define it is given."""
+    generator = _restrained_generator(tmp_path)
+    assert "define" not in generator.generate_energy_minimization().to_mdp_string()
+    text = generator.generate_energy_minimization(define="-DPOSRES_EM").to_mdp_string()
+    assert "define          = -DPOSRES_EM\n" in text + "\n"
+
+
+def test_a_seeded_stage_writes_ld_seed_for_any_integrator() -> None:
+    """GROMACS seeds v-rescale and c-rescale noise with ld_seed, so a seeded md stage writes it."""
+    from polyzymd.exporters.gromacs import MDPParameters
+
+    params = MDPParameters(integrator="md", tcoupl="v-rescale", ld_seed=1234)
+    assert "ld_seed         = 1234" in params.to_mdp_string()
+    assert "ld_seed" not in MDPParameters(integrator="md", tcoupl="v-rescale").to_mdp_string()
+
+
+@pytest.mark.parametrize("interval", [150, 250, 9973])
+def test_nstcalcenergy_divides_every_energy_output_interval(interval: int) -> None:
+    """GROMACS stops when nstenergy is not a multiple of nstcalcenergy (default 100)."""
+    from polyzymd.exporters.gromacs import MDPParameters
+
+    text = MDPParameters(nstlog=interval, nstenergy=interval).to_mdp_string()
+    (line,) = [line for line in text.splitlines() if line.startswith("nstcalcenergy")]
+    nstcalcenergy = int(line.split("=")[1])
+    assert 1 <= nstcalcenergy <= 100
+    assert interval % nstcalcenergy == 0
+
+
+@pytest.mark.skipif(shutil.which("gmx") is None, reason="GROMACS is not installed")
+@pytest.mark.parametrize("steps_per_frame", [150, 250])
+def test_every_stage_passes_grompp_for_any_steps_per_frame(
+    tmp_path: Path, steps_per_frame: int
+) -> None:
+    """grompp accepts every stage's MDP when steps per frame is not a multiple of 100."""
+    import subprocess
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    gmx = shutil.which("gmx")
+    subprocess.run(
+        [gmx, "solvate", "-cs", "spc216.gro", "-box", "2.5", "-o", str(tmp_path / "w.gro")],
+        check=True,
+        capture_output=True,
+    )
+    n_water = int((tmp_path / "w.gro").read_text().splitlines()[1]) // 3
+    (tmp_path / "w.top").write_text(
+        '#include "oplsaa.ff/forcefield.itp"\n#include "oplsaa.ff/spc.itp"\n'
+        f"[ system ]\nwater\n[ molecules ]\nSOL {n_water}\n"
+    )
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    duration = steps_per_frame * 4 * 2e-6
+    phases = data["simulation_phases"]
+    phases["production"].update(duration=duration, samples=4, thermostat="NoseHoover")
+    phases["equilibration_stages"] = [
+        {"name": "eq1", "duration": duration, "temperature": 300.0, "samples": 4},
+        {
+            "name": "heat",
+            "temperature_start": 280.0,
+            "temperature_end": 300.0,
+            "temperature_increment": 10.0,
+            "temperature_interval_steps": steps_per_frame,
+            "samples": 4,
+        },
+    ]
+    path.write_text(yaml.safe_dump(data))
+    generator = MDPGenerator(SimulationConfig.from_yaml(path), replicate=1)
+    stages = [("em", generator.generate_energy_minimization())]
+    stages += generator.generate_equilibration_stages()
+    stages += [("prod", generator.generate_production())]
+    for name, params in stages:
+        mdp = tmp_path / f"{Path(name).stem}.mdp"
+        mdp.write_text(params.to_mdp_string())
+        result = subprocess.run(
+            [gmx, "grompp", "-f", str(mdp), "-c", str(tmp_path / "w.gro")]
+            + ["-p", str(tmp_path / "w.top"), "-o", str(tmp_path / f"{mdp.stem}.tpr")]
+            + ["-po", str(tmp_path / f"{mdp.stem}_out.mdp")],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"{name}: {result.stderr[-2000:]}"
+
+
+def test_restrained_npt_stage_scales_reference_coordinates() -> None:
+    """A stage with a barostat and position restraints writes refcoord-scaling = com."""
+    from polyzymd.exporters.gromacs import MDPParameters
+
+    npt = MDPParameters(pcoupl="C-rescale", define="-DPOSRES_PROTEIN").to_mdp_string()
+    assert "refcoord-scaling = com" in npt
+    assert "refcoord-scaling" not in MDPParameters(define="-DPOSRES_PROTEIN").to_mdp_string()
+    assert "refcoord-scaling" not in MDPParameters(pcoupl="C-rescale").to_mdp_string()
+
+
+@pytest.mark.skipif(shutil.which("gmx") is None, reason="GROMACS is not installed")
+def test_restrained_npt_stage_passes_grompp(tmp_path: Path) -> None:
+    """grompp accepts an NPT stage with position restraints without warnings."""
+    import subprocess
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    gmx = shutil.which("gmx")
+    subprocess.run(
+        [gmx, "solvate", "-cs", "spc216.gro", "-box", "2.5", "-o", str(tmp_path / "w.gro")],
+        check=True,
+        capture_output=True,
+    )
+    n_water = int((tmp_path / "w.gro").read_text().splitlines()[1]) // 3
+    (tmp_path / "w.top").write_text(
+        '#include "oplsaa.ff/forcefield.itp"\n#include "oplsaa.ff/spc.itp"\n'
+        "#ifdef POSRES_WATER\n[ position_restraints ]\n1 1 1000 1000 1000\n#endif\n"
+        f"[ system ]\nwater\n[ molecules ]\nSOL {n_water}\n"
+    )
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    data["simulation_phases"]["equilibration_stages"] = [
+        {
+            "name": "npt",
+            "ensemble": "NPT",
+            "duration": 0.001,
+            "temperature": 300.0,
+            "samples": 4,
+            "position_restraints": [{"group": "protein_backbone", "force_constant": 1000.0}],
+        }
+    ]
+    path.write_text(yaml.safe_dump(data))
+    generator = MDPGenerator(SimulationConfig.from_yaml(path), replicate=1)
+    ((_, params),) = generator.generate_equilibration_stages()
+    assert params.pcoupl != "no" and params.define
+    # The toy topology is water, whose restraints sit behind POSRES_WATER.
+    params.define = "-DPOSRES_WATER"
+    mdp = tmp_path / "npt.mdp"
+    mdp.write_text(params.to_mdp_string())
+    result = subprocess.run(
+        [gmx, "grompp", "-f", str(mdp), "-c", str(tmp_path / "w.gro")]
+        + ["-r", str(tmp_path / "w.gro"), "-p", str(tmp_path / "w.top")]
+        + ["-o", str(tmp_path / "npt.tpr"), "-po", str(tmp_path / "npt_out.mdp")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+
+
+def test_gromacs_export_refuses_distance_restraints_it_would_drop(tmp_path):
+    """Exporting an OpenMM config with distance restraints to GROMACS is refused."""
+    from polyzymd.config.schema import SimulationConfig
+
+    config = SimulationConfig(
+        name="t",
+        engine="openmm",
+        solutes=[
+            {
+                "type": "protein",
+                "name": "E",
+                "pdb_path": "e.pdb",
+                "force_field": ["ff14sb_off_impropers_0.0.4.offxml"],
+                "charges": {"method": "library"},
+            }
+        ],
+        solvent={"force_field": ["openff-2.3.0.offxml"], "water": {"model": "tip3p"}},
+        thermodynamics={"temperature": 300.0},
+        simulation_phases={
+            "equilibration_stages": [
+                {"name": "eq", "duration": 0.1, "temperature": 300.0, "ensemble": "NVT"}
+            ],
+            "production": {"ensemble": "NPT", "duration": 1.0, "samples": 10},
+        },
+        restraints=[
+            {
+                "type": "flat_bottom",
+                "name": "site",
+                "atom1": {"component": "E", "selection": "resid 1 and name CA"},
+                "atom2": {"component": "E", "selection": "resid 2 and name CA"},
+                "distance": 3.5,
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="set engine: openmm"):
+        GromacsExporter(interchange=None, config=config).export(tmp_path)
+    assert not any(tmp_path.iterdir())
+
+
+def _phase_generator(tmp_path: Path, production: dict, stages: list | None = None):
+    """Return an MDPGenerator of the test config with the given production and stages."""
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    data["simulation_phases"]["production"].update(production)
+    if stages is not None:
+        data["simulation_phases"]["equilibration_stages"] = stages
+    path.write_text(yaml.safe_dump(data))
+    config = SimulationConfig.from_yaml(path)
+    return config, MDPGenerator(config)
+
+
+def test_an_npt_phase_without_a_barostat_couples_pressure(tmp_path: Path) -> None:
+    """NPT without a barostat key means MC (the schema fills it in), so GROMACS couples pressure."""
+    stage = {
+        "name": "npt",
+        "ensemble": "NPT",
+        "temperature": 300.0,
+        "duration": 0.001,
+        "samples": 2,
+    }
+    _, generator = _phase_generator(tmp_path, {"ensemble": "NPT", "barostat": None}, stages=[stage])
+    ((_, stage_params),) = generator.generate_equilibration_stages()
+    assert stage_params.pcoupl == "c-rescale"
+    assert generator.generate_production().pcoupl == "c-rescale"
+
+
+def test_both_engines_run_the_production_dynamics_of_the_config(tmp_path: Path) -> None:
+    """One config gives the same ensemble and thermostat coupling on OpenMM and GROMACS."""
+    from polyzymd.simulation.runner import production_dynamics
+
+    for settings, npt in [
+        ({"ensemble": "NVT", "thermostat": "Langevin", "thermostat_timescale": 2.0}, False),
+        ({"ensemble": "NPT", "barostat": "MC", "thermostat_timescale": 0.5}, True),
+    ]:
+        config, generator = _phase_generator(tmp_path / str(npt), settings)
+        openmm = production_dynamics(config.simulation_phases.production)
+        gromacs = generator.generate_production()
+        assert openmm["ensemble"] == settings["ensemble"]
+        assert gromacs.tau_t == pytest.approx(1.0 / openmm["friction"])
+        assert (gromacs.pcoupl != "no") is npt
+        assert gromacs.integrator == "sd"
+
+
+def test_a_barostat_frequency_gromacs_does_not_use_is_named_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """GROMACS's c-rescale keeps its own coupling interval, so a set frequency gives a warning."""
+    from polyzymd.exporters import gromacs
+
+    messages = []
+    monkeypatch.setattr(gromacs.logger, "warning", lambda text, *a: messages.append(text % a))
+    _, generator = _phase_generator(tmp_path, {"barostat": "MC", "barostat_frequency": 50})
+    generator.generate_production()
+    generator.generate_production()
+    assert sum("barostat_frequency 50" in text for text in messages) == 1
+
+
+def test_the_protein_restraint_groups_restrain_different_atoms(tmp_path):
+    """protein_heavy, protein_backbone and protein_calpha share the POSRES_PROTEIN switch,
+    but each writes its own atoms into the protein's restraint block."""
+    from polyzymd.exporters.gromacs import PositionRestraintGenerator
+
+    atoms = ["N", "H", "CA", "HA", "CB", "HB1", "C", "O", "OXT"]
+    itp = tmp_path / "protein.itp"
+    itp.write_text(
+        "[ moleculetype ]\nMOL0 3\n[ atoms ]\n"
+        + "".join(
+            f"{k:>5} t {1:>5} ALA {name:>4} {k:>5} 0.0 {1.008 if name.startswith('H') else 12.011}\n"
+            for k, name in enumerate(atoms, start=1)
+        )
+    )
+
+    def selected(group):
+        indices = PositionRestraintGenerator._get_local_atom_indices_from_itp(itp, group)
+        return [atoms[i - 1] for i in indices]
+
+    assert selected("protein_heavy") == ["N", "CA", "CB", "C", "O", "OXT"]
+    assert selected("protein_backbone") == ["N", "CA", "C", "O", "OXT"]
+    assert selected("protein_calpha") == ["CA"]
+    assert PositionRestraintGenerator.GROUP_MAPPING["protein_backbone"][1] == "POSRES_PROTEIN"
+
+
+def test_a_local_gromacs_run_uses_the_configured_mdrun_flags(tmp_path, monkeypatch):
+    """polyzymd run on GROMACS passes the config's threads, ranks and flags to each mdrun,
+    as a SLURM job does, instead of letting GROMACS take every core."""
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.engines import create_engine
+    from polyzymd.exporters.gromacs import GromacsRunner
+
+    root = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+    data = yaml.safe_load((root / "config_gromacs.yaml").read_text())
+    data["gromacs"].update(ntomp=3, ntmpi=1, mdrun_flags="-pin on")
+    (tmp_path / "trpcage.pdb").write_text((root / "trpcage.pdb").read_text())
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(data))
+    config = SimulationConfig.from_yaml(path)
+    engine = create_engine(config, override="gromacs", defer_binary=True)
+
+    flags = engine.local_mdrun_flags("gmx")
+    assert flags["prod"].split() == ["-pin", "on", "-ntmpi", "1", "-ntomp", "3"]
+    assert "-ntmpi" not in engine.local_mdrun_flags("gmx_mpi")["prod"]  # real MPI: no -ntmpi
+    data["gromacs"]["gpu"] = True
+    path.write_text(yaml.safe_dump(data))
+    gpu = create_engine(SimulationConfig.from_yaml(path), override="gromacs", defer_binary=True)
+    assert "-nb gpu" in gpu.local_mdrun_flags("gmx")["eq"]
+    # Energy minimization cannot offload PME, update or bonded work (as in the job script).
+    em = gpu.local_mdrun_flags("gmx")["em"]
+    assert "-nb gpu" in em
+    assert not any(f"-{work} gpu" in em for work in ("pme", "update", "bonded"))
+
+    commands = []
+    runner = GromacsRunner(tmp_path, "trpcage", [], "gmx", mdrun_flags=flags)
+    monkeypatch.setattr(runner, "_run_command", lambda cmd, *a, **k: commands.append(cmd))
+    try:
+        runner._run_energy_minimization()
+    except Exception:  # em.gro is not produced by the stub
+        pass
+    mdrun = next(cmd for cmd in commands if "mdrun" in cmd)
+    assert mdrun[-6:] == ["-pin", "on", "-ntmpi", "1", "-ntomp", "3"]
+
+
+def _fake_gmx(tmp_path, code):
+    script = tmp_path / f"gmx{code}"
+    script.write_text(
+        "#!/bin/bash\n"
+        'while [ $# -gt 0 ]; do if [ "$1" = "-o" ]; then echo part > "$2"; fi; shift; done\n'
+        f"cat > /dev/null; exit {code}\n"
+    )
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_postprocessing_writes_under_temporary_names_and_renames_on_success(tmp_path):
+    from polyzymd.exporters.gromacs import GromacsRunner, postprocessing_needed
+
+    (tmp_path / "prod.xtc").write_text("x")
+    assert postprocessing_needed(tmp_path)
+    runner = GromacsRunner(tmp_path, "sys", [], gmx_command=_fake_gmx(tmp_path, 0))
+    runner.run_postprocessing()
+    assert (tmp_path / "prod_nojump.xtc").is_file() and (tmp_path / "prod_centered.xtc").is_file()
+    assert not list(tmp_path.glob("*.part.xtc"))
+    assert not postprocessing_needed(tmp_path)
+
+
+def test_a_failed_postprocessing_leaves_no_trajectory_under_the_final_name(tmp_path):
+    from polyzymd.exporters.gromacs import GromacsError, GromacsRunner
+
+    (tmp_path / "prod.xtc").write_text("x")
+    runner = GromacsRunner(tmp_path, "sys", [], gmx_command=_fake_gmx(tmp_path, 1))
+    with pytest.raises(GromacsError):
+        runner.run_postprocessing()
+    assert not (tmp_path / "prod_nojump.xtc").exists()

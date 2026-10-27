@@ -1,0 +1,322 @@
+"""Tests for CLI pixi environment advisory warnings."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from click.testing import CliRunner
+
+from polyzymd.cli.env_warnings import (
+    env_warnings_disabled,
+    get_active_pixi_environment,
+    warn_if_wrong_pixi_env,
+)
+from polyzymd.cli.main import cli
+
+
+def _make_submission_config(engine: str = "openmm") -> SimpleNamespace:
+    """Create a minimal config-like object for submission warning tests."""
+    return SimpleNamespace(
+        name="demo",
+        engine=engine,
+        output=SimpleNamespace(
+            get_job_scripts_directory=lambda: "/tmp/polyzymd-job-scripts",
+            slurm_logs_subdir="slurm_logs",
+            get_slurm_logs_directory=lambda: Path("/tmp/polyzymd-slurm-logs"),
+        ),
+        require_buildable=lambda engine=None, inputs=True: None,
+        get_working_directory=lambda replicate: Path("/nonexistent/polyzymd-run") / str(replicate),
+    )
+
+
+def _make_incomplete_progress() -> SimpleNamespace:
+    """Create minimal progress metadata for recover warning tests."""
+    return SimpleNamespace(
+        total_steps_completed=5,
+        total_steps_requested=10,
+        steps_remaining=5,
+        status=SimpleNamespace(value="interrupted"),
+        segments=[],
+        is_complete=False,
+        fraction_complete=lambda: 0.5,
+    )
+
+
+def test_get_active_pixi_environment_returns_none_when_unset(monkeypatch) -> None:
+    """Missing pixi environment metadata should return ``None``."""
+    monkeypatch.delenv("PIXI_ENVIRONMENT_NAME", raising=False)
+
+    assert get_active_pixi_environment() is None
+
+
+def test_get_active_pixi_environment_strips_empty_value(monkeypatch) -> None:
+    """Blank pixi environment metadata should behave like an inactive shell."""
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "   ")
+
+    assert get_active_pixi_environment() is None
+
+
+def test_env_warnings_disabled_accepts_truthy_values(monkeypatch) -> None:
+    """The suppression environment variable should accept simple truthy values."""
+    for value in ("1", "true", "TRUE", "yes", "on"):
+        monkeypatch.setenv("POLYZYMD_DISABLE_ENV_WARNINGS", value)
+        assert env_warnings_disabled()
+
+
+def test_warn_if_wrong_pixi_env_writes_stderr_only(monkeypatch, capsys) -> None:
+    """Wrong active environments should emit an advisory warning on stderr."""
+
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "analysis")
+    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
+
+    warn_if_wrong_pixi_env("demo", "build")
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert "Warning: polyzymd demo" in captured.err
+    assert "recommended environment is 'build'" in captured.err
+
+
+def test_warn_if_wrong_pixi_env_skips_accepted_environment(monkeypatch, capsys) -> None:
+    """Accepted active environments should not warn."""
+
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "analysis")
+
+    warn_if_wrong_pixi_env("demo", "build", accepted=("build", "analysis"))
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_warn_if_wrong_pixi_env_respects_suppressor(monkeypatch, capsys) -> None:
+    """The suppressor should silence advisory warnings."""
+
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "analysis")
+    monkeypatch.setenv("POLYZYMD_DISABLE_ENV_WARNINGS", "yes")
+
+    warn_if_wrong_pixi_env("demo", "build")
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_main_validate_warns_for_analysis_environment(monkeypatch, tmp_path) -> None:
+    """System validation should recommend the build environment."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("name: demo\n", encoding="utf-8")
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "analysis")
+    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["validate", "-c", str(config_path)])
+
+    assert result.exit_code != 0
+    assert "Warning: polyzymd validate" not in result.stdout
+    assert "Warning: polyzymd validate" in result.stderr
+    assert "recommended environment is 'build'" in result.stderr
+
+
+def test_run_openmm_warns_for_build_environment(monkeypatch, tmp_path) -> None:
+    """Local OpenMM execution should recommend CUDA simulation environments."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("name: demo\n", encoding="utf-8")
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "build")
+    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["run", "-c", str(config_path), "--engine", "openmm"])
+
+    assert result.exit_code != 0
+    assert "Warning: polyzymd run --engine openmm" not in result.stdout
+    assert "Warning: polyzymd run --engine openmm" in result.stderr
+    assert "sim-cuda-12-4" in result.stderr
+    assert "sim-cuda-12-6" in result.stderr
+
+
+def test_submit_openmm_accepts_build_environment(monkeypatch, tmp_path) -> None:
+    """OpenMM submission from build should not warn about CUDA envs."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("name: demo\n", encoding="utf-8")
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "build")
+    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
+    monkeypatch.setattr(
+        "polyzymd.config.schema.SimulationConfig.from_yaml",
+        lambda path: _make_submission_config("openmm"),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["submit", "-c", str(config_path), "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "Warning: polyzymd submit --engine openmm" not in result.stdout
+    assert "Warning: polyzymd submit --engine openmm" not in result.stderr
+
+
+def test_submit_openmm_warns_for_unrelated_environment(monkeypatch, tmp_path) -> None:
+    """OpenMM submission from unrelated envs should remain advisory."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("name: demo\n", encoding="utf-8")
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "analysis")
+    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
+    monkeypatch.setattr(
+        "polyzymd.config.schema.SimulationConfig.from_yaml",
+        lambda path: _make_submission_config("openmm"),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["submit", "-c", str(config_path), "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "Warning: polyzymd submit --engine openmm" not in result.stdout
+    assert "Warning: polyzymd submit --engine openmm" in result.stderr
+    assert "auto" in result.stderr
+
+
+def test_recover_submit_openmm_accepts_build_environment(monkeypatch, tmp_path) -> None:
+    """OpenMM recovery submission from build should not warn about CUDA envs."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("name: demo\n", encoding="utf-8")
+    working_dir = tmp_path / "run_1"
+    working_dir.mkdir()
+    sim_config = _make_submission_config("openmm")
+    sim_config.simulation_phases = SimpleNamespace(
+        production=SimpleNamespace(time_step=2.0, duration=1.0, samples=10)
+    )
+    fake_engine = SimpleNamespace(
+        get_engine_working_directory=lambda config, replicate: working_dir,
+        load_or_scan_progress=lambda path, replicate: _make_incomplete_progress(),
+    )
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "build")
+    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
+    monkeypatch.setattr(
+        "polyzymd.config.schema.SimulationConfig.from_yaml", lambda path: sim_config
+    )
+    monkeypatch.setattr("polyzymd.engines.create_engine", lambda *args, **kwargs: fake_engine)
+    monkeypatch.setattr("polyzymd.simulation.progress.save_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr("polyzymd.workflow.daisy_chain.create_job_name", lambda *args: "demo-r1")
+    monkeypatch.setattr(
+        "polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", lambda run_dir, job_name: []
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        ["recover", "-c", str(config_path), "-r", "1", "--submit", "--dry-run"],
+    )
+
+    assert result.exit_code == 0
+    assert "Warning: polyzymd recover --submit --engine openmm" not in result.stdout
+    assert "Warning: polyzymd recover --submit --engine openmm" not in result.stderr
+
+
+def _import_polyzymd_from(monkeypatch, package_dir: Path, user_site: Path) -> None:
+    """Make the CLI see ``polyzymd`` imported from ``package_dir``."""
+    import site
+
+    import polyzymd
+
+    monkeypatch.setattr(polyzymd, "__file__", str(package_dir / "__init__.py"))
+    monkeypatch.setattr(site, "getusersitepackages", lambda: str(user_site))
+    monkeypatch.setattr(site, "ENABLE_USER_SITE", True)
+
+
+def test_info_warns_for_a_copy_in_user_site_packages(monkeypatch, tmp_path: Path) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    package_dir = user_site / "polyzymd"
+    package_dir.mkdir(parents=True)
+    _import_polyzymd_from(monkeypatch, package_dir, user_site)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert f"Imported from: {package_dir}" in result.stdout
+    assert f"warning: polyzymd is imported from {package_dir}" in result.stderr
+    assert (
+        "fix: run with PYTHONNOUSERSITE=1, or remove the user install: "
+        "pip uninstall --user polyzymd"
+    ) in result.stderr
+
+
+def test_info_warns_for_an_editable_install_in_user_site_packages(
+    monkeypatch, tmp_path: Path
+) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    user_site.mkdir(parents=True)
+    old_checkout = tmp_path / "old_polyzymd" / "src"
+    (old_checkout / "polyzymd").mkdir(parents=True)
+    (user_site / "_polyzymd.pth").write_text(f"{old_checkout}\n")
+    _import_polyzymd_from(monkeypatch, old_checkout / "polyzymd", user_site)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert f"Imported from: {old_checkout / 'polyzymd'}" in result.stdout
+    assert "warning: polyzymd is imported from" in result.stderr
+    assert "fix: run with PYTHONNOUSERSITE=1" in result.stderr
+
+
+def test_a_relative_pth_line_is_read_from_the_user_site(monkeypatch, tmp_path: Path) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    user_site.mkdir(parents=True)
+    old_checkout = tmp_path / "old_polyzymd" / "src"
+    (old_checkout / "polyzymd").mkdir(parents=True)
+    (user_site / "_polyzymd.pth").write_text("../../../../old_polyzymd/src\n")
+    _import_polyzymd_from(monkeypatch, old_checkout / "polyzymd", user_site)
+    monkeypatch.chdir(tmp_path / "old_polyzymd")
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert "warning: polyzymd is imported from" in result.stderr
+
+
+def test_info_does_not_warn_for_an_install_in_the_environment(monkeypatch, tmp_path: Path) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    user_site.mkdir(parents=True)
+    (user_site / "other.pth").write_text(f"{tmp_path / 'other' / 'src'}\nimport other\n")
+    checkout = tmp_path / "polyzymd" / "src"
+    (checkout / "polyzymd").mkdir(parents=True)
+    _import_polyzymd_from(monkeypatch, checkout / "polyzymd", user_site)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert f"Imported from: {checkout / 'polyzymd'}" in result.stdout
+    assert "user install" not in result.stderr
+
+
+def test_no_warning_when_the_user_site_packages_is_disabled(monkeypatch, tmp_path: Path) -> None:
+    import site
+
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    package_dir = user_site / "polyzymd"
+    package_dir.mkdir(parents=True)
+    _import_polyzymd_from(monkeypatch, package_dir, user_site)
+    monkeypatch.setattr(site, "ENABLE_USER_SITE", False)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert "user install" not in result.stderr
+
+
+@pytest.mark.parametrize(("env", "expected"), [("build", 0), ("sim-cuda-12-6", 1)])
+def test_analyze_warns_at_most_once_and_not_in_build(
+    monkeypatch, tmp_path, env: str, expected: int
+) -> None:
+    """build holds the analysis tools; --project runs analyze once per study but warns once."""
+    from polyzymd.analyses.project_scaffold import create_project
+
+    project = create_project(tmp_path / "paper", ["first", "second"], git=False).root
+    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", env)
+    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
+
+    result = CliRunner().invoke(cli, ["analyze", "--project", str(project)])
+
+    assert "== study second" in result.output
+    assert result.stderr.count("Warning: polyzymd analyze") == expected

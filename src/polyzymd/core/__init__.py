@@ -16,10 +16,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "SimulationPhase": ("polyzymd.core.parameters", "SimulationPhase"),
     "ThermoParameters": ("polyzymd.core.parameters", "ThermoParameters"),
     "ThermostatParameters": ("polyzymd.core.parameters", "ThermostatParameters"),
-    "KCAL_MOL_ANGSTROM2_TO_KJ_MOL_NM2": (
-        "polyzymd.core.position_restraints",
-        "KCAL_MOL_ANGSTROM2_TO_KJ_MOL_NM2",
-    ),
     "PositionalRestraintForce": (
         "polyzymd.core.position_restraints",
         "PositionalRestraintForce",
@@ -58,7 +54,6 @@ __all__ = [
     "create_position_restraints",
     "add_position_restraints_to_system",
     "remove_position_restraints_from_system",
-    "KCAL_MOL_ANGSTROM2_TO_KJ_MOL_NM2",
     "PREDEFINED_GROUPS",
     "SystemComponentInfo",
     "AtomGroupResolver",

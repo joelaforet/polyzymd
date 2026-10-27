@@ -12,11 +12,12 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
-from openff.interchange import Interchange
-from openff.toolkit import ForceField, Molecule, Topology
-
 if TYPE_CHECKING:
+    from openff.interchange import Interchange
+    from openff.toolkit import ForceField, Molecule, Topology
+
     from polyzymd.config.schema import SimulationConfig
+    from polyzymd.core.components import ChargeSource, ComponentRecord
 
 from polyzymd.builders.enzyme import EnzymeBuilder
 from polyzymd.builders.polymer import PolymerBuilder
@@ -25,20 +26,54 @@ from polyzymd.builders.substrate import SubstrateBuilder
 
 LOGGER = logging.getLogger(__name__)
 
+_ORIGINAL_RESIDUE_TOKEN_KEY = "_polyzymd_original_residue_token"
+
+
+def _default_nagl_model() -> str:
+    from polyzymd.utils.charging import DEFAULT_NAGL_MODEL
+
+    return DEFAULT_NAGL_MODEL
+
+
+def _cosolvent_charges(cosolvent: Any, nagl_model: Optional[str]) -> "ChargeSource":
+    """Return where a co-solvent's charges come from: its bundled SDF, or its charge method."""
+    from polyzymd.core.components import ChargeSource
+    from polyzymd.data.solvent_molecules import _SOLVENTS_DIR, is_bundled_solvent
+
+    library = _SOLVENTS_DIR / f"{cosolvent.name.lower().strip()}.sdf"
+    method = getattr(cosolvent, "charge_method", None)
+    bundled = is_bundled_solvent(cosolvent.name) and library.exists()
+    if method in (None, "preset") and bundled and cosolvent.molecule is not None:
+        from openff.toolkit import Molecule
+
+        # The solvent loader uses the bundled charges whenever the molecule is the
+        # library's, whether or not the config spelled out its SMILES.
+        if Molecule.from_file(str(library)).is_isomorphic_with(cosolvent.molecule):
+            return ChargeSource("preset", source_file=str(library))
+    method = method if method not in (None, "preset") else "nagl"
+    model = (nagl_model or _default_nagl_model()) if method == "nagl" else None
+    return ChargeSource(method, model=model)
+
+
+def _optional_str(value: Any) -> Optional[str]:
+    return None if value is None else str(value)
+
+
+def _cosolvent_smiles(cosolvent: Any) -> str:
+    """The SMILES of the co-solvent molecule the build packed, without counter-ions."""
+    from polyzymd.data.solvent_molecules import split_counter_ions
+
+    if cosolvent.smiles:
+        return split_counter_ions(cosolvent.smiles, cosolvent.name)[0]
+    return cosolvent.molecule.to_smiles()
+
 
 class SystemBuilder:
     """Orchestrator for building complete simulation systems.
 
-    This class coordinates the 5-stage build pipeline:
-    1. Enzyme loading and partitioning
-    2. Substrate loading and charging
-    3. Polymer generation and packing
-    4. Solvation with water, ions, and co-solvents
-    5. Interchange creation with optimized combining
-
-    The Interchange.combine() optimization is used when polymers are present,
-    which significantly speeds up parameterization for systems with many
-    unique molecules.
+    This class coordinates enzyme loading, substrate charging, polymer
+    generation, solvation, and Interchange creation through the canonical
+    single-call OpenFF pathway.
 
     Example:
         >>> builder = SystemBuilder.from_config(config)
@@ -56,15 +91,19 @@ class SystemBuilder:
         self,
         protein_forcefield: str = "ff14sb_off_impropers_0.0.4.offxml",
         small_molecule_forcefield: str = "openff-2.0.0.offxml",
+        nagl_model: Optional[str] = None,
     ) -> None:
         """Initialize the SystemBuilder.
 
         Args:
             protein_forcefield: Force field for proteins.
             small_molecule_forcefield: Force field for small molecules.
+            nagl_model: NAGL model for every molecule charged with nagl; the
+                default model when None.
         """
         self._protein_ff = protein_forcefield
         self._sm_ff = small_molecule_forcefield
+        self._nagl_model = nagl_model
 
         # Sub-builders
         self._enzyme_builder = EnzymeBuilder()
@@ -75,12 +114,17 @@ class SystemBuilder:
         # State
         self._enzyme_topology: Optional[Topology] = None
         self._substrate_molecule: Optional[Molecule] = None
+        self._substrate_charge_method: Optional[str] = None
+        self._substrate_conformer_index: Optional[int] = None
+        #: (name, segid) of each solute type, from the config's solutes.
+        self._solute_handles: Dict[str, Tuple[str, str]] = {}
         self._polymer_molecules: List[Molecule] = []
         self._polymer_counts: List[int] = []
         self._combined_topology: Optional[Topology] = None
         self._solvated_topology: Optional[Topology] = None
         self._interchange: Optional[Interchange] = None
         self._working_dir: Optional[Path] = None
+        self._build_provenance: Dict[str, Any] = {}
 
         # Molecule count tracking for PDB chain/residue assignment
         # These are set during build and used by _assign_pdb_identifiers()
@@ -111,21 +155,44 @@ class SystemBuilder:
         builder = cls(
             protein_forcefield=config.force_field.protein,
             small_molecule_forcefield=config.force_field.small_molecule,
+            nagl_model=config.force_field.nagl_model,
         )
         builder._config = config
         return builder
 
-    def build_enzyme(self, pdb_path: Union[str, Path]) -> Topology:
+    def build_enzyme(
+        self,
+        pdb_path: Union[str, Path],
+        custom_substructures_path: Union[str, Path, None] = None,
+    ) -> Topology:
         """Build the enzyme component.
 
-        Args:
-            pdb_path: Path to enzyme PDB file.
+        Parameters
+        ----------
+        pdb_path : str or Path
+            Path to enzyme PDB file.
+        custom_substructures_path : str or Path, optional
+            JSON file of residue templates for residues OpenFF does not know.
 
-        Returns:
+        Returns
+        -------
+        Topology
             Enzyme topology.
+
+        Raises
+        ------
+        RuntimeError
+            If OpenFF loads the enzyme PDB without any molecules.
         """
-        self._enzyme_topology = self._enzyme_builder.build(pdb_path)
-        self._n_enzyme_molecules = 1
+        self._enzyme_topology = self._enzyme_builder.build(pdb_path, custom_substructures_path)
+        self._n_enzyme_molecules = self._enzyme_topology.n_molecules
+        if self._n_enzyme_molecules <= 0:
+            raise RuntimeError("OpenFF enzyme topology contains no molecules")
+        if self._n_enzyme_molecules > 1:
+            LOGGER.info(
+                "Enzyme topology contains %d protein molecules; retaining all on chain A",
+                self._n_enzyme_molecules,
+            )
         return self._enzyme_topology
 
     def build_substrate(
@@ -151,7 +218,10 @@ class SystemBuilder:
             conformer_index=conformer_index,
             charge_method=charge_method,
             residue_name=residue_name,
+            nagl_model=self._nagl_model,
         )
+        self._substrate_charge_method = charge_method
+        self._substrate_conformer_index = conformer_index
         self._n_substrate_molecules = 1
         return self._substrate_molecule
 
@@ -169,7 +239,8 @@ class SystemBuilder:
         monomer_smiles: Optional[Dict[str, str]] = None,
         monomer_names: Optional[Dict[str, str]] = None,
         residue_names: Optional[Dict[str, str]] = None,
-        reactions: Optional[Any] = None,
+        end_groups: Optional[Dict[str, str]] = None,
+        force_field: Optional[List[str]] = None,
         charger_type: str = "nagl",
         max_retries: int = 10,
         cache_directory: Optional[Union[str, Path]] = None,
@@ -178,7 +249,7 @@ class SystemBuilder:
 
         Supports two generation modes:
         - "cached": Load pre-built polymer SDFs from sdf_directory
-        - "dynamic": Generate polymers on-the-fly from monomer SMILES
+        - "dynamic": Build chains with mBuild from star-sited monomer SMILES
 
         Args:
             characters: Monomer labels.
@@ -189,10 +260,11 @@ class SystemBuilder:
             sdf_directory: Directory with pre-built polymer SDFs (cached mode).
             seed: Random seed for reproducibility.
             generation_mode: "cached" or "dynamic".
-            monomer_smiles: Dict of monomer name -> SMILES (dynamic mode).
+            monomer_smiles: Dict of monomer name -> star-sited repeat-unit SMILES (dynamic mode).
             monomer_names: Dict of label -> monomer name (dynamic mode).
             residue_names: Dict of monomer name -> 3-char residue name.
-            reactions: ReactionConfig with ATRP reaction paths (dynamic mode).
+            end_groups: {"head": smiles, "tail": smiles}, the star-sited caps (dynamic mode).
+            force_field: Force field files the chains are relaxed with (dynamic mode).
             charger_type: Charge method ("nagl", "espaloma", "am1bcc").
             max_retries: Max retries for polymer generation.
             cache_directory: Directory for caching generated polymers.
@@ -211,9 +283,11 @@ class SystemBuilder:
             monomer_smiles=monomer_smiles,
             monomer_names=monomer_names,
             residue_names=residue_names,
-            reactions=reactions,
+            end_groups=end_groups,
+            force_field=force_field,
             charger_type=charger_type,
             max_retries=max_retries,
+            nagl_model=self._nagl_model,
         )
 
         molecules, counts = self._polymer_builder.build(count=count, seed=seed)
@@ -223,22 +297,42 @@ class SystemBuilder:
 
         return molecules, counts
 
+    def _polymer_chain_builders(self) -> List[Dict[str, Any]]:
+        """Return the builder records of the polymer chains (mBuild), if any built them."""
+        builder = self._polymer_builder
+        return builder.chain_builders() if builder is not None else []
+
     def combine_solutes(self) -> Topology:
         """Combine enzyme, substrate, and polymers into a single topology.
 
-        Returns:
+        All OpenFF enzyme topology molecules are retained in their original
+        order before substrate and polymer components are added. During export,
+        every enzyme molecule is assigned to PolyzyMD protein chain ``A``.
+
+        Returns
+        -------
+        Topology
             Combined topology ready for solvation.
 
-        Raises:
-            RuntimeError: If enzyme has not been built.
+        Raises
+        ------
+        RuntimeError
+            If enzyme has not been built or contains no molecules.
         """
         if self._enzyme_topology is None:
             raise RuntimeError("Enzyme must be built before combining solutes")
 
         LOGGER.info("Combining solute components")
 
-        # Start with enzyme
-        molecules = [self._enzyme_topology.molecule(0)]
+        from openff.toolkit import Topology
+
+        enzyme_molecule_count = self._enzyme_topology.n_molecules
+        if enzyme_molecule_count <= 0:
+            raise RuntimeError("OpenFF enzyme topology contains no molecules")
+        self._n_enzyme_molecules = enzyme_molecule_count
+
+        # Retain all enzyme molecules before substrate and polymers
+        molecules = [self._enzyme_topology.molecule(i) for i in range(self._n_enzyme_molecules)]
 
         # Add substrate if present
         if self._substrate_molecule is not None:
@@ -259,28 +353,35 @@ class SystemBuilder:
 
     def pack_polymers(
         self,
+        box_vectors: Any,
         padding: float = 2.0,
         tolerance: float = 2.0,
         movebadrandom: bool = False,
         working_directory: Optional[Union[str, Path]] = None,
-        box_vectors_nm: Optional[List[float]] = None,
+        seed: Optional[int] = None,
+        confine_to_sphere: bool = True,
+        nloop: int = 200,
     ) -> Topology:
         """Pack polymers around the combined solute topology.
 
         Args:
-            padding: Box padding in nm. Larger values give polymers more room
-                and can significantly speed up PACKMOL convergence.  Ignored
-                when *box_vectors_nm* is provided.
+            box_vectors: Final periodic box vectors (3x3 Quantity) of the
+                simulation cell.  Chains are packed inside the rectangular
+                brick of this cell so that no atom can overlap its own
+                periodic image.
+            padding: Padding in nm of the confinement sphere around the solute.
             tolerance: PACKMOL tolerance in Angstrom.
             movebadrandom: When True, pass the ``movebadrandom`` keyword to
                 PACKMOL. Improves convergence for dense or heterogeneous
                 polymer systems (many unique chain types) by placing
                 badly-packed molecules at random positions in the box.
             working_directory: Directory for PACKMOL files.
-            box_vectors_nm: Optional explicit box dimensions ``[Lx, Ly, Lz]``
-                in nanometers.  When provided, overrides the auto-computed
-                bounding box + *padding*.  The protein is centered at the
-                midpoint of this box.
+            seed: Packmol random seed (typically the replicate index).
+                ``None`` leaves Packmol on its fixed built-in default.
+            confine_to_sphere: Confine chains to a sphere around the solute
+                (radius = solute bounding-box circumradius + *padding*) while
+                packing inside the final periodic brick. Default ``True``.
+            nloop: Maximum PACKMOL GENCAN loops per molecule type.
 
         Returns:
             Topology with polymers packed.
@@ -296,24 +397,15 @@ class SystemBuilder:
             return self._combined_topology
 
         import numpy as np
-        from openff.units import Quantity
 
-        from polyzymd.utils import boxvectors
         from polyzymd.utils.packmol import pack_polymers as _pack_polymers
+        from polyzymd.utils.packmol import solute_sphere_constraint
 
-        # Calculate box vectors — explicit override or auto from bbox + padding
-        if box_vectors_nm is not None:
-            LOGGER.info(
-                f"Using explicit box vectors: "
-                f"[{box_vectors_nm[0]:.2f}, {box_vectors_nm[1]:.2f}, "
-                f"{box_vectors_nm[2]:.2f}] nm"
-            )
-            box_vecs = Quantity(np.diag(box_vectors_nm), "nanometer")
-        else:
-            padding_qty = Quantity(padding, "nanometer")
-            min_box_vecs = boxvectors.get_topology_bbox(self._combined_topology)
-            box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
-
+        LOGGER.info(
+            "Packing polymers inside the final periodic brick "
+            f"(box vectors {np.diagonal(np.asarray(box_vectors.m_as('nanometer'))).round(3)} nm "
+            "on the diagonal)"
+        )
         LOGGER.info(
             f"Packing {sum(self._polymer_counts)} polymer chains "
             f"({len(self._polymer_molecules)} unique types), "
@@ -321,16 +413,25 @@ class SystemBuilder:
         )
 
         # Pack polymers using our custom PACKMOL runner (supports movebadrandom)
+        solute_topology = self._combined_topology
         packed_top = _pack_polymers(
             molecules=self._polymer_molecules,
             number_of_copies=self._polymer_counts,
             solute=self._combined_topology,
-            box_vectors=box_vecs,
+            box_vectors=box_vectors,
             tolerance_angstrom=tolerance,
             movebadrandom=movebadrandom,
+            nloop=nloop,
+            seed=seed,
+            confine_to_sphere=confine_to_sphere,
+            sphere_padding_angstrom=padding * 10.0,
             working_directory=str(working_directory) if working_directory else None,
             retain_working_files=True,
         )
+        self._build_provenance["polymer_packmol_seed"] = seed
+        if confine_to_sphere:
+            sphere = solute_sphere_constraint(solute_topology, padding_angstrom=padding * 10.0)
+            self._build_provenance["polymer_sphere_radius_nm"] = float(sphere[3]) / 10.0
 
         # Re-number chains
         self._renumber_chains(packed_top)
@@ -365,6 +466,12 @@ class SystemBuilder:
 
         LOGGER.info("Solvating system")
 
+        if self._nagl_model is not None:
+            import dataclasses
+
+            composition = dataclasses.replace(
+                composition or SolventComposition(), nagl_model=self._nagl_model
+            )
         self._solvated_topology = self._solvent_builder.solvate(
             topology=self._combined_topology,
             composition=composition,
@@ -374,11 +481,7 @@ class SystemBuilder:
 
         return self._solvated_topology
 
-    def create_interchange(
-        self,
-        use_optimized_combining: bool = True,
-        use_batched_combining: bool = False,
-    ) -> Interchange:
+    def create_interchange(self) -> Interchange:
         """Create the OpenFF Interchange for simulation.
 
         By default, passes the entire solvated topology to a single
@@ -391,15 +494,6 @@ class SystemBuilder:
         for water, polymers, substrate, and co-solvents so that no
         AM1BCC calculations are triggered at runtime.
 
-        The legacy batched approach (multiple ``create_interchange()``
-        calls joined by ``Interchange.combine()``) is available via
-        ``use_batched_combining=True`` for A/B benchmarking.
-
-        Args:
-            use_optimized_combining: Unused, kept for backward compat.
-            use_batched_combining: If True, use the legacy batched +
-                serial-combine code path instead of a single call.
-
         Returns:
             OpenFF Interchange object.
 
@@ -409,10 +503,22 @@ class SystemBuilder:
         if self._solvated_topology is None:
             raise RuntimeError("System must be solvated before creating Interchange")
 
+        from openff.toolkit import ForceField
+
         from polyzymd.data.solvent_molecules import get_solvent_molecule
 
         LOGGER.info("Creating Interchange")
 
+        # Canonical metadata must be present before OpenFF serializes topology
+        # identifiers into downstream coordinate and topology exports
+        self._assign_pdb_identifiers()
+
+        # Loaded last, the small-molecule force field gives every non-protein
+        # molecule its parameters, and its generic SMIRKS also override every
+        # ff14SB bonded and Lennard-Jones term of the protein; only the ff14SB
+        # library charges survive. _apply_protein_force_field restores the
+        # protein terms. Loading ff14SB last instead is no fix: its cap and
+        # amide SMIRKS then match acetone, acetates and amide polymers.
         ff = ForceField(self._protein_ff, self._sm_ff)
 
         # Get water molecule with pre-computed charges for charge_from_molecules
@@ -422,102 +528,13 @@ class SystemBuilder:
             water_model = self._solvent_builder._composition.water_model
         water_mol = get_solvent_molecule(water_model)
 
-        if use_batched_combining:
-            LOGGER.info("Using BATCHED approach (multiple create + serial combine)")
-            self._interchange = self._create_interchange_batched(ff, water_mol)
-        else:
-            LOGGER.info("Using SINGLE-CALL approach (one create_interchange, no combine)")
-            self._interchange = self._create_interchange_single_call(ff, water_mol)
+        LOGGER.info("Using single-call Interchange creation")
+        self._interchange = self._create_interchange_single_call(ff, water_mol)
+        self._apply_protein_force_field(self._interchange)
 
         LOGGER.info("Interchange created successfully")
 
         return self._interchange
-
-    def _build_molecule_name_mapping(self) -> Dict[str, str]:
-        """Build SMILES -> friendly name mapping for logging.
-
-        Creates a mapping from molecule SMILES to human-readable names
-        for use in log messages during Interchange creation.
-
-        Returns:
-            Dictionary mapping SMILES strings to display names.
-
-        Example output:
-            {
-                "[large-enzyme-smiles]": "LipA",
-                "[substrate-smiles]": "ResorufinButyrate",
-                "[polymer-smiles]": "EGPMA-SBMA_AAABA",
-                "CS(=O)C": "dmso",
-            }
-        """
-        name_map: Dict[str, str] = {}
-
-        # Add enzyme name from config or default
-        if self._enzyme_topology:
-            enzyme_smiles = self._enzyme_topology.molecule(0).to_smiles()
-            config = getattr(self, "_config", None)
-            if config and hasattr(config, "enzyme") and config.enzyme:
-                name_map[enzyme_smiles] = config.enzyme.name
-            else:
-                name_map[enzyme_smiles] = "Enzyme"
-
-        # Add substrate name from config or default
-        if self._substrate_molecule:
-            substrate_smiles = self._substrate_molecule.to_smiles()
-            config = getattr(self, "_config", None)
-            if config and hasattr(config, "substrate") and config.substrate:
-                name_map[substrate_smiles] = config.substrate.name
-            else:
-                name_map[substrate_smiles] = "Substrate"
-
-        # Add polymer names: type_prefix + sequence (e.g., "EGPMA-SBMA_AAABA")
-        if self._polymer_builder:
-            for sequence, mol in self._polymer_builder.loaded_molecules.items():
-                polymer_smiles = mol.to_smiles()
-                name_map[polymer_smiles] = f"{self._polymer_builder._type_prefix}_{sequence}"
-
-        # Add co-solvent names
-        if self._solvent_builder._composition:
-            for cosolvent in self._solvent_builder._composition.co_solvents:
-                if cosolvent.molecule:
-                    cosolvent_smiles = cosolvent.molecule.to_smiles()
-                    # Use name if available, otherwise use SMILES
-                    name_map[cosolvent_smiles] = cosolvent.name
-
-        return name_map
-
-    def _build_charge_template_mapping(self, water_mol: Molecule) -> Dict[str, Molecule]:
-        """Build SMILES -> charge template molecule mapping.
-
-        Creates a mapping from molecule SMILES to template molecules with
-        pre-computed charges for use with charge_from_molecules parameter.
-
-        Args:
-            water_mol: Water molecule with pre-computed charges.
-
-        Returns:
-            Dictionary mapping SMILES strings to charged template molecules.
-        """
-        smiles_to_template: Dict[str, Molecule] = {}
-
-        # Add water
-        smiles_to_template[water_mol.to_smiles()] = water_mol
-
-        # Add polymers (already have charges from SDF)
-        for mol in self._polymer_molecules:
-            smiles_to_template[mol.to_smiles()] = mol
-
-        # Add substrate (already has charges from NAGL/AM1BCC)
-        if self._substrate_molecule:
-            smiles_to_template[self._substrate_molecule.to_smiles()] = self._substrate_molecule
-
-        # Add co-solvents with pre-computed charges
-        if self._solvent_builder._composition:
-            for cosolvent in self._solvent_builder._composition.co_solvents:
-                if cosolvent.molecule is not None:
-                    smiles_to_template[cosolvent.molecule.to_smiles()] = cosolvent.molecule
-
-        return smiles_to_template
 
     def _create_interchange_single_call(self, ff: ForceField, water_mol: Molecule) -> Interchange:
         """Create Interchange with a single ``ForceField.create_interchange()`` call.
@@ -548,18 +565,21 @@ class SystemBuilder:
                 charge_from.append(mol)
                 seen_smiles.add(smi)
 
+        parts = ["water"]
+        if seen_smiles:
+            parts.append(f"{len(seen_smiles)} polymer type(s)")
+
         if self._substrate_molecule:
             charge_from.append(self._substrate_molecule)
+            parts.append("substrate")
 
         if self._solvent_builder._composition:
             for cosolvent in self._solvent_builder._composition.co_solvents:
                 if cosolvent.molecule is not None:
                     charge_from.append(cosolvent.molecule)
+                    parts.append(cosolvent.name)
 
-        LOGGER.info(
-            f"Charge templates: {len(charge_from)} "
-            f"(water + {len(seen_smiles)} polymer type(s) + substrate + co-solvents)"
-        )
+        LOGGER.info(f"Charge templates: {len(charge_from)} ({' + '.join(parts)})")
         LOGGER.info(f"  Template prep took {time.perf_counter() - t0:.1f}s")
 
         # Single parameterization call
@@ -592,175 +612,122 @@ class SystemBuilder:
 
         return interchange
 
-    def _create_interchange_batched(self, ff: ForceField, water_mol: Molecule) -> Interchange:
-        """Create Interchange using batched molecule processing with preserved order.
+    def _apply_protein_force_field(self, interchange: Interchange) -> None:
+        """Replace the protein's terms with those of the protein force field alone.
 
-        This implementation batches molecules by type for efficiency while preserving
-        the exact molecule order from self._solvated_topology. This is critical for
-        DCD trajectory compatibility - the atom order in the Interchange must match
-        the atom order in solvated_system.pdb.
+        The protein molecules come first in the solvated topology. They are
+        parameterized on their own with the protein force field, and every
+        bonded, Lennard-Jones and constraint term wholly inside them is swapped
+        for its counterpart, so the protein no longer depends on load order.
+        Terms of other molecules and all charges stay as they are; the
+        protein's charges are already the ff14SB library charges. Constraints
+        follow the small-molecule force field's bonds-to-hydrogen policy, with
+        the protein force field's bond lengths.
 
-        Batching strategy:
-        1. Build an ``id(molecule) -> SMILES`` cache in ONE pass (avoids calling
-           ``to_smiles()`` three separate times per molecule).
-        2. Parameterize each unique molecule type ONCE (cache parameters).
-        3. Create individual Interchanges in original topology order, grouping
-           consecutive same-type molecules into single batches.
-        4. Combine Interchanges using an **adjacent-pair tree reduction** instead
-           of a serial left-fold.  This keeps the atom order identical to the
-           original topology while reducing the asymptotic cost of
-           ``Interchange.combine()`` from O(N²) to O(N log N).
-
-        Note:
-            When combining Interchanges from molecules parameterized by different
-            force fields (e.g., ff14SB for proteins + OpenFF 2.0 for small molecules),
-            you may see "Key collision with different parameters" warnings. This is
-            expected behavior - the same SMIRKS pattern (e.g., [#6X4:1]-[#1:2] for
-            C-H bonds) can have different parameters in different force fields.
-            OpenFF handles this by appending "_DUPLICATE" to the key, allowing both
-            parameter sets to coexist. See OpenFF's "Sharp Edges" documentation:
-            https://docs.openforcefield.org/projects/interchange/en/stable/using/edges.html
+        Impropers are not checked for coverage, because the two force fields
+        define them differently; every other handler must cover the same
+        protein atoms as the combined force field did.
 
         Args:
-            ff: OpenFF ForceField.
-            water_mol: Water molecule with pre-computed charges.
+            interchange: Interchange of the whole solvated topology, changed
+                in place.
 
-        Returns:
-            Combined Interchange object.
+        Raises:
+            RuntimeError: If the protein force field does not cover a protein
+                term the combined force field covered, the global nonbonded
+                settings of the two force fields differ, or the first
+                molecules of the solvated topology are not the enzyme.
         """
-        LOGGER.info("Using batched Interchange creation (preserving molecule order)")
+        from openff.toolkit import ForceField, Topology
 
-        # Build helper mappings
-        smiles_to_name = self._build_molecule_name_mapping()
-        smiles_to_template = self._build_charge_template_mapping(water_mol)
-
-        # ── Step 0: Cache to_smiles() for every molecule in ONE pass ──
-        # molecule.to_smiles() is expensive; previous code called it 3×.
-        t0 = time.perf_counter()
-        mol_id_to_smiles: Dict[int, str] = {}
-        smiles_counts: Dict[str, int] = {}
-        first_mol_for_smiles: Dict[str, Molecule] = {}
-
-        for molecule in self._solvated_topology.molecules:
-            mid = id(molecule)
-            mol_smiles = molecule.to_smiles()
-            mol_id_to_smiles[mid] = mol_smiles
-            smiles_counts[mol_smiles] = smiles_counts.get(mol_smiles, 0) + 1
-            if mol_smiles not in first_mol_for_smiles:
-                first_mol_for_smiles[mol_smiles] = molecule
-
-        LOGGER.info(
-            f"SMILES cache built in {time.perf_counter() - t0:.1f}s "
-            f"({len(mol_id_to_smiles)} molecules, {len(smiles_counts)} unique types)"
+        if self._n_enzyme_molecules == 0:
+            LOGGER.warning("No enzyme molecules recorded; the protein force field is not applied")
+            return
+        protein_atoms = sum(
+            self._solvated_topology.molecule(index).n_atoms
+            for index in range(self._n_enzyme_molecules)
         )
+        if self._enzyme_topology is not None and protein_atoms != self._enzyme_topology.n_atoms:
+            raise RuntimeError(
+                f"The first {self._n_enzyme_molecules} molecule(s) of the solvated topology hold "
+                f"{protein_atoms} atoms, the enzyme {self._enzyme_topology.n_atoms}"
+            )
 
-        # ── Step 1: Prepare per-type metadata (no parameterisation yet) ──
-        smiles_info: Dict[str, dict] = {}
-        for mol_smiles, count in smiles_counts.items():
-            display_name = smiles_to_name.get(mol_smiles, mol_smiles[:50] + "...")
-            LOGGER.info(f"  {display_name}: {count} instance(s)")
+        t0 = time.perf_counter()
+        protein_ff = ForceField(self._protein_ff)
+        small_molecule_ff = ForceField(self._sm_ff)
+        # The Amber port has no Constraints handler.
+        if "Constraints" not in protein_ff.registered_parameter_handlers:
+            protein_ff.register_parameter_handler(small_molecule_ff["Constraints"])
+        protein_topology = Topology.from_molecules(
+            [self._solvated_topology.molecule(index) for index in range(self._n_enzyme_molecules)]
+        )
+        reference = protein_ff.create_interchange(protein_topology)
 
-            charge_from = []
-            if mol_smiles in smiles_to_template:
-                charge_from = [smiles_to_template[mol_smiles]]
+        for name in ("vdW", "Electrostatics"):
+            for attribute in ("scale_12", "scale_13", "scale_14", "scale_15"):
+                if (
+                    abs(getattr(interchange[name], attribute) - getattr(reference[name], attribute))
+                    > 1e-6
+                ):
+                    raise RuntimeError(
+                        f"{self._protein_ff} and {self._sm_ff} use different {name} {attribute}"
+                    )
+        if interchange["vdW"].mixing_rule != reference["vdW"].mixing_rule:
+            raise RuntimeError(f"{self._protein_ff} and {self._sm_ff} use different mixing rules")
 
-            smiles_info[mol_smiles] = {
-                "template": first_mol_for_smiles[mol_smiles],
-                "charge_from": charge_from,
-                "display_name": display_name,
+        for name in ("Bonds", "Angles", "ProperTorsions", "ImproperTorsions", "vdW", "Constraints"):
+            target = interchange[name]
+            source = reference[name]
+            removed = [key for key in target.key_map if max(key.atom_indices) < protein_atoms]
+            for key in removed:
+                del target.key_map[key]
+            for key, potential_key in source.key_map.items():
+                # A potential is keyed by its SMIRKS. The prefix keeps a SMIRKS
+                # the two force fields share from replacing the potential that
+                # non-protein molecules use.
+                copied = potential_key.model_copy(
+                    update={"id": f"{self._protein_ff}::{potential_key.id}"}
+                )
+                target.key_map[key] = copied
+                target.potentials[copied] = source.potentials[potential_key]
+            if name != "ImproperTorsions":
+                before = {tuple(sorted(key.atom_indices)) for key in removed}
+                after = {tuple(sorted(key.atom_indices)) for key in source.key_map}
+                if before != after:
+                    example = sorted(before - after or after - before)[0]
+                    raise RuntimeError(
+                        f"{self._protein_ff} does not cover the protein {name} terms "
+                        f"({len(before - after)} missing, {len(after - before)} extra, "
+                        f"for example atoms {example})"
+                    )
+            used = set(target.key_map.values())
+            target.potentials = {
+                key: value for key, value in target.potentials.items() if key in used
             }
-
-        # ── Step 2: Create Interchanges in ORIGINAL TOPOLOGY ORDER ──
-        # Group consecutive molecules of the same type into single batches.
-        t1 = time.perf_counter()
-        all_interchanges: List[Interchange] = []
-        interchange_names: List[str] = []
-
-        current_smiles: str | None = None
-        current_batch: List[Molecule] = []
-
-        def flush_batch():
-            """Create interchange for current batch and add to list."""
-            nonlocal current_batch, current_smiles
-            if not current_batch:
-                return
-
-            info = smiles_info[current_smiles]
-            display_name = info["display_name"]
-            charge_from = info["charge_from"]
-
-            LOGGER.debug(f"Creating Interchange for {len(current_batch)} {display_name}")
-
-            inc = ff.create_interchange(
-                topology=current_batch,
-                charge_from_molecules=charge_from,
+            source_name = (
+                f"{self._sm_ff} policy at {self._protein_ff} bond lengths"
+                if name == "Constraints"
+                else self._protein_ff
             )
-            all_interchanges.append(inc)
-            interchange_names.append(f"{len(current_batch)}x {display_name}")
+            LOGGER.info(f"  {name}: {len(source.key_map)} protein terms from {source_name}")
 
-            current_batch = []
-
-        for molecule in self._solvated_topology.molecules:
-            mol_smiles = mol_id_to_smiles[id(molecule)]
-
-            if mol_smiles != current_smiles:
-                flush_batch()
-                current_smiles = mol_smiles
-
-            current_batch.append(molecule)
-
-        flush_batch()
-
-        t2 = time.perf_counter()
-        LOGGER.info(f"Created {len(all_interchanges)} Interchange batch(es) in {t2 - t1:.1f}s")
-        if len(interchange_names) <= 10:
-            LOGGER.info(f"  Batches: {', '.join(interchange_names)}")
-        else:
-            LOGGER.info(f"  First 5: {', '.join(interchange_names[:5])}")
-            LOGGER.info(f"  Last 5: {', '.join(interchange_names[-5:])}")
-
-        if not all_interchanges:
-            raise RuntimeError("No molecules found in solvated topology")
-
-        # ── Step 3: Serial combine (preserving order) ──
-        # OpenFF Interchange.combine() creates _DUPLICATE parameter keys when
-        # SMIRKS patterns resolve to different force constants in different
-        # molecular contexts.  Combining two objects that *both* contain
-        # _DUPLICATE keys raises UnsupportedCombinationError, which rules out
-        # tree-based (pairwise) reduction.  We therefore keep the serial
-        # left-fold: combined = ((A + B) + C) + D.
-        #
-        # The O(N²) cost is mitigated by having very few batches (one per
-        # contiguous same-SMILES run), typically 5-10 for a solvated system.
-        combined = all_interchanges[0]
-        for idx, inc in enumerate(all_interchanges[1:], 1):
-            t_step = time.perf_counter()
-            combined = combined.combine(inc)
-            elapsed = time.perf_counter() - t_step
-            LOGGER.info(
-                f"  Combined batch {idx}/{len(all_interchanges) - 1} "
-                f"({interchange_names[idx]}) in {elapsed:.1f}s"
-            )
-
-        t3 = time.perf_counter()
-        LOGGER.info(f"Interchange combination complete ({t3 - t2:.1f}s total)")
-
-        # Reset box vectors
-        combined.box = self._solvated_topology.box_vectors
-
-        return combined
+        LOGGER.info(f"  Protein force field applied in {time.perf_counter() - t0:.1f}s")
 
     def _renumber_chains(self, topology: Topology) -> None:
-        """Re-number chain IDs in the topology.
+        """Normalize chain IDs before canonical PDB identifier assignment.
 
-        Note: This is the legacy method. For PDB-compliant output, use
-        _assign_pdb_identifiers() which is called by save_topology().
+        This lightweight normalization keeps intermediate OpenFF metadata
+        deterministic before ``_assign_pdb_identifiers()`` applies the
+        canonical PolyzyMD chain convention during topology export.
 
         Args:
             topology: Topology to modify.
         """
         for i, mol in enumerate(topology.molecules):
-            for atom in mol.atoms:
+            for atom_index, atom in enumerate(mol.atoms):
+                # Record the input residue, chain included, before the chain is replaced.
+                self._get_original_residue_token(atom, atom_index)
                 atom.metadata["chain_id"] = str(i + 1)
 
     def _assign_pdb_identifiers(self) -> None:
@@ -771,7 +738,8 @@ class SystemBuilder:
         source of truth for what each molecule represents.
 
         Chain assignment uses FIXED letters regardless of component presence:
-        - Chain A: Protein (preserves original residue numbers from input PDB)
+
+        - Chain A: Protein/enzyme molecules (continuous residues across molecules)
         - Chain B: Substrate (residue 1; letter reserved even if no substrate)
         - Chain C: Polymers (preserves per-monomer residue numbers)
         - Chain D+: Solvent (overflow at 9999 residues per chain)
@@ -794,7 +762,7 @@ class SystemBuilder:
         CHAIN_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         mol_idx = 0
 
-        # Fixed chain letter assignments per component type.
+        # Fixed chain letter assignments per component type
         # A=protein, B=substrate, C=polymer, D+=solvent — regardless of whether
         # a component is present. This ensures downstream code (SystemComponentInfo,
         # AtomGroupResolver, from_topology()) always sees the expected chain IDs.
@@ -803,21 +771,33 @@ class SystemBuilder:
         POLYMER_CHAIN = "C"
         SOLVENT_START_IDX = 3  # index of 'D' in CHAIN_LETTERS
 
-        # 1. Protein: Always chain A, preserve original residue numbers
+        # 1. Protein molecules always use chain A with continuous unique residues
         if self._n_enzyme_molecules > 0:
-            LOGGER.debug(f"Assigning chain {PROTEIN_CHAIN} to protein")
+            LOGGER.debug(
+                f"Assigning chain {PROTEIN_CHAIN} to {self._n_enzyme_molecules} protein molecule(s)"
+            )
+
+            protein_residue_num = 1
+
+            # A PDB can hold several protein molecules (a homodimer such as
+            # https://www.rcsb.org/structure/1HXW), or several chains joined into one
+            # molecule by disulfides (insulin). All of them go on chain A, numbered one
+            # after the other: two 100-residue chains become residues 1-100 and
+            # 101-200. Adjust your downstream analysis accordingly!!!
 
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
-                for atom in mol.atoms:
+                residue_map: dict[str, int] = {}
+                for atom_index, atom in enumerate(mol.atoms):
+                    residue_token = self._get_original_residue_token(atom, atom_index)
                     atom.metadata["chain_id"] = PROTEIN_CHAIN
-                    # Ensure residue_number is a string (PDB loader may store as int)
-                    # OpenMM's addResidue(id=...) expects a string
-                    if "residue_number" in atom.metadata:
-                        atom.metadata["residue_number"] = str(atom.metadata["residue_number"])
+                    if residue_token not in residue_map:
+                        residue_map[residue_token] = protein_residue_num
+                        protein_residue_num += 1
+                    atom.metadata["residue_number"] = str(residue_map[residue_token])
                 mol_idx += 1
 
-        # 2. Substrate: Always chain B, residue 1
+        # 2. Substrate always uses chain B and residue 1
         if self._n_substrate_molecules > 0:
             LOGGER.debug(f"Assigning chain {SUBSTRATE_CHAIN} to substrate")
 
@@ -828,7 +808,7 @@ class SystemBuilder:
                     atom.metadata["residue_number"] = "1"
                 mol_idx += 1
 
-        # 3. Polymers: Always chain C, continue residue numbering across chains
+        # 3. Polymers always use chain C and continue residue numbering across chains
         if self._n_polymer_chains > 0:
             LOGGER.debug(
                 f"Assigning chain {POLYMER_CHAIN} to {self._n_polymer_chains} polymer chain(s)"
@@ -862,7 +842,7 @@ class SystemBuilder:
                 polymer_residue_num += 1
                 mol_idx += 1
 
-        # 4. Solvent: Always starts at chain D (index 3)
+        # 4. Solvent always starts at chain D
         self._assign_solvent_identifiers(
             start_mol_idx=mol_idx,
             start_chain_idx=SOLVENT_START_IDX,
@@ -874,6 +854,46 @@ class SystemBuilder:
             f"substrate={self._n_substrate_molecules}, polymers={self._n_polymer_chains}, "
             f"solvent molecules start at chain {CHAIN_LETTERS[SOLVENT_START_IDX]}"
         )
+
+    @staticmethod
+    def _get_original_residue_token(atom: Any, atom_index: int) -> str:
+        """Return a stable residue grouping token for a protein atom.
+
+        The first call stores source residue metadata before PolyzyMD writes
+        canonical output residue numbers. Later calls reuse that stored token so
+        protein residue numbering is idempotent and does not cascade from
+        already-renumbered output metadata.
+
+        Parameters
+        ----------
+        atom : Any
+            OpenFF-like atom with mutable ``metadata``.
+        atom_index : int
+            Atom index within the molecule, used only for deterministic fallback
+            metadata when residue fields are absent.
+
+        Returns
+        -------
+        str
+            Stable token identifying the atom's original residue group.
+        """
+        metadata = atom.metadata
+        residue_token = metadata.get(_ORIGINAL_RESIDUE_TOKEN_KEY)
+        if residue_token is not None:
+            return str(residue_token)
+
+        chain_id = metadata.get("chain_id") or ""
+        residue_number = metadata.get("residue_number")
+        residue_name = metadata.get("residue_name") or metadata.get("residue_name_3") or ""
+        insertion_code = metadata.get("insertion_code") or ""
+        if residue_number is None:
+            residue_token = f"missing-residue-metadata:{atom_index}"
+        else:
+            # Chains joined by a disulfide are one molecule; A7 and B7 are two residues.
+            residue_token = f"{chain_id!s}|{residue_number!s}|{residue_name!s}|{insertion_code!s}"
+
+        metadata[_ORIGINAL_RESIDUE_TOKEN_KEY] = residue_token
+        return residue_token
 
     def _assign_solvent_identifiers(
         self,
@@ -907,11 +927,13 @@ class SystemBuilder:
                 residue_num = 1
 
                 if chain_idx >= len(chain_letters):
-                    LOGGER.warning(
-                        f"Exceeded {len(chain_letters)} chain letters - cycling. "
-                        "Consider using a topology format with larger chain ID capacity."
+                    # Cycling back would give solvent the chain IDs that mark the
+                    # protein, substrate and polymer, which analyses select on.
+                    raise ValueError(
+                        f"The solvent needs more than {len(chain_letters) - start_chain_idx} "
+                        f"chains of {max_residue} residues each ({n_solvent} solvent "
+                        "molecules), and chain IDs would repeat those of the solute."
                     )
-                    chain_idx = chain_idx % len(chain_letters)
 
             chain_id = chain_letters[chain_idx]
             mol = self._solvated_topology.molecule(mol_idx)
@@ -957,6 +979,10 @@ class SystemBuilder:
 
         path = Path(path)
         topology.to_file(str(path), keep_ids=True)
+        if topology is self._solvated_topology:
+            from polyzymd.core.components import atom_segids, write_pdb_segids
+
+            write_pdb_segids(path, atom_segids(self.components(), topology.n_atoms))
         LOGGER.info(f"Saved topology to {path}")
 
     def build_from_config(
@@ -964,6 +990,7 @@ class SystemBuilder:
         config: "SimulationConfig",
         working_dir: Optional[Union[str, Path]] = None,
         polymer_seed: Optional[int] = None,
+        publish_topology: bool = True,
     ) -> Interchange:
         """Build the complete system from a configuration.
 
@@ -973,29 +1000,79 @@ class SystemBuilder:
             config: SimulationConfig with all settings.
             working_dir: Working directory for output files.
             polymer_seed: Random seed for polymer generation. This is used as a
-                fallback if config.polymers.random_seed is not set.
+                fallback if config.polymers.random_seed is not set. Callers pass
+                the replicate index. The same value seeds Packmol for polymer
+                packing and solvation so that replicates start from independent
+                coordinates (Packmol is otherwise deterministic for identical
+                inputs).
 
         Returns:
             OpenFF Interchange ready for simulation.
+
+        Raises:
+            ValueError: If the config names something the build cannot make
+                correctly (see ``SimulationConfig.require_buildable``).
         """
+        config.require_buildable()
         self._working_dir = Path(working_dir) if working_dir else None
+        self._solute_handles = {
+            solute.type: (solute.name, solute.segid) for solute in getattr(config, "solutes", [])
+        }
+        from polyzymd.utils.charging import nagl_model_provenance
+
+        self._build_provenance = {"packmol_seed": polymer_seed}
+        # Record a NAGL model only when a component is charged with one.
+        nagl_model = getattr(config, "nagl_model", None)
+        if nagl_model is not None:
+            self._build_provenance.update(nagl_model_provenance(nagl_model))
+        if config.polymers and config.polymers.enabled:
+            self._build_provenance["polymer_seed"] = polymer_seed
+        if polymer_seed is None:
+            LOGGER.warning(
+                "No replicate seed supplied: Packmol will use its fixed default seed and "
+                "replicates will share identical starting coordinates."
+            )
+        else:
+            LOGGER.info(f"Packmol seed (from replicate): {polymer_seed}")
 
         # 1. Build enzyme
         LOGGER.info(f"Building enzyme: {config.enzyme.name}")
-        self.build_enzyme(config.enzyme.pdb_path)
+        self.build_enzyme(config.enzyme.pdb_path, config.enzyme.custom_substructures_path)
 
         # 2. Build substrate (if configured)
         if config.substrate:
             LOGGER.info(f"Building substrate: {config.substrate.name}")
-            self._substrate_builder.build_from_config(config.substrate)
+            self._substrate_builder.build_from_config(config.substrate, nagl_model=self._nagl_model)
             self._substrate_molecule = self._substrate_builder.molecule
+            self._substrate_charge_method = config.substrate.charge_method.value
+            self._substrate_conformer_index = config.substrate.conformer_index
             self._n_substrate_molecules = 1
 
         # 3. Combine enzyme + substrate
         self.combine_solutes()
 
+        # 3b. Compute the periodic cell FIRST, from the protein + substrate
+        # alone.  The cell must not depend on where Packmol happens to put the
+        # polymer chains, otherwise replicates of one condition end up with
+        # different box volumes and therefore different water and ion counts.
+        # Polymers get their room by reserving polymers.packing.padding on top
+        # of solvent.box.padding.
+        polymers_enabled = bool(config.polymers and config.polymers.enabled)
+        box_vectors = None
+        if polymers_enabled:
+            box_vectors = self._solvent_builder.compute_box_vectors_from_config(
+                self._combined_topology,
+                config.solvent,
+                extra_padding_nm=config.polymers.packing.padding,
+            )
+            LOGGER.info(
+                "Deterministic periodic cell from the protein + substrate diameter "
+                f"+ 2 x ({config.polymers.packing.padding} + {config.solvent.box.padding}) nm: "
+                f"{box_vectors}"
+            )
+
         # 4. Build and pack polymers (if configured)
-        if config.polymers and config.polymers.enabled:
+        if polymers_enabled:
             LOGGER.info(f"Building polymers: {config.polymers.type_prefix}")
 
             characters = [m.label for m in config.polymers.monomers]
@@ -1012,24 +1089,28 @@ class SystemBuilder:
             monomer_smiles = None
             monomer_names = None
             residue_names = None
-            reactions = None
+            end_groups = None
+            force_field = None
 
-            if generation_mode == "dynamic":
-                # Build monomer_smiles: name -> SMILES
-                monomer_smiles = {
-                    m.name: m.smiles for m in config.polymers.monomers if m.smiles is not None
-                }
-                # Build monomer_names: label -> name
-                monomer_names = {m.label: m.name for m in config.polymers.monomers}
-                # Build residue_names: name -> 3-char residue name
+            # A monomer without a name is named by its label. The SMILES and caps
+            # build dynamic chains; in cached mode they are checked against the
+            # build metadata of cached chains that dynamic generation made.
+            monomers = config.polymers.monomers
+            if any(m.smiles for m in monomers) or config.polymers.end_groups is not None:
+                monomer_smiles = {(m.name or m.label): m.smiles for m in monomers if m.smiles}
+                monomer_names = {m.label: (m.name or m.label) for m in monomers}
                 residue_names = {
-                    m.name: m.residue_name
-                    for m in config.polymers.monomers
-                    if m.residue_name is not None
+                    (m.name or m.label): m.residue_name for m in monomers if m.residue_name
                 }
-                # Get reaction config
-                reactions = config.polymers.reactions
-
+            if config.polymers.end_groups is not None:
+                end_groups = {
+                    end: [
+                        option.model_dump() for option in getattr(config.polymers.end_groups, end)
+                    ]
+                    for end in ("head", "tail")
+                }
+            if generation_mode == "dynamic":
+                force_field = [str(name) for name in config.polymers.force_field]
                 LOGGER.info(
                     f"Dynamic mode: monomers={list(monomer_smiles.keys())}, "
                     f"charger={config.polymers.charger.value}"
@@ -1047,35 +1128,57 @@ class SystemBuilder:
                 monomer_smiles=monomer_smiles,
                 monomer_names=monomer_names,
                 residue_names=residue_names,
-                reactions=reactions,
+                end_groups=end_groups,
+                force_field=force_field,
                 charger_type=config.polymers.charger.value,
                 max_retries=config.polymers.max_retries,
                 cache_directory=config.polymers.cache_directory,
             )
+            self._build_provenance["polymer_sequence_seed"] = effective_seed
+            builders = self._polymer_chain_builders()
+            if builders:
+                from polyzymd.builders.polymer_generator import builder_summary
+
+                self._build_provenance["polymer_builder"] = "; ".join(
+                    builder_summary(record) for record in builders
+                )
 
             # Get packing config (uses defaults if not specified)
             packing = config.polymers.packing
             self.pack_polymers(
+                box_vectors=box_vectors,
                 padding=packing.padding,
                 tolerance=packing.tolerance,
                 movebadrandom=packing.movebadrandom,
                 working_directory=self._working_dir,
+                seed=polymer_seed,
+                confine_to_sphere=packing.confine_to_sphere,
+                nloop=packing.nloop,
             )
 
-        # 5. Solvate
+        # 5. Solvate.  With a precomputed cell the packed topology is already
+        # framed in the brick, so the solvent builder must not re-centre it.
         LOGGER.info("Solvating system")
-        self._solvent_builder.solvate_from_config(self._combined_topology, config.solvent)
+        self._solvent_builder.solvate_from_config(
+            self._combined_topology,
+            config.solvent,
+            seed=polymer_seed,
+            box_vectors=box_vectors,
+            nagl_model=self._nagl_model,
+        )
         self._solvated_topology = self._solvent_builder.solvated_topology
+        self._build_provenance["solvent_packmol_seed"] = self._solvent_builder.packmol_seed
+        self._record_box_provenance(polymers_enabled)
 
         # Save solvated PDB if working dir specified
-        if self._working_dir:
+        self._assign_pdb_identifiers()
+        if self._working_dir and publish_topology:
             self._working_dir.mkdir(parents=True, exist_ok=True)
             pdb_path = self._working_dir / "solvated_system.pdb"
             self.save_topology(pdb_path)
 
         # 6. Create Interchange
-        use_optimized = config.polymers is not None and config.polymers.enabled
-        self.create_interchange(use_optimized_combining=use_optimized)
+        self.create_interchange()
 
         return self._interchange
 
@@ -1118,230 +1221,31 @@ class SystemBuilder:
 
         return omm_topology, omm_system, omm_positions
 
-    def export_to_gromacs(
-        self,
-        output_dir: Union[str, Path],
-        prefix: Optional[str] = None,
-        gmx_command: str = "gmx",
-        generate_mdps: bool = True,
-    ) -> Dict[str, Any]:
-        """Export the system to GROMACS format with full simulation setup.
+    def _record_box_provenance(self, deterministic_box: bool) -> None:
+        """Record the final cell in the build provenance.
 
-        Generates a complete GROMACS simulation setup including:
-        - .gro (coordinates) and .top (topology) files
-        - MDP files for energy minimization, equilibration, and production
-        - Position restraint files for equilibration stages
-        - Run script for executing the full workflow
-
-        The topology is split into separate .itp files for each molecule type
-        (monolithic=False), which is cleaner for multi-component systems.
-
-        MDP files are generated from config.yaml parameters to match OpenMM
-        simulation settings (temperature, pressure, duration, etc.). OpenFF
-        defaults are used for force field parameters (rcoulomb=0.9, rvdw=0.9,
-        PME, etc.) to ensure 1:1 parity with OpenMM.
-
-        Args:
-            output_dir: Directory to write GROMACS files. Will be created if it
-                doesn't exist.
-            prefix: Filename prefix for output files. If None, generates a
-                descriptive name from the config (e.g., "LipA_EGPMA-SBMA").
-            gmx_command: GROMACS command/path for the run script (default "gmx").
-            generate_mdps: If True (default), generate MDP files from config.
-                If False, only export coordinates and topology.
-
-        Returns:
-            Dictionary with paths to generated files:
-            - "gro": Path to coordinate file
-            - "top": Path to topology file
-            - "em_mdp": Path to energy minimization MDP (if generate_mdps=True)
-            - "eq_mdps": List of equilibration MDP paths (if generate_mdps=True)
-            - "prod_mdp": Path to production MDP (if generate_mdps=True)
-            - "posres": Dict of position restraint files (if applicable)
-            - "run_script": Path to run script (if generate_mdps=True)
-
-        Raises:
-            RuntimeError: If Interchange has not been created.
-
-        Example:
-            >>> builder = SystemBuilder.from_config(config)
-            >>> builder.build_from_config(config, working_dir)
-            >>> result = builder.export_to_gromacs(
-            ...     output_dir="gromacs/",
-            ...     prefix="my_system"
-            ... )
-            >>> print(f"Run: cd {result['gro'].parent} && ./{result['run_script'].name}")
+        ``box_vectors_nm`` and ``brick_nm`` let a user confirm that replicates
+        of one condition really do share a box (and therefore the same water
+        and ion counts) by diffing their ``build_provenance.json`` files.
         """
-        if self._interchange is None:
-            raise RuntimeError(
-                "Interchange not created. Call create_interchange() or build_from_config() first."
-            )
+        import numpy as np
 
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Generate prefix from config if not provided
-        if prefix is None:
-            prefix = self._generate_gromacs_prefix()
-
-        LOGGER.info(f"Exporting to GROMACS format: {output_dir / prefix}.*")
-
-        # Check if we have config for MDP generation
-        config = getattr(self, "_config", None)
-
-        if generate_mdps and config is not None:
-            # Use GromacsExporter for full export with MDP generation
-            from polyzymd.exporters.gromacs import GromacsExporter
-
-            # Get component info for position restraints
-            try:
-                component_info = self.get_component_info()
-            except RuntimeError:
-                component_info = None
-                LOGGER.warning(
-                    "Could not get component info for position restraints. "
-                    "Position restraint files will not be generated."
-                )
-
-            exporter = GromacsExporter(
-                interchange=self._interchange,
-                config=config,
-                component_info=component_info,
-            )
-
-            result = exporter.export(
-                output_dir=output_dir,
-                prefix=prefix,
-                gmx_command=gmx_command,
-            )
-
-            return result
-        else:
-            # Legacy mode: just export coordinates and topology
-            return self._export_gromacs_minimal(output_dir, prefix)
-
-    def _export_gromacs_minimal(
-        self,
-        output_dir: Path,
-        prefix: str,
-    ) -> Dict[str, Any]:
-        """Export minimal GROMACS files (coordinates and topology only).
-
-        This is the legacy export mode used when no config is available
-        or when generate_mdps=False.
-
-        Args:
-            output_dir: Output directory.
-            prefix: Filename prefix.
-
-        Returns:
-            Dictionary with gro and top paths.
-        """
-        # Fix 0-indexed residues (GROMACS requires 1-indexed)
-        self._fix_zero_indexed_residues()
-
-        # Export using OpenFF Interchange
-        output_prefix = str(output_dir / prefix)
-        self._interchange.to_gromacs(
-            prefix=output_prefix,
-            monolithic=False,
-            _merge_atom_types=True,
-        )
-
-        gro_path = output_dir / f"{prefix}.gro"
-        top_path = output_dir / f"{prefix}.top"
-        mdp_path = output_dir / f"{prefix}.mdp"
-
-        LOGGER.info("Generated GROMACS files:")
-        LOGGER.info(f"  Coordinates: {gro_path}")
-        LOGGER.info(f"  Topology:    {top_path}")
-        LOGGER.info(f"  MDP stub:    {mdp_path}")
-        LOGGER.info("")
-        LOGGER.info("Note: The .mdp file is a stub for single-point energy calculation.")
-        LOGGER.info("For MD simulations, use generate_mdps=True with a config file,")
-        LOGGER.info("or create custom MDP files.")
-
-        return {
-            "gro": gro_path,
-            "top": top_path,
-            "mdp_stub": mdp_path,
-        }
-
-    def _generate_gromacs_prefix(self) -> str:
-        """Generate a descriptive filename prefix from the config.
-
-        Creates a prefix in the format: {enzyme_name}_{polymer_prefix}
-        Falls back to "system" if config information is not available.
-
-        Returns:
-            Filename prefix string (without extension).
-        """
-        parts = []
-
-        # Get enzyme name from config
-        config = getattr(self, "_config", None)
-        if config and hasattr(config, "enzyme") and config.enzyme:
-            parts.append(config.enzyme.name)
-
-        # Get polymer type prefix from config
-        if config and hasattr(config, "polymers") and config.polymers:
-            if config.polymers.enabled and config.polymers.type_prefix:
-                parts.append(config.polymers.type_prefix)
-
-        if parts:
-            return "_".join(parts)
-        else:
-            return "system"
-
-    def _fix_zero_indexed_residues(self) -> None:
-        """Fix 0-indexed residues in the topology for GROMACS compatibility.
-
-        GROMACS requires residue numbers to be 1-indexed. This method checks
-        all atoms in the topology and increments any 0-indexed residue numbers.
-        """
-        if self._interchange is None:
+        self._build_provenance["deterministic_box"] = bool(deterministic_box)
+        box_vecs = self._solvent_builder.box_vectors
+        if box_vecs is None:
             return
+        arr = np.asarray(box_vecs.m_as("nanometer"), dtype=float)
+        self._build_provenance["box_vectors_nm"] = [[float(v) for v in row] for row in arr]
+        self._build_provenance["brick_nm"] = [float(v) for v in np.diagonal(arr)]
 
-        found_zero_indexed = False
+    @property
+    def build_provenance(self) -> Dict[str, Any]:
+        """Seeds and settings that determine the build's starting coordinates.
 
-        # First pass: check for 0-indexed residues
-        for molecule in self._interchange.topology.molecules:
-            for atom in molecule.atoms:
-                residue_num = atom.metadata.get("residue_number")
-                if residue_num is not None:
-                    # Handle both string and int representations
-                    if isinstance(residue_num, str):
-                        try:
-                            if int(residue_num) == 0:
-                                found_zero_indexed = True
-                                break
-                        except ValueError:
-                            pass
-                    elif residue_num == 0:
-                        found_zero_indexed = True
-                        break
-            if found_zero_indexed:
-                break
-
-        if not found_zero_indexed:
-            LOGGER.debug("No 0-indexed residues found")
-            return
-
-        # Second pass: fix 0-indexed residues
-        LOGGER.info("Fixing 0-indexed residues for GROMACS compatibility")
-        for molecule in self._interchange.topology.molecules:
-            for atom in molecule.atoms:
-                residue_num = atom.metadata.get("residue_number")
-                if residue_num is not None:
-                    if isinstance(residue_num, str):
-                        try:
-                            atom.metadata["residue_number"] = str(int(residue_num) + 1)
-                        except ValueError:
-                            pass
-                    else:
-                        atom.metadata["residue_number"] = residue_num + 1
-
-        LOGGER.info("Fixed all 0-indexed residues")
+        Populated by :meth:`build_from_config`; recorded in ``build_provenance.json``
+        by :func:`polyzymd.simulation.artifact_integrity.publish_build_bundle`.
+        """
+        return dict(self._build_provenance)
 
     def get_component_info(self) -> "SystemComponentInfo":
         """Get system component information for atom group resolution.
@@ -1401,3 +1305,221 @@ class SystemBuilder:
             polymer_chain_id="C",
             solvent_start_chain_id="D",
         )
+
+    def components(self) -> List["ComponentRecord"]:
+        """Return the components of the solvated system, in atom order.
+
+        Each record names the atoms the component owns, where their parameters
+        and charges come from (as the build was asked to make them), and the
+        inputs it was made from. The physics audit checks the built system
+        against these records.
+
+        Raises:
+            RuntimeError: If the system has not been solvated.
+        """
+        from polyzymd.core.components import (
+            DEFAULT_SEGIDS,
+            ChargeSource,
+            ComponentRecord,
+            Domain,
+            check_layout,
+            file_record,
+            molecule_ranges,
+        )
+
+        if self._solvated_topology is None:
+            raise RuntimeError("No solvated topology. Call solvate() first.")
+
+        def handle(type_: str) -> Tuple[str, str]:
+            # The config names its solutes; a builder driven from Python uses the type.
+            return self._solute_handles.get(type_, (type_, DEFAULT_SEGIDS[type_]))
+
+        sizes = [molecule.n_atoms for molecule in self._solvated_topology.molecules]
+        records: List[ComponentRecord] = []
+        cursor = 0  # index of the next molecule
+
+        def take(n_molecules: int):
+            nonlocal cursor
+            start = sum(sizes[:cursor])
+            ranges = molecule_ranges(sizes[cursor : cursor + n_molecules], start)
+            cursor += n_molecules
+            return ranges
+
+        def charges(method: Optional[str], source_file=None) -> ChargeSource:
+            model = (self._nagl_model or _default_nagl_model()) if method == "nagl" else None
+            return ChargeSource(method=method, model=model, source_file=source_file)
+
+        if self._n_enzyme_molecules:
+            atoms = take(self._n_enzyme_molecules)
+            records.append(
+                ComponentRecord(
+                    name=handle("protein")[0],
+                    type="protein",
+                    segid=handle("protein")[1],
+                    placement="fixed",
+                    molecules=atoms,
+                    domains=[
+                        Domain(
+                            "protein",
+                            tuple(atoms),
+                            (self._protein_ff,),
+                            ChargeSource("library"),
+                            reference={
+                                "pdb": str(self._enzyme_builder.pdb_path),
+                                "custom_substructures": _optional_str(
+                                    getattr(self._enzyme_builder, "custom_substructures_path", None)
+                                ),
+                            },
+                        )
+                    ],
+                    provenance={"pdb": file_record(self._enzyme_builder.pdb_path)},
+                )
+            )
+        if self._n_substrate_molecules:
+            atoms = take(self._n_substrate_molecules)
+            method = self._substrate_charge_method or "nagl"
+            records.append(
+                ComponentRecord(
+                    name=handle("small_molecule")[0],
+                    type="small_molecule",
+                    segid=handle("small_molecule")[1],
+                    placement="fixed",
+                    molecules=atoms,
+                    domains=[
+                        Domain(
+                            "substrate",
+                            tuple(atoms),
+                            (self._sm_ff,),
+                            charges(method),
+                            reference={
+                                "sdf": str(self._substrate_builder.sdf_path),
+                                "conformer_index": self._substrate_conformer_index or 0,
+                            },
+                        )
+                    ],
+                    provenance={
+                        "sdf": file_record(self._substrate_builder.sdf_path),
+                        "conformer_index": self._substrate_conformer_index,
+                    },
+                )
+            )
+        if self._n_polymer_chains:
+            molecules, domains, sources = [], [], {}
+            from polyzymd.utils.packmol import packing_order
+
+            sequences = list(self._polymer_builder.sequence_counts) if self._polymer_builder else []
+            for index in packing_order(self._polymer_counts):
+                count = self._polymer_counts[index]
+                atoms = take(count)
+                molecules += atoms
+                sequence = sequences[index] if index < len(sequences) else f"type{index}"
+                source = (
+                    self._polymer_builder.molecule_source(sequence) if self._polymer_builder else {}
+                )
+                sdf = source.get("sdf_path")
+                domains.append(
+                    Domain(
+                        f"polymer:{sequence}",
+                        tuple(atoms),
+                        (self._sm_ff,),
+                        charges(source.get("charge_method", "preset"), str(sdf) if sdf else None),
+                        reference={"sdf": str(sdf)} if sdf else None,
+                    )
+                )
+                sources[sequence] = {"chains": count, "sdf": file_record(sdf)}
+            provenance = {"sequences": sources}
+            builders = self._polymer_chain_builders()
+            if builders:
+                provenance["builder"] = builders[0] if len(builders) == 1 else builders
+            chemistry = self._polymer_builder.chain_chemistry() if self._polymer_builder else {}
+            if chemistry:
+                provenance.update(chemistry)
+            records.append(
+                ComponentRecord(
+                    name=handle("polymer")[0],
+                    type="polymer",
+                    segid=handle("polymer")[1],
+                    placement="packed",
+                    molecules=molecules,
+                    domains=domains,
+                    provenance=provenance,
+                )
+            )
+        counts = self._solvent_builder._solvation_counts
+        composition = self._solvent_builder._composition
+        if counts is not None:
+            water_model = composition.water_model if composition else "tip3p"
+            water = take(counts.water)
+            na, cl = take(counts.na), take(counts.cl)
+            solvent_molecules = list(water)
+            domains = [
+                Domain(
+                    "water",
+                    tuple(water),
+                    (self._sm_ff,),
+                    ChargeSource("water_model", water_model),
+                    reference={"smiles": "O"},
+                )
+            ]
+            for (name, count), cosolvent in zip(
+                counts.co_solvents, composition.co_solvents if composition else []
+            ):
+                atoms = take(count)
+                solvent_molecules += atoms
+                source = _cosolvent_charges(cosolvent, self._nagl_model)
+                domains.append(
+                    Domain(
+                        f"co_solvent:{name}",
+                        tuple(atoms),
+                        (self._sm_ff,),
+                        source,
+                        reference=(
+                            {"sdf": source.source_file}
+                            if source.method == "preset"
+                            else {"smiles": _cosolvent_smiles(cosolvent)}
+                        ),
+                    )
+                )
+            records.append(
+                ComponentRecord(
+                    name="solvent",
+                    type="solvent",
+                    segid=DEFAULT_SEGIDS["solvent"],
+                    placement="packed",
+                    molecules=solvent_molecules,
+                    domains=domains,
+                    provenance={
+                        "water_model": water_model,
+                        "waters": counts.water,
+                        "co_solvents": dict(counts.co_solvents),
+                    },
+                )
+            )
+            if na or cl:
+                records.append(
+                    ComponentRecord(
+                        name="ions",
+                        type="ions",
+                        segid=DEFAULT_SEGIDS["ions"],
+                        placement="packed",
+                        molecules=na + cl,
+                        domains=[
+                            Domain(
+                                ion,
+                                tuple(atoms),
+                                (self._sm_ff,),
+                                ChargeSource("library"),
+                                reference={"smiles": smiles},
+                            )
+                            for ion, atoms, smiles in (("Na+", na, "[Na+]"), ("Cl-", cl, "[Cl-]"))
+                            if atoms
+                        ],
+                        provenance={"Na+": counts.na, "Cl-": counts.cl},
+                    )
+                )
+        if cursor != len(sizes):
+            raise RuntimeError(
+                f"{len(sizes) - cursor} molecules of the solvated system belong to no component"
+            )
+        check_layout(records, sum(sizes))
+        return records

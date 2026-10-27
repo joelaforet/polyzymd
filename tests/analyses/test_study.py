@@ -1,0 +1,225 @@
+"""Study, Condition and Replicate: how a replicate reports a universe it cannot load."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+
+def test_a_topology_that_cannot_load_is_named_as_such(tmp_path: Path) -> None:
+    """A broken topology is not reported as an equilibration problem."""
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study import Condition, Replicate
+
+    class Broken:
+        def load_universe(self, index):
+            raise ValueError("Length of charges does not match number of atoms")
+
+    replicate = Replicate.__new__(Replicate)
+    replicate._universe = None
+    replicate.index = 1
+    replicate.condition = type("C", (), {"_provider": Broken(), "label": "A"})()
+    with pytest.raises(ProtocolError, match="Cannot load the topology") as info:
+        Replicate.universe(replicate)
+    assert "analysis-topology" in info.value.hint
+    assert Condition  # the class used above is the study's own
+
+
+def test_labels_that_share_a_folder_name_are_refused(tmp_path: Path) -> None:
+    """Study.from_configs refuses two labels that give one results folder name."""
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study import Study
+    from tests._support.analysis_testkit import write_simulation_config
+
+    configs = {
+        label: write_simulation_config(tmp_path / name, scratch=tmp_path / "scratch" / name)
+        for label, name in (("SBMA 50", "a"), ("SBMA 50%", "b"))
+    }
+    with pytest.raises(ProtocolError, match="SBMA 50.*SBMA 50%"):
+        Study.from_configs(configs, equilibration="0ns")
+
+
+def test_labels_differing_in_case_are_refused_only_in_a_study_file() -> None:
+    """WT and wt keep separate results folders, but share one conditions/ folder name."""
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study_file import check_folder_names
+
+    check_folder_names(["WT", "wt"], "Study.from_configs", study_folders=False)
+    with pytest.raises(ProtocolError, match="'WT' and 'wt'"):
+        check_folder_names(["WT", "wt"], "study.yaml")
+
+
+def test_a_replicate_folder_that_was_never_run_is_left_out(tmp_path: Path, caplog) -> None:
+    """A folder a failed `polyzymd run` left behind does not drop the whole condition."""
+    import logging
+
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.study import Study
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+
+    config = write_simulation_config(tmp_path / "cond", scratch=tmp_path / "scratch")
+    for replicate in (1, 2):
+        write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(10)])
+    empty = SimulationConfig.from_yaml(config).get_working_directory(3)
+    empty.mkdir(parents=True)
+    (empty / "progress.json").write_text("{}")
+
+    with caplog.at_level(logging.WARNING):
+        condition = Study.from_configs({"A": config}, equilibration="0ns")["A"]
+    assert [replicate.index for replicate in condition.replicates] == [1, 2]
+    assert condition.not_run == [3]
+    assert "replicate 3 has no production output yet" in caplog.text
+
+
+def test_a_named_replicate_that_was_never_run_is_still_used(tmp_path: Path) -> None:
+    """Replicates named on purpose are kept, so a missing run is an error, not a gap."""
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.study import Study
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+
+    config = write_simulation_config(tmp_path / "cond", scratch=tmp_path / "scratch")
+    write_openmm_replicate(config, 1, [1.0 + 0.01 * k for k in range(10)])
+    SimulationConfig.from_yaml(config).get_working_directory(2).mkdir(parents=True)
+
+    study = Study.from_configs({"A": config}, equilibration="0ns", replicates=[1, 2])
+    assert [replicate.index for replicate in study["A"].replicates] == [1, 2]
+
+
+def test_segments_that_do_not_join_are_not_blamed_on_the_topology() -> None:
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.shared.loader import TrajectoryLineageError
+    from polyzymd.analyses.study import Replicate
+
+    class Branched:
+        def load_universe(self, index):
+            raise TrajectoryLineageError("production_1 overlaps production_0")
+
+    replicate = Replicate.__new__(Replicate)
+    replicate._universe = None
+    replicate.index = 1
+    replicate.condition = type("C", (), {"_provider": Branched(), "label": "A"})()
+    with pytest.raises(ProtocolError, match="Cannot join the production segments") as info:
+        Replicate.universe(replicate)
+    assert "analysis-topology" not in info.value.hint
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_replicates_left_out_reach_the_report(tmp_path: Path) -> None:
+    """The report names the folder it left out and is partial, in JSON and in text."""
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.protocols import analyze
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+
+    config = write_simulation_config(tmp_path / "cond", scratch=tmp_path / "scratch")
+    for replicate in (1, 2):
+        write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(10)])
+    SimulationConfig.from_yaml(config).get_working_directory(3).mkdir(parents=True)
+
+    report = analyze(
+        "rg",
+        [config],
+        labels=["A"],
+        equilibration="0ns",
+        settings={"selection": "all"},
+        output_dir=tmp_path / "out",
+        plots=False,
+        eq_check=False,
+    )
+    assert report.status == "partial"
+    assert report.excluded_replicates == {
+        "A": {"3": "no production output (never built or never run)"}
+    }
+    assert report.conditions[0].n_replicates == 2
+    text = report.to_agent_text()
+    assert "status partial" in text
+    assert "problem: condition A: replicate 3 left out" in text
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_a_replicate_short_of_its_production_makes_the_report_partial(tmp_path: Path) -> None:
+    """Its frames so far are read, and the report says how far it got."""
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.protocols import analyze
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.progress import (
+        SegmentRecord,
+        SegmentStatus,
+        SimulationProgress,
+        save_progress,
+    )
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+
+    config = write_simulation_config(tmp_path / "cond", scratch=tmp_path / "scratch")
+    for replicate in (1, 2, 3):
+        write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(10)])
+    sim = SimulationConfig.from_yaml(config)
+    total = int(
+        sim.simulation_phases.production.duration * 1e6 / sim.simulation_phases.production.time_step
+    )
+    run_dir = sim.get_working_directory(3)
+    (run_dir / "production_0" / "INTERRUPTED").write_text(
+        f"segment_index=0\nsteps_completed={int(total * 0.63)}\ntotal_steps={total}\n"
+    )
+    save_progress(
+        run_dir,
+        SimulationProgress(
+            total_steps_requested=total,
+            timestep_fs=sim.simulation_phases.production.time_step,
+            segments=[
+                SegmentRecord(
+                    index=0, status=SegmentStatus.INTERRUPTED, steps_completed=int(total * 0.63)
+                )
+            ],
+        ),
+    )
+    report = analyze(
+        "rg",
+        [config],
+        labels=["A"],
+        equilibration="0ns",
+        settings={"selection": "all"},
+        output_dir=tmp_path / "out",
+        plots=False,
+        eq_check=False,
+    )
+    assert report.status == "partial"
+    assert report.conditions[0].n_replicates == 3
+    assert any("replicate 3 has run 63% of production" in p for p in report.problems)
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_a_replicate_built_from_another_config_is_named_in_a_warning(tmp_path: Path) -> None:
+    """Its build record's config hash differs: the analysis warns and still reads it."""
+    import json
+
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.protocols import analyze
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.artifact_integrity import MANIFEST_NAME, config_hash
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+
+    config = write_simulation_config(tmp_path / "cond", scratch=tmp_path / "scratch")
+    for replicate in (1, 2, 3):
+        write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(10)])
+    sim = SimulationConfig.from_yaml(config)
+    for replicate, digest in ((1, "0" * 64), (2, config_hash(sim))):
+        (sim.get_working_directory(replicate) / MANIFEST_NAME).write_text(
+            json.dumps({"config_hash": digest})
+        )
+    report = analyze(
+        "rg",
+        [config],
+        labels=["A"],
+        equilibration="0ns",
+        settings={"selection": "all"},
+        output_dir=tmp_path / "out",
+        plots=False,
+        eq_check=False,
+    )
+    warnings = [text for text in report.warnings if "built from another config" in text]
+    assert len(warnings) == 1 and "replicate 1 was built" in warnings[0]
+    assert report.conditions[0].n_replicates == 3

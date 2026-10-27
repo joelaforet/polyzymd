@@ -1,0 +1,224 @@
+# Why PolyzyMD audits the physics of every build
+
+A simulation is only as good as the system it integrates. A config says which
+force field, charge model, water model, salt and restraints the system has.
+Before 1.3.0, nothing checked that the built system had them. PolyzyMD now
+checks every build against its config, records the result, and refuses to run
+files that no passing check vouches for.
+
+This page explains the failures the checks catch, how the checks work, and
+what they do not check. {doc}`../reference/physics_checks` lists every check.
+
+## Failures that raise no error
+
+A build can differ from its config while every step succeeds. For example:
+
+- two force fields are loaded together, and the generic parameters of one
+  replace the specific parameters of the other on some of the molecules;
+- a run computes charges again instead of reading the built system;
+- a restraint selects a neighbouring atom, because its selection counts atoms
+  in a different way than its author expected;
+- a setting, such as a salt concentration, changes meaning between versions,
+  and nothing records which meaning a build used.
+
+Each of these gives a valid system and plausible trajectories, and no step
+reports an error. Only an independent comparison of the built system with the
+config finds them.
+
+## The config states every scientific choice
+
+The audit can only compare the system with what the config says. A default
+that PolyzyMD fills in is a choice nobody made. Therefore PolyzyMD has no
+scientific defaults:
+
+- every solute names its `force_field` files and its `charges`;
+- `charges: {method: nagl}` names its NAGL `model` file;
+- `solvent` names its `force_field` and its water `model`;
+- each component has a `type`, and the type is never guessed.
+
+The choice of force field is the user's. PolyzyMD recommends none. It checks
+that the system carries what the config names, and it records the files, their
+hashes and the model versions.
+
+## How the audit checks a build
+
+The audit runs at the end of every build, before any file is committed. It
+reads the system that the engine will run, not an intermediate:
+
+- OpenMM: `system.xml`, with the built PDB;
+- GROMACS: the `.top`, `.itp` and `.gro` files, read with OpenMM's
+  `GromacsTopFile` with the `define`s of the production `.mdp`, and every
+  `.mdp` file.
+
+A force that the audit cannot read is an error, not a pass. GROMACS settings
+that OpenMM cannot reproduce, such as reaction-field electrostatics, are
+refused with the setting named.
+
+### Each component is rebuilt on its own
+
+The builder records each component: its atoms, its force field files and its
+charge source. The audit then rebuilds each component's molecules from those
+inputs alone, with OpenFF directly. It never calls PolyzyMD's builders, so a
+mistake in the builder cannot repeat in the check. It compares the built
+system with the rebuild term by term: every bond, angle, torsion, improper,
+Lennard-Jones and 1-4 parameter, every constraint, every library, NAGL or
+preset charge and every mass. A water box has thousands of copies of one molecule; the audit compares
+each copy, so one wrong copy fails the check.
+
+A protein that received another force field's bonded terms fails
+`parameters.bonded`. The test
+`tests/audit/test_parameter_checks.py::test_the_force_field_order_bug_fails_the_protein`
+builds such a protein (Sage loaded after ff14SB, the bug this audit was
+written for) and checks that the protein, and only the protein, fails
+`parameters.bonded` and `parameters.nonbonded`.
+
+A coverage check makes sure that every atom belongs to exactly one component,
+and that no bonded term joins two molecules.
+
+### The system is checked against the config
+
+The audit recomputes from the built system what the config asked for:
+
+- the number of chains, ligands and co-solvent molecules;
+- the net charge, the salt and the ionic strength, from the realized solvent
+  mass, with a formula written separately from the builder's;
+- the constraint of every bond to hydrogen;
+- the cutoff, switching distance, PME and dispersion correction, against the
+  force field file;
+- clashes between solvent, polymer and protein under periodic boundaries,
+  below half the PACKMOL tolerance the build used;
+- the distance from the solute to its own periodic image, and polymer chains
+  that touch both the protein and its image;
+- each restraint's form, distance and force constant, and the atoms it joins.
+  The audit selects each restrained atom again with MDAnalysis, a different
+  library than the builder's, inside the component the config names;
+- for GROMACS, every `.mdp` file: integrator, thermostat, time step, length,
+  temperature or annealing ramp, pressure coupling, constraints, velocity
+  generation and the position-restraint switches of each stage.
+
+On a system of about 90,000 atoms with 78 polymer chains, the whole
+audit takes about one minute on a cluster node.
+
+## When a check fails
+
+A check that fails stops the build. For OpenMM, nothing is committed: there is
+no `system.xml` to run. The full record is kept as
+`build_provenance.failed.json` and `build_provenance.failed.md`; a GROMACS
+build keeps its record, marked failed. The error
+lists each failing check with its component and detail, and names the two ways
+forward: correct the config or the inputs, or accept the departure.
+
+A check can also warn: the build goes on, and the warning is recorded.
+
+Some departures are deliberate. Crystal waters kept inside a protein, for
+example, warn under `geometry.buried_water`. To accept a failure or a warning
+on purpose, add an entry under `modeling_exceptions` with the check, the
+component and the reason:
+
+```yaml
+modeling_exceptions:
+  - check: geometry.buried_water
+    component: LipA
+    reason: "Crystal waters in the active-site pocket are kept on purpose."
+```
+
+The reason is for the reader of the published config. The build record keeps
+the accepted finding with its reason and the atoms it covered, so it shows
+both what PolyzyMD would have refused and why the user chose it. An entry
+that accepts nothing is reported, so stale entries do not stay in a config.
+
+## The record and the gates
+
+The build writes `build_provenance.json` and a readable
+`build_provenance.md`. They hold the versions, seeds, {term}`build config hash`, the SHA-256
+of every file the engine reads, the component records and the full audit. See
+{doc}`../reference/data_requirements`.
+
+The record is what `run` and `submit` check. A replicate that has not started
+runs only if its record exists, has a passing audit, is for the same engine,
+matches the current config, and lists files whose hashes have not changed.
+Each refusal says whether to rebuild or to restore an edited file. A replicate
+that has already started continues from its own files, so a running campaign
+is not interrupted by a new release.
+
+The checks continue after the build:
+
+- A GROMACS build that passes writes `audited_files.sha256`. Every GROMACS job
+  checks it with `sha256sum` before `grompp`, so a file edited after
+  submission does not run.
+- Each OpenMM production segment compares the System it is about to integrate
+  with the audited `system.xml`: every force-field term, the restraints and the
+  nonbonded settings. The result is written beside the segment and into
+  `progress.json`. A segment whose System differs stops before its first step,
+  the chain is not resubmitted, and `polyzymd status` shows
+  `SYSTEM DIVERGED FROM THE AUDITED BUILD` with the action `inspect`. A run
+  that started before 1.3.0 has no audited build to compare with; its
+  record says so, and it goes on.
+
+(physics-audit-tests)=
+## How the audit is tested
+
+Each check has a test that builds a correct system, breaks a copy of it on
+purpose, and asserts that the right check fails. The tests use one small
+system that holds every component type: Trp-cage, a substrate, polymer chains
+of two monomers, DMSO, water and NaCl (`tests/_support/small_system.py`).
+
+| What is tested | Test file |
+|---|---|
+| Wrong parameters: force field order, a wrong charge, a missing constraint, a wrong mass, one wrong water among thousands, one wrong polymer chain, a bond between two components | `tests/audit/test_parameter_checks.py` |
+| The system against the config: chain counts, salt and ionic strength, net charge, hydrogen constraints, cutoff, buried water, polymer overlap, periodic image, bridging chains, restraint constants and atoms | `tests/audit/test_system_checks.py` |
+| Reading the engines' files: permuted torsions, a force the audit cannot read, GROMACS settings OpenMM cannot reproduce, a structure with another atom count | `tests/audit/test_terms_and_settings.py` |
+| OpenMM and GROMACS exports hold the same terms and settings | `tests/audit/test_components_and_engines.py` |
+| The GROMACS files pass the audit, and edits to an `.itp` or `.mdp` fail it | `tests/audit/test_engine_parity.py` |
+| GROMACS applies the staged position restraints PolyzyMD writes (`grompp` and `gmx dump`) | `tests/exporters/test_gromacs_staged_restraints.py` |
+| The gates: `run` and `submit` refuse unvouched files; a failed audit commits nothing; a run whose System differs from the build is recorded and shown in `status` | `tests/audit/test_gates.py` |
+| `modeling_exceptions`, the build record and the methods to cite | `tests/audit/test_report_and_provenance.py` |
+
+These files, with `tests/config/test_solutes.py`, run on every pull request
+in the workflow
+[`engine-parity.yml`](https://github.com/joelaforet/polyzymd/actions/workflows/engine-parity.yml).
+The whole test suite runs on Linux and macOS in
+[`full-test.yml`](https://github.com/joelaforet/polyzymd/actions/workflows/full-test.yml),
+for pushes and pull requests to `main` and `dev` and once a week.
+For what the engine tests compare, and a single-point energy of one build on
+both engines, see {ref}`the engine parity check <engine-parity>`.
+
+## What the audit does not check
+
+The audit checks that the built system is the one the config describes. It
+does not check that the config describes good science:
+
+- whether the force field, charge model or water model suits the system;
+- the protonation states and the preparation of the input structure;
+- whether the simulation is long enough, or converged;
+- AM1-BCC and Espaloma charges: they are computed for each molecule, so the
+  audit does not compute them again; `charges.source` reports a warning that
+  says so;
+- how closely GROMACS and OpenMM sample the same ensemble where their
+  algorithms differ (see {doc}`../reference/gromacs_openmm`);
+- the chemistry of dynamically built polymer chains against their SMILES
+  (atoms, bonds, stereochemistry, caps): the builder assembles each chain from
+  the SMILES and checks its geometry, and the audit checks the parameters and
+  charges of the chain it is given.
+
+A wrong config is built faithfully, and recorded.
+
+## Why this matters when an agent runs the simulations
+
+An agent that sets up and runs simulations can make the same mistakes a
+person makes, faster and at a larger scale. The audit gives an agent and the
+person who supervises it the same guarantee: what ran is what the config says,
+or the run did not start. Each refusal names the check, the component and the
+fix, so an agent can act on it. A deliberate departure must be written into
+the config with a reason, where anyone who reads the config sees it. `polyzymd status
+--format agent` reports a run that diverged from its build.
+
+## Related pages
+
+- {doc}`../reference/physics_checks` — every check, its status and component
+- {ref}`engine-parity` — engine parity tests and a single-point energy on both engines
+- {doc}`../reference/data_requirements` — the build record and run files
+- {doc}`../reference/configuration` — solutes, charges and `modeling_exceptions`
+- {doc}`../how_to/rewrite_config_rc5` — rewrite a config for 1.3.0
+- {doc}`simulation_safeguards` — the build and run safeguards that came before
+- {doc}`../how_to/own_protocol` — run an audited build with your own protocol

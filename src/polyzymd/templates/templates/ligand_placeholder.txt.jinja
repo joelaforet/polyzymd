@@ -1,0 +1,33 @@
+# ============================================================================
+# PLACEHOLDER: Place your small-molecule SDF file here (optional)
+# ============================================================================
+#
+# If your simulation includes a docked or crystal small molecule (a ligand
+# or substrate), place its SDF file in this directory.
+#
+# SMALL-MOLECULE SDF FILE (optional):
+#   - 3D coordinates (from docking, a crystal structure, or conformer
+#     generation), in the frame of the protein PDB
+#   - Hydrogens and formal charges for your simulation pH
+#   - One conformer is simplest; with several, pick one with
+#     `conformer_index` (0 = first)
+#   - Name it as the `sdf_path` of a `type: small_molecule` entry under
+#     `solutes:` in config.yaml, for example:
+#
+#       solutes:
+#         - type: small_molecule
+#           name: "substrate"
+#           sdf_path: "structures/ligand_Y.sdf"
+#           conformer_index: 0
+#
+#   The file must be SDF (.sdf). Other formats are not read.
+#
+# ATOM NAMES: an SDF usually has no atom names, so in the built system each
+# atom of the small molecule is named by its element, its count among the
+# atoms of that element in the SDF's order, and an "x" suffix (C1x, C2x,
+# H1x, ...). Use these names in restraint selections; `polyzymd validate`
+# lists them when a selection names an atom the molecule will not have.
+#
+# If you are not simulating a small molecule, delete this placeholder and
+# leave the `type: small_molecule` entry in config.yaml commented out.
+# ============================================================================

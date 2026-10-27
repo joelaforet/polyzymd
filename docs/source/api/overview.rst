@@ -11,6 +11,7 @@ Package Structure
     polyzymd/
     ├── config/           # Configuration and YAML loading
     │   ├── schema.py     # Pydantic models for all config sections
+    │   ├── analysis_settings.py # PlotSettings, PlotTheme, AnalysisDefaults
     │   └── loader.py     # YAML loading utilities
     ├── builders/         # System building components
     │   ├── enzyme.py     # Enzyme/protein preparation
@@ -25,25 +26,28 @@ Package Structure
     │   └── signals.py    # SLURM signal handling
     ├── workflow/         # HPC workflow management
     │   ├── slurm.py      # SLURM script generation
-    │   └── daisy_chain.py     # Job submission
+    │   ├── daisy_chain.py     # Job submission
+    │   └── analysis_submit.py # `polyzymd analyze --submit` SLURM jobs
     ├── core/             # Core utilities
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
-    ├── analysis/         # Post-simulation trajectory analysis
-    │   ├── rmsf/         # Root Mean Square Fluctuation
-    │   ├── distances/    # Inter-atomic distance analysis
-    │   ├── triad/        # Catalytic triad integrity
-    │   ├── contacts/     # Polymer-protein contacts, binding preference
-    │   ├── sasa/         # Solvent Accessible Surface Area
-    │   ├── exposure/     # Chaperone-like exposure dynamics
-    │   ├── core/         # Statistics, autocorrelation, MetricType
-    │   └── results/      # Serializable result models
-    ├── compare/          # Multi-condition statistical comparison
-    │   ├── comparators/  # RMSF, contacts, triad, BFE, affinity, exposure
-    │   ├── results/      # Comparison result models
-    │   └── plotters/     # Publication-quality figures
+    ├── analyses/         # ★ Study API, analysis functions and `polyzymd analyze`
+    │   ├── study.py      # Study API: replicates as MDAnalysis universes
+    │   ├── timeseries.py # study.timeseries / per_replicate, summaries and tests
+    │   ├── functions.py  # Shipped analysis functions (rg, rmsd, rmsf, sasa, contacts,
+    │   │                 # hydrogen bonds, distances, ...)
+    │   ├── figures.py    # Figures drawn from stored values
+    │   ├── protocols.py  # `polyzymd analyze` and the ProtocolReport
+    │   ├── reference.py  # Reference structures for RMSD, RMSF, native contacts
+    │   ├── universe.py   # UniverseProvider: replicate universes and input file records
+    │   ├── identity.py   # compute_config_hash, recorded by every stored result
+    │   ├── shared/       # Reusable utilities (TrajectoryLoader, statistics, plotting)
     └── cli/              # Command-line interface
+        ├── analyze.py    # `polyzymd analyze`
         └── main.py       # Click CLI
+
+Every analysis that ``polyzymd analyze`` offers is a function in
+``polyzymd.analyses.functions`` run through ``polyzymd.analyses.study.Study``.
 
 
 Key Classes
@@ -87,20 +91,18 @@ Restraints
 Analysis
 ~~~~~~~~
 
-- :py:class:`~polyzymd.analysis.rmsf.calculator.RMSFCalculator` - Per-residue RMSF
-- :py:class:`~polyzymd.analysis.distances.calculator.DistanceCalculator` - Inter-group distances
-- :py:class:`~polyzymd.analysis.triad.analyzer.CatalyticTriadAnalyzer` - Catalytic triad integrity
-- :py:class:`~polyzymd.analysis.contacts.calculator_parallel.ParallelContactAnalyzer` - Polymer-protein contacts
-- :py:class:`~polyzymd.analysis.results.base.BaseAnalysisResult` - Serializable result base class
+- :py:class:`~polyzymd.analyses.study.Study` - Every replicate of every condition as MDAnalysis universes
+- :py:func:`~polyzymd.analyses.functions.hydrogen_bonds` - Hydrogen-bond counts between two groups
+- :py:func:`~polyzymd.analyses.functions.residue_occlusion` - Polymer-protein contacts by occluded SASA
+- :py:class:`~polyzymd.analyses.timeseries.Timeseries` - Per-frame values of every replicate, from ``Study.timeseries``
+- :py:class:`~polyzymd.analyses.timeseries.ReplicateValues` - One value or labelled array per replicate, with ``summary()`` and ``compare()``
+- :py:class:`~polyzymd.analyses.universe.UniverseProvider` - Loads a replicate's universe and records its input files
+- :py:class:`~polyzymd.config.analysis_settings.PlotSettings` - Figure format, style preset, theme and condition colours
 
 Comparison
 ~~~~~~~~~~
 
-- :py:class:`~polyzymd.compare.core.base.BaseComparator` - Template Method comparator base
-- :py:class:`~polyzymd.compare.comparators.exposure.ExposureDynamicsComparator` - Chaperone analysis
-- :py:class:`~polyzymd.compare.comparators.binding_free_energy.BindingFreeEnergyComparator` - Per-contact ΔG_sel
-- :py:class:`~polyzymd.compare.comparators.polymer_affinity.PolymerAffinityScoreComparator` - Total interaction strength
-
+- :py:class:`~polyzymd.analyses.protocols.ProtocolReport` - The report of ``polyzymd analyze`` and of ``summary()`` and ``compare()``
 
 Quick Reference
 ---------------

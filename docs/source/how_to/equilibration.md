@@ -1,0 +1,253 @@
+# Set up equilibration stages
+
+Use this guide to configure PolyzyMD's required staged equilibration workflow
+with heating, restrained relaxation, or a final unrestrained equilibration
+step.
+
+## When to use staged equilibration
+
+Multi-stage equilibration is useful when:
+
+- the initial packed system has bad contacts
+- you want gradual heating instead of starting directly at the target temperature
+- polymers or ligands should relax while the protein stays restrained
+- you want a final free equilibration stage before production
+
+## Basic rule
+
+PolyzyMD requires `simulation_phases.equilibration_stages`. Equilibration
+cannot be skipped: list at least one stage, with a duration above 0 ns. Any
+duration above 0 is accepted. The quickstart uses one stage of 0.002 ns.
+
+(minimization-constraints)=
+## What happens before stage 1: minimization
+
+Energy minimization always runs before the first equilibration stage. By
+default it holds every protein and substrate **heavy** atom fixed and relaxes
+water, ions, polymers, and the solute hydrogens, so the heavy-atom structure
+you prepared enters heating exactly as built. The hydrogens are left mobile on
+purpose: with `constraints=HBonds` their bond lengths are set by the force
+field, and freezing them would carry the input PDB's X–H lengths into a
+constrained integrator that cannot satisfy them. Keep this default unless you
+have a specific reason to let the protein relax before restraints are applied:
+
+```yaml
+simulation_phases:
+  minimization:
+    freeze_solute: true    # default
+  equilibration_stages:
+    - name: "heating"
+      ...
+```
+
+The minimizer records the frozen heavy-atom displacement (expected `0.0`) and
+the largest solute-hydrogen displacement
+(`hydrogen_max_displacement_angstrom`, non-zero whenever the input hydrogens
+were off their force-field bond lengths) in `minimization/phase.json`. It also
+verifies that the minimized state satisfies every constraint of the real System
+before heating starts. See {doc}`../explanation/simulation_safeguards` for the
+rationale.
+
+The minimizer holds constrained distances (the X-H bonds and rigid water)
+only approximately, so after it a constrained distance is usually off by a few
+hundredths of an ångström. When it is off by more than 0.01 Å, PolyzyMD puts
+the atoms back onto the exact constraint lengths with OpenMM
+`applyConstraints` and logs one INFO line, for example
+`Minimized state was 0.02681 A off its constraints (> 0.010 A); put back onto them with applyConstraints (1.2e-07 A remains)`.
+This happens in most builds and needs nothing from you. Only if more than
+0.01 Å remains after the correction does the log give a WARNING. With
+`freeze_solute: true`, PolyzyMD also checks that the correction moved no
+solute heavy atom by more than 0.02 Å; if it did, the run stops with an
+error.
+
+## Simple three-stage example
+
+```yaml
+simulation_phases:
+  equilibration_stages:
+    - name: "heating"
+      samples: 50
+      ensemble: "NVT"
+      temperature_start: 60.0
+      temperature_end: 293.0
+      temperature_increment: 1.0
+      temperature_interval_steps: 600  # increase temperature by `temperature_increment` every this many steps
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+        - group: "polymer_heavy"
+          force_constant: 4184.0
+
+    - name: "polymer_relaxation"
+      duration: 1.0
+      samples: 100
+      ensemble: "NVT"
+      temperature: 293.0
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+
+    - name: "free_equilibration"
+      duration: 0.5
+      samples: 100
+      ensemble: "NPT"
+      temperature: 293.0
+
+  production:
+    ensemble: "NPT"
+    duration: 100.0
+    samples: 2500
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0
+    barostat: "MC"
+    barostat_frequency: 25
+```
+
+## How to choose stage settings
+
+### Heating stage
+
+Use a heating stage when you want a gentler start for a crowded or fragile
+system. Set `temperature_start`, `temperature_end`, and
+`temperature_increment` in K, plus `temperature_interval_steps` in MD steps. PolyzyMD calculates the number of updates needed to reach
+the endpoint and derives the duration. If the final update would overshoot,
+PolyzyMD shortens only that final temperature increase. Validation and
+simulation logs report the derived duration before the stage runs.
+
+The ramp ends when the target reaches `temperature_end`; it does not include a
+hold at that temperature. Add a following constant-temperature stage when the
+system should equilibrate at the endpoint. Both engines hold each target for
+the requested step interval and change it at the same integration step
+({doc}`../reference/gromacs_openmm`).
+
+### Restrained relaxation stage
+
+Use `position_restraints` when one part of the system should stay close to its
+reference coordinates while another part relaxes.
+
+Available groups include:
+
+- `protein_heavy`
+- `protein_backbone`
+- `protein_calpha`
+- `ligand_heavy` (the substrate heavy atoms: list it in one stage to hold the
+  substrate in that stage only)
+- `polymer_heavy`
+- `solute` (protein + substrate, hydrogens included), `solute_heavy` (the same
+  without hydrogens: the set frozen during minimization)
+- `solvent`, `water_only`, `ions_only`, `cosolvents_only`
+
+### Free equilibration stage
+
+Omit `position_restraints` when you want the stage to run fully unrestrained.
+
+## Common recipes
+
+### Enzyme-only system
+
+```yaml
+simulation_phases:
+  equilibration_stages:
+    - name: "heating"
+      ensemble: "NVT"
+      temperature_start: 60.0
+      temperature_end: 300.0
+      temperature_increment: 1.0
+      temperature_interval_steps: 600
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+
+    - name: "free_equilibration"
+      duration: 1.0
+      ensemble: "NPT"
+      temperature: 300.0
+```
+
+### Gradual restraint release
+
+This schedule runs on OpenMM only. On GROMACS a position restraint group has
+one force constant in every stage, and all stages must use the same protein
+group, so `validate` refuses it with `engine: gromacs`. On GROMACS, keep
+`protein_heavy` at one `force_constant` in each restrained stage and release
+it by leaving `position_restraints` out of the later stages.
+
+```yaml
+simulation_phases:
+  equilibration_stages:
+    - name: "heating"
+      ensemble: "NVT"
+      temperature_start: 60.0
+      temperature_end: 300.0
+      temperature_increment: 1.0
+      temperature_interval_steps: 600
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+
+    - name: "relax_1"
+      duration: 0.5
+      ensemble: "NVT"
+      temperature: 300.0
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 2092.0
+
+    - name: "relax_2"
+      duration: 0.5
+      ensemble: "NVT"
+      temperature: 300.0
+      position_restraints:
+        - group: "protein_backbone"
+          force_constant: 1046.0
+
+    - name: "free_equilibration"
+      duration: 0.5
+      ensemble: "NPT"
+      temperature: 300.0
+```
+
+## Validate the setup
+
+Run:
+
+```bash
+pixi run -e build polyzymd validate -c config.yaml
+pixi run -e build polyzymd build -c config.yaml --dry-run
+```
+
+## Outputs to expect
+
+Each stage writes its own trajectory, state-data CSV, topology PDB, and
+checkpoint files. The stage name becomes part of the output filename, which
+makes it easier to inspect temperature ramps or restraint-release steps later.
+
+`progress.json` records each completed stage together with the PolyzyMD
+version, OpenMM version, and pixi environment that ran it, so you can confirm
+after the fact that every stage of a restart chain ran under the same software.
+
+## Troubleshooting
+
+### simulation blows up during heating
+
+Try a smaller `time_step`, a lower starting temperature, or stronger initial
+position restraints.
+
+### temperature overshoots the target
+
+Use a smaller `temperature_increment` or a larger `temperature_interval_steps`.
+
+### protein moves too much while polymers relax
+
+Keep `protein_heavy` restraints for longer or reduce them more gradually.
+
+## Related pages
+
+- first-run tutorial: {doc}`../get_started/quickstart`
+- distance restraints: {doc}`restraints`
+- config schema: {doc}`../reference/configuration`
+
+<!-- IMAGE OPPORTUNITY: Add a three-panel schematic for `heating -> restrained
+relaxation -> free equilibration`, with example restraint groups called out in
+each panel. -->

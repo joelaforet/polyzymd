@@ -1,0 +1,370 @@
+# ============================================================================
+# PolyzyMD Configuration Template
+# ============================================================================
+#
+# INSTRUCTIONS:
+# 1. Set the protein's pdb_path under solutes. The required sections below
+#    are filled in with working defaults.
+# 2. Uncomment the optional entries you need by removing the leading "# "
+# 3. Validate your configuration: polyzymd validate -c config.yaml
+# 4. Check the build without running it: polyzymd build -c config.yaml -r 1 --dry-run
+#
+# Documentation: https://polyzymd.readthedocs.io/en/latest/tutorials/own_system.html
+# Rewriting a config from PolyzyMD 1.3.0rc4 or earlier:
+#   https://polyzymd.readthedocs.io/en/latest/how_to/rewrite_config_rc5.html
+#
+# REQUIRED SECTIONS:
+#   - name (simulation identifier)
+#   - engine (openmm or gromacs)
+#   - solutes (what you add to the box: the protein, and optionally a docked
+#     small molecule and polymer chains)
+#   - solvent (water, co-solvents, ions and box)
+#   - thermodynamics (temperature, pressure)
+#   - simulation_phases (equilibration, production)
+#   - output (directory settings)
+#   - openmm (compute platform; OpenMM engine only)
+#
+# OPTIONAL SECTIONS:
+#   - restraints (distance restraints)
+#
+# You choose the physics: PolyzyMD assumes no force field, charge model or
+# water model. Every solute and the solvent name theirs, PolyzyMD applies
+# exactly those and checks that it did, and the config keeps the choice on
+# record. Whether they suit your system is your call.
+#
+# ============================================================================
+
+# Simulation identifier - used in output directory names
+name: {{ project_name | yaml_quote }}
+
+# Required simulation engine: "openmm" or "gromacs". For GROMACS, write
+# "gromacs"; GROMACS does not read the openmm: block below.
+engine: "openmm"
+
+description: "Description of your simulation system"
+
+# ============================================================================
+# Solutes (REQUIRED)
+# ============================================================================
+# Everything you add to the box, one entry each. Every entry has:
+#   type        protein, small_molecule or polymer (required; picks which keys
+#               the entry takes and how it is checked)
+#   name        the handle restraints and analysis use; defaults to the type
+#   segid       PSF segment ID of its atoms (1-4 characters); defaults to
+#               PROT, LIG or POLY. Water and co-solvents are SOL, ions ION.
+#   force_field the force field file(s) that parameterize it
+#   charges     where its partial charges come from:
+#                 library  the force field's own charges (proteins)
+#                 preset   the charges stored in its SDF files
+#                 nagl     OpenFF NAGL; model names the network, such as
+#                          openff-gnn-am1bcc-1.0.0.pt (the model Sage 2.3.0 names)
+#                 am1bcc   AM1-BCC (needs AmberTools; slower)
+#                 espaloma Espaloma
+#
+solutes:
+  # The protein. Its structure file must have:
+  #   - standard amino acid residue names (no nonstandard residues)
+  #   - hydrogens for your simulation pH
+  #   - no missing heavy atoms in regions of interest
+  # TIP: run `polyzymd clean-pdb -i your_protein.pdb` or another PDB
+  #      preparation tool first.
+  - type: protein
+    name: "protein_X"
+    pdb_path: "structures/protein_X.pdb"
+    description: "My enzyme description"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+
+  # A docked small molecule, placed as given (OPTIONAL).
+  # - type: small_molecule
+  #   name: "substrate"
+  #   sdf_path: "structures/ligand_Y.sdf"
+  #   conformer_index: 0                  # Which conformer to use (0 = first)
+  #   residue_name: "LIG"                 # 3-letter residue name in output
+  #   force_field: ["openff-2.3.0.offxml"]
+  #   charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+
+  # Random co-polymer chains packed around the protein (OPTIONAL), from
+  # pre-built SDF files (generation_mode: cached, charges: {method: preset})
+  # or built with mBuild from star-sited SMILES (dynamic, charged with nagl).
+  # A monomer is its repeat unit with '*' on the two linking atoms; the
+  # notebook notebooks/star_sited_monomers.ipynb of your project helps you write
+  # it from a PubChem SMILES. For both modes and every key, see
+  # https://polyzymd.readthedocs.io/en/latest/how_to/polymers.html
+  # - type: polymer
+  #   generation_mode: "dynamic"          # Build chains from star-sited SMILES
+  #   type_prefix: "SBMA-EGMA"           # Used in output directory names
+  #   force_field: ["openff-2.3.0.offxml"]
+  #   charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+  #   monomers:                           # Probabilities must sum to 1.0
+  #     - label: "A"
+  #       probability: 0.75
+  #       name: "SBMA"                    # sulfobetaine methacrylate
+  #       smiles: "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]"  # repeat unit, '*' on the two linking atoms
+  #       residue_name: "SBM"
+  #     - label: "B"
+  #       probability: 0.25
+  #       name: "EGMA"                    # methoxy tetra(ethylene glycol) methacrylate
+  #       smiles: "[*]CC([*])(C)C(=O)OCCOCCOCCOCCOC"
+  #       residue_name: "EGM"
+  #   end_groups:                         # Caps of each end, drawn per chain; each end's
+  #     head:                             # probabilities sum to 1.0. Here: the monomer
+  #       - {label: "A", name: "SBMA", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", residue_name: "SBM", probability: 0.75}
+  #       - {label: "B", name: "EGMA", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", residue_name: "EGM", probability: 0.25}
+  #     tail:                             # with its C=C kept. A fixed hydrogen cap is
+  #       - {label: "A", name: "SBMA", smiles: "[*]C=C(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]", residue_name: "SBM", probability: 0.75}
+  #       - {label: "B", name: "EGMA", smiles: "[*]C=C(C)C(=O)OCCOCCOCCOCCOC", residue_name: "EGM", probability: 0.25}
+  #                                       # [{label: "H", smiles: "[*][H]", probability: 1.0}]
+  #   length: 5                           # Monomers per chain, the two ends included
+  #   count: 4                            # Number of chains
+
+# ============================================================================
+# Solvent (REQUIRED)
+# ============================================================================
+# Water, co-solvents, ions and the box. In this release the small molecule,
+# the polymers and the solvent share one force field file: list the same file
+# here and on those solutes.
+#
+# water model: tip3p (the only model PolyzyMD builds; Sage carries it)
+# box shape options: cube, rhombic_dodecahedron
+#
+solvent:
+  force_field: ["openff-2.3.0.offxml"]
+  water:
+    model: "tip3p"
+
+  # Co-solvents (optional) - leave empty [] if not using
+  co_solvents: []
+
+  # Co-solvent specification options:
+  #   - mole_fraction: Specify as solvent mole fraction (e.g., 0.10 for 10 mol%)
+  #   - concentration:  Specify as molar (e.g., 2.0 for 2 M)
+  #   - count:          Number of molecules
+  #   NOTE: Use ONE method per co-solvent.
+  #
+  # Built-in co-solvents (auto-populated smiles & density):
+  #   dmso, dmf, acetonitrile, urea, ethanol, methanol, glycerol,
+  #   isopropanol, acetone, thf, dioxane, ethylene_glycol
+  # Every co-solvent names its charges: {method: preset} for the charges
+  # PolyzyMD ships with the built-in ones, or nagl (with model), am1bcc, espaloma.
+
+  # Example: 10 mol% DMSO (replaces water in neutral solvent mixture)
+  # co_solvents:
+  #   - name: "dmso"
+  #     mole_fraction: 0.10              # Mole fraction
+  #     charges: {method: preset}
+
+  # Example: 2 M urea (additive, doesn't reduce water)
+  # co_solvents:
+  #   - name: "urea"
+  #     concentration: 2.0                # Molar
+  #     charges: {method: preset}
+
+  # Example: Custom co-solvent (not in library)
+  # co_solvents:
+  #   - name: "my_solvent"
+  #     smiles: "CCOC(=O)C"               # SMILES required for custom
+  #     mole_fraction: 0.05              # Mole fraction
+  #     charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}
+
+  ions:
+    neutralize: true                    # Add counter-ions to neutralize
+    nacl_concentration: 0.15            # NaCl pairs (M); neutralizing ions are added on top
+    # Or match a buffer by ionic strength, counter-ions included (replaces
+    # nacl_concentration):
+    # ionic_strength: 0.13
+
+  box:
+    padding: 1.2                        # nm from solute to box edge
+    shape: "rhombic_dodecahedron"       # Efficient packing
+    target_density: 1.0                 # g/mL
+    tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
+
+# ============================================================================
+# Restraints (OPTIONAL)
+# ============================================================================
+# Distance restraints to maintain specific interactions during simulation.
+# Useful for keeping substrates in active sites.
+#
+# Restraint types:
+#   - flat_bottom  : No force within threshold, harmonic beyond
+#   - harmonic     : Standard harmonic restraint
+#   - upper_wall   : Only restrains if distance exceeds threshold
+#   - lower_wall   : Only restrains if distance below threshold
+#
+# Each atom names the solute it belongs to (component: its name) and a
+# selection matched only among that solute's atoms, so "resid 100" cannot
+# pick up a polymer or water residue 100.
+#
+# Selection syntax:
+#   resid N        : Residue number in the built topology (protein renumbered from 1)
+#   resname XXX    : Residue name (e.g., LIG, SER)
+#   name XXX       : Atom name (e.g., CA, OG; ligand atoms C1x, C2x, ...)
+#   pdbindex N     : the N-th atom of the built system, from 1 (PyMOL `index`,
+#                    not its `ID`: PDB serials skip a number at every TER)
+#   index N        : Internal atom index (0-indexed)
+#   and/or         : Combine selections
+#
+# restraints:
+#   - type: "flat_bottom"
+#     name: "substrate_restraint"
+#     atom1:
+#       component: "protein_X"
+#       selection: "resid 100 and name OG"     # Example: Serine OG
+#       description: "Catalytic residue"
+#     atom2:
+#       component: "substrate"
+#       selection: "name C1x"                   # Ligand atoms: C1x, C2x, ..., H1x
+#       description: "Substrate reactive atom"
+#     distance: 3.5                           # Angstroms (flat-bottom threshold)
+#     force_constant: 10000.0                 # kJ/mol/nm^2
+#     enabled: true
+
+# ============================================================================
+# Modeling exceptions (OPTIONAL)
+# ============================================================================
+# Every build checks that the system is the physics this config asks for: each
+# component's force field and charges, counts, salt, constraints, clashes,
+# periodic images and restraints. A failing check stops the build. If a failure
+# is a deliberate choice, accept it here with the reason; the build record
+# (build_provenance.json) lists it with the atoms it covered.
+# Every check and what it catches:
+#   https://polyzymd.readthedocs.io/en/latest/reference/physics_checks.html
+#
+# modeling_exceptions:
+#   - check: geometry.buried_water
+#     component: protein_X              # optional; all components if left out
+#     reason: "Crystal waters kept deliberately (cite the structure)"
+
+# ============================================================================
+# Thermodynamics (REQUIRED)
+# ============================================================================
+# Temperature and pressure settings for the simulation.
+#
+thermodynamics:
+  temperature: 300.0                    # Kelvin
+  pressure: 1.0                         # atmospheres
+
+# ============================================================================
+# Simulation Phases (REQUIRED)
+# ============================================================================
+# Configure equilibration and production runs.
+#
+# ensemble options: NVT, NPT (validate refuses NVE)
+# thermostat options: LangevinMiddle (recommended), Langevin. NoseHoover and
+#   Andersen run only on GROMACS; see "GROMACS and OpenMM" in the reference.
+# barostat options: MC (Monte Carlo), MCA (anisotropic, GROMACS only)
+#
+# Equilibration is a list of stages. Each stage sets its ensemble, its
+# temperature (or a temperature ramp) and its position restraints.
+#
+# Use this pattern for protocols with:
+#   - Temperature ramping (simulated annealing style heating)
+#   - Position restraints on specific atom groups
+#   - Staged release of restraints
+#
+# Available atom groups for position restraints:
+#   protein_heavy     : All non-hydrogen protein atoms
+#   protein_backbone  : Protein backbone atoms (N, CA, C, O)
+#   protein_calpha    : Protein alpha carbons only
+#   ligand_heavy      : All non-hydrogen substrate/ligand atoms
+#   polymer_heavy     : All non-hydrogen polymer atoms
+#   solvent           : All solvent atoms (water + ions + cosolvents)
+#   water_only        : Only water molecules
+#   ions_only         : Only ions (Na+, Cl-, etc.)
+#   cosolvents_only   : Only cosolvent molecules (DMSO, etc.)
+#
+# Temperature settings:
+#   - Use "temperature" for constant temperature
+#   - For ramping, set temperature_start, temperature_end,
+#     temperature_increment (K), and temperature_interval_steps;
+#     PolyzyMD derives the duration
+#
+simulation_phases:
+  # These durations are for a real study (about 1.8 ns of equilibration). For a
+  # test run, shorten each duration and heat faster: temperature_increment: 24.0
+  # with temperature_interval_steps: 100 heats 60 -> 300 K in 0.002 ns.
+  equilibration_stages:
+    # Stage 1: Heat from 60K to 300K with everything restrained
+    - name: "heating"
+      samples: 50                       # trajectory frames
+      ensemble: "NVT"
+      temperature_start: 60.0           # Start temperature (K)
+      temperature_end: 300.0            # End temperature (K)
+      temperature_increment: 1.0         # Increase per update (K)
+      temperature_interval_steps: 600    # MD steps between updates
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0        # kJ/mol/nm^2 (= 10 kcal/mol/A^2)
+        # With polymers, also restrain them:
+        # - group: "polymer_heavy"
+        #   force_constant: 4184.0
+    # Add a constant-temperature stage after heating to equilibrate at the endpoint.
+
+    # Stage 2: Relax the solvent (and any polymers) with the protein restrained
+    - name: "restrained_relaxation"
+      duration: 1.0                     # nanoseconds
+      samples: 100
+      ensemble: "NVT"
+      temperature: 300.0                # Constant temperature
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+    
+    # Stage 3: Free equilibration (no restraints)
+    - name: "free_equilibration"
+      duration: 0.5                     # nanoseconds
+      samples: 100
+      ensemble: "NPT"
+      temperature: 300.0
+      # No position_restraints = unrestrained
+  
+  production:
+    ensemble: "NPT"
+    duration: 100.0
+    samples: 2500
+    checkpoint_interval: 60.0          # seconds of wall time between restart checkpoints
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0
+    barostat: "MC"
+    barostat_frequency: 25
+
+# ============================================================================
+# Output Configuration (REQUIRED)
+# ============================================================================
+# Where the runs go, and how their folders are named. A relative path is
+# relative to this file.
+#
+# WARNING: the runs go into the runs/ folder of the project (of the study,
+# for a study in no project) unless you set scratch_directory. Trajectories
+# can use a lot of disk space. On a cluster, set scratch_directory to your
+# scratch storage. git ignores runs/.
+#
+output:
+  projects_directory: {{ runs_directory | yaml_quote }}   # job scripts and logs
+  scratch_directory: null               # the runs (null = projects_directory)
+  
+  # Subdirectories within projects_directory
+  job_scripts_subdir: "job_scripts"
+  slurm_logs_subdir: "slurm_logs"
+  
+  # Naming template for run directories
+  # Available variables: {enzyme}, {substrate}, {polymer_type}, {duration},
+  #   {temperature}, {replicate}, {primary_solvent}, {cosolvent_composition},
+  #   {solvent_composition}. See the configuration reference.
+  # polymer_type format: {type_prefix}_{label1}{pct1}_{label2}{pct2} (e.g., SBMA-EGMA_A75_B25),
+  #   or "none" without polymers
+  # Leave {duration} and {temperature} out: each condition has its own runs
+  # folder, and with them in the name, running longer or changing the
+  # temperature would point the config at a new, empty folder.
+  naming_template: "{enzyme}_{substrate}_{polymer_type}_run{replicate}"
+
+# ============================================================================
+# OpenMM Platform (REQUIRED for the OpenMM engine; not read by GROMACS)
+# ============================================================================
+# CUDA runs on NVIDIA GPUs; job scripts made by `polyzymd submit` need it.
+# To run on a CPU with `polyzymd run`, set platform: "CPU".
+#
+openmm:
+  platform: "CUDA"

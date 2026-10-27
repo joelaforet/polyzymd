@@ -1,0 +1,1166 @@
+"""Agent-oriented status reporting for ``polyzymd status``.
+
+The original ``polyzymd status`` printed a progress bar per replicate. That
+answers "how far along is it?" but not the two questions an operator (or an
+LLM agent acting for one) actually asks about a preemptable restart chain:
+
+* **Is anything still driving this replicate?** A ``progress.json`` status of
+  ``interrupted`` is ambiguous: the chain may be mid-resubmit, preempted and
+  requeued, or dead after a ``FATAL`` in the wrapper. Only SLURM knows.
+* **When will it finish?** The segment records already carry wall-clock
+  timestamps and step counts, so a throughput and an ETA cost nothing.
+
+This module joins the three sources that answer those questions —
+``progress.json`` (via the engine's ``load_or_scan_progress``), a single
+``squeue`` call for the user's jobs, and the newest SLURM log per replicate —
+into one :class:`SystemReport` per config, and renders it either as a compact
+plain-text block designed to be cheap in tokens or as JSON.
+
+Everything that touches the filesystem or SLURM is injectable so the logic is
+unit-testable without a scheduler.
+"""
+
+from __future__ import annotations
+
+import getpass
+import json
+import logging
+import os
+import re
+import subprocess
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Callable, Iterable, Sequence
+
+from polyzymd.workflow.daisy_chain import is_within_run_dir, job_belongs_to_run
+
+LOGGER = logging.getLogger(__name__)
+
+# Minimum wall time a segment must have run before its throughput is trusted.
+_MIN_RATE_WINDOW = timedelta(minutes=10)
+# A live segment's rate is noisy until it has run this long.
+_MIN_LIVE_WINDOW = timedelta(hours=1)
+# Minimum steps a segment must have advanced before its throughput is trusted.
+_MIN_RATE_STEPS = 1_000
+
+# Lines in a SLURM log that explain why a chain stopped. Ordered so that the
+# most specific wrapper verdicts win over generic Python tracebacks.
+# "FATAL: run-segment failed" only says the Python step exited non-zero, so it
+# ranks below the "Segment N failed: <cause>" line that names the cause.
+_ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^FATAL: (?!run-segment failed).*"),
+    re.compile(r"^CONCURRENT:.*"),
+    re.compile(r"^STOP:.*"),
+    re.compile(r"^Segment \d+ failed:.*"),
+    re.compile(r"^Validation error:.*"),
+    re.compile(r"^slurmstepd: error:.*"),
+    re.compile(r"^\w*Error: .*"),
+    re.compile(r"^FATAL:.*"),
+)
+
+# What to do about a dead chain, decided from its last error line.
+ACTION_RESUBMIT = "resubmit"
+ACTION_INSPECT = "inspect"
+#: Note of a dead replicate that a signal stopped after saving its state, with no SLURM log.
+NOTE_STOPPED_OUTSIDE_SLURM = "stopped by a signal outside SLURM, state saved"
+# Causes that leave a valid checkpoint behind: node, scheduler or GPU faults.
+_TRANSIENT_MARKERS = (
+    "CUDA routing failed",
+    "resubmit manually with --exclude=",
+    "cannot activate the pixi environment",
+    "dependent successor submission failed",
+    "CONCURRENT:",
+    "CUDA_ERROR",
+    "Stale file handle",
+    "Invalid input string",
+    "DUE TO PREEMPTION",
+    "DUE TO NODE FAILURE",
+)
+_RESUBMIT_SLURM_STATES = {
+    "NODE_FAIL",
+    "PREEMPTED",
+    "CANCELLED",
+    "TIMEOUT",
+    "COMPLETED",
+    "BOOT_FAIL",
+}
+_EXCLUDE = re.compile(r"--exclude=(\S+)")
+_LOG_TAIL_LINES = 80
+_LOG_HEAD_LINES = 200
+_ERROR_MAX_CHARS = 160
+
+
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SlurmJob:
+    """One queued or running SLURM job, as reported by ``squeue``."""
+
+    job_id: str
+    name: str
+    state: str
+    elapsed: str = ""
+    node: str = ""
+    reason: str = ""
+    work_dir: str = ""
+
+
+@dataclass
+class ReplicateReport:
+    """Everything the report knows about one replicate."""
+
+    replicate: int
+    directory: str | None
+    progress_status: str
+    completed_ns: float
+    total_ns: float
+    fraction: float
+    verdict: str
+    jobs: list[SlurmJob] = field(default_factory=list)
+    rate_ns_per_day: float | None = None
+    eta_days: float | None = None
+    last_error: str | None = None
+    last_log: str | None = None
+    note: str | None = None
+    action: str | None = None
+    #: Segments whose System is not the audited build (polyzymd.audit.runtime), with why.
+    diverged: list[str] = field(default_factory=list)
+    #: Preset and overrides ``polyzymd submit`` recorded for the replicate
+    #: (:mod:`polyzymd.workflow.submit_settings`), reused by the resubmit commands.
+    submit_settings: dict | None = None
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        return data
+
+
+@dataclass
+class SystemReport:
+    """Report for one config file (one system, N replicates)."""
+
+    name: str
+    config_path: str
+    scratch_directory: str
+    replicates: list[ReplicateReport]
+    error: str | None = None
+    #: The config's own ``name:``; ``name`` comes from the folder template and
+    #: can be the same for two conditions.
+    config_name: str | None = None
+
+    def counts(self) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for rep in self.replicates:
+            out[rep.verdict] = out.get(rep.verdict, 0) + 1
+        return out
+
+    def to_dict(self, unfinished: bool = False) -> dict:
+        reps = [r for r in self.replicates if not (unfinished and r.verdict in VERDICTS_FINISHED)]
+        return {
+            "name": self.name,
+            "config_name": self.config_name,
+            "config_path": self.config_path,
+            "scratch_directory": self.scratch_directory,
+            "error": self.error,
+            "counts": self.counts(),
+            "replicates": [r.to_dict() for r in reps],
+        }
+
+
+# Verdict vocabulary. Kept deliberately small so an agent can branch on it.
+VERDICT_COMPLETED = "completed"
+VERDICT_RUNNING = "running"
+VERDICT_QUEUED = "queued"
+VERDICT_DEAD = "dead"
+#: A run stopped by a signal outside SLURM after it saved its state; ``polyzymd run`` continues it.
+VERDICT_INTERRUPTED = "interrupted"
+#: Action of an interrupted local run.
+ACTION_CONTINUE = "continue"
+#: Production finished the length it started with, but the config now asks for more.
+VERDICT_EXTENDABLE = "extendable"
+VERDICT_STOPPED = "stopped"
+VERDICT_NOT_STARTED = "not_started"
+VERDICT_NOT_FOUND = "not_found"
+VERDICT_CORRUPT = "corrupt"
+#: Run outside PolyzyMD with the user's own protocol (``protocol/``); never resubmitted.
+VERDICT_OWN_PROTOCOL = "own_protocol"
+#: Verdicts with nothing left for PolyzyMD to do (``--unfinished`` hides them).
+VERDICTS_FINISHED = (VERDICT_COMPLETED, VERDICT_OWN_PROTOCOL)
+VERDICT_ORDER = (
+    VERDICT_COMPLETED,
+    VERDICT_OWN_PROTOCOL,
+    VERDICT_RUNNING,
+    VERDICT_QUEUED,
+    VERDICT_DEAD,
+    VERDICT_INTERRUPTED,
+    VERDICT_EXTENDABLE,
+    VERDICT_STOPPED,
+    VERDICT_NOT_STARTED,
+    VERDICT_NOT_FOUND,
+    VERDICT_CORRUPT,
+)
+
+
+# ---------------------------------------------------------------------------
+# SLURM
+# ---------------------------------------------------------------------------
+
+
+def query_user_jobs(user: str | None = None, timeout: int = 20) -> list[SlurmJob] | None:
+    """Return every queued or running job for *user* in one ``squeue`` call.
+
+    Returns ``None`` (not an empty list) when ``squeue`` is unavailable or
+    fails, so callers can distinguish "no jobs" from "could not ask".
+    """
+    if user is None:
+        user = os.environ.get("USER") or getpass.getuser()
+    cmd = [
+        "squeue",
+        "--noheader",
+        "-u",
+        user,
+        "--states",
+        "RUNNING,PENDING,COMPLETING,CONFIGURING,SUSPENDED,REQUEUED",
+        "--format",
+        "%i|%j|%t|%M|%N|%R|%Z",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        LOGGER.warning(f"squeue unavailable ({exc}); SLURM state will be omitted")
+        return None
+    if result.returncode != 0:
+        LOGGER.warning(
+            f"squeue exited {result.returncode}; SLURM state will be omitted: "
+            f"{result.stderr.strip()[:200]}"
+        )
+        return None
+    return parse_squeue_output(result.stdout)
+
+
+def parse_squeue_output(text: str) -> list[SlurmJob]:
+    """Parse ``squeue --format "%i|%j|%t|%M|%N|%R|%Z"`` output."""
+    jobs: list[SlurmJob] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        parts = line.split("|")
+        if len(parts) < 3:
+            continue
+        parts += [""] * (7 - len(parts))
+        job_id, name, state, elapsed, node, reason, work_dir = parts[:7]
+        jobs.append(
+            SlurmJob(
+                job_id=job_id.strip(),
+                name=name.strip(),
+                state=state.strip(),
+                elapsed=elapsed.strip(),
+                node=node.strip(),
+                reason=reason.strip(),
+                work_dir=work_dir.strip(),
+            )
+        )
+    return jobs
+
+
+def query_end_states(job_ids: Sequence[str], timeout: int = 20) -> dict[str, str]:
+    """Return ``{job_id: "STATE exit N"}`` from one ``sacct`` call.
+
+    Used when a dead chain's log holds no error line, which is what a node
+    failure, power loss or hard preemption leaves behind. Empty on any error.
+    """
+    if not job_ids:
+        return {}
+    cmd = ["sacct", "-n", "-X", "-P", "-j", ",".join(job_ids), "-o", "JobID,State,ExitCode"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return {}
+    if result.returncode != 0:
+        return {}
+    out: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) == 3 and parts[0]:
+            out[parts[0]] = f"{parts[1].split()[0]} exit {parts[2]}"
+    return out
+
+
+def death_action(last_error: str | None, directory: str | None) -> str:
+    """Map a dead chain's last error line to resubmit or inspect.
+
+    Only causes known to leave a valid checkpoint get ``resubmit``: node,
+    scheduler, GPU-routing and environment-activation faults. Physics
+    blow-ups, build refusals, a missing package and anything unrecognised
+    need a person. ``directory`` is kept for callers; the action does not
+    depend on it.
+    """
+    err = last_error or ""
+    if err.startswith("slurm: "):
+        state = err.split()[1]
+        return ACTION_RESUBMIT if state in _RESUBMIT_SLURM_STATES else ACTION_INSPECT
+    if any(marker in err for marker in _TRANSIENT_MARKERS):
+        return ACTION_RESUBMIT
+    return ACTION_INSPECT
+
+
+def assign_actions(reports: Sequence["SystemReport"]) -> None:
+    """Set ``action`` on every dead replicate. Run after :func:`fill_end_states`."""
+    for report in reports:
+        for rep in report.replicates:
+            if rep.verdict == VERDICT_DEAD and rep.action is None:
+                rep.action = death_action(rep.last_error, rep.directory)
+
+
+def fill_end_states(
+    reports: Sequence["SystemReport"],
+    query_fn: Callable[[Sequence[str]], dict[str, str]] = query_end_states,
+) -> None:
+    """Give dead replicates without a log error line their SLURM end state."""
+    pending: dict[str, ReplicateReport] = {}
+    for report in reports:
+        for rep in report.replicates:
+            if rep.verdict != VERDICT_DEAD or rep.last_error or not rep.last_log:
+                continue
+            m = re.search(r"\.(\d+)\.out$", rep.last_log)
+            if m:
+                pending[m.group(1)] = rep
+    if not pending:
+        return
+    for job_id, state in query_fn(list(pending)).items():
+        if job_id in pending:
+            pending[job_id].last_error = f"slurm: {state}"
+
+
+# ---------------------------------------------------------------------------
+# Throughput / ETA
+# ---------------------------------------------------------------------------
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def segment_window(engine_dir: Path, index: int) -> tuple[datetime, datetime] | None:
+    """Wall window of ``production_<index>`` from its files.
+
+    The parameters JSON is written when the segment starts and the state-data
+    CSV on every report, so their mtimes bracket the segment. Unlike the
+    progress record, they survive rewrites of ``progress.json``.
+    """
+    seg = Path(engine_dir) / f"production_{index}"
+    try:
+        start = (seg / f"production_{index}_parameters.json").stat().st_mtime
+        end = (seg / f"production_{index}_state_data.csv").stat().st_mtime
+    except OSError:
+        return None
+    if end <= start:
+        return None
+    tz = timezone.utc
+    return datetime.fromtimestamp(start, tz), datetime.fromtimestamp(end, tz)
+
+
+def estimate_rate_ns_per_day(
+    progress,
+    now: datetime,
+    *,
+    live: bool,
+    window_fn: Callable[[int], tuple[datetime, datetime] | None] | None = None,
+) -> float | None:
+    """Estimate throughput from the most recent informative segment.
+
+    Preference order:
+
+    1. With ``window_fn`` (segment file times): a running last segment past an
+       hour of data when *live*, then the newest stopped segment.
+    2. The newest segment with a ``finished_at`` timestamp and enough steps.
+    3. If *live*, the newest segment without ``finished_at``, timed from
+       ``started_at`` to *now*.
+
+    Returns ``None`` when no segment gives a trustworthy window.
+    """
+    segments = sorted(getattr(progress, "segments", []) or [], key=lambda s: s.index)
+    timestep_fs = float(getattr(progress, "timestep_fs", 0.0) or 0.0)
+    if timestep_fs <= 0:
+        return None
+
+    def _rate(steps: int, start: datetime, end: datetime) -> float | None:
+        window = end - start
+        if steps < _MIN_RATE_STEPS or window < _MIN_RATE_WINDOW:
+            return None
+        ns = steps * timestep_fs / 1e6
+        return ns / (window.total_seconds() / 86400.0)
+
+    if window_fn is not None:
+        # File timestamps first. A live segment past an hour reflects the GPU
+        # the chain is on now, so it wins; otherwise use the newest stopped one.
+        last_running = bool(segments) and (
+            getattr(segments[-1].status, "value", segments[-1].status) == "running"
+        )
+        if live and last_running:
+            window = window_fn(segments[-1].index)
+            if window is not None and now - window[0] >= _MIN_LIVE_WINDOW:
+                rate = _rate(segments[-1].steps_completed, window[0], now)
+                if rate is not None:
+                    return rate
+        for seg in reversed(segments):
+            if getattr(seg.status, "value", seg.status) == "running":
+                continue
+            window = window_fn(seg.index)
+            if window is not None:
+                rate = _rate(seg.steps_completed, *window)
+                if rate is not None:
+                    return rate
+
+    for seg in reversed(segments):
+        start = _parse_iso(seg.started_at)
+        end = _parse_iso(seg.finished_at)
+        if start is None or end is None:
+            continue
+        rate = _rate(seg.steps_completed, start, end)
+        if rate is not None:
+            return rate
+
+    if live:
+        for seg in reversed(segments):
+            if seg.finished_at:
+                continue
+            start = _parse_iso(seg.started_at)
+            if start is None:
+                continue
+            if now - start < _MIN_LIVE_WINDOW:
+                continue
+            rate = _rate(seg.steps_completed, start, now)
+            if rate is not None:
+                return rate
+    return None
+
+
+def estimate_eta_days(remaining_ns: float, rate_ns_per_day: float | None) -> float | None:
+    if rate_ns_per_day is None or rate_ns_per_day <= 0:
+        return None
+    if remaining_ns <= 0:
+        return 0.0
+    return remaining_ns / rate_ns_per_day
+
+
+# ---------------------------------------------------------------------------
+# SLURM log inspection
+# ---------------------------------------------------------------------------
+
+
+def find_latest_log(logs_dir: Path | None, job_name: str, run_dir: Path) -> Path | None:
+    """Newest ``<job_name>.<jobid>.out`` in *logs_dir* written for *run_dir*.
+
+    Two conditions can share a job name and a logs folder, so a log counts
+    only when its ``Work dir:`` header line names *run_dir* or a folder
+    inside it.
+    """
+    if logs_dir is None or not logs_dir.is_dir():
+        return None
+    candidates = [
+        path
+        for path in logs_dir.glob(f"{job_name}.*.out")
+        if is_within_run_dir(_logged_work_dir(path), run_dir)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def _logged_work_dir(path: Path) -> str | None:
+    """The ``Work dir:`` value in the header of a job log, or None."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for _, line in zip(range(_LOG_HEAD_LINES), fh):
+                if line.startswith("Work dir:"):
+                    return line.partition(":")[2].strip()
+    except OSError:
+        pass
+    return None
+
+
+def _tail_lines(path: Path, n: int) -> list[str]:
+    try:
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            block = min(size, 64 * 1024)
+            fh.seek(size - block)
+            data = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return []
+    return data.splitlines()[-n:]
+
+
+def last_error_line(log_path: Path | None) -> str | None:
+    """Return the most informative failure line near the end of a SLURM log."""
+    if log_path is None:
+        return None
+    lines = _tail_lines(log_path, _LOG_TAIL_LINES)
+    best: tuple[int, str] | None = None
+    for line in lines:
+        stripped = line.strip()
+        for rank, pattern in enumerate(_ERROR_PATTERNS):
+            if pattern.match(stripped):
+                # Later lines override earlier ones at the same or better rank.
+                if best is None or rank <= best[0]:
+                    best = (rank, stripped)
+                break
+    if best is None:
+        return None
+    # A preemption or node failure explains the FATAL lines the job printed after it.
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("slurmstepd: error:") and (
+            "DUE TO PREEMPTION" in stripped or "DUE TO NODE FAILURE" in stripped
+        ):
+            best = (-1, stripped)
+    text = best[1]
+    if len(text) > _ERROR_MAX_CHARS:
+        text = text[: _ERROR_MAX_CHARS - 1] + "…"
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Report assembly
+# ---------------------------------------------------------------------------
+
+
+def classify(
+    progress_status: str,
+    jobs: Sequence[SlurmJob],
+    has_dir: bool,
+    *,
+    stopped: bool = False,
+    run_started: bool = False,
+) -> str:
+    """Map (progress.json status, live SLURM jobs) to a verdict.
+
+    *stopped* means a ``STOP`` file from ``polyzymd cancel`` is present.
+    *run_started* means minimization or equilibration wrote output, so a
+    replicate with no production segment was still started.
+    """
+    if not has_dir:
+        return VERDICT_NOT_FOUND
+    if progress_status == "completed":
+        return VERDICT_COMPLETED
+    if any(j.state in ("R", "CG", "CF", "S") for j in jobs):
+        return VERDICT_RUNNING
+    if jobs:
+        return VERDICT_QUEUED
+    if stopped:
+        return VERDICT_STOPPED
+    if progress_status == "not_started" and not run_started:
+        return VERDICT_NOT_STARTED
+    return VERDICT_DEAD
+
+
+#: File in which a local ``polyzymd run`` records the error that stopped it.
+LOCAL_RUN_ERROR = "polyzymd_run_error.txt"
+
+
+def _local_run_error(run_dir: Path) -> str | None:
+    """Return the error a local ``polyzymd run`` recorded in *run_dir*, if any."""
+    try:
+        text = (Path(run_dir) / LOCAL_RUN_ERROR).read_text().strip()
+    except OSError:
+        return None
+    return f"local run: {text.splitlines()[0]}" if text else None
+
+
+def _stopped_gracefully(engine_dir: Path, progress: Any) -> bool:
+    """Whether the last production segment was stopped by a signal after saving its state."""
+    if not progress.segments:
+        return False
+    last = max(seg.index for seg in progress.segments)
+    return (Path(engine_dir) / f"production_{last}" / "INTERRUPTED").is_file()
+
+
+def _run_started(run_dir: Path) -> bool:
+    """Return whether minimization, equilibration or production wrote output in *run_dir*."""
+    from polyzymd.simulation.artifact_integrity import (
+        ArtifactIntegrityError,
+        assert_rebuild_allowed,
+    )
+
+    try:
+        assert_rebuild_allowed(run_dir)
+    except ArtifactIntegrityError:
+        return True
+    return False
+
+
+def _stop_file_present(run_dir: Path) -> bool:
+    """Return whether ``polyzymd cancel`` left a ``STOP`` file for *run_dir*."""
+    return (run_dir / "STOP").exists() or (run_dir / "gromacs" / "STOP").exists()
+
+
+def build_system_report(
+    sim_config,
+    config_path: str | Path,
+    *,
+    engine_inst,
+    jobs: Sequence[SlurmJob] | None,
+    now: datetime | None = None,
+    job_name_fn: Callable[[object, int], str] | None = None,
+) -> SystemReport:
+    """Assemble a :class:`SystemReport` for one loaded config.
+
+    Parameters
+    ----------
+    sim_config
+        A loaded ``SimulationConfig``.
+    config_path
+        Path the config was loaded from (echoed in the report so an agent can
+        copy it into a follow-up command).
+    engine_inst
+        Engine created for *sim_config*; supplies working-directory resolution
+        and ``load_or_scan_progress``.
+    jobs
+        The user's live jobs, or ``None`` when SLURM could not be queried.
+        A job belongs to a replicate as decided by
+        :func:`~polyzymd.workflow.daisy_chain.job_belongs_to_run`.
+    """
+    from polyzymd.simulation.progress import SimulationStatus, unreadable_progress_reason
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if job_name_fn is None:
+        from polyzymd.workflow.daisy_chain import create_job_name
+
+        job_name_fn = create_job_name
+
+    prod = sim_config.simulation_phases.production
+    total_ns = float(prod.duration)
+    dir_name = sim_config._format_run_directory_name(1)
+    system_name = dir_name.rsplit("_run", 1)[0] if "_run" in dir_name else dir_name
+    scratch = Path(sim_config.output.effective_scratch_directory)
+
+    try:
+        logs_dir = Path(sim_config.output.get_slurm_logs_directory())
+    except Exception:  # pragma: no cover - defensive against mocked configs
+        logs_dir = None
+
+    replicates: list[ReplicateReport] = []
+    for rep_num, rep_path in sorted(dict(sim_config.discover_replicate_dirs()).items()):
+        job_name = job_name_fn(sim_config, rep_num)
+        run_dir = rep_path or sim_config.get_working_directory(rep_num)
+        rep_jobs = [
+            job
+            for job in jobs or []
+            if job_belongs_to_run(job.name, job.work_dir, run_dir, job_name)
+        ]
+
+        if rep_path is None:
+            replicates.append(
+                ReplicateReport(
+                    replicate=rep_num,
+                    directory=None,
+                    progress_status="not_found",
+                    completed_ns=0.0,
+                    total_ns=total_ns,
+                    fraction=0.0,
+                    verdict=VERDICT_NOT_FOUND,
+                    jobs=rep_jobs,
+                )
+            )
+            continue
+
+        engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
+        corrupt = unreadable_progress_reason(engine_dir)
+        if corrupt is not None:
+            replicates.append(
+                ReplicateReport(
+                    replicate=rep_num,
+                    directory=str(rep_path),
+                    progress_status=VERDICT_CORRUPT,
+                    completed_ns=0.0,
+                    total_ns=total_ns,
+                    fraction=0.0,
+                    verdict=VERDICT_CORRUPT,
+                    jobs=rep_jobs,
+                    last_error=corrupt,
+                    note="slurm unavailable" if jobs is None else None,
+                )
+            )
+            continue
+        from polyzymd.simulation.own_protocol import protocol_dir
+
+        if protocol_dir(rep_path) is not None:
+            replicates.append(
+                ReplicateReport(
+                    replicate=rep_num,
+                    directory=str(rep_path),
+                    progress_status=VERDICT_OWN_PROTOCOL,
+                    completed_ns=0.0,
+                    total_ns=total_ns,
+                    fraction=0.0,
+                    verdict=VERDICT_OWN_PROTOCOL,
+                    jobs=rep_jobs,
+                    note=(
+                        "run with its own protocol (protocol/): PolyzyMD vouches for the "
+                        "build, not the run, and does not run or resubmit it"
+                    ),
+                )
+            )
+            continue
+        progress = engine_inst.load_or_scan_progress(engine_dir, rep_num)
+
+        status_val = progress.status
+        status_str = status_val.value if hasattr(status_val, "value") else str(status_val)
+        steps_for_display = progress.total_steps_completed
+        if status_val == SimulationStatus.FAILED:
+            steps_for_display = max((seg.steps_completed for seg in progress.segments), default=0)
+        fraction = (
+            min(1.0, steps_for_display / progress.total_steps_requested)
+            if progress.total_steps_requested
+            else 0.0
+        )
+        completed_ns = steps_for_display * progress.timestep_fs / 1e6
+
+        verdict = classify(
+            status_str,
+            rep_jobs,
+            has_dir=True,
+            stopped=_stop_file_present(rep_path),
+            run_started=_run_started(rep_path),
+        )
+        local_run = False
+        if verdict in (VERDICT_DEAD, VERDICT_NOT_STARTED) and not rep_jobs:
+            # A local `polyzymd run` has no SLURM job but holds the replicate lock
+            # for as long as its process lives.
+            from polyzymd.simulation.artifact_integrity import replicate_lock_held_elsewhere
+
+            if replicate_lock_held_elsewhere(rep_path):
+                verdict = VERDICT_RUNNING
+                local_run = True
+        if (
+            verdict == VERDICT_COMPLETED
+            and progress.total_steps_requested
+            and progress.total_steps_completed < progress.total_steps_requested
+        ):
+            # The config was raised after production finished: run it longer.
+            verdict = VERDICT_EXTENDABLE
+        live = verdict == VERDICT_RUNNING
+        rate = None
+        eta = None
+        if verdict != VERDICT_COMPLETED:
+            rate = estimate_rate_ns_per_day(
+                progress,
+                now,
+                live=live,
+                window_fn=lambda idx, d=engine_dir: segment_window(d, idx),
+            )
+            if verdict in (VERDICT_RUNNING, VERDICT_QUEUED):
+                eta = estimate_eta_days(total_ns - completed_ns, rate)
+
+        last_err = None
+        last_log = None
+        if verdict in (VERDICT_DEAD, VERDICT_STOPPED, VERDICT_NOT_STARTED):
+            log_path = find_latest_log(logs_dir, job_name, run_dir)
+            if log_path is None and logs_dir is not None and logs_dir.is_dir():
+                # Build logs are named build_r<N>_<jobid>.out
+                builds = list(logs_dir.glob(f"build_r{rep_num}_*.out"))
+                if builds:
+                    log_path = max(builds, key=lambda p: p.stat().st_mtime)
+            if log_path is not None:
+                last_log = log_path.name
+                last_err = last_error_line(log_path)
+
+        note = None
+        action = None
+        if local_run and jobs is None:
+            # Without squeue a SLURM job that holds the lock looks the same.
+            note = "lock held (local run or job)"
+        elif local_run:
+            note = "local run (a process holds the replicate lock)"
+        elif jobs is None:
+            note = "slurm unavailable"
+        elif verdict == VERDICT_STOPPED:
+            note = "STOP file present"
+        elif verdict == VERDICT_DEAD and status_str == "not_started":
+            note = "killed before production"
+        if (
+            verdict == VERDICT_DEAD
+            and last_log is None
+            and _stopped_gracefully(engine_dir, progress)
+        ):
+            # A signal stopped the run after it saved its state, outside SLURM.
+            verdict = VERDICT_INTERRUPTED
+            action = ACTION_CONTINUE
+            note = NOTE_STOPPED_OUTSIDE_SLURM
+        if verdict == VERDICT_EXTENDABLE:
+            action = ACTION_CONTINUE
+            note = (
+                f"the config now asks for {total_ns:g} ns; continue from "
+                f"{completed_ns:g} ns with polyzymd run, or polyzymd submit on a cluster"
+            )
+        if last_err is None and verdict in (VERDICT_DEAD, VERDICT_NOT_STARTED):
+            # A local `polyzymd run` that failed wrote its error beside the run.
+            last_err = _local_run_error(rep_path)
+            if last_err is not None and note == "killed before production":
+                note = "failed before production"
+
+        replicates.append(
+            ReplicateReport(
+                replicate=rep_num,
+                directory=str(rep_path),
+                progress_status=status_str,
+                completed_ns=completed_ns,
+                total_ns=total_ns,
+                fraction=fraction,
+                verdict=verdict,
+                jobs=rep_jobs,
+                rate_ns_per_day=rate,
+                eta_days=eta,
+                last_error=last_err,
+                last_log=last_log,
+                note=note,
+                action=action,
+                diverged=_diverged_segments(progress),
+                submit_settings=_recorded_submit_settings(rep_path),
+            )
+        )
+
+    return SystemReport(
+        name=system_name,
+        config_name=(
+            getattr(sim_config, "name", None)
+            if isinstance(getattr(sim_config, "name", None), str)
+            else None
+        ),
+        config_path=str(config_path),
+        scratch_directory=str(scratch),
+        replicates=replicates,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+
+def _fmt_days(days: float | None) -> str:
+    if days is None:
+        return "eta ?"
+    if days < 1.0:
+        return f"eta {days * 24:.0f}h"
+    return f"eta {days:.1f}d"
+
+
+def _fmt_job(job: SlurmJob) -> str:
+    parts = [f"job {job.job_id}", job.state]
+    if job.state == "R":
+        if job.elapsed:
+            parts.append(job.elapsed)
+        if job.node:
+            parts.append(job.node)
+    elif job.reason:
+        parts.append(f"({job.reason})")
+    return " ".join(parts)
+
+
+def _progress_text(done_ns: float, total_ns: float) -> str:
+    """Return ``done/total`` in ns, or in ps when the run is shorter than 1 ns."""
+    if total_ns < 1.0:
+        return f"{done_ns * 1000:6.1f}/{total_ns * 1000:.0f}ps"
+    return f"{done_ns:6.1f}/{total_ns:.0f}ns"
+
+
+def _diverged_segments(progress: Any) -> list[str]:
+    """Segments whose run-time System differs from the audited build."""
+    segments = getattr(progress, "segments", None) or []
+    return [
+        f"segment {seg.index}"
+        + ("" if seg.system_check.get("compared", True) else " (not compared)")
+        + f": {seg.system_check.get('detail', '')}"
+        for seg in segments
+        if seg.system_check and not seg.system_check.get("matches_build", True)
+    ]
+
+
+def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
+    label = f"run{rep.replicate}"
+    pct = f"{rep.fraction * 100:3.0f}%"
+    ns = _progress_text(rep.completed_ns, rep.total_ns)
+    verdict = rep.verdict.upper()
+    fields = [f"{label:<{label_width}}", ns, pct, f"{verdict:<11}"]
+
+    if rep.verdict == VERDICT_OWN_PROTOCOL:
+        fields = [f"{label:<{label_width}}", f"{verdict:<11}", rep.note or ""]
+        if rep.jobs:
+            # A chain queued before the run was brought back stops on its own;
+            # say so, so nobody waits for it.
+            fields.extend(_fmt_job(j) for j in rep.jobs)
+            fields.append("this PolyzyMD job will stop without running; cancel it with scancel")
+    elif rep.verdict == VERDICT_COMPLETED:
+        pass
+    elif rep.verdict in (VERDICT_INTERRUPTED, VERDICT_EXTENDABLE):
+        fields.append(rep.note or "")
+        fields.append(f"action: {rep.action or ACTION_CONTINUE}")
+    elif rep.verdict in (VERDICT_RUNNING, VERDICT_QUEUED):
+        fields.extend(_fmt_job(j) for j in rep.jobs)
+        if not rep.jobs and rep.note:
+            fields.append(rep.note)
+        if rep.rate_ns_per_day is not None:
+            fields.append(f"{rep.rate_ns_per_day:.0f}ns/d")
+        fields.append(_fmt_days(rep.eta_days))
+    elif rep.verdict == VERDICT_NOT_FOUND:
+        fields.append("no directory in scratch")
+    else:
+        if rep.jobs:
+            fields.extend(_fmt_job(j) for j in rep.jobs)
+        elif rep.note:
+            fields.append(rep.note)
+        else:
+            fields.append("no job")
+        if rep.last_error:
+            src = f" [{rep.last_log}]" if rep.last_log else ""
+            fields.append(f"last: {rep.last_error}{src}")
+        elif rep.last_log:
+            fields.append(f"last log {rep.last_log} (no error line found)")
+        else:
+            fields.append("no slurm log found")
+        if rep.action:
+            fields.append(f"action: {rep.action}")
+    if rep.diverged:
+        fields.append("SYSTEM DIVERGED FROM THE AUDITED BUILD: " + "; ".join(rep.diverged))
+    return "  ".join(fields)
+
+
+def _recorded_submit_settings(run_dir: Path | None) -> dict | None:
+    """The submit settings recorded in ``run_dir``, as a dict, or ``None``."""
+    from polyzymd.workflow.submit_settings import read_submit_settings
+
+    settings = read_submit_settings(run_dir)
+    return settings.to_dict() if settings is not None else None
+
+
+def _submit_flags(rep: ReplicateReport, preset_hint: str | None, nodes: str = "") -> str:
+    """The ``polyzymd submit`` flags that resubmit ``rep`` with the settings it ran with.
+
+    A replicate whose submit recorded its settings gets them back; otherwise
+    the flags name ``preset_hint`` (or a ``<preset>`` placeholder). ``nodes``
+    are nodes to leave out in addition to the excluded ones.
+    """
+    if rep.submit_settings:
+        from polyzymd.workflow.submit_settings import SubmitSettings
+
+        return SubmitSettings(**rep.submit_settings).command_flags(extra_exclude=nodes)
+    preset = f"--preset {preset_hint}" if preset_hint else "--preset <preset>"
+    flag = f" --exclude {_with_preset_exclude(nodes, preset_hint)}" if nodes else ""
+    return preset + flag
+
+
+def _with_preset_exclude(nodes: str, preset: str | None) -> str:
+    """Join ``nodes`` with the preset's excluded nodes, since ``submit --exclude`` replaces them."""
+    names = [n for n in nodes.split(",") if n]
+    if preset:
+        try:
+            from polyzymd.workflow.slurm import SlurmConfig
+
+            configured = SlurmConfig.from_preset(preset).exclude or ""
+        except Exception:  # noqa: BLE001 - an unknown preset keeps the routing nodes only
+            configured = ""
+        names = [n for n in configured.split(",") if n] + names
+    return ",".join(dict.fromkeys(names))
+
+
+def system_labels(reports: Sequence[SystemReport]) -> list[str]:
+    """Header label of each report: its run-folder name, plus the condition where it repeats.
+
+    Two conditions copied from one config share the run-folder template (and
+    so the name, e.g. ``trpcage_300K``). Such a name gets the config's
+    ``name:`` in brackets, or the config's folder when that repeats too.
+    """
+    counts: dict[str, int] = {}
+    for report in reports:
+        counts[report.name] = counts.get(report.name, 0) + 1
+    config_names: dict[str | None, int] = {}
+    for report in reports:
+        config_names[report.config_name] = config_names.get(report.config_name, 0) + 1
+    labels = []
+    for report in reports:
+        if counts[report.name] < 2:
+            labels.append(report.name)
+            continue
+        tag = report.config_name
+        if not tag or config_names[tag] > 1 or tag == report.name:
+            tag = Path(report.config_path).parent.name
+        labels.append(f"{report.name} [{tag}]")
+    return labels
+
+
+def render_agent(
+    reports: Sequence[SystemReport],
+    *,
+    now: datetime | None = None,
+    slurm_available: bool = True,
+    preset_hint: str | None = None,
+    slurm_queried: bool = True,
+    unfinished: bool = False,
+) -> str:
+    """Compact, colour-free, fixed-vocabulary text for agents and terminals.
+
+    Each system header carries ``done/total completed``. With *unfinished*,
+    completed replicates are omitted and fully completed systems collapse to
+    their header line.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    totals: dict[str, int] = {}
+    n_reps = 0
+    for rep_report in reports:
+        for verdict, count in rep_report.counts().items():
+            totals[verdict] = totals.get(verdict, 0) + count
+            n_reps += count
+
+    lines: list[str] = []
+    summary = ", ".join(f"{totals[v]} {v}" for v in VERDICT_ORDER if totals.get(v))
+    header = (
+        f"# polyzymd status  {now.strftime('%Y-%m-%d %H:%M UTC')}  "
+        f"{len(reports)} system(s)  {n_reps} replicate(s): {summary or 'none'}"
+    )
+    lines.append(header)
+    if not slurm_queried:
+        lines.append("# SLURM not queried (--no-slurm): verdicts below come from progress.json")
+    elif not slurm_available:
+        lines.append(
+            "# WARNING: squeue unavailable — DEAD/QUEUED cannot be distinguished from RUNNING; "
+            "verdicts below fall back to progress.json only"
+        )
+
+    for report, label in zip(reports, system_labels(reports)):
+        reps = report.replicates
+        done = sum(r.verdict == VERDICT_COMPLETED for r in reps)
+        shown = [r for r in reps if r.verdict not in VERDICTS_FINISHED] if unfinished else reps
+        if unfinished and reps and not shown and not report.error:
+            lines.append(f"## {label}  ({report.config_path})  {done}/{len(reps)} completed")
+            continue
+        lines.append("")
+        state = f"{done}/{len(reps)} completed" if reps else "not started: no replicate folders"
+        lines.append(f"## {label}  ({report.config_path})  {state}")
+        if report.error:
+            lines.append(f"ERROR {report.error}")
+            continue
+        if not reps:
+            lines.append(f"no replicate directories in {report.scratch_directory}")
+            continue
+        width = max(len(f"run{r.replicate}") for r in shown)
+        for rep in shown:
+            lines.append(render_replicate_line(rep, width))
+
+    dead = [(r, rep) for r in reports for rep in r.replicates if rep.verdict == VERDICT_DEAD]
+    local = [
+        (r.config_path, rep)
+        for r in reports
+        for rep in r.replicates
+        if rep.verdict == VERDICT_INTERRUPTED
+    ]
+    restart: dict[tuple[str, str], list[int]] = {}
+    inspect: list[str] = []
+    for report, rep in dead:
+        action = rep.action or ACTION_RESUBMIT
+        if action == ACTION_INSPECT:
+            inspect.append(f"{report.name} run{rep.replicate}  ({report.config_path})")
+        else:
+            # A chain that failed CUDA routing names the nodes to leave out.
+            exclude = _EXCLUDE.search(rep.last_error or "")
+            flags = _submit_flags(rep, preset_hint, exclude.group(1) if exclude else "")
+            restart.setdefault((report.config_path, flags), []).append(rep.replicate)
+    if restart:
+        lines.append("")
+        lines.append("# dead chains — resume from checkpoint with:")
+        for (cfg, flags), reps in restart.items():
+            rep_arg = ",".join(str(r) for r in sorted(reps))
+            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg} {flags}")
+    if local:
+        lines.append("")
+        lines.append(
+            "# interrupted runs (stopped by a signal, state saved, no SLURM log) — continue "
+            "each with the first command on a workstation, or the second on a cluster:"
+        )
+        for cfg, rep in local:
+            lines.append(f"polyzymd run -c {cfg} -r {rep.replicate}")
+            lines.append(
+                f"polyzymd submit -c {cfg} -r {rep.replicate} {_submit_flags(rep, preset_hint)}"
+            )
+    if inspect:
+        lines.append("")
+        lines.append("# dead chains that need a look before restarting:")
+        lines.extend(inspect)
+
+    stopped = [(r, rep) for r in reports for rep in r.replicates if rep.verdict == VERDICT_STOPPED]
+    if stopped:
+        lines.append("")
+        lines.append("# stopped chains (polyzymd cancel left a STOP file) — restart with:")
+        by_cfg: dict[tuple[str, str], list[int]] = {}
+        for report, rep in stopped:
+            key = (report.config_path, _submit_flags(rep, preset_hint))
+            by_cfg.setdefault(key, []).append(rep.replicate)
+        for (cfg, flags), reps in by_cfg.items():
+            rep_arg = ",".join(str(r) for r in sorted(reps))
+            lines.append(f"polyzymd cancel -c {cfg} -r {rep_arg} --resume")
+            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg} {flags}")
+    return "\n".join(lines) + "\n"
+
+
+def render_json(
+    reports: Sequence[SystemReport],
+    *,
+    now: datetime | None = None,
+    slurm_available: bool = True,
+    unfinished: bool = False,
+) -> str:
+    if now is None:
+        now = datetime.now(timezone.utc)
+    payload = {
+        "generated_at": now.isoformat(),
+        "slurm_available": slurm_available,
+        "systems": [r.to_dict(unfinished=unfinished) for r in reports],
+    }
+    return json.dumps(payload, indent=1, default=str) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Config discovery
+# ---------------------------------------------------------------------------
+
+
+def discover_config_files(roots: Iterable[str | Path], *, max_depth: int = 3) -> list[Path]:
+    """Find ``config.yaml`` files under *roots*, at most *max_depth* levels deep.
+
+    Depth is bounded so that pointing ``--all`` at a large project tree does
+    not walk into trajectory directories on slow network filesystems.
+    """
+    found: list[Path] = []
+    for root in roots:
+        root_path = Path(root)
+        if root_path.is_file():
+            found.append(root_path)
+            continue
+        if not root_path.is_dir():
+            continue
+        base_depth = len(root_path.resolve().parts)
+        for dirpath, dirnames, filenames in os.walk(root_path):
+            depth = len(Path(dirpath).resolve().parts) - base_depth
+            if depth >= max_depth:
+                dirnames[:] = []
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            if "config.yaml" in filenames:
+                found.append(Path(dirpath) / "config.yaml")
+    return sorted(set(found))

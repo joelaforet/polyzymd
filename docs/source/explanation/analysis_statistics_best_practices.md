@@ -1,0 +1,458 @@
+# Statistics best practices for MD analysis
+
+This page explains how to interpret statistical uncertainty in PolyzyMD
+analysis results. It follows the spirit of the LiveCoMS best-practices
+recommendations for molecular-simulation uncertainty quantification
+(Grossfield et al., 2018), while staying cautious about what finite trajectories
+can prove.
+
+```{contents} On This Page
+:local:
+:depth: 2
+```
+
+## Why MD statistics need extra care
+
+Molecular dynamics trajectories are correlated in time. Consecutive frames are
+usually similar because they are snapshots from one continuous dynamical path,
+not independent experimental repeats. This does not make trajectory averages
+useless, but it does mean that the number of saved frames is not the number of
+independent observations.
+
+Autocorrelation mainly affects interpretation in three ways:
+
+- It reduces the effective amount of independent information in a trajectory.
+- It makes uncertainty estimates and convergence checks more difficult.
+- It can make finite-trajectory fluctuation estimates unreliable, especially
+  when dynamics are slow, rare events are missed, or the trajectory is not
+  stationary.
+
+```{warning}
+Naive uncertainty estimates based on the raw frame count can be much too
+confident. Treat statistical significance from short, correlated, or
+non-stationary trajectories as provisional unless independent replicates and
+convergence diagnostics support the conclusion.
+```
+
+PolyzyMD reports the statistical inefficiency g and N_eff of the time series
+of each replicate. These values change no interval, because intervals use one
+value per replicate.
+
+## Key concepts
+
+### Autocorrelation
+
+An autocorrelation function measures how much an observable resembles itself at
+later time lags:
+
+$$C(\tau) = \frac{\langle (x(t) - \mu)(x(t+\tau) - \mu) \rangle}{\sigma^2}$$
+
+At zero lag, $C(0) = 1$. As the observable decorrelates, $C(\tau)$ approaches
+zero. Slow decay means that many saved frames contain overlapping information.
+
+### Statistical inefficiency and effective sample size
+
+For a correlated time series, the effective number of independent samples is
+described using the statistical inefficiency $g$:
+
+$$N_{\mathrm{eff}} = \frac{N}{g}$$
+
+PolyzyMD estimates $g$ by summing the normalised autocorrelation function over
+positive lags,
+
+$$g = 1 + 2 \sum_{t \geq 1} C(t) \left(1 - \frac{t}{N}\right),$$
+
+following Chodera et al. (2007) as implemented in pymbar. The $(1 - t/N)$
+factor accounts for the smaller number of pairs available at long lags, and the
+sum is truncated at the first non-positive $C(t)$ so that noise in the tail does
+not accumulate. Lag zero is excluded from the sum; it is the leading 1.
+
+The integrated correlation time follows from $g$ as
+
+$$\tau = \frac{g - 1}{2} \Delta t,$$
+
+where $\Delta t$ is the spacing between saved observations, which is the same
+relation read the other way round as $g = 1 + 2\tau/\Delta t$. For
+uncorrelated data $g$ approaches 1 and $\tau$ approaches 0, so $N_{\mathrm{eff}}$
+approaches $N$. $N_{\mathrm{eff}}$ is reported as a real number and is not
+rounded down to whole frames.
+
+Spacing frames by about $2\tau$ is a heuristic for selecting approximately
+independent frames. It is not a universal formula for the true number of
+independent samples, and PolyzyMD does not use it to select the frames that
+enter any estimate.
+
+```{tip}
+A trajectory with 10,000 saved frames may contain far fewer effective samples
+for a slow observable. The relevant timescale is the decorrelation time of the
+observable being analyzed, not the output frequency alone.
+```
+
+### Stationarity and convergence
+
+Correlation corrections assume that the sampled data represent one stationary
+distribution after equilibration. If the trajectory drifts between metastable
+states, remains trapped in one basin, or contains large relaxation transients,
+then a corrected SEM can still be misleading.
+
+For this reason, convergence is not just a numerical property of an error bar.
+It is a scientific judgment about whether the simulation sampled the states
+that matter for the question being asked.
+
+## Means and fluctuations need different interpretation
+
+### Averages
+
+For observables such as mean distance, mean RMSD, contact fraction, or average
+energy, all frames can contribute information about the mean if the trajectory
+is equilibrated and representative. Autocorrelation mainly reduces precision:
+the mean may be estimated from all frames, but the uncertainty should reflect
+$N_{\mathrm{eff}}$ or an equivalent blocking/replicate-based estimate rather
+than the raw frame count.
+
+Conceptually:
+
+```text
+mean = average(all equilibrated frames)
+uncertainty = spread adjusted for correlation or estimated across replicates
+```
+
+This is why a mean computed from a dense trajectory can be useful while its
+naive frame-based SEM is not.
+
+### Fluctuations
+
+For observables that are themselves fluctuation measures, such as RMSF, energy
+variance, compressibility-like quantities, or variance-derived order
+parameters, finite correlated trajectories are harder to interpret. The issue is
+not that every correlated variance estimate is universally biased downward in a
+simple, predictable way. The problem is broader: finite, correlated, and
+possibly non-stationary trajectories may not sample the full distribution of
+motions that define the fluctuation.
+
+Conservative strategies include:
+
+- comparing results across independent replicates;
+- checking whether the estimate changes with trajectory length or block size;
+- reporting caveats when slow motions are undersampled.
+
+Thinning the trajectory to roughly $2\tau$ spacing is not one of them, and
+PolyzyMD does not do it. The finite-sample bias of a variance computed from $N$
+correlated frames with inefficiency $g$ is about the same as the bias of one
+computed from $N/g$ independent frames, so discarding frames leaves the bias
+where it was and only raises the variance of the estimate. RMSF is therefore
+computed from every production frame, with the correlation time recorded beside
+it as a diagnostic and the uncertainty taken from the spread across replicates.
+
+## How to interpret PolyzyMD analysis results
+
+Each shipped analysis chooses how one replicate's frames become one value, and
+the intervals and tests are then computed from one value per replicate. The
+reduction can differ between analyses because contact fractions,
+distances, RMSF, secondary structure, and other observables answer different
+scientific questions.
+
+When reading output, focus on these questions:
+
+Mean-like observables
+: Does the uncertainty account for correlation or independent replicates rather
+  than the raw number of frames?
+
+Fluctuation-like observables
+: Was the trajectory long enough to sample the motions that define the
+  fluctuation? Do replicate or block estimates agree?
+
+Condition comparisons
+: Are the compared conditions based on comparable simulation protocols,
+  equilibration choices, and replicate counts?
+
+Significance markers
+: Were multiple comparisons corrected, and are the effect sizes meaningful in
+  addition to being statistically significant?
+
+For implementation details of shared analysis utilities, see
+{doc}`../api/analyses_shared`.
+
+## Replicates and condition-level uncertainty
+
+Independent replicates are often the most interpretable basis for
+condition-level uncertainty. A replicate-level SEM estimates how much replicate
+means vary across independent starts, seeds, or prepared systems.
+
+This is preferred when the replicates are:
+
+- genuinely independent;
+- generated with comparable protocols;
+- analyzed after appropriate equilibration removal;
+- long enough to sample the relevant states for each observable.
+
+In PolyzyMD, the replicates of a condition differ in what their seeds set:
+Packmol's placement of the solvent, ions and polymer chains, the drawn polymer
+sequences (unless `random_seed` fixes them) and the thermostat noise. They
+share the rest of their start: every replicate begins from the same protein
+structure, and a polymer sequence drawn in two replicates starts from the same
+chain conformation. Their spread therefore measures sampling from those
+starts, not from independently prepared structures.
+
+Replicate SEM is not magically robust to bad sampling. If all replicates are
+trapped in the same metastable basin, or if different replicates have not
+reached comparable stationary behavior, the between-replicate spread may still
+understate or misrepresent uncertainty.
+
+## From a standard error to a confidence interval
+
+A standard error is not an interval. It is the estimated standard deviation of
+the mean, and on its own it says nothing about how often a stated range would
+contain the true value. To turn it into a 95 percent confidence interval you
+multiply it by a coverage factor:
+
+```
+interval = mean +/- k(n) * SEM
+```
+
+If the standard deviation of the replicate means were known exactly, `k` would
+be 1.96. It is not known exactly. It is estimated from the same handful of
+replicates, so the factor comes from the Student t distribution with `n - 1`
+degrees of freedom. With the replicate counts an MD study can afford, that
+matters a great deal:
+
+| Replicates | `k` at 95 percent | Interval width relative to `+/- 1 SEM` |
+|---|---|---|
+| 2 | 12.71 | 12.7x |
+| 3 | 4.30 | 4.3x |
+| 5 | 2.78 | 2.8x |
+| 10 | 2.26 | 2.3x |
+| large | 1.96 | 2.0x |
+
+### Why plus or minus one SEM misleads at three replicates
+
+Suppose two conditions each have three replicates, and their `+/- 1 SEM` bars do
+not touch. It is tempting to read that as a real difference. It is not. At
+`n = 3` the 95 percent interval is over four times wider than the SEM bar, so
+the two intervals can overlap heavily while the SEM bars sit far apart. The
+gap between one-SEM bars is not evidence of anything; only the interval, or the
+t-test the comparison already runs, can answer that question.
+
+This is why PolyzyMD reports the 95 percent interval alongside the standard
+error in every table rather than the standard error alone.
+
+### Why a single replicate has no uncertainty at all
+
+With one replicate there is nothing to take a spread over. PolyzyMD writes
+`null` for the SEM, the standard deviation and both confidence limits, and
+prints `na` in the text report (for example `sem na  ci95 na`), rather than
+writing `0.0`. A zero
+would claim a measurement with no uncertainty, which is the opposite of what a
+single run supports.
+
+### What PolyzyMD does not yet estimate
+
+The interval above is the only one the package computes. There is no block
+averaging, no bootstrap and no jackknife. Fractions and occupancies are given
+the same symmetric interval as unbounded quantities, so near 0 or 1 a limit can
+fall outside the physical range; read those limits as an indication of spread
+rather than a bound. Within-replicate correlation times are reported as
+diagnostics and do not enter any condition-level interval.
+
+## Practical interpretation principles
+
+### Compare timescales before trusting uncertainty
+
+Ask whether the process of interest decorrelates many times within the analyzed
+window. If a loop rearrangement, contact transition, or polymer conformation
+changes on a timescale comparable to the whole production trajectory, a small
+error bar is not strong evidence of convergence.
+
+### Prefer effect sizes with uncertainty over p-values alone
+
+A statistically significant difference can be scientifically small, while a
+large apparent effect can be uncertain if replicate counts are low. Interpret
+PolyzyMD comparison output by considering the direction, magnitude, the
+95 percent confidence interval, and the physical plausibility of the change.
+
+### Treat diagnostics as evidence, not proof
+
+Autocorrelation estimates and replicate intervals are diagnostics. They
+summarize available sampling; they cannot reveal unsampled states that the
+trajectory never visited. Use them alongside structural inspection and domain
+knowledge.
+
+## Compare conditions over comparable windows
+
+The replicate mean of a per-frame quantity summarises the window it was
+taken over. When one condition was simulated, or is available on this
+machine, for 450 ns and another for 40 ns, their means describe different
+times: a structure that drifts late, such as an active site that opens after
+100 ns, appears only in the longer runs, and the difference looks like an
+effect of the condition. PolyzyMD warns in every report that compares
+conditions whose analysed production ends more than 10% apart, names each
+condition's span, and suggests a common window:
+
+```
+warning: the conditions were analysed up to different times (No polymer 456.4 ns; SBMA 50% 38.4 ns); a difference may come from simulated time rather than the condition. Compare over a common window with until 38.4ns (--until, or until: in study.yaml)
+```
+
+`until` leaves out production after that time for every condition, so the
+comparison is over the same simulated time; alternatively, extend the short
+runs. Say which you did in the methods. The warning does not change any
+value. A replicate whose `progress.json` records production segments that
+are missing from disk is reported too, because its analysed production is
+shorter than what was simulated. `polyzymd study check` prints each
+condition's production length before you choose an equilibration window.
+
+## Multiple comparison correction
+
+### Why it matters
+
+When comparing *N* conditions pairwise, the number of hypothesis tests grows as
+*N*(*N*−1)/2. With 5 conditions this is already 10 tests; with 10 conditions,
+45 tests. Without correction, the probability of at least one false positive
+increases rapidly, even when every null hypothesis is true.
+
+### Benjamini-Hochberg FDR control
+
+PolyzyMD uses the Benjamini-Hochberg procedure to control the false discovery
+rate: the expected proportion of false positives among rejected hypotheses. This is less
+conservative than controlling the probability of any false positive, and is
+often appropriate when many related comparisons are screened together.
+
+Conceptually, the procedure ranks p-values, compares them to rank-dependent
+thresholds, and marks discoveries only up to the largest rank that satisfies the
+threshold. Adjusted p-values and the `significant` flag are based on this
+correction rather than on raw p-values alone.
+
+### Why the family is one comparison
+
+A correction only means something if you can say what it corrected over. The
+package draws the boundary at one comparison: every tested row that one
+`polyzymd analyze` command, or one `compare()` call in Python, produced is one
+Benjamini-Hochberg family. For one number per replicate that is every
+condition compared with the control. For a per-residue result, such as
+`polyzymd analyze rmsf`, it is every residue of every condition compared.
+
+That boundary matches how the results are read. When you look at a per-residue
+profile over four conditions, you scan the whole table at once and pick out the
+residues that stand out. The number of chances you gave yourself to find
+something is the size of that table, not the size of one column, and a false
+discovery rate holds for the discoveries of a search only when the family is
+the set searched (Benjamini 2010).
+
+Drawing the family wider would be worse in a different way. Pooling across
+separate commands, or across analyses, would make the significance of an RMSD
+comparison depend on whether somebody also ran SASA that afternoon. A
+comparison should not change its verdict because of an unrelated command.
+
+### Why Welch is the sensible default at three replicates
+
+With three replicates per condition, the variance of each condition is
+estimated from two degrees of freedom. That estimate is extremely noisy, so a
+test that assumes the two conditions share a variance is assuming something you
+cannot check: a variance-ratio test at this sample size has almost no power to
+reject equality, and passing it is not evidence of it.
+
+The assumption also fails for physical reasons in the comparisons this package
+is built for. A protein with no polymer and the same protein in a crowded
+polymer environment are not expected to fluctuate by the same amount. The
+conditions that change the mean usually change the spread as well.
+
+Welch's t-test drops the shared-variance assumption. With equal group sizes it
+gives the same t statistic as Student's test but fewer degrees of freedom, so
+it is the more cautious of the two: when the variances really do differ, the
+Student p-value is too small. The cost when the variances happen to be equal is
+a small loss of power; the cost of the Student test when they are not is a
+false positive rate above the nominal alpha.
+
+PolyzyMD therefore uses Welch's t-test by default. In Python,
+`compare(test="student")` gives Student's test for a comparison where equal
+variances are known on other grounds.
+
+### Effect sizes at small replicate counts
+
+Cohen's d is biased upward at small samples. Hedges' correction removes most of
+that bias by multiplying d by `J = 1 - 3 / (4 * (n1 + n2) - 9)`, which is about
+0.80 for three replicates per condition. PolyzyMD reports both `cohens_d` and
+`hedges_g`; quote the latter.
+
+The Cohen adjectives ("small", "medium", "large") are withheld below ten
+combined replicates. At six replicates the standard error of the effect size is
+of order one, so the boundary between "medium" and "large" is noise. The
+numbers are still reported; only the label is suppressed.
+
+For the same reason, a direction label such as "stabilizing" or "increased" is
+attached only when the corrected test is significant. A direction read off a
+one percent shift in two means is a description of the noise, not a finding.
+
+### Within-trajectory uncertainty and multiple testing are separate
+
+Autocorrelation handling and multiple-comparison correction address different
+problems. Autocorrelation affects the uncertainty of an observable within or
+across trajectories. Multiple-comparison correction controls how many false
+positives are expected when many hypotheses are tested.
+
+Both matter. A corrected p-value does not fix poor sampling, and a careful SEM
+does not control the false-positive rate across many condition pairs.
+
+For the tests, the correction family and the fields of each comparison row,
+see {doc}`../reference/posthoc_testing`.
+
+## References
+
+This explanation follows guidance from:
+
+> **Grossfield, A., et al.** (2018). "Best Practices for Quantification of
+> Uncertainty and Sampling Quality in Molecular Simulations."
+> *Living Journal of Computational Molecular Science*, 1(1), 5067.
+> [DOI: 10.33011/livecoms.1.1.5067](https://doi.org/10.33011/livecoms.1.1.5067)
+
+The statistical inefficiency estimator follows:
+
+> **Chodera, J. D., Swope, W. C., Pitera, J. W., Seok, C., & Dill, K. A.**
+> (2007). "Use of the Weighted Histogram Analysis Method for the Analysis of
+> Simulated and Parallel Tempering Simulations."
+> *Journal of Chemical Theory and Computation*, 3(1), 26-41.
+> [DOI: 10.1021/ct0502864](https://doi.org/10.1021/ct0502864)
+
+> **Shirts, M. R., & Chodera, J. D.** (2008). "Statistically optimal analysis
+> of samples from multiple equilibrium states."
+> *The Journal of Chemical Physics*, 129(12), 124105.
+> [DOI: 10.1063/1.2978177](https://doi.org/10.1063/1.2978177)
+
+PolyzyMD calls pymbar's `timeseries.statistical_inefficiency` for this estimate rather than carrying its own copy of the algorithm, so pymbar is a dependency of the analysis environment.
+
+Useful background includes:
+
+> **Janke, W.** (2002). "Statistical analysis of simulations: data correlations
+> and error estimation." In *Quantum Simulations of Complex Many-Body Systems*,
+> NIC Series vol. 10, 423-445.
+
+> **Flyvbjerg, H., & Petersen, H. G.** (1989). "Error estimates on averages
+> of correlated data." *Journal of Chemical Physics*, 91(1), 461-466.
+> [DOI: 10.1063/1.457480](https://doi.org/10.1063/1.457480). Block averaging is
+> an alternative route to the statistical inefficiency. PolyzyMD does not
+> implement it.
+
+> **Joint Committee for Guides in Metrology** (2008). "JCGM 100: Evaluation of
+> measurement data - Guide to the expression of uncertainty in measurement
+> (GUM)." BIPM.
+> [PDF](https://www.bipm.org/utils/common/documents/jcgm/JCGM_100_2008_E.pdf)
+
+The coverage factors above follow the section of Grossfield et al. (2018) on
+turning a standard uncertainty into a confidence interval, which in turn
+follows the GUM.
+
+> **Welch, B. L.** (1947). "The generalization of 'Student's' problem when
+> several different population variances are involved." *Biometrika*, 34(1-2),
+> 28-35. [DOI: 10.1093/biomet/34.1-2.28](https://doi.org/10.1093/biomet/34.1-2.28)
+
+> **Hedges, L. V.** (1981). "Distribution theory for Glass's estimator of
+> effect size and related estimators." *Journal of Educational Statistics*,
+> 6(2), 107-128.
+> [DOI: 10.3102/10769986006002107](https://doi.org/10.3102/10769986006002107)
+
+> **Benjamini, Y., & Hochberg, Y.** (1995). "Controlling the false discovery
+> rate: a practical and powerful approach to multiple testing." *Journal of the
+> Royal Statistical Society B*, 57(1), 289-300.
+
+> **Benjamini, Y.** (2010). "Discovering the false discovery rate." *Journal of
+> the Royal Statistical Society B*, 72(4), 405-416.
+> [DOI: 10.1111/j.1467-9868.2010.00746.x](https://doi.org/10.1111/j.1467-9868.2010.00746.x)

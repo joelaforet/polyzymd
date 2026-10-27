@@ -1,0 +1,506 @@
+"""Tests for the agent-facing analysis protocol: report fields, verdicts, text and errors.
+
+The reports come from :class:`~polyzymd.analyses.timeseries.ReplicateValues`
+built from given replicate values, the path every analysis of
+``polyzymd analyze`` reports through.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Sequence
+
+import pytest
+
+from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.analyses.protocols import (
+    ANALYSES,
+    VERDICT_LARGER,
+    VERDICT_NO_DIFFERENCE,
+    VERDICT_NOT_TESTABLE,
+    ConditionReport,
+    PairwiseReport,
+    ProtocolReport,
+    _difference_ci,
+    analyze,
+)
+
+
+class _Study:
+    """The parts of a Study that ReplicateValues reads."""
+
+    def __init__(self, labels: Sequence[str]) -> None:
+        self.labels, self.control = list(labels), labels[0]
+
+    def __getitem__(self, label: str) -> SimpleNamespace:
+        return SimpleNamespace(equilibration="10ns", stride=1, config_hash=f"hash-{label}")
+
+
+def _report(tmp_path: Path, values: dict[str, list[float]]) -> ProtocolReport:
+    """Compare the given per-condition replicate values against the first condition.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Folder named as the results path of the report.
+    values : dict
+        Replicate values keyed by condition label, control first.
+
+    Returns
+    -------
+    ProtocolReport
+        The summary for one condition, the comparison for several.
+    """
+    from polyzymd.analyses.timeseries import ReplicateValues, Source
+
+    rows = {
+        label: [
+            (index + 1, value, None, None, 100, None, None) for index, value in enumerate(items)
+        ]
+        for label, items in values.items()
+    }
+    source = Source("rg", "A", _Study(list(values)), {label: [] for label in values}, tmp_path)
+    result = ReplicateValues(source, "mean_rg", "A", False, rows)
+    return result.compare() if len(values) > 1 else result.summary()
+
+
+class TestReportFields:
+    """The report states what every number is."""
+
+    def test_two_conditions_report_is_fully_typed(self, tmp_path: Path) -> None:
+        """Every documented field is present and carries the declared type."""
+        report = _report(tmp_path, {"A": [10.0, 10.1, 10.2], "B": [12.0, 12.1, 12.2]})
+
+        assert isinstance(report, ProtocolReport)
+        assert report.analysis == "rg"
+        assert report.metric == "mean_rg"
+        assert report.unit == "A"
+        assert report.equilibration == "10ns"
+        assert report.frames_per_replicate == {"A": [100, 100, 100], "B": [100, 100, 100]}
+
+        assert [condition.label for condition in report.conditions] == ["A", "B"]
+        first = report.conditions[0]
+        assert isinstance(first, ConditionReport)
+        assert first.n_replicates == 3
+        assert first.mean == pytest.approx(10.1)
+        assert first.sem is not None and first.sem > 0.0
+        assert first.ci95 is not None and first.ci95[0] < first.mean < first.ci95[1]
+        assert first.ci_method == "student_t"
+        assert first.replicate_values == [10.0, 10.1, 10.2]
+        assert first.replicates == [1, 2, 3]
+
+        assert len(report.pairwise) == 1
+        pair = report.pairwise[0]
+        assert isinstance(pair, PairwiseReport)
+        assert (pair.a, pair.b) == ("A", "B")
+        assert pair.delta == pytest.approx(2.0)
+        assert pair.delta_ci95 is not None
+        assert pair.p is not None and pair.p_adjusted is not None
+        assert pair.test == "welch_t"
+        assert pair.correction == "BH"
+        assert pair.family_size == 1
+        # Effect sizes are oriented like delta, so both are positive when the
+        # second condition is larger.
+        assert pair.cohens_d is not None and pair.cohens_d > 0.0
+        assert pair.hedges_g is not None and 0.0 < pair.hedges_g < pair.cohens_d
+        assert pair.testable is True
+
+        assert report.provenance.polyzymd_version
+        assert report.provenance.config_hashes == {"A": "hash-A", "B": "hash-B"}
+        assert report.provenance.output_paths == {"results": str(tmp_path)}
+        assert report.verdict
+
+    def test_json_round_trips_through_the_model(self, tmp_path: Path) -> None:
+        """The JSON form validates back into an equal report."""
+        report = _report(tmp_path, {"A": [10.0, 10.1, 10.2], "B": [12.0, 12.1, 12.2]})
+
+        assert ProtocolReport.model_validate_json(report.model_dump_json()) == report
+
+
+class TestVerdict:
+    """The verdict answers the question in one sentence."""
+
+    def test_significant_difference_names_direction_and_evidence(self, tmp_path: Path) -> None:
+        """A clear difference is reported as larger, with delta, CI, p and n."""
+        report = _report(tmp_path, {"A": [10.0, 10.1, 10.2], "B": [12.0, 12.1, 12.2]})
+
+        assert len(report.verdict) == 1
+        sentence = report.verdict[0]
+        assert sentence.startswith(f"B {VERDICT_LARGER} mean_rg than A")
+        assert "delta +2" in sentence
+        assert "95% CI" in sentence
+        assert "p_adj" in sentence
+        assert "n 3 vs 3" in sentence
+        assert report.pairwise[0].significant is True
+
+    def test_overlapping_conditions_report_no_significant_difference(self, tmp_path: Path) -> None:
+        """Conditions that overlap get the no-difference sentence."""
+        report = _report(tmp_path, {"A": [10.0, 11.0, 12.0], "B": [10.2, 11.1, 11.9]})
+
+        sentence = report.verdict[0]
+        assert sentence.startswith(f"{VERDICT_NO_DIFFERENCE} in mean_rg between A and B")
+        assert "n 3 vs 3" in sentence
+        assert report.pairwise[0].significant is False
+
+    def test_single_condition_has_no_comparison(self, tmp_path: Path) -> None:
+        """One condition gives an empty pairwise list and a summary verdict."""
+        report = _report(tmp_path, {"A": [10.0, 10.1, 10.2]})
+
+        assert report.pairwise == []
+        assert len(report.verdict) == 1
+        assert report.verdict[0].startswith("A mean_rg 10.1 A (95% CI")
+        assert "n 3" in report.verdict[0]
+
+    def test_single_replicate_is_not_testable_rather_than_not_different(
+        self, tmp_path: Path
+    ) -> None:
+        """One replicate per condition makes the test undefined, and says so."""
+        report = _report(tmp_path, {"A": [10.0], "B": [12.0]})
+
+        assert report.pairwise[0].testable is False
+        assert report.pairwise[0].significant is None
+        assert report.pairwise[0].direction == "not testable"
+        assert report.pairwise[0].delta_ci95 is None
+        assert report.verdict[0].startswith(VERDICT_NOT_TESTABLE)
+        assert any("one replicate" in warning for warning in report.warnings)
+
+
+class TestAgentText:
+    """The agent rendering prints every item on its own line."""
+
+    def test_two_condition_report_fits_in_25_lines(self, tmp_path: Path) -> None:
+        """A two-condition comparison renders compactly and carries the verdict."""
+        report = _report(tmp_path, {"A": [10.0, 10.1, 10.2], "B": [12.0, 12.1, 12.2]})
+
+        text = report.to_agent_text()
+        lines = text.strip().split("\n")
+
+        assert len(lines) <= 25
+        assert lines[0].startswith("# polyzymd analyze rg")
+        assert "metric mean_rg" in lines[0]
+        assert "unit A" in lines[0]
+        assert "eq 10ns" in lines[0]
+        assert any(line.startswith("A  n 3") for line in lines)
+        assert any(line.startswith("A vs B") for line in lines)
+        assert any(line.startswith("verdict:") for line in lines)
+        assert "|" not in text
+        assert "" not in [line.strip() for line in lines]
+
+    def test_many_conditions_print_every_line(self, tmp_path: Path) -> None:
+        """A wide comparison prints every condition and comparison."""
+        values = {f"C{index}": [10.0 + index, 10.1 + index, 10.2 + index] for index in range(12)}
+        lines = _report(tmp_path, values).to_agent_text().strip().split("\n")
+
+        conditions = [line for line in lines if line.startswith("C") and "  n 3  " in line]
+        comparisons = [line for line in lines if line.startswith("C0 vs ")]
+        assert len(conditions) == 12
+        assert len(comparisons) == 11
+        assert not any("omitted" in line for line in lines)
+
+    def test_every_replicate_value_is_printed(self, tmp_path: Path) -> None:
+        """A condition with many replicates prints all of their values."""
+        values = {
+            "A": [10.0 + 0.1 * index for index in range(8)],
+            "B": [12.0 + 0.1 * index for index in range(8)],
+        }
+        text = _report(tmp_path, values).to_agent_text()
+
+        line = next(line for line in text.split("\n") if line.startswith("A  n 8"))
+        printed = line.split("  values ", 1)[1].split(", ")
+        assert len(printed) == 8
+        assert "more" not in line
+
+
+class TestDifferenceInterval:
+    """The interval on a difference matches the reported test."""
+
+    A = [1.0, 2.0, 3.0]
+    B = [2.0, 4.0, 6.0, 8.0]
+
+    def test_student_uses_the_pooled_variance(self) -> None:
+        """Pooled variance 4.4 with 5 degrees of freedom gives 3 +/- 4.118."""
+        low, high = _difference_ci(self.A, self.B, "student_t")
+        assert (low, high) == pytest.approx((-1.118283, 7.118283), abs=1e-6)
+
+    def test_welch_uses_separate_variances(self) -> None:
+        """Welch's interval is narrower here than the pooled one."""
+        low, high = _difference_ci(self.A, self.B, "welch_t")
+        assert (low, high) == pytest.approx((-0.897975, 6.897975), abs=1e-6)
+
+    @pytest.mark.parametrize(
+        "values_a, values_b, test",
+        [
+            (A, B, "tukey_hsd"),
+            ([1.0], B, "student_t"),
+            ([1.0, 1.0], [2.0, 2.0], "student_t"),
+            ([1.0, 1.0], [2.0, 2.0], "welch_t"),
+        ],
+    )
+    def test_no_interval_when_none_can_be_estimated(
+        self, values_a: list[float], values_b: list[float], test: str
+    ) -> None:
+        """Tukey, one replicate and zero variance give no interval."""
+        assert _difference_ci(values_a, values_b, test) is None
+
+
+class TestErrors:
+    """Setup failures raise typed errors that say how to fix them."""
+
+    def test_unknown_analysis_lists_the_analyses_and_the_function_api(self, tmp_path: Path) -> None:
+        """An unknown name names every analysis and the page on writing a function."""
+        with pytest.raises(ProtocolError) as excinfo:
+            analyze("not_an_analysis", [tmp_path / "A" / "config.yaml"])
+
+        assert str(excinfo.value) == "No analysis named 'not_an_analysis'."
+        hint = excinfo.value.hint or ""
+        assert hint.startswith(f"Use one of {', '.join(ANALYSES)}.")
+        assert "Study.timeseries or Study.per_replicate" in hint
+        assert "how_to/study_api.html" in hint
+
+    @pytest.mark.parametrize("name", ["toy_protocol", "radius_of_gyration", "catalytic_triad"])
+    def test_names_outside_the_analyses_are_refused_before_any_config_is_read(
+        self, name: str, tmp_path: Path
+    ) -> None:
+        """No name outside ANALYSES reaches a config, even a missing one."""
+        with pytest.raises(ProtocolError, match="No analysis named"):
+            analyze(name, [tmp_path / "missing" / "config.yaml"], stride=5)
+
+    def test_missing_config_names_the_path(self, tmp_path: Path) -> None:
+        """A config path that does not exist raises before any computation."""
+        missing = tmp_path / "nope" / "config.yaml"
+        with pytest.raises(ProtocolError) as excinfo:
+            analyze("rg", [missing], replicates=[1])
+
+        assert "not found" in str(excinfo.value)
+        assert str(missing) in str(excinfo.value)
+        assert excinfo.value.hint
+
+    def test_no_configs_is_rejected(self) -> None:
+        """Calling with an empty config list raises a typed error."""
+        with pytest.raises(ProtocolError, match="none given"):
+            analyze("rg", [])
+
+    def test_label_count_must_match_config_count(self, tmp_path: Path) -> None:
+        """One label per config is required when labels are given at all."""
+        configs = []
+        for label in ("A", "B"):
+            (tmp_path / label).mkdir()
+            configs.append(tmp_path / label / "config.yaml")
+            configs[-1].write_text("placeholder: true\n")
+
+        with pytest.raises(ProtocolError, match="label\\(s\\) for"):
+            analyze("rg", configs, labels=["only_one"], replicates=[1])
+
+
+def test_repeated_pair_labels_are_refused() -> None:
+    """Two distance pairs with one label would overwrite each other's values."""
+    from polyzymd.analyses.protocols import Request, _measure_distances
+
+    pair = {"label": "d", "selection_a": "name C1", "selection_b": "name C2"}
+    settings = {**ANALYSES["distances"].defaults, "pairs": [pair, pair]}
+    with pytest.raises(ProtocolError, match="repeat"):
+        _measure_distances(None, settings, Request("distances", None, settings, False, None, False))
+
+
+@pytest.mark.parametrize(
+    ("limits", "text"),
+    [((1.9999995, 2.0000004), "1.999999 to 2"), ((0.7733, 1.227), "0.7733 to 1.227"), (None, "na")],
+)
+def test_a_narrow_interval_is_not_printed_as_one_number(limits, text) -> None:
+    """A real, narrow interval prints with enough digits to show both ends, not as 'ci95 2 to 2'."""
+    from polyzymd.analyses.protocols import _interval
+
+    assert _interval(limits) == text
+
+
+def test_the_untestable_reason_is_the_real_one() -> None:
+    """Three replicates with no variance are said to have no variance, not to lack replicates."""
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label=label, n_replicates=3, mean=0.0, replicate_values=[0.0] * 3)
+        for label in ("A", "B")
+    ]
+    pair = PairwiseReport(a="A", b="B", delta=0.0, testable=False)
+    text = " ".join(_verdict("m", None, conditions, [pair]))
+    assert "same value in every replicate" in text and "at least 3" not in text
+
+
+def test_a_selection_on_a_missing_topology_attribute_is_a_protocol_error() -> None:
+    """'chainid A' on a topology without chain IDs names the selection, not a bare AttributeError."""
+    mda = pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.protocols import _empty_selections
+
+    universe = mda.Universe.empty(3, trajectory=True)
+    replicate = SimpleNamespace(index=1, universe=lambda: universe)
+    study = [SimpleNamespace(label="Water", replicates=[replicate])]
+    with pytest.raises(ProtocolError, match="'chainid A'.*chainIDs") as info:
+        _empty_selections(study, {"protein_selection": "chainid A"})
+    assert "resname" in (info.value.hint or "")
+
+
+def test_two_replicates_per_condition_are_never_called_significant() -> None:
+    """At n 2 vs 2 the verdict gives the means and says not testable, whatever p says."""
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label="Water", n_replicates=2, mean=0.0, replicate_values=[0.0, 0.0]),
+        ConditionReport(label="SDS", n_replicates=2, mean=0.4, replicate_values=[0.39, 0.41]),
+    ]
+    pair = PairwiseReport(
+        a="Water", b="SDS", delta=0.4, p=0.03, p_adjusted=0.03, significant=True, testable=True
+    )
+    (text,) = _verdict("coverage", None, conditions, [pair])
+    assert text.startswith("not testable (n < 3): coverage for Water vs SDS")
+    assert "means 0 vs 0.4" in text and "n 2 vs 2" in text
+    assert "larger" not in text and "p_adj" not in text
+
+
+def test_a_constant_control_at_three_replicates_warns_of_low_power() -> None:
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label="Water", n_replicates=3, mean=0.0, replicate_values=[0.0] * 3),
+        ConditionReport(label="SDS", n_replicates=3, mean=0.4, replicate_values=[0.39, 0.4, 0.41]),
+    ]
+    pair = PairwiseReport(
+        a="Water", b="SDS", delta=0.4, p=0.03, p_adjusted=0.03, significant=True, testable=True
+    )
+    (text,) = _verdict("coverage", None, conditions, [pair])
+    assert text.startswith("SDS larger coverage than Water")
+    assert "little power: Water has the same value in every replicate" in text
+
+
+def test_a_test_with_three_varying_replicates_has_no_power_warning() -> None:
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label=label, n_replicates=3, mean=1.0, replicate_values=[0.9, 1.0, 1.1])
+        for label in ("A", "B")
+    ]
+    pair = PairwiseReport(a="A", b="B", delta=0.0, p=0.9, p_adjusted=0.9, testable=True)
+    assert "power" not in " ".join(_verdict("m", None, conditions, [pair]))
+
+
+def test_a_single_replicate_is_not_said_to_have_the_same_value_in_every_replicate() -> None:
+    """At n 1 the verdict names only the replicate count."""
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label="Water", n_replicates=1, mean=0.0, replicate_values=[0.0]),
+        ConditionReport(label="SDS", n_replicates=3, mean=0.4, replicate_values=[0.3, 0.4, 0.5]),
+    ]
+    pair = PairwiseReport(a="Water", b="SDS", delta=0.4, p=0.03, p_adjusted=0.03, testable=True)
+    (text,) = _verdict("coverage", None, conditions, [pair])
+    assert text.startswith("not testable (n < 3)") and "n 1 vs 3" in text
+    assert "same value in every replicate" not in text
+
+
+def test_a_stratum_whose_control_is_left_out_is_summarised_the_others_compared() -> None:
+    """With within, only the conditions whose control matched no atoms go uncompared."""
+    from polyzymd.analyses.protocols import _report_skipping
+    from tests.analyses.test_study_timeseries import temperature_polymer_values
+
+    values = temperature_polymer_values()
+    values.source.study.comparison = {"within": ["temperature_K"], "control": None}
+    study = [SimpleNamespace(label=label) for label in values.rows]
+    empty = {("none 330 K", index): ["polymer"] for index in (1, 2, 3)}
+    report = _report_skipping(values, study, empty, "hydrogen_bonds")
+    assert [(row.a, row.b) for row in report.pairwise] == [
+        ("none 300 K", "SBMA 300 K"),
+        ("none 360 K", "SBMA 360 K"),
+    ]
+    assert "SBMA 330 K" in [condition.label for condition in report.conditions]
+    assert any(
+        "summarised and not compared: SBMA 330 K (control none 330 K)" in text
+        for text in report.warnings
+    )
+    assert len(_report_skipping(temperature_polymer_values(), study, {}, "x").pairwise) == 5
+
+
+# ---------------------------------------------------------------------------
+# Selections left null select the atoms of a role
+# ---------------------------------------------------------------------------
+
+
+def _protein_ligand(tmp_path: Path, partner_chain: str) -> Path:
+    """One condition of two replicates: SER, THR, GLN in chain A and SBM, EGM in ``partner_chain``."""
+    pytest.importorskip("MDAnalysis")
+    pytest.importorskip("openmm")
+    from tests._support.analysis_testkit import write_openmm_frames, write_simulation_config
+    from tests._support.openmm_system import write_openmm_system
+    from tests.analyses import test_hydrogen_bonds_analyze as system
+
+    resindex, resids, resnames = system._resindex_and_names()
+    config = write_simulation_config(tmp_path / "A", scratch=tmp_path / "scratch")
+    for replicate in (1, 2):
+        run_dir = write_openmm_frames(
+            config,
+            replicate,
+            system._frames(system._schedule(replicate)),
+            resindex,
+            resids=resids,
+            names=[atom[0] for atom in system.ATOMS],
+            resnames=resnames,
+            elements=[atom[1] for atom in system.ATOMS],
+            chain_ids=[partner_chain if atom[4] == "C" else atom[4] for atom in system.ATOMS],
+            dimensions=system.BOX,
+        )
+        write_openmm_system(run_dir, system.CHARGES, (), system.CONSTRAINTS)
+    return config
+
+
+def test_the_selection_defaults_are_null_for_the_roles() -> None:
+    assert ANALYSES["hydrogen_bonds"].defaults["groups"] == {"protein": None, "polymer": None}
+    assert ANALYSES["contacts"].defaults["protein_selection"] is None
+    assert ANALYSES["contacts"].defaults["polymer_selection"] is None
+
+
+def test_null_hydrogen_bond_groups_select_the_protein_and_the_ligand(tmp_path: Path) -> None:
+    """Groups named protein and ligand with null selections measure chains A and B, recorded."""
+    config = _protein_ligand(tmp_path, "B")
+    settings = {
+        "groups": {"protein": None, "ligand": None},
+        "summaries": {"protein_ligand": {"between": ["protein", "ligand"]}},
+    }
+    report = analyze(
+        "hydrogen_bonds",
+        [config],
+        equilibration="0ns",
+        settings=settings,
+        plots=False,
+        output_dir=tmp_path / "out",
+    )
+    recorded = report.provenance.settings
+    assert recorded["groups"] == {"protein": "chainid A", "ligand": "chainid B"}
+    assert recorded["summary"]["groups"] == ["chainid A", "chainid B"]
+    assert report.conditions[0].mean > 0
+
+
+def test_null_contact_selections_select_the_protein_and_the_polymer(tmp_path: Path) -> None:
+    """protein_selection and polymer_selection given as null give the default's result."""
+    config = _protein_ligand(tmp_path, "C")
+    options = {"equilibration": "0ns", "plots": False, "output_dir": tmp_path / "out"}
+    given = {"method": "distance", "protein_selection": None, "polymer_selection": None}
+    report = analyze("contacts", [config], settings=given, **options)
+    default = analyze("contacts", [config], settings={"method": "distance"}, **options)
+    assert report.provenance.settings["protein_selection"] == "(chainid A) and not element H"
+    assert report.provenance.settings["polymer_selection"] == "(chainid C) and not element H"
+    assert report.conditions == default.conditions
+
+
+def test_a_null_group_not_named_after_a_role_is_refused(tmp_path: Path) -> None:
+    config = _protein_ligand(tmp_path, "B")
+    settings = {"groups": {"sds": None}, "summaries": {"s": {"within": "sds"}}}
+    with pytest.raises(ProtocolError, match="groups.sds is null.*role 'sds'.*protein, ligand"):
+        analyze("hydrogen_bonds", [config], equilibration="0ns", settings=settings, plots=False)
+
+
+def test_a_two_replicate_summary_gives_no_interval() -> None:
+    from polyzymd.analyses.protocols import _verdict
+
+    two = ConditionReport(label="A", n_replicates=2, mean=1.0, replicate_values=[0.9, 1.1])
+    two.ci95 = (-3.0, 5.0)
+    (text,) = _verdict("rmsd", "A", [two], [])
+    assert text == "A rmsd 1 A (n 2; no interval below 3 replicates)"

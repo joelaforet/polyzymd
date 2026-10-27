@@ -1,46 +1,65 @@
 # Explanation
 
-Explanation pages help you understand why PolyzyMD works the way it does, how
-to interpret outputs, and what assumptions or tradeoffs matter.
+Explanation pages give the reasons behind PolyzyMD's design and the
+assumptions behind each analysis. For the steps of a task, see
+{doc}`../how_to/index`. To look up a key or an option, see
+{doc}`../reference/index`.
 
-## Concepts and Design
+Read these pages in this order to understand an analysis result:
 
-- [Architecture](../tutorials/architecture.md)
-- [Residue Assignment and Chain Conventions](../tutorials/residue_assignment.md)
-- [Colored Logging](../tutorials/colored_logging.md)
+1. {doc}`analysis_concepts`: the steps of an analysis and what PolyzyMD
+   stores.
+2. {doc}`analysis_statistics_best_practices`: why PolyzyMD uses one value per
+   replicate, and how it compares conditions.
+3. {doc}`convergence_detection`: how PolyzyMD checks that a series has
+   reached equilibrium.
+4. The page of the metric you report, under "Metrics" below.
 
-## Analysis Interpretation and Best Practices
-
-- [Statistical Best Practices for Analysis](../tutorials/analysis_statistics_best_practices.md)
-- [RMSF Best Practices](../tutorials/analysis_rmsf_best_practices.md)
-- [RMSF Reference Selection](../tutorials/analysis_reference_selection.md)
-- [RMSF Verification](../tutorials/analysis_rmsf_verification.md)
-- [Catalytic Triad Best Practices](../tutorials/analysis_triad_best_practices.md)
-
-## Experimental Analysis Concepts
-
-These workflows remain available in PolyzyMD, but their interpretation is still
-evolving and they should be treated as experimental:
-
-- [Binding Preference](../tutorials/analysis_binding_preference.md)
-- [Binding Free Energy](../tutorials/analysis_binding_free_energy.md)
-- [Polymer Affinity](../tutorials/analysis_polymer_affinity.md)
-- [Exposure Dynamics](../tutorials/analysis_exposure_dynamics.md)
-
-<!-- IMAGE OPPORTUNITY: Add a chain-convention figure (A/B/C/D+), plus a simple
-stable-vs-experimental analysis map to orient users before they dive into the
-longer conceptual pages. -->
+## Studies and projects
 
 ```{toctree}
-:hidden:
+:caption: Studies and projects
 :maxdepth: 1
 
-Architecture <../tutorials/architecture>
-Residue Assignment and Chain Conventions <../tutorials/residue_assignment>
-Colored Logging <../tutorials/colored_logging>
-Statistical Best Practices for Analysis <../tutorials/analysis_statistics_best_practices>
-RMSF Best Practices <../tutorials/analysis_rmsf_best_practices>
-RMSF Reference Selection <../tutorials/analysis_reference_selection>
-RMSF Verification <../tutorials/analysis_rmsf_verification>
-Catalytic Triad Best Practices <../tutorials/analysis_triad_best_practices>
+projects
+study_folders
+```
+
+## Analysis
+
+```{toctree}
+:caption: Analysis
+:maxdepth: 1
+
+analysis_concepts
+analysis_api
+analysis_entry_points
+analysis_statistics_best_practices
+convergence_detection
+```
+
+## Metrics
+
+```{toctree}
+:caption: Metrics
+:maxdepth: 1
+
+analysis_rmsd_best_practices
+analysis_rg_best_practices
+analysis_rmsf_best_practices
+analysis_reference_selection
+analysis_contact_lifetimes
+analysis_triad_best_practices
+```
+
+## Simulation design
+
+```{toctree}
+:caption: Simulation design
+:maxdepth: 1
+
+simulation_safeguards
+physics_audit
+residue_assignment
+gromacs_parallelism
 ```

@@ -1,0 +1,1285 @@
+"""Tests for simulation runner behaviour.
+
+These tests verify runner logic using mocks to avoid requiring a full
+OpenMM simulation setup (GPU, topology, system, etc.).
+"""
+
+import gc
+import inspect
+import json
+import struct
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+
+def test_completed_minimization_uses_configured_platform_properties():
+    """A recovered minimization must use the shared platform-aware constructor."""
+    from polyzymd.simulation.runner import SimulationRunner
+
+    source = inspect.getsource(SimulationRunner.minimize)
+    assert "simulation = self._create_simulation(integrator)" in source
+    assert "self._get_platform())" not in source
+
+
+class TestThermostatTimescaleFriction:
+    """Verify that thermostat_timescale is converted to friction for the integrator."""
+
+    def _make_stage(self, thermostat_timescale=None, temperature=300.0):
+        """Create a minimal EquilibrationStageConfig."""
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        return EquilibrationStageConfig(
+            name="test",
+            duration=0.001,
+            temperature=temperature,
+            samples=1,
+            thermostat_timescale=thermostat_timescale,
+        )
+
+    def test_default_friction_when_no_timescale(self):
+        """Without thermostat_timescale, friction should be 1.0 / 1.0 = 1.0/ps."""
+        stage = self._make_stage(thermostat_timescale=None)
+        # thermostat_timescale defaults to 1.0 when None, so friction = 1/1 = 1.0
+        timescale = stage.thermostat_timescale if stage.thermostat_timescale else 1.0
+        friction = 1.0 / timescale
+        assert friction == pytest.approx(1.0)
+
+    def test_custom_timescale_produces_correct_friction(self):
+        """thermostat_timescale=2.0 should yield friction=0.5/ps."""
+        stage = self._make_stage(thermostat_timescale=2.0)
+        timescale = stage.thermostat_timescale if stage.thermostat_timescale else 1.0
+        friction = 1.0 / timescale
+        assert friction == pytest.approx(0.5)
+
+    def test_small_timescale_produces_large_friction(self):
+        """thermostat_timescale=0.1 should yield friction=10.0/ps."""
+        stage = self._make_stage(thermostat_timescale=0.1)
+        timescale = stage.thermostat_timescale if stage.thermostat_timescale else 1.0
+        friction = 1.0 / timescale
+        assert friction == pytest.approx(10.0)
+
+    def test_friction_passed_to_create_integrator(self):
+        """run_equilibration_stage must pass the computed friction to _create_integrator.
+
+        We directly invoke the friction computation logic that lives in
+        run_equilibration_stage to verify the conversion, since mocking the
+        full OpenMM simulation loop is fragile.
+        """
+        stage = self._make_stage(thermostat_timescale=2.0)
+
+        # Replicate the exact computation from run_equilibration_stage
+        default_friction = 1.0  # noqa: F841 — mirrors the function parameter
+        thermostat_timescale = stage.thermostat_timescale if stage.thermostat_timescale else 1.0
+        friction = 1.0 / thermostat_timescale
+
+        # The friction passed to _create_integrator must be 0.5, NOT default_friction
+        assert friction == pytest.approx(0.5)
+        assert friction != default_friction
+
+    def test_default_friction_matches_default_timescale(self):
+        """When thermostat_timescale is None, friction should equal default_friction."""
+        stage = self._make_stage(thermostat_timescale=None)
+
+        default_friction = 1.0
+        thermostat_timescale = stage.thermostat_timescale if stage.thermostat_timescale else 1.0
+        friction = 1.0 / thermostat_timescale
+
+        assert friction == pytest.approx(default_friction)
+
+
+class TestBarostatTemperatureRampUpdate:
+    """Verify that barostat temperature is updated during NPT temperature ramps (B3).
+
+    The MonteCarloBarostat must track the integrator temperature during ramps,
+    otherwise volume-move acceptance is evaluated at the wrong temperature.
+    """
+
+    def test_barostat_update_present_in_ramp_loop(self):
+        """The ramp loop must call context.setParameter for the barostat temperature."""
+        import inspect
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
+        # Verify the barostat temperature update is present in the ramp section
+        assert "MonteCarloBarostat.Temperature()" in source
+        assert "context.setParameter" in source
+
+    def test_barostat_update_conditional_on_npt(self):
+        """Barostat temperature update must be conditional on NPT ensemble."""
+        import inspect
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
+        # The setParameter call should appear after an NPT check
+        lines = source.split("\n")
+        for i, line in enumerate(lines):
+            if "MonteCarloBarostat.Temperature()" in line:
+                # Walk backwards to find the nearest ensemble check
+                for j in range(i - 1, max(0, i - 5), -1):
+                    if "Ensemble.NPT" in lines[j]:
+                        break
+                else:
+                    pytest.fail(
+                        "MonteCarloBarostat.Temperature() update not guarded by Ensemble.NPT check"
+                    )
+
+    def test_barostat_temperature_parameter_name(self):
+        """The MonteCarloBarostat.Temperature() parameter name must be correct."""
+        import openmm
+
+        # This is the string used in context.setParameter(...)
+        param_name = openmm.MonteCarloBarostat.Temperature()
+        assert param_name == "MonteCarloTemperature"
+
+    def test_ramp_loop_has_two_barostat_updates(self):
+        """There should be two barostat updates: one in the ramp loop and one at final temp."""
+        import inspect
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
+        count = source.count("MonteCarloBarostat.Temperature()")
+        message = f"Expected 2 barostat temperature updates (ramp loop + final), found {count}"
+        assert count == 2, message
+
+
+class TestRampInterruptTemperature:
+    """Verify interrupted ramps recover temperature from completed steps."""
+
+    @staticmethod
+    def _make_ramp():
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        return EquilibrationStageConfig(
+            name="heating",
+            temperature_start=100.0,
+            temperature_end=400.0,
+            temperature_increment=10.0,
+            temperature_interval_steps=5000,
+            samples=10,
+        )
+
+    def test_completed_step_temperature_is_recorded(self):
+        stage = self._make_ramp()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        assert stage.temperature_at_step(total_steps // 4, total_steps) == pytest.approx(170.0)
+
+    def test_temperature_changes_at_requested_step_boundary(self):
+        stage = self._make_ramp()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        assert stage.temperature_at_step(4999, total_steps) == pytest.approx(100.0)
+        assert stage.temperature_at_step(5000, total_steps) == pytest.approx(110.0)
+
+    def test_temperature_schedule_clamps_to_endpoints(self):
+        stage = self._make_ramp()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        assert stage.temperature_at_step(-1, total_steps) == pytest.approx(100.0)
+        assert stage.temperature_at_step(total_steps + 1, total_steps) == pytest.approx(400.0)
+
+
+class TestRampResumeFastForward:
+    """Verify resumed ramps calculate temperature directly from elapsed steps."""
+
+    def test_resume_uses_elapsed_fraction(self):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        stage = EquilibrationStageConfig(
+            name="heating",
+            temperature_start=200.0,
+            temperature_end=500.0,
+            temperature_increment=10.0,
+            temperature_interval_steps=10000,
+        )
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        assert stage.temperature_at_step(total_steps // 2, total_steps) == pytest.approx(350.0)
+
+    def test_completed_ramp_uses_final_temperature(self):
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        stage = EquilibrationStageConfig(
+            name="heating",
+            temperature_start=100.0,
+            temperature_end=130.0,
+            temperature_increment=10.0,
+            temperature_interval_steps=5000,
+        )
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        assert stage.temperature_at_step(total_steps, total_steps) == pytest.approx(130.0)
+
+
+class TestRampResumeIntegrity:
+    """Protect synchronized state and output handling for interrupted ramps."""
+
+    def test_reference_platform_interrupt_and_resume_appends_outputs(self, tmp_path, monkeypatch):
+        from openmm import System, Vec3, unit
+        from openmm.app import Element, Topology
+
+        from polyzymd.config.schema import EquilibrationStageConfig
+        from polyzymd.simulation import signals
+        from polyzymd.simulation.runner import SimulationRunner
+
+        class DeterministicRunner(SimulationRunner):
+            def _create_integrator(self, *args, **kwargs):
+                integrator = super()._create_integrator(*args, **kwargs)
+                integrator.setRandomNumberSeed(20260721)
+                return integrator
+
+        class EmptyResolver:
+            @staticmethod
+            def resolve(_group):
+                return []
+
+        topology = Topology()
+        chain = topology.addChain("A")
+        residue = topology.addResidue("MOL", chain)
+        topology.addAtom("C", Element.getBySymbol("C"), residue)
+        system = System()
+        system.addParticle(12.0 * unit.dalton)
+        system.setDefaultPeriodicBoxVectors(
+            Vec3(2.0, 0.0, 0.0),
+            Vec3(0.0, 2.0, 0.0),
+            Vec3(0.0, 0.0, 2.0),
+        )
+        positions = [Vec3(0.0, 0.0, 0.0)] * unit.nanometer
+        stage = EquilibrationStageConfig(
+            name="heating",
+            temperature_start=100.0,
+            temperature_end=102.0,
+            temperature_increment=1.0,
+            temperature_interval_steps=5,
+            time_step=1.0,
+            samples=5,
+        )
+
+        # Deliver TERM after the first integration chunk, not during the new
+        # pre-setup interruption boundary where no synchronized state exists.
+        monkeypatch.setattr(
+            signals,
+            "is_interrupted",
+            lambda: runner.simulation is not None and runner.simulation.currentStep > 0,
+        )
+        monkeypatch.setattr(signals, "get_interrupt_signal", lambda: 15)
+        runner = DeterministicRunner(
+            topology=topology,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+        with pytest.raises(signals.GracefulExit):
+            runner.run_equilibration_stage(
+                stage=stage,
+                reference_positions=positions,
+                atom_group_resolver=EmptyResolver(),
+                stage_index=0,
+            )
+
+        stage_dir = tmp_path / "equilibration_0_heating"
+        marker = (stage_dir / "EQ_INTERRUPTED").read_text()
+        assert "steps_completed=5" in marker
+        assert "current_temperature=101.0" in marker
+        assert (stage_dir / "equilibration_0_heating_checkpoint.chk").is_file()
+        assert (stage_dir / "equilibration_0_heating_state.xml").is_file()
+
+        del runner
+        gc.collect()
+        monkeypatch.setattr(signals, "is_interrupted", lambda: False)
+        resumed = DeterministicRunner(
+            topology=topology,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+        resumed._load_eq_stage_state(0, "heating")
+        result = resumed.run_equilibration_stage(
+            stage=stage,
+            reference_positions=positions,
+            atom_group_resolver=EmptyResolver(),
+            stage_index=0,
+            resume_from_step=5,
+            resume_temperature=101.0,
+        )
+
+        assert result["total_steps"] == 10
+        assert not (stage_dir / "EQ_INTERRUPTED").exists()
+        # The first job's velocity and integrator seeds are kept beside the resumed job's.
+        first, second = result["seeds_by_attempt"]
+        assert "velocities" in first and "velocities" not in second
+        assert result["seeds"] == second
+        state_lines = (
+            (stage_dir / "equilibration_0_heating_state_data.csv").read_text().splitlines()
+        )
+        reported_steps = [
+            int(line.split(",", 1)[0]) for line in state_lines if not line.startswith("#")
+        ]
+        assert reported_steps == [2, 4, 6, 8, 10]
+        trajectory = stage_dir / "equilibration_0_heating_trajectory.dcd"
+        with trajectory.open("rb") as handle:
+            header = handle.read(12)
+        assert header[4:8] == b"CORD"
+        assert struct.unpack("<i", header[8:12])[0] == 5
+
+
+# ---------------------------------------------------------------------------
+# B14 – load_checkpoint must restore velocities, not just positions
+# ---------------------------------------------------------------------------
+
+
+class TestLoadCheckpointRestoresVelocities:
+    """load_checkpoint must update _current_velocities from the checkpoint."""
+
+    def test_getstate_requests_velocities(self):
+        """The getState call must include getVelocities=True."""
+        import inspect
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        src = inspect.getsource(SimulationRunner.load_checkpoint)
+        message = "load_checkpoint must call getState with getVelocities=True"
+        assert "getVelocities=True" in src, message
+
+    def test_current_velocities_assigned(self):
+        """_current_velocities must be set from state.getVelocities()."""
+        import inspect
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        src = inspect.getsource(SimulationRunner.load_checkpoint)
+        assert "_current_velocities" in src, "load_checkpoint must update self._current_velocities"
+        assert "getVelocities()" in src, "load_checkpoint must call state.getVelocities()"
+
+
+class TestEquilibrationPortableState:
+    """Portable equilibration state avoids binary System compatibility issues."""
+
+    def test_load_prefers_portable_state(self, tmp_path):
+        from unittest.mock import patch
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage_dir = tmp_path / "equilibration_0_heating"
+        stage_dir.mkdir()
+        (stage_dir / "equilibration_0_heating_state.xml").write_text("<State/>")
+        state = MagicMock()
+        state.getPositions.return_value = "positions"
+        state.getVelocities.return_value = "velocities"
+        state.getPeriodicBoxVectors.return_value = "box"
+        state.getStepCount.return_value = 1234
+        state.getTime.return_value = "time"
+        runner = SimulationRunner.__new__(SimulationRunner)
+        runner._working_dir = tmp_path
+        serializer = MagicMock()
+        serializer.deserialize.return_value = state
+
+        with patch("polyzymd.simulation.runner.XmlSerializer", serializer):
+            runner._load_eq_stage_state(0, "heating")
+
+        assert runner._current_positions == "positions"
+        assert runner._current_velocities == "velocities"
+        assert runner._current_box_vectors == "box"
+        assert runner._current_step_count == 1234
+        assert runner._current_time == "time"
+
+    def test_load_refuses_a_stage_without_portable_state(self, tmp_path):
+        """A completed stage is resumed only from its state XML, not from a binary checkpoint."""
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage_dir = tmp_path / "equilibration_0_heating"
+        stage_dir.mkdir()
+        (stage_dir / "equilibration_0_heating_checkpoint.chk").write_bytes(b"checkpoint")
+        runner = SimulationRunner.__new__(SimulationRunner)
+        runner._working_dir = tmp_path
+
+        with pytest.raises(FileNotFoundError, match="equilibration_0_heating_state.xml"):
+            runner._load_eq_stage_state(0, "heating")
+
+
+class TestEquilibrationResumeMetadata:
+    """Resume markers must match the current derived stage schedule."""
+
+    @staticmethod
+    def _stage():
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        return EquilibrationStageConfig(
+            name="heating",
+            temperature_start=60.0,
+            temperature_end=300.0,
+            temperature_increment=1.0,
+            temperature_interval_steps=500,
+            time_step=2.0,
+        )
+
+    def test_rejects_changed_total_steps(self):
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage = self._stage()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        with pytest.raises(RuntimeError, match="current configuration"):
+            SimulationRunner._validate_eq_resume_metadata(
+                stage,
+                resume_step=100,
+                saved_total_steps=total_steps + 1,
+                saved_temperature=stage.temperature_at_step(100, total_steps),
+                saved_temperature_start=stage.temperature_start,
+                saved_temperature_end=stage.temperature_end,
+                saved_temperature_increment=stage.temperature_increment,
+                saved_temperature_interval_steps=stage.temperature_interval_steps,
+            )
+
+    def test_rejects_changed_ramp_temperature(self):
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage = self._stage()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        with pytest.raises(RuntimeError, match="current schedule"):
+            SimulationRunner._validate_eq_resume_metadata(
+                stage,
+                resume_step=100,
+                saved_total_steps=total_steps,
+                saved_temperature=100.0,
+                saved_temperature_start=stage.temperature_start,
+                saved_temperature_end=stage.temperature_end,
+                saved_temperature_increment=stage.temperature_increment,
+                saved_temperature_interval_steps=stage.temperature_interval_steps,
+            )
+
+    def test_rejects_changed_increment_schedule(self):
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage = self._stage()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+
+        with pytest.raises(RuntimeError, match="marker schedule"):
+            SimulationRunner._validate_eq_resume_metadata(
+                stage,
+                resume_step=100,
+                saved_total_steps=total_steps,
+                saved_temperature=stage.temperature_at_step(100, total_steps),
+                saved_temperature_start=stage.temperature_start,
+                saved_temperature_end=stage.temperature_end,
+                saved_temperature_increment=2.0,
+                saved_temperature_interval_steps=stage.temperature_interval_steps,
+            )
+
+    def test_accepts_matching_schedule(self):
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage = self._stage()
+        total_steps = int(stage.resolved_duration * 1e6 / 2.0)
+        resume_step = total_steps // 2
+
+        SimulationRunner._validate_eq_resume_metadata(
+            stage,
+            resume_step=resume_step,
+            saved_total_steps=total_steps,
+            saved_temperature=stage.temperature_at_step(resume_step, total_steps),
+            saved_temperature_start=stage.temperature_start,
+            saved_temperature_end=stage.temperature_end,
+            saved_temperature_increment=stage.temperature_increment,
+            saved_temperature_interval_steps=stage.temperature_interval_steps,
+        )
+
+
+def _write_eq_stage(
+    working_dir: Path,
+    stage_index: int,
+    stage_name: str,
+    completed: bool = True,
+    interrupted: bool = False,
+    steps_completed: int = 50000,
+    total_steps: int = 100000,
+    current_temperature: float = 300.0,
+    is_temperature_ramping: bool = False,
+) -> None:
+    """Write equilibration stage files on disk."""
+    dir_name = f"equilibration_{stage_index}_{stage_name}"
+    stage_dir = working_dir / dir_name
+    stage_dir.mkdir(parents=True, exist_ok=True)
+
+    if completed or interrupted:
+        (stage_dir / f"{dir_name}_checkpoint.chk").write_bytes(b"\x00" * 16)
+
+    if completed and not interrupted:
+        from polyzymd.simulation.phase_state import write_phase_record
+
+        write_phase_record(
+            stage_dir / "phase.json",
+            phase=dir_name,
+            status="completed",
+            step=total_steps,
+            total_steps=total_steps,
+        )
+
+    if interrupted:
+        (stage_dir / f"{dir_name}_state.xml").write_text("<State/>")
+        (stage_dir / "EQ_INTERRUPTED").write_text(
+            f"stage_index={stage_index}\n"
+            f"stage_name={stage_name}\n"
+            f"steps_completed={steps_completed}\n"
+            f"total_steps={total_steps}\n"
+            f"current_temperature={current_temperature}\n"
+            f"is_temperature_ramping={is_temperature_ramping}\n"
+        )
+
+
+class TestEqInterruptedMarker:
+    """Tests for EQ_INTERRUPTED marker write/read cycle."""
+
+    def test_marker_format(self, tmp_path):
+        """Verify the marker file format written by run_equilibration_stage."""
+        stage_dir = tmp_path / "equilibration_2_npt_eq"
+        stage_dir.mkdir()
+        marker = stage_dir / "EQ_INTERRUPTED"
+        marker.write_text(
+            "stage_index=2\n"
+            "stage_name=npt_eq\n"
+            "steps_completed=75000\n"
+            "total_steps=100000\n"
+            "current_temperature=350.5\n"
+            "is_temperature_ramping=True\n"
+        )
+
+        info = {}
+        for line in marker.read_text().strip().splitlines():
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if key == "steps_completed":
+                info["steps_completed"] = int(value)
+            elif key == "total_steps":
+                info["total_steps"] = int(value)
+            elif key == "current_temperature":
+                info["current_temperature"] = float(value)
+            elif key == "is_temperature_ramping":
+                info["is_temperature_ramping"] = value.lower() == "true"
+
+        assert info["steps_completed"] == 75000
+        assert info["total_steps"] == 100000
+        assert info["current_temperature"] == 350.5
+        assert info["is_temperature_ramping"] is True
+
+
+class TestFindCompletedEqStages:
+    """_find_completed_eq_stages handles completed/interrupted stages."""
+
+    def _make_runner(self, working_dir):
+        """Create a minimal mock SimulationRunner for eq stage detection."""
+        try:
+            from polyzymd.simulation.runner import SimulationRunner
+
+            runner = SimulationRunner.__new__(SimulationRunner)
+            runner._working_dir = Path(working_dir)
+            return runner
+        except ImportError:
+            pytest.skip("polyzymd.simulation.runner not importable")
+
+    def _make_stage(self, name):
+        """Create a minimal mock EquilibrationStageConfig."""
+        stage = MagicMock()
+        stage.name = name
+        return stage
+
+    def test_all_completed(self, tmp_path):
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(tmp_path, 1, "npt_eq", completed=True)
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == [0, 1]
+
+    def test_stops_at_interrupted(self, tmp_path):
+        """Interrupted stage (with EQ_INTERRUPTED marker) is NOT completed."""
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(tmp_path, 1, "npt_eq", interrupted=True)
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == [0]
+
+    def test_orphan_checkpoint_is_not_completion(self, tmp_path):
+        """A hard-kill checkpoint without an atomic completion record is incomplete."""
+        stages = [self._make_stage("heating")]
+        stage_dir = tmp_path / "equilibration_0_heating"
+        stage_dir.mkdir()
+        (stage_dir / "equilibration_0_heating_checkpoint.chk").write_bytes(b"checkpoint")
+        runner = self._make_runner(tmp_path)
+        assert runner._find_completed_eq_stages(stages) == []
+
+    def test_stops_at_first_gap(self, tmp_path):
+        stages = [
+            self._make_stage("heating"),
+            self._make_stage("npt_eq"),
+            self._make_stage("final"),
+        ]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(tmp_path, 2, "final", completed=True)
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == [0]
+
+    def test_empty(self, tmp_path):
+        stages = [self._make_stage("heating")]
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == []
+
+
+class TestFindInterruptedEqStage:
+    """_find_interrupted_eq_stage detects mid-stage interrupts."""
+
+    def _make_runner(self, working_dir):
+        try:
+            from polyzymd.simulation.runner import SimulationRunner
+
+            runner = SimulationRunner.__new__(SimulationRunner)
+            runner._working_dir = Path(working_dir)
+            return runner
+        except ImportError:
+            pytest.skip("polyzymd.simulation.runner not importable")
+
+    def _make_stage(self, name):
+        stage = MagicMock()
+        stage.name = name
+        return stage
+
+    def test_finds_interrupted_stage(self, tmp_path):
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(
+            tmp_path,
+            1,
+            "npt_eq",
+            interrupted=True,
+            steps_completed=75000,
+            total_steps=100000,
+            current_temperature=300.0,
+        )
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[0])
+        assert info is not None
+        assert info["stage_index"] == 1
+        assert info["steps_completed"] == 75000
+        assert info["total_steps"] == 100000
+        assert info["current_temperature"] == 300.0
+
+    def test_no_interrupted_stage(self, tmp_path):
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[0])
+        assert info is None
+
+    def test_all_completed_returns_none(self, tmp_path):
+        stages = [self._make_stage("heating")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[0])
+        assert info is None
+
+    def test_interrupted_without_checkpoint_returns_none(self, tmp_path):
+        """EQ_INTERRUPTED marker without state or checkpoint can't resume."""
+        stages = [self._make_stage("heating")]
+        dir_name = "equilibration_0_heating"
+        stage_dir = tmp_path / dir_name
+        stage_dir.mkdir()
+        (stage_dir / "EQ_INTERRUPTED").write_text(
+            "stage_index=0\nstage_name=heating\n"
+            "steps_completed=5000\ntotal_steps=10000\n"
+            "current_temperature=300.0\nis_temperature_ramping=False\n"
+        )
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+        assert info is None
+
+    def test_interrupted_with_checkpoint_only_restarts_stage(self, tmp_path):
+        """A marker with only a binary checkpoint restarts the stage from its start."""
+        stages = [self._make_stage("heating")]
+        dir_name = "equilibration_0_heating"
+        stage_dir = tmp_path / dir_name
+        stage_dir.mkdir()
+        (stage_dir / "EQ_INTERRUPTED").write_text(
+            "stage_index=0\nstage_name=heating\n"
+            "steps_completed=5000\ntotal_steps=10000\n"
+            "current_temperature=300.0\nis_temperature_ramping=False\n"
+        )
+        (stage_dir / f"{dir_name}_checkpoint.chk").write_bytes(b"\x00" * 16)
+        runner = self._make_runner(tmp_path)
+
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+
+        assert info is None
+
+    def test_interrupted_with_portable_state_can_resume(self, tmp_path):
+        stages = [self._make_stage("heating")]
+        dir_name = "equilibration_0_heating"
+        stage_dir = tmp_path / dir_name
+        stage_dir.mkdir()
+        (stage_dir / "EQ_INTERRUPTED").write_text(
+            "stage_index=0\nstage_name=heating\n"
+            "steps_completed=5000\ntotal_steps=10000\n"
+            "current_temperature=200.0\nis_temperature_ramping=True\n"
+        )
+        (stage_dir / f"{dir_name}_state.xml").write_text("<State/>")
+        runner = self._make_runner(tmp_path)
+
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+
+        assert info is not None
+        assert info["steps_completed"] == 5000
+
+    def test_temperature_ramping_metadata(self, tmp_path):
+        stages = [self._make_stage("ramp")]
+        _write_eq_stage(
+            tmp_path,
+            0,
+            "ramp",
+            interrupted=True,
+            steps_completed=25000,
+            total_steps=50000,
+            current_temperature=200.0,
+            is_temperature_ramping=True,
+        )
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+        assert info is not None
+        assert info["is_temperature_ramping"] is True
+        assert info["current_temperature"] == 200.0
+
+
+# ---------------------------------------------------------------------------
+# Provenance recorded per production segment
+# ---------------------------------------------------------------------------
+
+
+class TestSegmentProvenance:
+    """Each production segment must record the software that produced it."""
+
+    def test_parameters_json_and_progress_carry_provenance(self, tmp_path, monkeypatch):
+        import json
+
+        from openmm import NonbondedForce, System, Vec3, unit
+        from openmm.app import Element, Topology
+
+        from polyzymd.simulation.progress import (
+            SegmentStatus,
+            load_or_scan_progress,
+            load_progress,
+            save_progress,
+        )
+        from polyzymd.simulation.runner import SimulationRunner
+
+        monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "test-env")
+        monkeypatch.setenv("SLURM_JOB_ID", "42")
+
+        topology = Topology()
+        chain = topology.addChain("A")
+        residue = topology.addResidue("MOL", chain)
+        topology.addAtom("C", Element.getBySymbol("C"), residue)
+        system = System()
+        system.addParticle(12.0 * unit.dalton)
+        system.setDefaultPeriodicBoxVectors(
+            Vec3(2.0, 0.0, 0.0), Vec3(0.0, 2.0, 0.0), Vec3(0.0, 0.0, 2.0)
+        )
+        # The NPT barostat requires a periodic force on the system.
+        nonbonded = NonbondedForce()
+        nonbonded.setNonbondedMethod(NonbondedForce.CutoffPeriodic)
+        nonbonded.setCutoffDistance(0.9 * unit.nanometer)
+        nonbonded.addParticle(0.0, 0.3, 0.1)
+        system.addForce(nonbonded)
+        positions = [Vec3(0.0, 0.0, 0.0)] * unit.nanometer
+
+        # Ten 1 fs steps, two frames.
+        total_steps = 10
+        progress = load_or_scan_progress(
+            tmp_path, total_steps=total_steps, total_samples=2, timestep_fs=1.0
+        )
+        save_progress(tmp_path, progress)
+
+        runner = SimulationRunner(
+            topology=topology,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+        runner.run_production(
+            temperature=300.0,
+            duration_ns=total_steps * 1e-6,
+            num_samples=2,
+            timestep_fs=1.0,
+            segment_index=0,
+            report_interval=5,
+            checkpoint_interval_s=3600.0,
+        )
+
+        params = json.loads(
+            (tmp_path / "production_0" / "production_0_parameters.json").read_text()
+        )
+        prov = params["provenance"]
+        assert prov["pixi_environment"] == "test-env"
+        assert prov["slurm_job_id"] == "42"
+        assert prov["openmm_version"]
+        assert prov["polyzymd_version"]
+        assert prov["hostname"]
+        # Existing consumers keep reading the nested __values__ block.
+        assert params["__values__"]["thermo_params"]["__values__"]["temperature"]
+
+        loaded = load_progress(tmp_path)
+        assert loaded is not None
+        seg = loaded.segments[0]
+        assert seg.status == SegmentStatus.COMPLETED
+        assert seg.pixi_environment == "test-env"
+        assert seg.openmm_version == prov["openmm_version"]
+        assert seg.polyzymd_version == prov["polyzymd_version"]
+
+
+# ---------------------------------------------------------------------------
+# Frozen-solute minimization
+# ---------------------------------------------------------------------------
+
+
+class TestFrozenSoluteMinimization:
+    """Minimization must leave solute heavy-atom coordinates exactly unchanged."""
+
+    #: Constraint length (nm) of the solute C-H bond in the toy system below.
+    CONSTRAINT_NM = 0.109
+
+    @staticmethod
+    def _system(tmp_path, hydrogen_offset_nm: float = 0.0):
+        """Toy system: a solute C-H pair plus one clashing water oxygen.
+
+        ``hydrogen_offset_nm`` stretches the input C-H distance away from the
+        constraint length, the way a PDB whose hydrogens were built with a
+        different geometry than the force field's does.
+        """
+        from openmm import NonbondedForce, System, Vec3, unit
+        from openmm.app import Element, Topology
+
+        top = Topology()
+        protein = top.addChain("A")
+        res = top.addResidue("ALA", protein)
+        top.addAtom("CA", Element.getBySymbol("C"), res)
+        top.addAtom("HA", Element.getBySymbol("H"), res)
+        water = top.addChain("D")
+        res = top.addResidue("HOH", water)
+        top.addAtom("O", Element.getBySymbol("O"), res)
+
+        system = System()
+        nb = NonbondedForce()
+        nb.setNonbondedMethod(NonbondedForce.CutoffPeriodic)
+        nb.setCutoffDistance(0.9 * unit.nanometer)
+        for mass in (12.0, 1.0, 16.0):
+            system.addParticle(mass)
+            nb.addParticle(0.0, 0.3, 0.5)
+        nb.addException(0, 1, 0.0, 0.1, 0.0)  # bonded pair: no LJ between CA and HA
+        system.addForce(nb)
+        system.addConstraint(0, 1, TestFrozenSoluteMinimization.CONSTRAINT_NM)
+        system.setDefaultPeriodicBoxVectors(
+            Vec3(3.0, 0.0, 0.0), Vec3(0.0, 3.0, 0.0), Vec3(0.0, 0.0, 3.0)
+        )
+        # Water oxygen placed 0.6 A from CA: a Packmol imperfect-packing residual.
+        hydrogen_x = 1.0 + TestFrozenSoluteMinimization.CONSTRAINT_NM + hydrogen_offset_nm
+        positions = [Vec3(1.0, 1.0, 1.0), Vec3(hydrogen_x, 1.0, 1.0), Vec3(1.0, 1.06, 1.0)] * (
+            unit.nanometer
+        )
+        return top, system, positions
+
+    @staticmethod
+    def _runner(tmp_path, top, system, positions):
+        from polyzymd.simulation.runner import SimulationRunner
+
+        return SimulationRunner(
+            topology=top,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+
+    def test_solute_heavy_atoms_fixed_and_solvent_relaxes(self, tmp_path):
+        import json
+
+        import numpy as np
+        from openmm import unit
+
+        top, system, positions = self._system(tmp_path)
+        runner = self._runner(tmp_path, top, system, positions)
+        energy = runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
+
+        before = np.asarray(positions.value_in_unit(unit.angstrom))
+        after = np.asarray(runner._current_positions.value_in_unit(unit.angstrom))
+        np.testing.assert_array_equal(after[0], before[0])  # heavy solute exactly unchanged
+        assert np.linalg.norm(after[2] - before[2]) > 1.0  # water pushed away
+        assert np.linalg.norm(after[2] - after[0]) > 2.5
+        assert np.isfinite(energy)
+        # The real System keeps its constraints and masses.
+        assert system.getNumConstraints() == 1
+        assert system.getParticleMass(0).value_in_unit(unit.dalton) == 12.0
+        assert system.getParticleMass(1).value_in_unit(unit.dalton) == 1.0
+
+        record = json.loads((tmp_path / "minimization" / "phase.json").read_text())
+        assert record["status"] == "completed"
+        # Only the heavy solute atom is frozen; the hydrogen stays mobile.
+        assert record["frozen_atoms"] == 1
+        assert record["frozen_rmsd_angstrom"] == 0.0
+        assert record["hydrogen_max_displacement_angstrom"] is not None
+
+    def test_misplaced_hydrogen_is_pulled_onto_its_constraint_length(self, tmp_path):
+        """A hydrogen 0.2 A off its constraint length is fixed by minimization."""
+        import json
+
+        import numpy as np
+        from openmm import unit
+
+        top, system, positions = self._system(tmp_path, hydrogen_offset_nm=0.02)
+        runner = self._runner(tmp_path, top, system, positions)
+        runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
+
+        before = np.asarray(positions.value_in_unit(unit.angstrom))
+        after = np.asarray(runner._current_positions.value_in_unit(unit.angstrom))
+        np.testing.assert_array_equal(after[0], before[0])  # heavy atom still exact
+        length = np.linalg.norm(after[1] - after[0])
+        assert abs(length - self.CONSTRAINT_NM * 10.0) < 1e-3  # H snapped onto the constraint
+        assert np.linalg.norm(after[1] - before[1]) > 0.1  # and it really had to move
+
+        record = json.loads((tmp_path / "minimization" / "phase.json").read_text())
+        assert record["frozen_atoms"] == 1
+        assert record["frozen_rmsd_angstrom"] == 0.0
+        assert record["hydrogen_max_displacement_angstrom"] > 0.1
+
+    def test_constraints_are_satisfied_after_frozen_minimization(self, tmp_path):
+        """The state handed to equilibration must satisfy every real constraint."""
+        from openmm import unit
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        top, system, positions = self._system(tmp_path, hydrogen_offset_nm=0.02)
+        # The input state is badly out of tolerance: that is what used to reach
+        # heating and make CCMA diverge on the first step.
+        assert SimulationRunner._max_constraint_violation_angstrom(system, positions) > 0.19
+
+        runner = self._runner(tmp_path, top, system, positions)
+        runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
+
+        violation = SimulationRunner._max_constraint_violation_angstrom(
+            system, runner._current_positions
+        )
+        assert violation < 1e-3
+        # Sanity: the helper measures in Angstrom against the System's own lengths.
+        assert system.getConstraintParameters(0)[2].value_in_unit(unit.nanometer) == (
+            self.CONSTRAINT_NM
+        )
+
+    def test_frozen_copy_keeps_heavy_hydrogen_constraints_as_surrogate_bonds(self, tmp_path):
+        """The copy replaces frozen-mobile constraints instead of dropping them."""
+        import openmm
+
+        top, system, positions = self._system(tmp_path)
+        runner = self._runner(tmp_path, top, system, positions)
+        frozen_system = runner._frozen_copy_of_system([0])
+
+        # OpenMM refuses a constraint that involves a massless particle, so the
+        # constraint is gone from the copy...
+        assert frozen_system.getNumConstraints() == 0
+        # ...but a stiff harmonic surrogate keeps the hydrogen on its bond length.
+        surrogates = [
+            frozen_system.getForce(i)
+            for i in range(frozen_system.getNumForces())
+            if isinstance(frozen_system.getForce(i), openmm.HarmonicBondForce)
+        ]
+        assert len(surrogates) == 1
+        assert surrogates[0].getNumBonds() == 1
+        p1, p2, length, k = surrogates[0].getBondParameters(0)
+        assert {p1, p2} == {0, 1}
+        assert length.value_in_unit(openmm.unit.nanometer) == self.CONSTRAINT_NM
+        assert k.value_in_unit(
+            openmm.unit.kilojoule_per_mole / openmm.unit.nanometer**2
+        ) == pytest.approx(500000.0)
+        # Only the heavy atom is massless.
+        assert frozen_system.getParticleMass(0).value_in_unit(openmm.unit.dalton) == 0.0
+        assert frozen_system.getParticleMass(1).value_in_unit(openmm.unit.dalton) == 1.0
+
+    def test_signal_during_minimization_keeps_the_finished_result(self, tmp_path, monkeypatch):
+        """A job stopped by a signal sent during minimization does not redo it in the next job."""
+        import json
+
+        from polyzymd.simulation import signals
+
+        calls = {"n": 0}
+
+        def interrupted_after_first_check() -> bool:
+            calls["n"] += 1
+            return calls["n"] > 1
+
+        monkeypatch.setattr(signals, "is_interrupted", interrupted_after_first_check)
+        top, system, positions = self._system(tmp_path)
+        runner = self._runner(tmp_path, top, system, positions)
+        with pytest.raises(signals.GracefulExit):
+            runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
+
+        record = json.loads((tmp_path / "minimization" / "phase.json").read_text())
+        assert record["status"] == "completed"
+        assert (tmp_path / "minimization" / "minimized_state.xml").exists()
+
+    def test_unfrozen_minimization_moves_solute(self, tmp_path):
+        import numpy as np
+        from openmm import unit
+
+        top, system, positions = self._system(tmp_path)
+        runner = self._runner(tmp_path, top, system, positions)
+        runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=False)
+        before = np.asarray(positions.value_in_unit(unit.angstrom))
+        after = np.asarray(runner._current_positions.value_in_unit(unit.angstrom))
+        # Without freezing, the overlap is shared between the protein and the water.
+        assert np.linalg.norm(after[0] - before[0]) > 0.1
+
+
+def test_openmm_integrator_noise_is_seeded() -> None:
+    """The integrator's random seed is the replicate's dynamics seed, or 0 without a replicate."""
+    pytest.importorskip("openmm")
+    from polyzymd.simulation import runner as runner_module
+    from polyzymd.simulation.runner import SimulationRunner
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    runner_module._ensure_openmm_loaded()
+    runner = SimulationRunner.__new__(SimulationRunner)
+    runner._replicate = 4
+    integrator = runner._create_integrator(temperature=300.0, phase="production:2")
+    assert integrator.getRandomNumberSeed() == dynamics_seed(4, "production:2")
+    runner._replicate = None
+    assert (
+        runner._create_integrator(temperature=300.0, phase="production:2").getRandomNumberSeed()
+        == 0
+    )
+
+
+def test_openmm_barostat_moves_are_seeded() -> None:
+    """The barostat's random seed is the replicate's dynamics seed of its phase."""
+    openmm = pytest.importorskip("openmm")
+    from polyzymd.simulation import runner as runner_module
+    from polyzymd.simulation.runner import SimulationRunner
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    runner_module._ensure_openmm_loaded()
+    runner = SimulationRunner.__new__(SimulationRunner)
+    runner._replicate = 4
+    runner._system = openmm.System()
+    runner._add_barostat(phase="production:2")
+    (barostat,) = runner._system.getForces()
+    assert barostat.getRandomNumberSeed() == dynamics_seed(4, "barostat:production:2")
+
+
+def _one_atom_runner(working_dir, replicate):
+    """Return a Reference-platform runner of one atom in a periodic box."""
+    from openmm import NonbondedForce, System, Vec3, unit
+    from openmm.app import Element, Topology
+
+    from polyzymd.simulation.runner import SimulationRunner
+
+    topology = Topology()
+    residue = topology.addResidue("MOL", topology.addChain("A"))
+    topology.addAtom("C", Element.getBySymbol("C"), residue)
+    system = System()
+    system.addParticle(12.0 * unit.dalton)
+    system.setDefaultPeriodicBoxVectors(
+        Vec3(2.0, 0.0, 0.0), Vec3(0.0, 2.0, 0.0), Vec3(0.0, 0.0, 2.0)
+    )
+    nonbonded = NonbondedForce()
+    nonbonded.setNonbondedMethod(NonbondedForce.CutoffPeriodic)
+    nonbonded.setCutoffDistance(0.9 * unit.nanometer)
+    nonbonded.addParticle(0.0, 0.3, 0.1)
+    system.addForce(nonbonded)
+    return SimulationRunner(
+        topology=topology,
+        system=system,
+        positions=[Vec3(0.0, 0.0, 0.0)] * unit.nanometer,
+        working_dir=working_dir,
+        platform="Reference",
+        replicate=replicate,
+    )
+
+
+def test_equilibration_stage_result_records_its_times_and_seeds(tmp_path):
+    """A stage reports when it started and finished and the seeds it drew."""
+    pytest.importorskip("openmm")
+    from polyzymd.config.schema import EquilibrationStageConfig
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    class EmptyResolver:
+        @staticmethod
+        def resolve(_group):
+            return []
+
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    stage = EquilibrationStageConfig(
+        name="npt", ensemble="NPT", temperature=300.0, duration=0.00001, samples=2
+    )
+    result = runner.run_equilibration_stage(
+        stage=stage,
+        reference_positions=runner._current_positions,
+        atom_group_resolver=EmptyResolver(),
+        stage_index=0,
+    )
+    assert result["started_at"] <= result["finished_at"]
+    assert result["seeds"] == {
+        "integrator": dynamics_seed(3, "equilibration:0:0"),
+        "barostat": dynamics_seed(3, "barostat:equilibration:0:0"),
+        "velocities": dynamics_seed(3, "velocities:equilibration:0"),
+    }
+
+
+def test_production_segment_records_its_seeds(tmp_path):
+    """progress.json holds the integrator, barostat and velocity seeds of a production segment."""
+    pytest.importorskip("openmm")
+    from polyzymd.simulation.progress import load_or_scan_progress, load_progress, save_progress
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    save_progress(
+        tmp_path, load_or_scan_progress(tmp_path, total_steps=10, total_samples=2, timestep_fs=1.0)
+    )
+    _one_atom_runner(tmp_path, replicate=3).run_production(
+        temperature=300.0,
+        duration_ns=1e-5,
+        num_samples=2,
+        timestep_fs=1.0,
+        segment_index=0,
+        report_interval=5,
+        checkpoint_interval_s=3600.0,
+    )
+    (segment,) = load_progress(tmp_path).segments
+    assert segment.seeds == {
+        "integrator": dynamics_seed(3, "production:0"),
+        "barostat": dynamics_seed(3, "barostat:production:0"),
+        "velocities": dynamics_seed(3, "velocities:production"),
+    }
+    assert segment.started_at <= segment.finished_at
+
+
+def _production_phase(**settings):
+    """Return a production phase config with the given settings."""
+    from polyzymd.config.schema import SimulationPhaseConfig
+
+    return SimulationPhaseConfig(
+        **{"ensemble": "NPT", "duration": 1e-5, "samples": 2, "time_step": 1.0, **settings}
+    )
+
+
+def _run_production(tmp_path, production):
+    """Run a one-step-scale production of one atom with ``production``'s settings."""
+    from polyzymd.simulation.progress import load_or_scan_progress, save_progress
+    from polyzymd.simulation.runner import production_dynamics
+
+    save_progress(
+        tmp_path, load_or_scan_progress(tmp_path, total_steps=10, total_samples=2, timestep_fs=1.0)
+    )
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    result = runner.run_production(
+        temperature=300.0,
+        duration_ns=1e-5,
+        num_samples=2,
+        timestep_fs=1.0,
+        segment_index=0,
+        report_interval=5,
+        checkpoint_interval_s=3600.0,
+        **production_dynamics(production),
+    )
+    params = json.loads((tmp_path / "production_0" / "production_0_parameters.json").read_text())[
+        "__values__"
+    ]["thermo_params"]["__values__"]
+    return runner, result, params
+
+
+def test_production_runs_the_ensemble_and_thermostat_of_the_config(tmp_path):
+    """An NVT production with Langevin at 2 ps has no barostat and friction 0.5/ps."""
+    openmm = pytest.importorskip("openmm")
+    from openmm import unit
+
+    runner, result, params = _run_production(
+        tmp_path,
+        _production_phase(
+            ensemble="NVT", thermostat="Langevin", thermostat_timescale=2.0, barostat="MC"
+        ),
+    )
+    integrator = runner.simulation.integrator
+    assert type(integrator) is openmm.LangevinIntegrator
+    assert integrator.getFriction().value_in_unit(unit.picosecond**-1) == pytest.approx(0.5)
+    forces = runner.simulation.system.getForces()
+    assert not any(isinstance(force, openmm.MonteCarloBarostat) for force in forces)
+    assert result["ensemble"] == "NVT"
+    assert "barostat_params" not in params
+    assert params["thermostat_params"]["__values__"]["thermostat"] == "Langevin"
+
+
+def test_npt_production_moves_the_volume_at_the_configured_frequency(tmp_path):
+    """barostat_frequency of the production phase reaches OpenMM's Monte Carlo barostat."""
+    openmm = pytest.importorskip("openmm")
+
+    runner, result, params = _run_production(
+        tmp_path, _production_phase(barostat="MC", barostat_frequency=50)
+    )
+    (barostat,) = [
+        force
+        for force in runner.simulation.system.getForces()
+        if isinstance(force, openmm.MonteCarloBarostat)
+    ]
+    assert barostat.getFrequency() == 50
+    assert type(runner.simulation.integrator) is openmm.LangevinMiddleIntegrator
+    assert result["ensemble"] == "NPT"
+    assert params["barostat_params"]["__values__"]["frequency"] == 50
+
+
+def test_an_equilibration_stage_runs_its_thermostat(tmp_path):
+    """A stage with thermostat Langevin runs OpenMM's LangevinIntegrator, not LangevinMiddle."""
+    openmm = pytest.importorskip("openmm")
+    from polyzymd.config.schema import EquilibrationStageConfig
+
+    class EmptyResolver:
+        @staticmethod
+        def resolve(_group):
+            return []
+
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    stage = EquilibrationStageConfig(
+        name="nvt",
+        ensemble="NVT",
+        temperature=300.0,
+        duration=0.00001,
+        samples=2,
+        thermostat="Langevin",
+    )
+    runner.run_equilibration_stage(
+        stage=stage,
+        reference_positions=runner._current_positions,
+        atom_group_resolver=EmptyResolver(),
+        stage_index=0,
+    )
+    assert type(runner.simulation.integrator) is openmm.LangevinIntegrator
+
+
+def test_production_refuses_a_thermostat_openmm_does_not_run(tmp_path):
+    """The parameters record the thermostat, so production must not run another one."""
+    pytest.importorskip("openmm")
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    with pytest.raises(ValueError, match="not 'NoseHoover'"):
+        runner.run_production(
+            temperature=300.0,
+            duration_ns=1e-5,
+            num_samples=2,
+            timestep_fs=1.0,
+            report_interval=5,
+            checkpoint_interval_s=3600.0,
+            thermostat="NoseHoover",
+        )
