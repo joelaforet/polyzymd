@@ -128,6 +128,11 @@ treelib               = "*"
 boltons               = "*"
 parmed                = ">=3.4.3"
 hoomd                 = { version = ">=4", build = "cpu*" }
+# openff-pablo (pinned under pypi-dependencies) imports these but does not
+# declare them.
+gemmi                 = "*"
+pyxdg                 = "*"
+rustworkx             = "*"
 # Opens the notebooks of src/polyzymd/templates/notebooks (pixi run -e build jupyter lab ...).
 jupyterlab            = ">=4"
 notebook              = ">=7"  # JupyterLab looks for its extension at startup
@@ -140,6 +145,9 @@ pytorch               = "2.6.*"
 [feature.builder.pypi-dependencies]
 # Dynamic polymers are built with mBuild's Polymer from this tag of the fork.
 mbuild = { git = "https://github.com/joelaforet/mbuild.git", tag = "biopolymers-v0.1.0" }
+# Modified proteins are read into OpenFF with openff-pablo, which is not on
+# PyPI or conda-forge; this tag is commit fb364e9a.
+openff-pablo = { git = "https://github.com/openforcefield/openff-pablo.git", tag = "v0.2.2" }
 
 
 # =============================================================================
