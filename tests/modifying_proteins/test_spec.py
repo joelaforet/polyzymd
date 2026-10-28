@@ -140,3 +140,13 @@ def test_spec_round_trip_rebuilds_the_same_protein(library: Path) -> None:
     assert second.atom_keys() == first.atom_keys()
     assert mp.modification_sites(second) == mp.modification_sites(first)
     assert mp.segments(second) == mp.segments(first)
+
+
+def test_to_spec_refuses_a_fragment_it_cannot_write() -> None:
+    from mbuild.biopolymers import prepare_fragment
+
+    protein = mp.load_protein(TRPCAGE)
+    acetyl = prepare_fragment("*C(=O)C", "ACY")  # built with mBuild directly
+    mp.attach(protein, acetyl, type="generic", site="A:S13", atom_name="OG", relax=False)
+    with pytest.raises(ValueError, match="built outside"):
+        mp.to_spec(protein)

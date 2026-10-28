@@ -87,7 +87,14 @@ def apply_spec(
     each = relax == "per_modification"
     mutations, modifications = expand(spec, base_dir)
     for entry in mutations:
-        api.mutate(protein, entry["site"], entry["to"], stereo=entry.get("stereo"), relax=each)
+        api.mutate(
+            protein,
+            entry["site"],
+            entry["to"],
+            stereo=entry.get("stereo"),
+            relax=each,
+            minimize=each,
+        )
     for entry in modifications:
         ((verb, arguments),) = entry.items()
         if verb == "attach":
@@ -110,6 +117,12 @@ def to_spec(protein: api.ModifiedProtein) -> dict:
         if record.kind == "mutate":
             mutations.append({"site": site, **arguments})
         elif record.kind == "attach":
+            if arguments.get("fragment") is None:
+                raise ValueError(
+                    f"Attachment {record.name} used a fragment built outside "
+                    "polyzymd.modifying_proteins, so it cannot be written as data. Build it "
+                    "with fragment_from_smiles, fragment_from_pdb or fragment_from_ccd."
+                )
             entry = {"type": record.type, "name": record.name, "site": site, **arguments}
             modifications.append({"attach": entry})
         else:
