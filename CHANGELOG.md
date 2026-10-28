@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `A:N58` or `A:ASN58` and checked against the structure; each call records
   the atoms it added, removed or renamed and the change in formal charge.
   Mutations must come before every other change.
+- `modification_sites` and `segments`: the atoms each modification owns (the
+  anchor residue's side chain from CB outward plus every attached atom; a
+  non-canonical residue's side chain) and each atom's segment (`PROT`, or the
+  attachment's own). `apply_spec`, `to_spec` and `to_yaml` read and write
+  `mutations:` and `modifications:` blocks; group entries (`chains` with
+  `residues` or `glycans`, `sites`, `sites_file`) expand to one record per site.
 
 ### Changed
 
