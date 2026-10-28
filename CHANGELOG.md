@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `build` and `test` environments install openff-pablo 0.2.2 (from its git
   tag, with gemmi, pyxdg and rustworkx, which it imports but does not declare),
   for reading covalently modified proteins into OpenFF in 1.4.
+- The `build` and `test` environments install numba, which mBuild needs to
+  relax a placement after `attach` or `mutate`.
 
 ## [1.3.0] - 2026-10-24
 
