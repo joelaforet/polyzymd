@@ -143,6 +143,11 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
         atoms = {atom for atom in explicit[name] if atom in present}
         for residue in anchors[name]:
             atoms.update(a for a in residue_atoms.get(residue, ()) if a.atom_name not in BACKBONE)
+        # Every atom of a residue the attachment created, including atoms a
+        # reaction moved there from the protein (the thiol H of a maleimide).
+        for residue, owner_name in fragment_residues.items():
+            if owner_name == name:
+                atoms.update(residue_atoms.get(residue, ()))
         ordered = sorted(atoms, key=order.__getitem__)
         sites.append(
             ModificationSite(

@@ -189,3 +189,24 @@ def test_two_glycans_are_two_sites_and_two_segments() -> None:
     _glycosylate(protein, "A:S20", "OG", "O-glycosylation")
     assert [site.name for site in mp.modification_sites(protein)] == ["G001", "G002"]
     assert {"G001", "G002", "PROT"} == set(mp.segments(protein))
+
+
+def test_atoms_a_reaction_moves_into_the_attached_residue_join_the_site() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    mp.mutate(protein, "A:S13", "CYS", relax=False)
+    record = mp.attach(
+        protein,
+        {"smiles": "CCN1C(=O)C=CC1=O", "resname": "NEM"},
+        type="generic",
+        site="A:C13",
+        atom_name="SG",
+        reaction="thiol-maleimide",
+        relax=False,
+    )
+    (site,) = mp.modification_sites(protein)
+    (residue,) = record.new_residues
+    attached = {key for key in protein.atom_keys() if key.resnum == residue[1]}
+    # The thiol hydrogen moves onto the maleimide carbon; it is renamed, not added.
+    assert any(new.resnum == residue[1] for _, new in record.renamed)
+    assert attached <= set(site.atoms)
+    assert len(site.atoms) == 4 + len(attached)
