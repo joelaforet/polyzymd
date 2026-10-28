@@ -727,6 +727,10 @@ stages too. `polyzymd validate` warns when a constant-temperature stage, or the
 end of a ramp in the last stage, differs from this one, and marks that stage in
 its summary.
 
+`pressure` is the pressure of every `NPT` phase: each `NPT` equilibration stage
+and an `NPT` production, with both engines. `NVT` phases run no barostat, so it
+does not apply to them.
+
 ---
 
 ## Simulation Phases Configuration
@@ -807,6 +811,14 @@ stages continue to require an explicit `duration`.
 | `NVT` | Constant volume, temperature |
 | `NPT` | Constant pressure, temperature |
 | `NVE` | Not run: both engines keep the thermostat on, so `validate` refuses it |
+
+PolyzyMD runs the ensemble each phase names. An `NVT` equilibration stage or
+production runs no barostat, so the box keeps the volume the phase before it
+ended with. An `NPT` one runs the barostat at `thermodynamics.pressure`. Every
+production segment after the first runs the ensemble of the first (see
+{doc}`../how_to/run_longer`). To keep the density an `NPT` stage reached while
+running at another temperature, end equilibration with an `NVT` stage that
+ramps to the new temperature and set production to `NVT`.
 
 ### Thermostats
 

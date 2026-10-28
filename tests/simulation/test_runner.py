@@ -1269,6 +1269,61 @@ def test_an_equilibration_stage_runs_its_thermostat(tmp_path):
     assert type(runner.simulation.integrator) is openmm.LangevinIntegrator
 
 
+def _run_stage(tmp_path, stage, **kwargs):
+    """Run ``stage`` on the one-atom runner and return the runner and the stage result."""
+
+    class EmptyResolver:
+        @staticmethod
+        def resolve(_group):
+            return []
+
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    result = runner.run_equilibration_stage(
+        stage=stage,
+        reference_positions=runner._current_positions,
+        atom_group_resolver=EmptyResolver(),
+        stage_index=0,
+        **kwargs,
+    )
+    return runner, result
+
+
+def test_an_npt_equilibration_stage_runs_the_configured_pressure(tmp_path):
+    """An NPT stage's barostat holds thermodynamics.pressure, not a fixed 1 atm."""
+    openmm = pytest.importorskip("openmm")
+    from openmm import unit
+
+    from polyzymd.config.schema import EquilibrationStageConfig
+
+    stage = EquilibrationStageConfig(
+        name="npt", ensemble="NPT", temperature=300.0, duration=0.00001, samples=2
+    )
+    runner, result = _run_stage(tmp_path, stage, pressure=100.0)
+    (barostat,) = [
+        force
+        for force in runner.simulation.system.getForces()
+        if isinstance(force, openmm.MonteCarloBarostat)
+    ]
+    assert barostat.getDefaultPressure().value_in_unit(unit.atmosphere) == pytest.approx(100.0)
+    assert result["ensemble"] == "NPT"
+    assert result["pressure_atm"] == 100.0
+
+
+def test_an_nvt_equilibration_stage_runs_no_barostat(tmp_path):
+    """An NVT stage removes the barostat whatever the pressure, and records no pressure."""
+    openmm = pytest.importorskip("openmm")
+    from polyzymd.config.schema import EquilibrationStageConfig
+
+    stage = EquilibrationStageConfig(
+        name="nvt", ensemble="NVT", temperature=300.0, duration=0.00001, samples=2
+    )
+    runner, result = _run_stage(tmp_path, stage, pressure=100.0)
+    forces = runner.simulation.system.getForces()
+    assert not any(isinstance(force, openmm.MonteCarloBarostat) for force in forces)
+    assert result["ensemble"] == "NVT"
+    assert result["pressure_atm"] is None
+
+
 def test_production_refuses_a_thermostat_openmm_does_not_run(tmp_path):
     """The parameters record the thermostat, so production must not run another one."""
     pytest.importorskip("openmm")

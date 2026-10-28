@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - Unreleased
+
+### Fixed
+
+- **NPT equilibration stages run at `thermodynamics.pressure`.**  With `engine: openmm`, every NPT equilibration stage ran its barostat at 1 atm, whatever `thermodynamics.pressure` said; production and the GROMACS engine used the configured pressure. Stages now use it too, and the stage results record `pressure_atm`. Configs at 1 atm, the default, run as before. The configuration reference now states that PolyzyMD runs the ensemble each phase names: `NVT` phases run no barostat and `NPT` phases run it at `thermodynamics.pressure`.
+
 ## [1.3.0] - 2026-10-24
 
 ### What changed for you (read this first)
