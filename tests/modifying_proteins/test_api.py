@@ -162,3 +162,79 @@ def test_unknown_attachment_type_is_refused() -> None:
         mp.plan_attach(
             protein, {"smiles": "*C", "resname": "MET"}, type="dye", site="A:K8", atom_name="NZ"
         )
+
+
+@pytest.mark.parametrize(
+    ("verb", "site", "atom_name"),
+    [("protonate", "A:S13", "OG"), ("protonate", "A:D9", "OD1"), ("protonate", "A:K8", "NZ")],
+)
+def test_protonation_that_changes_nothing_is_refused(verb, site, atom_name) -> None:
+    protein = mp.load_protein(TRPCAGE)
+    with pytest.raises(ValueError, match="would change nothing"):
+        getattr(mp, verb)(protein, site, atom_name)
+    assert protein.records == []
+
+
+def test_repeated_deprotonation_is_refused() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    mp.deprotonate(protein, "A:K8", "NZ")
+    with pytest.raises(ValueError, match="would change nothing"):
+        mp.deprotonate(protein, "A:K8", "NZ")
+    assert len(protein.records) == 1
+
+
+def test_a_planned_mutation_is_refused_after_another_change() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    plan = mp.plan_mutate(protein, "A:L2", "ALA", relax=False)
+    mp.deprotonate(protein, "A:K8", "NZ")
+    with pytest.raises(ValueError, match="Mutations come before"):
+        mp.apply(protein, plan)
+
+
+def test_a_plan_cannot_be_applied_twice() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    plan = mp.plan_mutate(protein, "A:L2", "ALA", relax=False)
+    mp.apply(protein, plan)
+    with pytest.raises(ValueError, match="already applied"):
+        mp.apply(protein, plan)
+
+
+def test_automatic_names_skip_names_already_taken() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    acetyl = {"smiles": "*C(=O)C", "resname": "ACY"}
+    names = [
+        mp.attach(
+            protein, acetyl, type="generic", site=site, atom_name="OG", relax=False, **name
+        ).name
+        for site, name in (("A:S13", {"name": "M002"}), ("A:S14", {}), ("A:S20", {}))
+    ]
+    assert names == ["M002", "M001", "M003"]
+
+
+def test_attachment_names_must_fit_a_segment_id() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    with pytest.raises(ValueError, match="one to four letters or digits"):
+        mp.attach(
+            protein,
+            {"smiles": "*C(=O)C", "resname": "ACY"},
+            type="generic",
+            site="A:S13",
+            atom_name="OG",
+            name="ACETYL",
+            relax=False,
+        )
+    assert protein.records == []
+
+
+def test_site_code_ending_in_a_digit_is_read_against_the_structure() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    mp.mutate(protein, "A:Y3", {"smiles": "*CCO", "resname": "HY3"}, relax=False)
+    # A:HY33 reads as HY 33 or HY3 3; only residue 3 (HY3) exists.
+    plan = mp.plan_attach(
+        protein,
+        {"smiles": "*C(=O)C", "resname": "ACY"},
+        type="generic",
+        site="A:HY33",
+        atom_name="O1",
+    )
+    assert (plan.site.code, plan.site.resnum) == ("HY3", 3)

@@ -56,3 +56,45 @@ def test_resolve_checks_the_residue_name() -> None:
         resolve(protein, parse_site("A:K9"))
     with pytest.raises(ValueError, match="No residue with number 99"):
         resolve(protein, parse_site("A:K99"))
+
+
+class _Residues:
+    """A stand-in structure with residues named by (number, name)."""
+
+    def __init__(self, residues):
+        self.residues = residues
+
+    def get_residue(self, resnum, chain_id=None, icode=""):
+        from mbuild.exceptions import MBuildError
+
+        if resnum not in self.residues:
+            raise MBuildError(f"No residue with number {resnum}")
+        return type("Residue", (), {"name": self.residues[resnum], "resnum": resnum})()
+
+
+def test_resolve_text_reads_a_code_ending_in_a_digit_by_the_structure() -> None:
+    from polyzymd.modifying_proteins.sites import candidate_sites, resolve_text
+
+    assert [(s.code, s.resnum) for s in candidate_sites("A:HY312")] == [
+        ("HY", 312),
+        ("HY3", 12),
+        ("HY31", 2),
+    ]
+    site, residue = resolve_text(_Residues({12: "HY3"}), "A:HY312")
+    assert (site.code, site.resnum, residue.name) == ("HY3", 12, "HY3")
+
+
+def test_resolve_text_refuses_two_readings_that_both_exist() -> None:
+    from polyzymd.modifying_proteins.sites import resolve_text
+
+    with pytest.raises(ValueError, match="more than one residue"):
+        resolve_text(_Residues({12: "HY3", 312: "HY"}), "A:HY312")
+
+
+def test_resolve_text_keeps_the_numbering_hint_when_nothing_matches() -> None:
+    from polyzymd.modifying_proteins.sites import resolve_text
+
+    with pytest.raises(ValueError, match="residue 9 of chain A is ASP"):
+        resolve_text(_Residues({9: "ASP"}), "A:K9")
+    with pytest.raises(ValueError, match="Other readings tried"):
+        resolve_text(_Residues({312: "GLY"}), "A:HY312")

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from polyzymd.modifying_proteins.sites import Site, parse_site, resolve
+from polyzymd.modifying_proteins.sites import Site, resolve, resolve_text
 
 #: Attachment types; each has its own segment prefix and checks.
 ATTACHMENT_TYPES = ("glycan", "polymer", "generic")
@@ -191,13 +191,8 @@ def plan_mutate(
     ``"4II"``), ``{"smiles": "*Cc1ccccc1", "resname": "PHX"}`` for a side
     chain whose ``*`` bonds to CA, or ``{"ccd_file": "path/XYZ.cif"}``.
     """
-    if any(record.kind != "mutate" for record in protein.records):
-        raise ValueError(
-            "Mutations come before protonation changes and attachments. Apply every "
-            "mutation first."
-        )
-    site = _site(site)
-    residue = resolve(protein.mbuild, site)
+    _check_mutations_first(protein)
+    site, residue = _site(protein, site)
     target, arguments = _mutation_target(protein, to)
     if stereo is not None:
         arguments["stereo"] = stereo
@@ -226,10 +221,12 @@ def plan_deprotonate(protein: ModifiedProtein, site: str | Site, atom_name: str)
 
 
 def _plan_protonation(protein, site, atom_name, kind):
-    site = _site(site)
-    residue = resolve(protein.mbuild, site)
+    site, residue = _site(protein, site)
     method = getattr(protein.mbuild, f"plan_{kind}")
     plan = method(residue.resnum, atom_name, chain_id=site.chain_id, icode=site.icode)
+    if not (plan.leaving if kind == "deprotonate" else plan.new_hydrogens):
+        reason = getattr(plan, "_state", {}).get("noop", "")
+        raise ValueError(f"{kind} {site} {atom_name} would change nothing. {reason}".strip())
     return _view(kind, site, {"atom_name": atom_name}, plan)
 
 
@@ -262,8 +259,7 @@ def plan_attach(
     """
     if type not in ATTACHMENT_TYPES:
         raise ValueError(f"Attachment type {type!r}; use one of {', '.join(ATTACHMENT_TYPES)}.")
-    site = _site(site)
-    residue = resolve(protein.mbuild, site)
+    site, residue = _site(protein, site)
     if isinstance(fragment, dict):
         fragment = _fragment_from_source(protein, fragment)
     source = fragment_source(fragment)
@@ -312,11 +308,22 @@ def plan_attach(
 
 def apply(protein: ModifiedProtein, plan: ModificationPlan) -> ModificationRecord:
     """Apply a plan and append the record of what it did."""
-    if plan.kind == "attach" and plan.name is None:
-        count = sum(1 for r in protein.records if r.kind == "attach" and r.type == plan.type)
-        plan.name = f"{_NAME_PREFIX[plan.type]}{count + 1:03d}"
-    if plan.name is not None and any(r.name == plan.name for r in protein.records):
-        raise ValueError(f"A modification named {plan.name!r} already exists.")
+    if plan._mbuild_plan.applied:
+        raise ValueError("This plan was already applied; plan the modification again.")
+    if plan.kind == "mutate":
+        _check_mutations_first(protein)
+    name = plan.name
+    if plan.kind == "attach":
+        taken = {record.name for record in protein.records}
+        if name is None:
+            name = _next_name(_NAME_PREFIX[plan.type], taken)
+        elif name in taken:
+            raise ValueError(f"A modification named {name!r} already exists.")
+        elif not (name.isalnum() and len(name) <= 4):
+            raise ValueError(
+                f"Attachment name {name!r} must be one to four letters or digits: it "
+                "becomes the attachment's PSF segment ID."
+            )
     residue_before = resolve(protein.mbuild, plan.site).name
     before = _snapshot(protein.mbuild)
     charge_before = protein.mbuild.net_formal_charge
@@ -351,7 +358,7 @@ def apply(protein: ModifiedProtein, plan: ModificationPlan) -> ModificationRecor
         formal_charge_change=protein.mbuild.net_formal_charge - charge_before,
         plan_text=plan.text,
         type=plan.type,
-        name=plan.name,
+        name=name,
     )
     protein.records.append(record)
     return record
@@ -410,8 +417,28 @@ def relax_all(
 # ---------------------------------------------------------------------------
 
 
-def _site(site: str | Site) -> Site:
-    return site if isinstance(site, Site) else parse_site(site)
+def _site(protein: ModifiedProtein, site: str | Site):
+    """Return the Site and the mBuild residue it names, checked against the structure."""
+    if isinstance(site, Site):
+        return site, resolve(protein.mbuild, site)
+    return resolve_text(protein.mbuild, site)
+
+
+def _check_mutations_first(protein: ModifiedProtein) -> None:
+    if any(record.kind != "mutate" for record in protein.records):
+        raise ValueError(
+            "Mutations come before protonation changes and attachments. Apply every "
+            "mutation first."
+        )
+
+
+def _next_name(prefix: str, taken: set) -> str:
+    number = 1
+    while f"{prefix}{number:03d}" in taken:
+        number += 1
+    if number > 999:
+        raise ValueError(f"More than 999 attachments of one type ({prefix}); name them.")
+    return f"{prefix}{number:03d}"
 
 
 def _mutation_target(protein: ModifiedProtein, to) -> tuple[Any, dict]:

@@ -106,6 +106,53 @@ def _valid_code(code: str) -> bool:
     return code.upper() in ONE_LETTER if len(code) == 1 else True
 
 
+def candidate_sites(text: str) -> list[Site]:
+    """Return every reading of ``text`` as a code and a number.
+
+    A code may end in a digit (``A:HY312`` is HY 312 or HY3 12), so the
+    structure decides between readings; see ``resolve_text``.
+    """
+    chain, _, rest = str(text).strip().partition(":")
+    if not chain.isalnum() or not rest:
+        return []
+    sites = []
+    for split in range(1, len(rest)):
+        code, number = rest[:split], re.fullmatch(r"(-?\d+)([A-Za-z]?)", rest[split:])
+        if number and _valid_code(code):
+            sites.append(Site(chain, code.upper(), int(number[1]), number[2].upper()))
+    return sites
+
+
+def resolve_text(protein, text: str):
+    """Return the Site and mBuild residue that ``text`` names in ``protein``.
+
+    Every reading of the code and number is tried against the structure,
+    and the one that names an existing residue of that name is used.
+    """
+    primary = parse_site(text)  # the reading with the shortest code
+    candidates = candidate_sites(text)
+    matches = []
+    for site in candidates:
+        try:
+            matches.append((site, resolve(protein, site)))
+        except ValueError:
+            continue
+    if len(matches) == 1:
+        return matches[0]
+    readings = ", ".join(f"{site.code} {site.resnum}{site.icode}" for site in candidates)
+    if matches:
+        raise ValueError(
+            f"Site {text} names more than one residue ({readings}); write a code "
+            "that does not end in a digit, or the three-letter code."
+        )
+    if len(candidates) > 1:
+        try:
+            resolve(protein, primary)
+        except ValueError as error:
+            raise ValueError(f"{error} (Other readings tried: {readings}.)") from error
+    return primary, resolve(protein, primary)
+
+
 def canonical_name(resname: str) -> str:
     """Return the canonical residue a variant name stands for (``LYN`` -> ``LYS``)."""
     return _VARIANTS.get(resname.upper(), resname.upper())
