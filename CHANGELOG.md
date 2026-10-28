@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `polyzymd.modifying_proteins`: mutate, protonate, deprotonate and covalently
+  modify a protein (`attach` with `type: glycan | polymer | generic`) through
+  stable PolyzyMD names over the mBuild biopolymers fork. Sites are written
+  `A:N58` or `A:ASN58` and checked against the structure; each call records
+  the atoms it added, removed or renamed and the change in formal charge.
+  Mutations must come before every other change.
+
 ### Changed
 
 - The `build` and `test` environments install openff-pablo 0.2.2 (from its git
