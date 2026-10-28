@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - Unreleased
+
+### Added
+
+- **A `polyzymd-organize` agent skill.**  `.claude/skills/polyzymd-organize/SKILL.md` tells an agent how to lay out a project: where configs, inputs, runs, job scripts and results go; how to choose studies (one control each, so a polymer comparison at a second temperature is its own study); `project init`, `add-study` and `add-condition` with a check and a commit after each; setting `scratch_directory` on a cluster, because `add-condition` sets it to null for a config without runs; and bringing in runs that already exist, including chains still running.
+
 ## [1.3.0] - 2026-10-24
 
 ### What changed for you (read this first)
