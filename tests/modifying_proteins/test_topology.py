@@ -91,21 +91,80 @@ def test_noncanonical_residue_is_a_site_and_a_click_on_it_grows_it() -> None:
 
 def test_protonation_changes_make_sites_only_outside_the_ff14sb_variants() -> None:
     protein = mp.load_protein(TRPCAGE)
-    mp.deprotonate(protein, "A:K8", "NZ")  # LYN: an ff14SB residue
+    for site, residue in (("A:L2", "CYS"), ("A:I4", "HIS"), ("A:Q5", "GLU")):
+        mp.mutate(protein, site, residue, relax=False)
+    mp.deprotonate(protein, "A:K8", "NZ")  # LYN
+    mp.deprotonate(protein, "A:C2", "SG")  # CYM
+    mp.deprotonate(protein, "A:H4", "ND1")  # HIE
+    mp.deprotonate(protein, "A:E5", "OE2")  # GLU from the neutral CCD acid
     mp.deprotonate(protein, "A:S13", "OG")  # no ff14SB variant
-    mp.protonate(protein, "A:S14", "OG")  # claimed by the attachment below
+    mp.deprotonate(protein, "A:Y3", "OH")  # no ff14SB variant, claimed below
     mp.attach(
         protein,
         {"smiles": "*C(=O)C", "resname": "ACY"},
         type="generic",
-        site="A:S14",
-        atom_name="OG",
+        site="A:Y3",
+        atom_name="CE1",
         relax=False,
     )
     sites = {site.name: site for site in mp.modification_sites(protein)}
     assert set(sites) == {"M001", "R001"}
     assert sites["R001"].residues == (("A", 13, ""),)
-    assert sites["M001"].residues == (("A", 14, ""),)
+    assert sites["M001"].residues == (("A", 3, ""),)
+
+
+def test_d_forms_of_canonical_residues_make_no_site() -> None:
+    by_stereo = mp.load_protein(TRPCAGE)
+    mp.mutate(by_stereo, "A:L2", "LEU", stereo="D", relax=False)
+    by_code = mp.load_protein(TRPCAGE)
+    mp.mutate(by_code, "A:L2", {"ccd_file": str(DATA / "DLE.cif")}, relax=False)
+    assert mp.modification_sites(by_stereo) == mp.modification_sites(by_code) == []
+
+
+def test_protonation_of_an_attached_residue_grows_its_site() -> None:
+    from polyzymd.modifying_proteins import AtomKey, ModificationRecord, Site
+
+    lysine = [AtomKey("A", 8, "", name) for name in ("N", "CA", "CB", "NZ")]
+    fragment = [AtomKey("A", 21, "", name) for name in ("C1", "O1")]
+    proton = AtomKey("A", 21, "", "H9")
+
+    def record(kind, site, added, **extra):
+        return ModificationRecord(
+            kind=kind,
+            site=site,
+            arguments={"atom_name": extra.pop("atom_name")},
+            residue_before="X",
+            residue_after="X",
+            added=tuple(added),
+            removed=(),
+            renamed=(),
+            new_residues=extra.pop("new_residues", ()),
+            formal_charge_change=0,
+            plan_text="",
+            **extra,
+        )
+
+    class Stub:
+        input_residues = {("A", 8, ""): "LYS"}
+        records = [
+            record(
+                "attach",
+                Site("A", "K", 8),
+                fragment,
+                atom_name="NZ",
+                type="generic",
+                name="M001",
+                new_residues=(("A", 21, "", "FRG"),),
+            ),
+            record("protonate", Site("A", "FRG", 21), [proton], atom_name="O1"),
+        ]
+
+        def atom_keys(self):
+            return [*lysine, *fragment, proton]
+
+    (site,) = mp.modification_sites(Stub())
+    assert proton in site.atoms
+    assert {key.atom_name for key in site.atoms if key.resnum == 8} == {"CB", "NZ"}
 
 
 def test_backbone_anchor_brings_its_atom_and_hydrogens_into_the_site() -> None:

@@ -25,6 +25,7 @@ record. Mutations are applied first, then the modifications in order.
 from __future__ import annotations
 
 import csv
+import os
 from pathlib import Path
 
 import yaml
@@ -41,6 +42,9 @@ def expand(spec: dict, base_dir: str | Path = ".") -> tuple[list[dict], list[dic
     mutations = []
     for entry in spec.get("mutations") or []:
         entry = dict(entry)
+        target = entry.get("to")
+        if isinstance(target, dict) and "ccd_file" in target:
+            entry["to"] = {**target, "ccd_file": str(base_dir / target["ccd_file"])}
         for site, _ in _sites(entry, base_dir):
             mutations.append({**_without_groups(entry), "site": site})
     modifications = []
@@ -67,6 +71,8 @@ def expand(spec: dict, base_dir: str | Path = ".") -> tuple[list[dict], list[dic
             single = {**_without_groups(arguments), "site": site}
             if fragment is not None:
                 single["fragment"] = fragment
+            if verb == "attach":
+                single["fragment"] = _resolved_fragment(single, base_dir)
             modifications.append({verb: single})
     return mutations, modifications
 
@@ -100,7 +106,6 @@ def apply_spec(
         if verb == "attach":
             arguments = dict(arguments)
             fragment = arguments.pop("fragment")
-            arguments.pop("parameters", None)  # read by parameterization, not here
             api.attach(protein, fragment, relax=each, minimize=each, **arguments)
         else:
             getattr(api, verb)(protein, arguments["site"], arguments["atom_name"])
@@ -108,12 +113,16 @@ def apply_spec(
         api.relax_all(protein)
 
 
-def to_spec(protein: api.ModifiedProtein) -> dict:
-    """Return the blocks that rebuild ``protein``'s modifications, one entry per record."""
+def to_spec(protein: api.ModifiedProtein, relative_to: str | Path | None = None) -> dict:
+    """Return the blocks that rebuild ``protein``'s modifications, one entry per record.
+
+    File paths are written relative to ``relative_to`` (the folder of the
+    config that will hold the blocks) when it is given.
+    """
     mutations, modifications = [], []
     for record in protein.records:
         site = str(record.site)
-        arguments = _without_hashes(record.arguments)
+        arguments = _paths_relative(_without_hashes(record.arguments), relative_to)
         if record.kind == "mutate":
             mutations.append({"site": site, **arguments})
         elif record.kind == "attach":
@@ -135,9 +144,9 @@ def to_spec(protein: api.ModifiedProtein) -> dict:
     return spec
 
 
-def to_yaml(protein: api.ModifiedProtein) -> str:
-    """Return ``to_spec(protein)`` as YAML, ready for a config."""
-    return yaml.safe_dump(to_spec(protein), sort_keys=False, default_flow_style=None)
+def to_yaml(protein: api.ModifiedProtein, relative_to: str | Path | None = None) -> str:
+    """Return ``to_spec(protein, relative_to)`` as YAML, ready for a config."""
+    return yaml.safe_dump(to_spec(protein, relative_to), sort_keys=False, default_flow_style=None)
 
 
 def _sites(arguments: dict, base_dir: Path) -> list[tuple[str, dict | None]]:
@@ -159,10 +168,17 @@ def _sites(arguments: dict, base_dir: Path) -> list[tuple[str, dict | None]]:
 
 def _read_sites_file(arguments: dict, base_dir: Path) -> list[tuple[str, dict | None]]:
     path = base_dir / arguments["sites_file"]
-    with open(path, newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    if not rows or "site" not in rows[0]:
+    with open(path, newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        header = [name.strip() for name in reader.fieldnames or []]
+        rows = [
+            {key.strip(): (value or "").strip() for key, value in row.items() if key}
+            for row in reader
+        ]
+    if "site" not in header:
         raise ValueError(f"{path} needs a `site` column (and `glycan` for glycan groups).")
+    if not rows:
+        raise ValueError(f"{path} has a header but no sites.")
     library = base_dir / arguments.get("glycan_library", ".")
     return [
         (
@@ -174,12 +190,18 @@ def _read_sites_file(arguments: dict, base_dir: Path) -> list[tuple[str, dict | 
 
 
 def _glycan_group(arguments: dict, base_dir: Path) -> list[dict]:
+    for key in ("name", "site", "sites", "sites_file", "residues"):
+        if key in arguments:
+            raise ValueError(
+                f"A `glycans` group lists its sites under each accession; remove `{key}`."
+            )
     library = base_dir / arguments.get("glycan_library", ".")
     chains = arguments.get("chains")
     base = {k: v for k, v in arguments.items() if k not in _GROUP_KEYS and k != "name"}
     entries = []
     for chain in chains or [None]:
         for accession, residues in arguments["glycans"].items():
+            residues = [residues] if isinstance(residues, str) else residues
             fragment = {"pdb_path": str(_glycan_file(library, accession))}
             for residue in residues:
                 site = parse_site(residue if chain is None else f"{chain}:{residue}")
@@ -195,6 +217,30 @@ def _glycan_file(library: Path, accession: str) -> Path:
         f"No file for glycan {accession} in {library}: expected glycam_{accession}.pdb "
         f"or {accession}.pdb with GLYCAM06 residue names and CONECT records."
     )
+
+
+def _resolved_fragment(entry: dict, base_dir: Path) -> dict:
+    fragment = entry.get("fragment")
+    if fragment is None:
+        raise ValueError(
+            f"attach at {entry['site']} has no `fragment` (give smiles + resname, pdb_path, "
+            "or ccd + link_atom; a glycan group uses `glycans`)."
+        )
+    if isinstance(fragment, dict) and "pdb_path" in fragment:
+        return {**fragment, "pdb_path": str(base_dir / fragment["pdb_path"])}
+    return fragment
+
+
+def _paths_relative(arguments: dict, relative_to: str | Path | None) -> dict:
+    if relative_to is None:
+        return arguments
+    arguments = dict(arguments)
+    for key, field in (("fragment", "pdb_path"), ("to", "ccd_file")):
+        value = arguments.get(key)
+        if isinstance(value, dict) and field in value:
+            path = os.path.relpath(Path(value[field]).resolve(), Path(relative_to).resolve())
+            arguments[key] = {**value, field: path}
+    return arguments
 
 
 def _without_groups(arguments: dict) -> dict:

@@ -31,17 +31,23 @@ _BACKBONE_HYDROGENS = {
     "OXT": ("HXT",),
 }
 
-#: Protonation changes that give an ff14SB residue variant (LYN, ASH, ...).
+#: Protonation changes that give an ff14SB residue variant (LYN, ASH, GLH,
+#: HID/HIE/HIP, CYM). mBuild moves the Asp and Glu proton at OD2 and OE2 only.
 _TEMPLATE_PROTONATION = {
     ("LYS", "NZ"),
-    ("ASP", "OD1"),
     ("ASP", "OD2"),
-    ("GLU", "OE1"),
     ("GLU", "OE2"),
     ("HIS", "ND1"),
     ("HIS", "NE2"),
     ("CYS", "SG"),
 }
+
+#: CCD codes of the D forms of the canonical residues. Like ``stereo="D"``,
+#: a mutation to one of them keeps ff14SB, whose parameters do not depend on
+#: handedness.
+D_CANONICAL = frozenset(
+    "DAL DAR DSG DAS DCY DGN DGL DHI DIL DLE DLY MED DPN DPR DSN DTH DTR DTY DVA".split()
+)
 
 #: Name prefix of a site on a non-canonical residue.
 RESIDUE_SITE_PREFIX = "R"
@@ -98,7 +104,8 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
         if record.kind == "mutate":
             if site is not None:
                 _drop(site, names, types, anchors, explicit)
-            if record.residue_after not in CANONICAL or not isinstance(record.arguments["to"], str):
+            canonical = record.residue_after in CANONICAL | D_CANONICAL
+            if not canonical or _is_side_chain_fragment(record):
                 n_residue_sites += 1
                 name = f"{RESIDUE_SITE_PREFIX}{n_residue_sites:03d}"
                 _new(name, "noncanonical", residue, names, types, anchors, explicit)
@@ -106,7 +113,9 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
         if record.kind in ("protonate", "deprotonate"):
             atom = record.arguments["atom_name"]
             template = (record.residue_before, atom) in _TEMPLATE_PROTONATION
-            if site is None and not template and residue not in pending:
+            if site is not None:
+                explicit[site].update(record.added)
+            elif not template and residue not in pending:
                 pending.append(residue)
             continue
         if residue in pending:
@@ -158,6 +167,12 @@ def segments(protein: ModifiedProtein) -> list[str]:
         segment_of.get((key.chain_id, key.resnum, key.icode), PROTEIN_SEGMENT)
         for key in protein.atom_keys()
     ]
+
+
+def _is_side_chain_fragment(record) -> bool:
+    """True for a mutation to a SMILES side chain, which is never an ff14SB residue."""
+    target = record.arguments["to"]
+    return isinstance(target, dict) and "smiles" in target
 
 
 def _new(name, site_type, residue, names, types, anchors, explicit) -> None:

@@ -246,6 +246,7 @@ def plan_attach(
     merge: bool = False,
     bond_order: int = 1,
     name: str | None = None,
+    parameters: str | None = None,
     relax: bool = True,
     minimize: bool = True,
     platform: str | None = None,
@@ -255,7 +256,9 @@ def plan_attach(
     ``type`` is ``"glycan"``, ``"polymer"`` or ``"generic"``. ``fragment``
     is a fragment built here, or its source written as data
     (``{"smiles": ..., "resname": ...}``, ``{"pdb_path": ...}`` or
-    ``{"ccd": ..., "link_atom": ...}``). The other arguments are mBuild's.
+    ``{"ccd": ..., "link_atom": ...}``). ``parameters`` names the parameter
+    set a config declares for this attachment; it is recorded, not used here.
+    The other arguments are mBuild's.
     """
     if type not in ATTACHMENT_TYPES:
         raise ValueError(f"Attachment type {type!r}; use one of {', '.join(ATTACHMENT_TYPES)}.")
@@ -277,6 +280,8 @@ def plan_attach(
         arguments["merge"] = True
     if bond_order != 1:
         arguments["bond_order"] = bond_order
+    if parameters is not None:
+        arguments["parameters"] = parameters
     plan = protein.mbuild.plan_attach(
         fragment,
         fragment_atom_name,
