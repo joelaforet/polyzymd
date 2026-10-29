@@ -150,6 +150,7 @@ def resolve_replicate_trajectory_window(
     step: int = 1,
     min_frames: int = 1,
     timestep_ps: float | None = None,
+    require_complete: bool = True,
 ) -> TrajectoryWindow:
     """Resolve a validated window using loader trajectory timing metadata.
 
@@ -176,6 +177,9 @@ def resolve_replicate_trajectory_window(
     timestep_ps : float | None, optional
         Explicit timestep override in picoseconds. When ``None``, the loader
         timestep is used.
+    require_complete : bool, optional
+        Read the timing from the same segments the analysis reads: False also
+        reads segments still being written. By default True.
 
     Returns
     -------
@@ -183,13 +187,16 @@ def resolve_replicate_trajectory_window(
         Validated trajectory window with materialized ``run()`` arguments.
     """
 
+    # Passed only when it differs from the default, so loader doubles with the
+    # older signature keep working.
+    segments = {} if require_complete else {"require_complete": False}
     resolved_timestep_ps = (
         float(timestep_ps)
         if timestep_ps is not None
-        else float(loader.get_timestep(replicate, unit="ps"))
+        else float(loader.get_timestep(replicate, unit="ps", **segments))
     )
     try:
-        first_frame_time_ps = loader.get_first_frame_time(replicate, unit="ps")
+        first_frame_time_ps = loader.get_first_frame_time(replicate, unit="ps", **segments)
     except (AttributeError, TypeError, ValueError):
         first_frame_time_ps = None
     return resolve_trajectory_window(

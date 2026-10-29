@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - Unreleased
+
+### Added
+
+- **Analyze simulations while they run.**  `polyzymd analyze --include-running` (or `include_running: true` in `study.yaml`) reads production segments that `progress.json` records as still running. The report warns that its values are provisional, and the results are stored apart from those of finished segments (the record's identity says `include_running`), so they are measured again as the trajectories grow. `--submit` passes the flag to its array tasks.
+
+### Fixed
+
+- **A replicate still writing its first production segment no longer stops an analysis.**  Without `--include-running`, a running segment is left out, so such a replicate had no frames and every run of `analyze` failed for all replicates with `No production trajectory files found`. It is now left out of its condition with a warning, listed in the report's `excluded_replicates`, and the report is `partial`. When every replicate of a condition is in that state, the error says to wait or use `--include-running`.
+- **The equilibration window is measured on the frames the analysis reads.**  The window's frame interval and first frame time came from a universe loaded without the running segments even when they were read, so a replicate with only a running segment failed there.
+
 ## [1.3.0] - 2026-10-24
 
 ### What changed for you (read this first)
