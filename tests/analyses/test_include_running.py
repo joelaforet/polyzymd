@@ -159,3 +159,28 @@ def test_the_command_line_flag_reads_running_segments_and_reaches_submit_tasks(
     assert dry.exit_code == 0, dry.output
     scripts = [path.read_text() for path in (tmp_path / "jobs").rglob("*.sbatch")]
     assert scripts and any("--include-running" in text for text in scripts)
+
+
+def test_include_running_leaves_out_a_replicate_that_has_no_frame_yet(tmp_path: Path) -> None:
+    """A run that just started (a segment folder, no frame) is left out, not fatal for the rest."""
+    from polyzymd.analyses.protocols import NO_FRAMES_YET_REASON, analyze
+    from polyzymd.config.schema import SimulationConfig
+
+    config = _config(tmp_path, [SegmentStatus.COMPLETED, SegmentStatus.RUNNING])
+    just_started = SimulationConfig.from_yaml(config).get_working_directory(3)
+    (just_started / "production_0").mkdir(parents=True)
+    _mark(just_started, SegmentStatus.RUNNING, frames=0)
+    condition = _study(config, include_running=True)["No polymer"]
+    assert [replicate.index for replicate in condition.replicates] == [1, 2]
+    assert condition.no_frames_yet == [3]
+    report = analyze(
+        "rg",
+        [config],
+        equilibration="0ns",
+        settings={"selection": "all"},
+        labels=["No polymer"],
+        plots=False,
+        output_dir=tmp_path / "live",
+        include_running=True,
+    )
+    assert report.excluded_replicates == {"No polymer": {"3": NO_FRAMES_YET_REASON}}

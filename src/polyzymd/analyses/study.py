@@ -489,26 +489,42 @@ class Condition:
         #: Replicates left out because every production segment they have is
         #: still being written (or failed); ``include_running`` reads them.
         self.only_running: list[int] = []
+        #: Replicates left out because no production frame has been written yet,
+        #: even counting segments still being written (a run that just started).
+        self.no_frames_yet: list[int] = []
         # Replicates named on purpose are kept, as for never-run folders above.
-        if not self.include_running and replicates is None:
-            self.only_running = [i for i in chosen if not self._provider.has_frames(i)]
-            if self.only_running and len(self.only_running) == len(chosen):
+        if replicates is None:
+            empty = [i for i in chosen if not self._provider.has_frames(i)]
+            if self.include_running:
+                self.no_frames_yet = empty
+            else:
+                self.only_running = empty
+            if empty and len(empty) == len(chosen):
                 raise ProtocolError(
                     f"Condition {label!r}: replicate {', '.join(map(str, chosen))} "
-                    f"{'is' if len(chosen) == 1 else 'are'} still writing the first production "
-                    "segment, so no finished frames can be read.",
+                    + (
+                        f"{'has' if len(chosen) == 1 else 'have'} written no production frame yet."
+                        if self.include_running
+                        else f"{'is' if len(chosen) == 1 else 'are'} still writing the first "
+                        "production segment, so no finished frames can be read."
+                    ),
                     hint="Wait for a segment to finish, or read the frames written so far with "
                     "--include-running (include_running: true in study.yaml); the results are "
-                    "then provisional.",
+                    "then provisional."
+                    if not self.include_running
+                    else "Wait until production has written its first frames.",
                 )
-            if self.only_running:
+            if empty:
                 LOGGER.warning(
-                    "Condition %r: replicate %s left out: only production segments still being "
-                    "written; --include-running reads them.",
+                    "Condition %r: replicate %s left out: %s.",
                     label,
-                    ", ".join(map(str, self.only_running)),
+                    ", ".join(map(str, empty)),
+                    "no production frame written yet"
+                    if self.include_running
+                    else "only production segments still being written; --include-running "
+                    "reads them",
                 )
-                chosen = [i for i in chosen if i not in self.only_running]
+                chosen = [i for i in chosen if i not in empty]
         self.replicates = [Replicate(self, index) for index in chosen]
         #: Replicates whose build record names another config than this one.
         self.built_from_other_config: list[int] = []
