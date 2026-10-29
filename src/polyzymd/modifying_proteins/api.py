@@ -326,7 +326,7 @@ def apply(protein: ModifiedProtein, plan: ModificationPlan) -> ModificationRecor
             )
     residue_before = resolve(protein.mbuild, plan.site).name
     before = _snapshot(protein.mbuild)
-    charge_before = protein.mbuild.net_formal_charge
+    charge_before = _chemical_charge(protein.mbuild)
     protein.mbuild.apply(plan._mbuild_plan)
     after = _snapshot(protein.mbuild)
     residue_after = protein.mbuild.get_residue(
@@ -355,7 +355,7 @@ def apply(protein: ModifiedProtein, plan: ModificationPlan) -> ModificationRecor
             if atom in after and before[atom][0] != after[atom][0]
         ),
         new_residues=tuple(new_residues),
-        formal_charge_change=protein.mbuild.net_formal_charge - charge_before,
+        formal_charge_change=_chemical_charge(protein.mbuild) - charge_before,
         plan_text=plan.text,
         type=plan.type,
         name=name,
@@ -511,6 +511,17 @@ def _snapshot(protein) -> dict:
         for atom in residue.particles():
             keys[atom] = (AtomKey(chain_id, residue.resnum, residue.icode, atom.name), residue.name)
     return keys
+
+
+def _chemical_charge(protein) -> int:
+    """Return the protein's net formal charge, summed over its chemistry.
+
+    mBuild's ``net_formal_charge`` sums each residue's template charges, and
+    a residue keeps them when an attachment removes a charged atom: a
+    C-terminal amide formed by removing OXT still reports OXT's -1 there.
+    The chemistry ``to_rdkit`` builds is correct, so it is the source.
+    """
+    return sum(atom.GetFormalCharge() for atom in protein.to_rdkit().GetAtoms())
 
 
 def _sha256(path: Path) -> str:

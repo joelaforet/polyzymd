@@ -238,3 +238,33 @@ def test_site_code_ending_in_a_digit_is_read_against_the_structure() -> None:
         atom_name="O1",
     )
     assert (plan.site.code, plan.site.resnum) == ("HY3", 3)
+
+
+def test_formal_charge_change_comes_from_the_chemistry() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    # A C-terminal N-methylamide removes the carboxylate's charged OXT.
+    amide = mp.attach(
+        protein,
+        {"smiles": "*NC", "resname": "NME"},
+        type="generic",
+        site="A:S20",
+        atom_name="C",
+        leaving_atom_names=["OXT"],
+        relax=False,
+    )
+    assert [key.atom_name for key in amide.removed] == ["OXT"]
+    assert amide.formal_charge_change == +1
+
+
+def test_formal_charge_change_of_a_lysine_acylation() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    deprotonated = mp.deprotonate(protein, "A:K8", "NZ")
+    acylated = mp.attach(
+        protein,
+        {"smiles": "*C(=O)C", "resname": "ACY"},
+        type="generic",
+        site="A:K8",
+        atom_name="NZ",
+        relax=False,
+    )
+    assert (deprotonated.formal_charge_change, acylated.formal_charge_change) == (-1, 0)
