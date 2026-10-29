@@ -85,6 +85,7 @@ def test_noncanonical_residue_is_a_site_and_a_click_on_it_grows_it() -> None:
     )
     (grown,) = mp.modification_sites(protein)
     assert grown.name == "R001"
+    assert (grown.type, grown.types) == ("noncanonical", {"noncanonical", "generic"})
     assert len(grown.atoms) == n_side_chain + len(click.added)
     assert set(mp.segments(protein)) == {"PROT"}
 
@@ -179,8 +180,11 @@ def test_backbone_anchor_brings_its_atom_and_hydrogens_into_the_site() -> None:
     )
     (site,) = mp.modification_sites(protein)
     names = {atom.atom_name for atom in site.atoms if atom.resnum == 1}
-    assert "N" in names and "CA" not in names and "C" not in names
-    assert names & {"H", "H2", "H3"}
+    # The touched N and its hydrogens join; the Asn side chain stays ff14SB.
+    assert "N" in names and names & {"H", "H2", "H3"}
+    assert not names & {"CA", "C", "CB", "CG", "OD1", "ND2"}
+    assert site.residues == (("A", 1, ""),)
+    assert site.input_residues == ("ASN",)
 
 
 def test_two_glycans_are_two_sites_and_two_segments() -> None:

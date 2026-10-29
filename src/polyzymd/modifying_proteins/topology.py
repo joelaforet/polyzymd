@@ -2,8 +2,9 @@
 
 A *site* is the set of atoms that take the modification's force field and
 charges instead of the protein's. For an attachment it is the anchor
-residue's side chain from CB outward plus every attached atom; when the
-anchor atom is a backbone atom, that atom and its hydrogens join. For a
+residue's side chain from CB outward plus every attached atom. When the
+anchor atom is a backbone atom (an N-terminal label), that atom and its
+hydrogens join instead, and the side chain stays with the protein. For a
 non-canonical residue (a mutation to a CCD component other than the 20
 canonical ones, or to a SMILES side chain) it is the side chain. A later
 modification that bonds to a site's atoms grows that site. The backbone
@@ -60,7 +61,8 @@ class ModificationSite:
     """The atoms one modification owns in the final structure."""
 
     name: str
-    type: str  # glycan, polymer, generic or noncanonical
+    type: str  # glycan, polymer, generic or noncanonical: the first modification's
+    types: frozenset[str]  # every modification's type, when several share the site
     residues: tuple[tuple[str, int, str], ...]  # anchor residues (chain, number, icode)
     input_residues: tuple[str, ...]  # their names in the input PDB, for backbone charges
     atoms: tuple[AtomKey, ...]
@@ -78,6 +80,10 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
     names: list[str] = []
     types: dict[str, str] = {}
     anchors: dict[str, list[tuple[str, int, str]]] = {}
+    # Residues whose side chain belongs to the site. A residue bonded only
+    # through a backbone atom keeps its side chain on the protein.
+    side_chains: dict[str, set[tuple[str, int, str]]] = {}
+    all_types: dict[str, set[str]] = {}
     explicit: dict[str, set[AtomKey]] = {}
     fragment_residues: dict[tuple[str, int, str], str] = {}
     # Residues protonated outside the ff14SB variants; they become sites of
@@ -104,11 +110,13 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
         if record.kind == "mutate":
             if site is not None:
                 _drop(site, names, types, anchors, explicit)
+                side_chains.pop(site), all_types.pop(site)
             canonical = record.residue_after in CANONICAL | D_CANONICAL
             if not canonical or _is_side_chain_fragment(record):
                 n_residue_sites += 1
                 name = f"{RESIDUE_SITE_PREFIX}{n_residue_sites:03d}"
                 _new(name, "noncanonical", residue, names, types, anchors, explicit)
+                side_chains[name], all_types[name] = {residue}, {"noncanonical"}
             continue
         if record.kind in ("protonate", "deprotonate"):
             atom = record.arguments["atom_name"]
@@ -124,11 +132,18 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
         if site is None:
             site = record.name
             _new(site, record.type, residue, names, types, anchors, explicit)
+            side_chains[site], all_types[site] = set(), set()
+        all_types[site].add(record.type)
         explicit[site].update(record.added)
         anchor_atom = record.arguments["atom_name"]
-        if anchor_atom in BACKBONE and residue not in fragment_residues:
-            touched = (anchor_atom, *_BACKBONE_HYDROGENS.get(anchor_atom, ()))
-            explicit[site].update(AtomKey(*residue, name) for name in touched)
+        if residue not in fragment_residues:
+            if residue not in anchors[site]:
+                anchors[site].append(residue)
+            if anchor_atom in BACKBONE:
+                touched = (anchor_atom, *_BACKBONE_HYDROGENS.get(anchor_atom, ()))
+                explicit[site].update(AtomKey(*residue, name) for name in touched)
+            else:
+                side_chains[site].add(residue)
         for chain_id, resnum, icode, _ in record.new_residues:
             fragment_residues[(chain_id, resnum, icode)] = site
 
@@ -136,12 +151,13 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
         n_residue_sites += 1
         name = f"{RESIDUE_SITE_PREFIX}{n_residue_sites:03d}"
         _new(name, "noncanonical", residue, names, types, anchors, explicit)
+        side_chains[name], all_types[name] = {residue}, {"noncanonical"}
 
     sites = []
     order = {key: index for index, key in enumerate(keys)}
     for name in names:
         atoms = {atom for atom in explicit[name] if atom in present}
-        for residue in anchors[name]:
+        for residue in side_chains[name]:
             atoms.update(a for a in residue_atoms.get(residue, ()) if a.atom_name not in BACKBONE)
         # Every atom of a residue the attachment created, including atoms a
         # reaction moved there from the protein (the thiol H of a maleimide).
@@ -153,6 +169,7 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
             ModificationSite(
                 name=name,
                 type=types[name],
+                types=frozenset(all_types[name]),
                 residues=tuple(anchors[name]),
                 input_residues=tuple(protein.input_residues[r] for r in anchors[name]),
                 atoms=tuple(ordered),
