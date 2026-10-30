@@ -141,7 +141,7 @@ class ModifiedReference:
     recipe: dict = field(default_factory=dict)
     #: How the chemistry the build used differs from the one read independently.
     chemistry: list[str] = field(default_factory=list)
-    #: Termini changed by protonation alone, which 1.4 does not model.
+    #: Termini changed by protonation alone, which the ff14SB path refuses.
     neutral_termini: list[str] = field(default_factory=list)
     protonation_warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -503,11 +503,8 @@ def _whole_protein_reference(
     # are compared with the config's blocks by modifications.declared.
     ref.records = list(protein.records)
     ref.recipe = recipe
-    # A terminus changed by protonation alone is refused as for ff14SB proteins
-    # (termini are simulated charged); the atoms the changes touch say which.
-    touched = site_rule(protein, keys, real(0))[0]
-    termini = modified_termini(recipe["pdb"], keys, dict.fromkeys(touched, "touched"), real(0))
-    ref.neutral_termini = neutral_termini(termini, ref.records)
+    # A neutral terminus (NH2, COOH) is allowed on Rosemary, which needs no
+    # residue templates, so ref.neutral_termini stays empty.
     ref.protonation_warnings = protonation_warnings(protein)
     return ref
 

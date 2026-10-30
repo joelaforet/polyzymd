@@ -405,13 +405,8 @@ def parameterize_whole(
             "a protein parameterized whole takes NAGL charges on the whole molecule: "
             "charges = {'method': 'nagl', 'model': ...}"
         )
-    # A terminus changed by protonation alone is refused, as for ff14SB proteins:
-    # termini are simulated charged (Joe, 2026-10-29). Labels and caps stay allowed.
-    _refuse_neutral_termini(
-        protein,
-        modified_termini(protein, modification_sites(protein)),
-        WHOLE_PROTEIN_NEUTRAL_TERMINUS_MESSAGE,
-    )
+    # A neutral terminus (NH2, COOH) is allowed here: Rosemary needs no residue
+    # templates, and NAGL charges the molecule as built.
     molecule = to_openff(protein)
     # NAGL brings each molecule to its own formal charge, so each connected
     # component (chain, or chains joined by a bond) is charged on its own;
@@ -613,17 +608,6 @@ NEUTRAL_TERMINUS_MESSAGE = (
     "at physiological pH. If your chain is truncated, cap it instead: attach ACE at the "
     "N-terminus or NME at the C-terminus. If you need a neutral terminus (e.g. a low- or "
     "high-pH study), please open an issue: https://github.com/joelaforet/polyzymd/issues"
-)
-
-
-#: The same guard rail for a protein one force field parameterizes whole
-#: (Rosemary needs no residue templates; the reason is the physics).
-WHOLE_PROTEIN_NEUTRAL_TERMINUS_MESSAGE = (
-    "PolyzyMD 1.4 does not model a neutral N-terminus (NH2) or C-terminus (COOH): "
-    "protein termini are normally simulated charged at physiological pH. If your chain is "
-    "truncated, cap it instead: attach ACE at the N-terminus or NME at the C-terminus. If "
-    "you need a neutral terminus (e.g. a low- or high-pH study), please open an issue: "
-    "https://github.com/joelaforet/polyzymd/issues"
 )
 
 

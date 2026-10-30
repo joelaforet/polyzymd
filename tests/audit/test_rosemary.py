@@ -124,23 +124,23 @@ def test_an_ff14sb_protein_gets_no_rosemary_finding(tmp_path) -> None:
     assert run_checks(realized, [component], ["parameters.rosemary_alpha"]) == []
 
 
-def test_the_audit_refuses_a_neutral_terminus_on_rosemary(tmp_path, monkeypatch) -> None:
-    """Independently of the build's refusal, the audit fails a terminus changed by
-    protonation alone on a protein parameterized whole."""
+@pytest.mark.parametrize(
+    ("verb", "site", "atom"), [("deprotonate", "A:N1", "N"), ("protonate", "A:S20", "OXT")]
+)
+def test_the_audit_passes_a_neutral_terminus_on_rosemary(tmp_path, verb, site, atom) -> None:
+    """Rosemary needs no residue templates, so a terminus changed by protonation
+    alone passes the audit of a protein parameterized whole."""
     import openmm
 
     from polyzymd import modifying_proteins as mp
-    from polyzymd.modifying_proteins import parameters
     from polyzymd.modifying_proteins.components import protein_component
 
-    monkeypatch.setattr(parameters, "_refuse_neutral_termini", lambda *args, **kwargs: None)
     protein = mp.load_protein(TRPCAGE)
-    mp.deprotonate(protein, "A:N1", "N")
+    getattr(mp, verb)(protein, site, atom)
     result = mp.parameterize_whole(protein, (ROSEMARY,), {"method": "nagl", "model": MODEL})
     (tmp_path / "system.xml").write_text(openmm.XmlSerializer.serialize(result.to_openmm()))
     protein.save_pdb(tmp_path / "protein.pdb")
     realized = RealizedSystem.from_openmm(tmp_path / "system.xml", tmp_path / "protein.pdb")
     component = protein_component(protein, result.record, {}, name="trpcage")
     (finding,) = run_checks(realized, [component], ["modifications.sites"])
-    assert finding.status == "FAIL" and "neutral terminus" in finding.detail
-    assert "physiological pH" in finding.detail
+    assert finding.status == "PASS", finding.detail

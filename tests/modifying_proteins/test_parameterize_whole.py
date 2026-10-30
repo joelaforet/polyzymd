@@ -61,17 +61,19 @@ def _protonated_c_terminus(protein) -> None:
 
 
 @pytest.mark.parametrize("change", [_neutral_n_terminus, _protonated_c_terminus])
-def test_a_terminus_changed_by_protonation_alone_is_refused(change) -> None:
-    """Termini are simulated charged; Rosemary needs no template, but the guard rail holds."""
+def test_a_terminus_changed_by_protonation_alone_is_parameterized_whole(change) -> None:
+    """Rosemary needs no residue templates, so a neutral terminus builds."""
+    from openff.units import unit
+
     from polyzymd import modifying_proteins as mp
 
     protein = mp.load_protein(TRPCAGE)
     change(protein)
-    with pytest.raises(ValueError, match="physiological pH") as error:
-        mp.parameterize_whole(protein, (newest_rosemary(),), NAGL)
-    message = str(error.value)
-    assert "ff14SB" not in message
-    assert "ACE" in message and "NME" in message and "github.com" in message
+    result = mp.parameterize_whole(protein, (newest_rosemary(),), NAGL)
+    charges = result.interchange["Electrostatics"].get_charge_array().m_as(unit.elementary_charge)
+    # Trp-cage is +1 with charged termini; a neutral terminus removes one charge.
+    expected = 0.0 if change is _neutral_n_terminus else 2.0
+    assert np.isclose(charges.sum(), expected, atol=1e-4)
 
 
 def test_a_labelled_terminus_is_parameterized_whole() -> None:
