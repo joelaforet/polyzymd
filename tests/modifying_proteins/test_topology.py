@@ -214,3 +214,39 @@ def test_atoms_a_reaction_moves_into_the_attached_residue_join_the_site() -> Non
     assert any(new.resnum == residue[1] for _, new in record.renamed)
     assert attached <= set(site.atoms)
     assert len(site.atoms) == 4 + len(attached)
+
+
+def test_a_neutral_n_terminus_puts_the_amine_into_a_site() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    mp.deprotonate(protein, "A:N1", "N")
+    (site,) = mp.modification_sites(protein)
+    names = {atom.atom_name for atom in site.atoms}
+    assert site.type == "noncanonical"
+    # The amine only; the side chain stays on ff14SB.
+    assert "N" in names and names <= {"N", "H", "H1", "H2", "H3"}
+
+
+def test_a_protonated_c_terminus_puts_the_carboxyl_and_ca_into_a_site() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    mp.protonate(protein, "A:S20", "OXT")
+    (site,) = mp.modification_sites(protein)
+    names = {atom.atom_name for atom in site.atoms}
+    assert {"OXT", "HXT", "O", "C", "CA", "HA"} <= names
+    assert not names & {"N", "H", "CB", "OG"}
+
+
+def test_an_attachment_to_the_n_terminal_amine_takes_the_amine_into_its_site() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    mp.deprotonate(protein, "A:N1", "N")
+    record = mp.attach(
+        protein,
+        {"smiles": "*C(C)=O", "resname": "ACE"},
+        type="generic",
+        site="A:N1",
+        atom_name="N",
+        relax=False,
+    )
+    (site,) = mp.modification_sites(protein)
+    names = {atom.atom_name for atom in site.atoms if atom.resnum == 1}
+    assert site.name == record.name
+    assert "N" in names and not names & {"CA", "HA", "C", "O", "CB", "CG"}

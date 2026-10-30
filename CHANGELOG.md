@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attachment's own). `apply_spec`, `to_spec` and `to_yaml` read and write
   `mutations:` and `modifications:` blocks; group entries (`chains` with
   `residues` or `glycans`, `sites`, `sites_file`) expand to one record per site.
+- `parameterize`: force-field parameters and charges for a modified protein.
+  Atoms outside every site keep ff14SB and its library charges; the backbone of
+  a modified residue keeps the ff14SB charges and terms of the residue it was
+  before the change; the side chain from CB outward plus the attached group
+  take the site type's OpenFF force field and NAGL charges from a capped model,
+  shifted uniformly per site to an integer total (the shift is recorded and
+  bounded, by default 0.005 e per atom). A change to a backbone atom (an
+  N-terminal label, a neutral N-terminus, a protonated C-terminus) puts the
+  touched atoms and their hydrogens into the site. Bonds to hydrogen are
+  constrained everywhere at the length of the force field that owns them.
+  Sites may use different OpenFF force fields. The result exports to OpenMM
+  and GROMACS.
 
 ### Changed
 

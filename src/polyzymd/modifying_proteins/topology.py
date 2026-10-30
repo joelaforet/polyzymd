@@ -25,11 +25,15 @@ from polyzymd.modifying_proteins.sites import CANONICAL
 #: Backbone atoms that keep the protein's parameters, termini included.
 BACKBONE = frozenset({"N", "H", "CA", "HA", "HA2", "HA3", "C", "O", "H1", "H2", "H3", "OXT", "HXT"})
 
-#: Hydrogens that move with each backbone heavy atom when it is the anchor.
+#: Atoms that join a site with each backbone atom a change touches.
 _BACKBONE_HYDROGENS = {
     "N": ("H", "H1", "H2", "H3"),
     "CA": ("HA", "HA2", "HA3"),
-    "OXT": ("HXT",),
+    # Protonating or bonding the C-terminal carboxylate changes the whole
+    # group: O and OXT are equivalent oxygens of the charged terminus, and
+    # ff14SB's C-terminal templates also put part of the carboxylate's charge
+    # on CA. Leaving CA, C and O on those charges forces a large shift.
+    "OXT": ("HXT", "O", "C", "CA", "HA", "HA2", "HA3"),
 }
 
 #: Protonation changes that give an ff14SB residue variant (LYN, ASH, GLH,
@@ -89,6 +93,10 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
     # Residues protonated outside the ff14SB variants; they become sites of
     # their own unless an attachment claims them.
     pending: list[tuple[str, int, str]] = []
+    # Backbone atoms touched by those protonation changes, per residue.
+    backbone_touched: dict[tuple[str, int, str], set[AtomKey]] = {}
+    # Residues pending because of a side-chain protonation change.
+    side_chain_pending: set[tuple[str, int, str]] = set()
     n_residue_sites = 0
 
     def owner(residue: tuple[str, int, str]) -> str | None:
@@ -120,11 +128,26 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
             continue
         if record.kind in ("protonate", "deprotonate"):
             atom = record.arguments["atom_name"]
+            if atom in BACKBONE:
+                # A neutral N-terminus or a protonated C-terminus has no ff14SB
+                # template: the touched atom and its hydrogens join a site, as
+                # for an attachment to a backbone atom.
+                hydrogens = _BACKBONE_HYDROGENS.get(atom, ())
+                touched = {AtomKey(*residue, name) for name in (atom, *hydrogens)}
+                if site is not None:
+                    explicit[site].update(touched)
+                else:
+                    backbone_touched.setdefault(residue, set()).update(touched)
+                    if residue not in pending:
+                        pending.append(residue)
+                continue
             template = (record.residue_before, atom) in _TEMPLATE_PROTONATION
             if site is not None:
                 explicit[site].update(record.added)
-            elif not template and residue not in pending:
-                pending.append(residue)
+            elif not template:
+                side_chain_pending.add(residue)
+                if residue not in pending:
+                    pending.append(residue)
             continue
         if residue in pending:
             pending.remove(residue)
@@ -135,6 +158,10 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
             side_chains[site], all_types[site] = set(), set()
         all_types[site].add(record.type)
         explicit[site].update(record.added)
+        explicit[site].update(backbone_touched.pop(residue, ()))
+        if residue in side_chain_pending:
+            side_chain_pending.discard(residue)
+            side_chains[site].add(residue)
         anchor_atom = record.arguments["atom_name"]
         if residue not in fragment_residues:
             if residue not in anchors[site]:
@@ -151,7 +178,11 @@ def modification_sites(protein: ModifiedProtein) -> list[ModificationSite]:
         n_residue_sites += 1
         name = f"{RESIDUE_SITE_PREFIX}{n_residue_sites:03d}"
         _new(name, "noncanonical", residue, names, types, anchors, explicit)
-        side_chains[name], all_types[name] = {residue}, {"noncanonical"}
+        explicit[name].update(backbone_touched.pop(residue, ()))
+        # A side-chain protonation change makes the side chain the site; a
+        # backbone one only the touched backbone atoms (the side chain stays).
+        side_chain = {residue} if residue in side_chain_pending else set()
+        side_chains[name], all_types[name] = side_chain, {"noncanonical"}
 
     sites = []
     order = {key: index for index, key in enumerate(keys)}

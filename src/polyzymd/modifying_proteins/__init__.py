@@ -35,6 +35,12 @@ from polyzymd.modifying_proteins.api import (
     protonate,
     relax_all,
 )
+from polyzymd.modifying_proteins.parameters import (
+    ParameterizationRecord,
+    ParameterSet,
+    SiteParameters,
+    parameterize,
+)
 from polyzymd.modifying_proteins.sites import Site, expand_sites, parse_site
 from polyzymd.modifying_proteins.spec import apply_spec, expand, to_spec, to_yaml
 from polyzymd.modifying_proteins.topology import ModificationSite, modification_sites, segments
@@ -46,7 +52,10 @@ __all__ = [
     "ModificationRecord",
     "ModificationSite",
     "ModifiedProtein",
+    "ParameterSet",
+    "ParameterizationRecord",
     "Site",
+    "SiteParameters",
     "apply",
     "apply_spec",
     "attach",
@@ -60,6 +69,7 @@ __all__ = [
     "load_protein",
     "modification_sites",
     "mutate",
+    "parameterize",
     "parse_site",
     "plan_attach",
     "plan_deprotonate",
