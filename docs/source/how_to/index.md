@@ -46,7 +46,6 @@ Choose an analysis, run it on a study, and measure your own quantity.
 :maxdepth: 1
 
 rewrite_config_rc5
-rosemary_protein
 polymers
 dynamic_polymers
 cosolvents
@@ -54,6 +53,20 @@ ligand
 restraints
 equilibration
 troubleshoot_openff_pdb_ingestion
+```
+
+## Modify a protein
+
+```{toctree}
+:caption: Modify a protein
+:maxdepth: 1
+
+mutate
+glycosylate
+attach_groups
+graft_polymers
+rosemary
+analyze_modified_proteins
 ```
 
 ## Run simulations

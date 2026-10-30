@@ -123,7 +123,7 @@ the protein takes no `modification_parameters` and has no per-site domains.
 It must be the protein's only force field file. The audit warns that it is an
 alpha release (`parameters.rosemary_alpha`). OpenFF pairs Rosemary with OPC3
 water: set `solvent.water.model: opc3`, or the build fails
-`solvent.rosemary_water` (see {doc}`../how_to/rosemary_protein`).
+`solvent.rosemary_water` (see {doc}`../how_to/rosemary`).
 
 PolyzyMD reads the force field file, not its name, to decide which charges
 apply: a file with protein library charges (ff14SB) takes
@@ -1029,9 +1029,9 @@ template without `{replicate}`, since the replicates would share one folder.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `{enzyme}` | Name of the protein solute; with `mutations` or `modifications`, followed by `-mod` and a six-digit hash of the declared changes | "LipA", "LipA-mod3f9a1c" |
+| `{enzyme}` | Name of the protein solute; with `mutations` or `modifications`, followed by `-mod` and a six-character (hex) hash of the declared changes | "LipA", "LipA-mod3f9a1c" |
 | `{substrate}` | Name of the small-molecule solute (hyphens removed), or `apo` without one | "ResorufinButyrate" |
-| `{polymer_type}` | Polymer type prefix and composition, or `none` without polymers; with a `sequence` block, followed by `-seq` and a six-digit hash of it | "SBMA-EGPMA_A70_B30", "SBMA-EGPMA_A70_B30-seq0b42de" |
+| `{polymer_type}` | Polymer type prefix and composition, or `none` without polymers; with a `sequence` block, followed by `-seq` and a six-character (hex) hash of it | "SBMA-EGPMA_A70_B30", "SBMA-EGPMA_A70_B30-seq0b42de" |
 | `{duration}` | Production duration in ns: whole ns from 1 ns up, in full below 1 ns | "100", "0.005" |
 | `{temperature}` | Temperature in K | "300" |
 | `{replicate}` | Replicate number | "1" |

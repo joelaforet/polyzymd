@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Documentation for modified proteins: the tutorial "From an idea and a PDB
+  to a glycosylated protein"; how-to guides to mutate, glycosylate with
+  GLYCAM06j, attach groups, graft polymers, use Rosemary and analyze a modified
+  protein; and an explanation of how modified residues are parameterized and
+  audited. References for GLYCAM06, mBuild biopolymers and openff-pablo.
+- `examples/modified_proteins`: ubiquitin with a GLYCAM06j glycan on Asn60, and
+  with an octanoyl amide on Lys63 (Sage 2.3.0 and NAGL).
+- Acceptance builds of mutated, labelled, glycosylated and grafted proteins
+  (fibronectin FN7-10 with AzF and FRET dyes, lipase A with dyes and a grafted
+  chain, the BG505 SOSIP protomer with 20 glycans)
+  (`POLYZYMD_ACCEPTANCE=1`, local only; `POLYZYMD_ACCEPTANCE_RUN=1` also runs
+  each one briefly).
 - Polymer chains grafted onto a protein: an `attach` of `type: polymer` whose
   `fragment: {polymer: ...}` is built by the star-sited polymer generator, from
   the monomers of a polymer solute (`monomers_from`) or its own, with `sequence`;
@@ -58,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field (allowed; Rosemary is untested in production), and
   `parameters.glycan_force_field` reports glycans parameterized by Rosemary
   (whole-protein mode) instead of a GLYCAM06j finding. How-to:
-  `docs/source/how_to/rosemary_protein.md`.
+  `docs/source/how_to/rosemary.md`.
 - The `build` and `test` environments install `openff-forcefields` 2026.09.0
   (was 2026.01.0), which adds the Rosemary candidate
   `openff_no_water-3.0.0-alpha2b.offxml`. The other force field files PolyzyMD

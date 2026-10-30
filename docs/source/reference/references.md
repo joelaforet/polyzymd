@@ -109,9 +109,15 @@ more method, add an entry there and the reference here.
   screening properties of soft matter. In *Foundations of Molecular Modeling
   and Simulation* (Molecular Modeling and Simulation), 79-92. Springer
   Singapore. doi:10.1007/978-981-10-1128-3_5. Used by dynamic polymers:
-  mBuild builds the coordinates of each chain. PolyzyMD installs mBuild from
-  github.com/joelaforet/mbuild (tag `biopolymers-v0.1.0`); the build record
-  names its commit.
+  mBuild builds the coordinates of each chain, and applies the mutations and
+  modifications of a protein (`mbuild.biopolymers`). PolyzyMD installs mBuild
+  from github.com/joelaforet/mbuild (tag `biopolymers-v0.1.0`); the build
+  record names its commit.
+- openff-pablo, <https://github.com/openforcefield/openff-pablo> (v0.2.2).
+  The audit's independent reading of a modified protein: it reads the built
+  structure into OpenFF with residue definitions for the attached groups and
+  crosslinks. It has no journal article; "Methods to cite" names it with its
+  version, and the build record names its commit.
 
 ## Force fields, water, ions and charge models
 
@@ -126,6 +132,11 @@ For any other file, cite its source.
   and Simmerling, C. (2015). ff14SB: improving the accuracy of protein side
   chain and backbone parameters from ff99SB. *Journal of Chemical Theory and
   Computation*, 11(8), 3696-3713. doi:10.1021/acs.jctc.5b00255
+- Kirschner, K. N., Yongye, A. B., Tschampel, S. M., Gonzalez-Outeirino, J.,
+  Daniels, C. R., Foley, B. L. and Woods, R. J. (2008). GLYCAM06: a
+  generalizable biomolecular force field. Carbohydrates. *Journal of
+  Computational Chemistry*, 29(4), 622-655. doi:10.1002/jcc.20820. For glycans
+  parameterized with `GLYCAM_06j-1.xml` (OpenMM's copy of GLYCAM06j).
 - Boothroyd, S., Behara, P. K., Madin, O. C., Hahn, D. F., Jang, H.,
   Gapsys, V., Wagner, J. R., Horton, J. T., Dotson, D. L., Thompson, M. W.,
   Maat, J., Gokey, T., Wang, L.-P., Cole, D. J., Gilson, M. K., Chodera, J. D.,
