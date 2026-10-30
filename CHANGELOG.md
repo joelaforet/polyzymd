@@ -21,6 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rectangular boxes with padding per axis.** `solvent.box.shape: rectangular`
+  takes one `padding` or one per axis (`{x, y, z}`), so an elongated protein
+  no longer needs a box sized by its longest dimension. The fixed solutes are
+  first turned onto their principal axes (longest on z; `align: none` keeps
+  the input orientation). The rotation is deterministic (canonical axis
+  signs; a plane of equal moments keeps its input orientation), ignores a
+  modified protein's attachment segments so replicates share one box, is
+  recorded in `build_provenance.json` and applied to `modified_protein.pdb`.
+  The alignment and per-axis padding enter the analysis identity only for a
+  rectangular box. Each axis needs at least the nonbonded cutoff plus
+  0.1 nm. The audit warns that the box assumes little rotation
+  (`geometry.rectangular_box`), and
+  `polyzymd.analyses.periodic_images` measures the solute's distance to its
+  own image over a run, keeping the solute whole with MDAnalysis' `NoJump`
+  from a whole first frame. Cubes and rhombic dodecahedra are unchanged.
+
 - Documentation for modified proteins: the tutorial "From an idea and a PDB
   to a glycosylated protein"; how-to guides to mutate, glycosylate with
   GLYCAM06j, attach groups, graft polymers, use Rosemary and analyze a modified

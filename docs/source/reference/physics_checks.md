@@ -40,6 +40,7 @@ This page is generated from PolyzyMD's check registry
 | `geometry.modified_protein_clash` | each component (protein) | FAIL | atoms of a modified protein without a bond or angle between them closer than 1.0 Å (heavy-heavy, hydrogen-heavy) or 0.8 Å (hydrogen-hydrogen): a fragment or side chain placed through the protein, which minimization can only fix by stretching bonds or moving the protein |
 | `geometry.periodic_image` | the system | FAIL | a fixed component closer to its own periodic image than the box padding guarantees |
 | `geometry.polymer_overlap` | the system | FAIL | a polymer heavy atom clashing with the protein or ligand |
+| `geometry.rectangular_box` | the system | WARN | a rectangular box, which keeps the solute clear of its images only while the solute keeps roughly the orientation the box was sized for |
 | `geometry.water_overlap` | the system | FAIL | a solvent heavy atom clashing with a solute heavy atom (closer than half the Packmol tolerance the build used) |
 | `ions.ionic_strength` | the system | FAIL | an ionic strength more than one ion away from the configured target |
 | `ions.neutral` | the system | FAIL | a net charge left on a system the config asked to neutralize |

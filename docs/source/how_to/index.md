@@ -49,6 +49,7 @@ rewrite_config_rc5
 polymers
 dynamic_polymers
 cosolvents
+elongated_protein_box
 ligand
 restraints
 equilibration

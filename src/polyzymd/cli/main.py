@@ -411,6 +411,24 @@ def _emit_protocol_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     return True
 
 
+def _pdb_masses(records: list[str]) -> tuple:
+    """Masses (Da) and atomic numbers of PDB ATOM/HETATM records, from the element column
+    (or the atom name when it is blank)."""
+    import numpy as np
+    from openmm.app.element import Element
+
+    masses, numbers = [], []
+    for line in records:
+        symbol = line[76:78].strip() or line[12:16].strip().lstrip("0123456789")[:1]
+        try:
+            element = Element.getBySymbol(symbol.capitalize())
+        except KeyError:
+            element = Element.getBySymbol("C")
+        masses.append(element.mass._value)
+        numbers.append(element.atomic_number)
+    return np.array(masses), np.array(numbers)
+
+
 def _echo_box_plan(sim_config: "SimulationConfig", *, phase: str) -> None:
     """Print the periodic box the build will make, sized from the enzyme PDB."""
     import numpy as np
@@ -419,22 +437,35 @@ def _echo_box_plan(sim_config: "SimulationConfig", *, phase: str) -> None:
     from polyzymd.utils.boxvectors import describe_box_plan, plan_box
 
     box = sim_config.solvent.box
-    padding = box.padding
+    extra = 0.0
     if sim_config.polymers and sim_config.polymers.enabled:
-        padding += sim_config.polymers.packing.padding
+        extra = sim_config.polymers.packing.padding
     try:
         with open(sim_config.enzyme.pdb_path) as stream:
-            positions = [
-                [float(line[30:38]), float(line[38:46]), float(line[46:54])]
-                for line in stream
-                if line.startswith(("ATOM", "HETATM"))
-            ]
-        plan = plan_box(
-            np.asarray(positions) / 10.0,
-            SolventBuilder._get_box_shape_matrix(box.shape.value),
-            padding_nm=padding,
-            margin_nm=box.tolerance / 10.0,
+            records = [line for line in stream if line.startswith(("ATOM", "HETATM"))]
+        positions_nm = (
+            np.array([[float(line[c : c + 8]) for c in (30, 38, 46)] for line in records]) / 10.0
         )
+        if box.shape.value == "rectangular":
+            from polyzymd.utils.boxvectors import fixed_solute_alignment, plan_rectangular_box
+
+            if box.alignment == "principal_axes":
+                # The build's alignment: mass-weighted heavy atoms (no attachments yet).
+                masses, numbers = _pdb_masses(records)
+                rotation, center = fixed_solute_alignment(positions_nm, masses, numbers)
+                positions_nm = (positions_nm - center) @ rotation.T + center
+            plan = plan_rectangular_box(
+                positions_nm,
+                tuple(p + extra for p in box.padding_xyz),
+                margin_nm=box.tolerance / 10.0,
+            )
+        else:
+            plan = plan_box(
+                positions_nm,
+                SolventBuilder._get_box_shape_matrix(box.shape.value),
+                padding_nm=box.padding + extra,
+                margin_nm=box.tolerance / 10.0,
+            )
     except Exception as exc:  # a diagnostic never stops the dry run
         reason = (
             "needs OpenFF, which only the build environment has"
@@ -667,7 +698,9 @@ def build(
             colored_echo(
                 f"  Chain D+ (Solvent): {sim_config.solvent.water.model.name}", phase="build"
             )
-            colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
+            colored_echo(
+                f"    Box padding: {sim_config.solvent.box.padding_label} nm", phase="build"
+            )
             _echo_box_plan(sim_config, phase="build")
             ions = sim_config.solvent.ions
             if ions.ionic_strength is not None:

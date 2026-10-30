@@ -117,11 +117,24 @@ def water_force_fields(solvent_force_field: Sequence[str], model: str) -> list[s
     return list(solvent_force_field) + ([extra] if extra else [])
 
 
+@functools.lru_cache(maxsize=None)
+def _vdw_cutoff_nm(name: str) -> float | None:
+    """The vdW cutoff of an OpenFF force field file, in nm, or None if it cannot be read."""
+    try:
+        from openff.toolkit import ForceField
+
+        handler = ForceField(name, load_plugins=True).get_parameter_handler("vdW")
+        return float(handler.cutoff.m_as("nanometer"))
+    except Exception:
+        return None
+
+
 class BoxShape(str, Enum):
     """Supported simulation box shapes."""
 
     CUBE = "cube"
     RHOMBIC_DODECAHEDRON = "rhombic_dodecahedron"
+    RECTANGULAR = "rectangular"
 
 
 class Ensemble(str, Enum):
@@ -1450,21 +1463,98 @@ class IonConfig(_ConfigModel):
         return self
 
 
+class AxisPadding(_ConfigModel):
+    """Solute-to-box-edge padding along each axis of a rectangular box, in nm."""
+
+    x: float = Field(..., gt=0.0, description="Padding along x (nm)")
+    y: float = Field(..., gt=0.0, description="Padding along y (nm)")
+    z: float = Field(..., gt=0.0, description="Padding along z (nm)")
+
+
 class BoxConfig(_ConfigModel):
     """Configuration for the simulation box.
 
     Attributes:
-        padding: Distance from solute to box edge in nm. The cell edge is the
-            solute diameter plus 2 x padding.
-        shape: Box geometry
+        padding: Distance from solute to box edge in nm. For a cube or a rhombic
+            dodecahedron the cell edge is the solute diameter plus 2 x padding.
+            A rectangular box takes one number or one per axis (``{x, y, z}``)
+            and is the solute's bounding box plus 2 x padding along each axis.
+        shape: Box geometry: ``cube``, ``rhombic_dodecahedron`` or ``rectangular``.
+        align: Rotation of the fixed solutes before a rectangular box is sized.
+            ``principal_axes`` (the default for a rectangular box) puts their
+            longest principal axis on z and the shortest on x; ``none`` keeps
+            the input orientation. Cubes and dodecahedra are sized for any
+            orientation and are never rotated.
         target_density: Target density in g/mL
         tolerance: Minimum molecular spacing for PACKMOL in Angstrom
     """
 
-    padding: float = Field(1.2, gt=0.0, description="Box padding (nm)")
+    padding: float | AxisPadding = Field(1.2, description="Box padding (nm)")
     shape: BoxShape = Field(BoxShape.RHOMBIC_DODECAHEDRON, description="Box shape")
+    align: Literal["principal_axes", "none"] | None = Field(
+        None, description="Rotate the fixed solutes before sizing a rectangular box"
+    )
     target_density: float = Field(1.0, gt=0.0, description="Target density (g/mL)")
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
+
+    @field_validator("padding")
+    @classmethod
+    def _positive_padding(cls, value: "float | AxisPadding") -> "float | AxisPadding":
+        if isinstance(value, float) and value <= 0.0:
+            raise ValueError("padding must be greater than 0 nm")
+        return value
+
+    @model_validator(mode="after")
+    def _rectangular_only(self) -> "BoxConfig":
+        """Per-axis padding and alignment describe a rectangular box only."""
+        if self.shape != BoxShape.RECTANGULAR:
+            if isinstance(self.padding, AxisPadding):
+                raise ValueError(
+                    f"padding per axis needs shape: rectangular; a {self.shape.value} is sized "
+                    "for any orientation, so give one number"
+                )
+            if self.align == "principal_axes":
+                raise ValueError(
+                    f"align: principal_axes is for shape: rectangular; a {self.shape.value} "
+                    "is sized for any orientation and is never rotated"
+                )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Omit an unset align, so configs without it keep their build hash."""
+        data = handler(self)
+        if self.align is None:
+            data.pop("align", None)
+        return data
+
+    @property
+    def padding_xyz(self) -> tuple[float, float, float]:
+        """The padding along x, y and z in nm (the same number three times unless per axis)."""
+        if isinstance(self.padding, AxisPadding):
+            return (self.padding.x, self.padding.y, self.padding.z)
+        value = float(self.padding)
+        return (value, value, value)
+
+    @property
+    def padding_label(self) -> str:
+        """The padding as text: one number, or ``x / y / z`` when the axes differ."""
+        values = self.padding_xyz
+        if len(set(values)) == 1:
+            return f"{values[0]:g}"
+        return " / ".join(f"{value:g}" for value in values)
+
+    @property
+    def min_padding(self) -> float:
+        """The smallest padding of any axis, in nm."""
+        return min(self.padding_xyz)
+
+    @property
+    def alignment(self) -> str:
+        """``principal_axes`` or ``none``: what the build does before sizing the box."""
+        if self.shape != BoxShape.RECTANGULAR:
+            return "none"
+        return self.align or "principal_axes"
 
 
 class SolventConfig(_ConfigModel):
@@ -2795,12 +2885,60 @@ class SimulationConfig(_ConfigModel):
                     "molecule's PDB chemical-component code, or leave it out."
                 )
         self._require_buildable_settings(engine)
+        self._require_box_padding()
         self.require_engine_restraints(engine)
         self.require_engine_barostats(engine)
         if inputs:
             from polyzymd.config.validation import require_inputs
 
             require_inputs(self)
+
+    #: Room a rectangular box must keep beyond the nonbonded cutoff on every axis (nm).
+    RECTANGULAR_PADDING_MARGIN_NM: ClassVar[float] = 0.1
+
+    def _nonbonded_cutoff_nm(self) -> float:
+        """The largest vdW cutoff of the force field files the build loads (0.9 nm if unknown).
+
+        Reads the solvent's and every solute's files, and a protein's
+        modification parameter sets (glycans, grafted polymers, small molecules).
+        """
+        names = [str(name) for name in self.solvent.force_field]
+        for solute in getattr(self, "solutes", []) or []:
+            names.extend(str(name) for name in getattr(solute, "force_field", []) or [])
+            sets = getattr(solute, "modification_parameters", None)
+            for parameter_set in (sets.as_dict() if sets is not None else {}).values():
+                names.extend(str(name) for name in getattr(parameter_set, "force_field", []) or [])
+        cutoffs = [
+            cutoff
+            for cutoff in (_vdw_cutoff_nm(name) for name in names if name.endswith(".offxml"))
+            if cutoff is not None
+        ]
+        return max(cutoffs) if cutoffs else 0.9
+
+    def _require_box_padding(self) -> None:
+        """Refuse a rectangular box padded less than the nonbonded cutoff plus a margin.
+
+        A rectangular box is sized for one orientation; each axis keeps the
+        solute at least one cutoff plus a margin from the box edge, so the
+        solute and its image are more than two cutoffs apart before it turns.
+        """
+        box = self.solvent.box
+        if box.shape != BoxShape.RECTANGULAR:
+            return
+        cutoff = self._nonbonded_cutoff_nm()
+        minimum = cutoff + self.RECTANGULAR_PADDING_MARGIN_NM
+        short = [
+            f"{axis} = {value:g} nm"
+            for axis, value in zip("xyz", box.padding_xyz)
+            if value < minimum - 1e-9
+        ]
+        if short:
+            raise ValueError(
+                f"solvent.box.padding: {', '.join(short)} is below the {minimum:g} nm a "
+                f"rectangular box needs (the {cutoff:g} nm nonbonded cutoff + "
+                f"{self.RECTANGULAR_PADDING_MARGIN_NM:g} nm).\nfix: give every axis at least "
+                f"{minimum:g} nm, or use shape: rhombic_dodecahedron."
+            )
 
     def _require_buildable_settings(self, engine: str) -> None:
         """Raise ``ValueError`` for settings a new build would not run as written."""

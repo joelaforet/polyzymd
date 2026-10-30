@@ -443,7 +443,7 @@ solvent:
   
   box:
     padding: 1.2                         # nm from solute to box edge (see below)
-    shape: "rhombic_dodecahedron"        # Box shape
+    shape: "rhombic_dodecahedron"        # cube, rhombic_dodecahedron or rectangular
     target_density: 1.0                  # g/mL
     tolerance: 2.0                       # PACKMOL tolerance (Angstrom)
 ```
@@ -525,9 +525,25 @@ an existing run with another model still loads for `status` and analysis.
 |-------|-------------|
 | `cube` | Cube: three equal edges at right angles |
 | `rhombic_dodecahedron` | Same edge, 71 % of the cube volume (default) |
+| `rectangular` | Three edges at right angles: the solute's extent along each axis plus `2 * padding` of that axis |
 
-Both shapes use the same edge, so they keep the solute equally far from its
-periodic copies. The rhombic dodecahedron needs fewer waters.
+The cube and the rhombic dodecahedron use the same edge, so they keep the
+solute equally far from its periodic copies in any orientation. The rhombic
+dodecahedron needs fewer waters.
+
+A `rectangular` box is for elongated solutes. It takes one `padding` or one
+per axis, `padding: {x: 1.2, y: 1.2, z: 1.5}`, and is sized for one
+orientation only:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `padding` | float or `{x, y, z}` (nm) | 1.2 | Distance from the solute to the box edge; per axis for a rectangular box only |
+| `align` | `principal_axes` or `none` | `principal_axes` for a rectangular box | Turn the fixed solutes together so that their longest principal axis lies on z (shortest on x) before the box is sized; recorded as `box_alignment` in `build_provenance.json`. Cubes and dodecahedra are never turned |
+
+Every axis of a rectangular box needs at least the nonbonded cutoff plus
+0.1 nm of padding; `validate` and `build` refuse less. The build audit warns
+(`geometry.rectangular_box`) that the solute may come closer to its own image
+if it turns during the run. See {doc}`../how_to/elongated_protein_box`.
 
 ### Co-solvents
 

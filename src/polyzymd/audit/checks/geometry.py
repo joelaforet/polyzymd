@@ -311,7 +311,9 @@ def periodic_image(context: AuditContext) -> list[Finding]:
     if not fixed:
         return []
     config = context.config
-    padding = 1.2 if config is None else config.solvent.box.padding
+    # A rectangular box may pad each axis differently; its closest image is
+    # along the axis with the smallest padding.
+    padding = 1.2 if config is None else config.solvent.box.min_padding
     if config is not None and config.polymers is not None:
         # The cell reserves room for the chains as well (polymers.packing.padding).
         padding += config.polymers.packing.padding
@@ -335,6 +337,34 @@ def periodic_image(context: AuditContext) -> list[Finding]:
             "system",
             "PASS",
             f"the solute stays {shown} from its own image (padding {padding} nm)",
+        )
+    ]
+
+
+@register(
+    CheckSpec(
+        "geometry.rectangular_box",
+        "system",
+        "WARN",
+        "a rectangular box, which keeps the solute clear of its images only while the "
+        "solute keeps roughly the orientation the box was sized for",
+    )
+)
+def rectangular_box(context: AuditContext) -> list[Finding]:
+    """Remind that a rectangular box assumes the solute rotates little."""
+    config = context.config
+    if config is None or config.solvent.box.shape.value != "rectangular":
+        return []
+    padding = config.solvent.box.padding_xyz
+    return [
+        Finding(
+            "geometry.rectangular_box",
+            "system",
+            "WARN",
+            "the box is rectangular (padding %.2f / %.2f / %.2f nm, %s): it is sized for the "
+            "solute's starting orientation, so check the solute's distance to its own image "
+            "over the run (polyzymd.analyses.periodic_images.solute_image_distances)"
+            % (*padding, config.solvent.box.alignment.replace("_", " ") + " alignment"),
         )
     ]
 

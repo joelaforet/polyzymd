@@ -1,5 +1,6 @@
 """Test that all public modules can be imported."""
 
+import copy
 import json
 import logging
 import re
@@ -1279,7 +1280,7 @@ def test_box_shape_refuses_truncated_octahedron():
     """Only the box shapes the build can make are accepted."""
     from polyzymd.config.schema import BoxConfig
 
-    with pytest.raises(ValidationError, match="'cube' or 'rhombic_dodecahedron'"):
+    with pytest.raises(ValidationError, match="'cube', 'rhombic_dodecahedron' or 'rectangular'"):
         BoxConfig(shape="truncated_octahedron")
 
 
@@ -1650,3 +1651,48 @@ def test_the_mod_token_is_the_start_of_the_modification_identity(minimal_config_
     config = SimulationConfig(**data)
     token = modification_identity(config.enzyme)[:6]
     assert config.format_run_directory_name(1) == f"TestEnzyme-mod{token}_apo_none_1ns_300K_run1"
+
+
+class TestRectangularBox:
+    """A rectangular box with padding per axis, rotated onto the solute's principal axes."""
+
+    def _config(self, data: dict, **box) -> SimulationConfig:
+        data = copy.deepcopy(data)
+        data["solvent"]["box"] = box
+        return SimulationConfig.model_validate(data)
+
+    def test_padding_per_axis_needs_a_rectangular_box(self, minimal_config_data) -> None:
+        config = self._config(
+            minimal_config_data, shape="rectangular", padding={"x": 1.0, "y": 1.1, "z": 2.0}
+        )
+        assert config.solvent.box.padding_xyz == (1.0, 1.1, 2.0)
+        assert config.solvent.box.alignment == "principal_axes"
+        with pytest.raises(ValidationError, match="padding per axis needs shape: rectangular"):
+            self._config(minimal_config_data, padding={"x": 1.0, "y": 1.0, "z": 2.0})
+
+    def test_alignment_is_only_for_a_rectangular_box(self, minimal_config_data) -> None:
+        with pytest.raises(ValidationError, match="align: principal_axes is for shape"):
+            self._config(minimal_config_data, shape="cube", align="principal_axes")
+        config = self._config(minimal_config_data, shape="rectangular", padding=1.2, align="none")
+        assert config.solvent.box.alignment == "none"
+        assert config.solvent.box.padding_xyz == (1.2, 1.2, 1.2)
+
+    def test_existing_boxes_dump_as_before(self, minimal_config_data) -> None:
+        """A cube or a dodecahedron gains no key, so its build hash does not change."""
+        for shape in ("cube", "rhombic_dodecahedron"):
+            dumped = self._config(minimal_config_data, shape=shape, padding=1.2).model_dump(
+                mode="json"
+            )["solvent"]["box"]
+            assert set(dumped) == {"padding", "shape", "target_density", "tolerance"}
+            assert dumped["padding"] == 1.2
+
+    def test_each_axis_needs_the_cutoff_plus_a_margin(self, minimal_config_data) -> None:
+        """Sage and the ff14SB port cut van der Waals off at 0.9 nm, so 1.0 nm is the minimum."""
+        thin = self._config(
+            minimal_config_data, shape="rectangular", padding={"x": 1.0, "y": 0.8, "z": 1.5}
+        )
+        with pytest.raises(ValueError, match=r"y = 0.8 nm is below the 1 nm"):
+            thin.require_buildable(inputs=False)
+        self._config(
+            minimal_config_data, shape="rectangular", padding={"x": 1.0, "y": 1.0, "z": 1.5}
+        ).require_buildable(inputs=False)

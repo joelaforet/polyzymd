@@ -54,6 +54,21 @@ def _modifications(solute: Any) -> dict[str, Any]:
     return modification_fingerprint(solute)
 
 
+def _box(box: Any) -> dict[str, Any]:
+    """The padding, shape and density of a box; a rectangular box adds its alignment.
+
+    A per-axis padding is hashed as its three numbers. A box without per-axis
+    padding or alignment (every box before the rectangular shape) hashes as before.
+    """
+    data = {name: getattr(box, name, None) for name in ("padding", "shape", "target_density")}
+    padding = data["padding"]
+    if padding is not None and not isinstance(padding, (int, float)):
+        data["padding"] = {axis: getattr(padding, axis) for axis in "xyz"}
+    if box is not None and getattr(getattr(box, "shape", None), "value", None) == "rectangular":
+        data["align"] = box.alignment
+    return data
+
+
 def _physics(config: "SimulationConfig") -> dict[str, Any]:
     """The force fields, charges, solvent, ions, box and restraints of a config."""
 
@@ -85,7 +100,7 @@ def _physics(config: "SimulationConfig") -> dict[str, Any]:
             "ions": part(
                 getattr(solvent, "ions", None), "neutralize", "nacl_concentration", "ionic_strength"
             ),
-            "box": part(getattr(solvent, "box", None), "padding", "shape", "target_density"),
+            "box": _box(getattr(solvent, "box", None)),
             "co_solvent_charges": sorted(
                 (c.name, str(charges(c))) for c in getattr(solvent, "co_solvents", None) or []
             ),

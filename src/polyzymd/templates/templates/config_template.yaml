@@ -212,6 +212,10 @@ solvent:
   box:
     padding: 1.2                        # nm from solute to box edge
     shape: "rhombic_dodecahedron"       # Efficient packing
+    # An elongated protein: a rectangular box, padded per axis and sized after
+    # the protein is turned onto its principal axes (longest on z):
+    # shape: "rectangular"
+    # padding: {x: 1.2, y: 1.2, z: 1.5}  # each axis >= cutoff + 0.1 nm
     target_density: 1.0                 # g/mL
     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
 

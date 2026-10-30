@@ -69,6 +69,22 @@ def _cosolvent_smiles(cosolvent: Any) -> str:
     return cosolvent.molecule.to_smiles()
 
 
+def _rotate_pdb_file(path: Path, rotation: Any, center_angstrom: Any) -> None:
+    """Turn the coordinates of a PDB file in place: ``(x - center) @ rotation.T + center``."""
+    import numpy as np
+
+    lines = path.read_text().splitlines(keepends=True)
+    rows = [i for i, line in enumerate(lines) if line.startswith(("ATOM", "HETATM"))]
+    xyz = np.array([[float(lines[i][c : c + 8]) for c in (30, 38, 46)] for i in rows])
+    if not rows:
+        return
+    turned = (xyz - center_angstrom) @ np.asarray(rotation).T + center_angstrom
+    for i, (x, y, z) in zip(rows, turned):
+        line = lines[i]
+        lines[i] = f"{line[:30]}{x:8.3f}{y:8.3f}{z:8.3f}{line[54:]}"
+    path.write_text("".join(lines))
+
+
 class SystemBuilder:
     """Orchestrator for building complete simulation systems.
 
@@ -1180,6 +1196,10 @@ class SystemBuilder:
         # 3. Combine enzyme + substrate
         self.combine_solutes()
 
+        # 3a. A rectangular box is sized for one orientation only, so the fixed
+        # solutes are first turned to put their principal axes on x, y and z.
+        self._align_for_box(config.solvent.box)
+
         # 3b. Compute the periodic cell FIRST, from the protein + substrate
         # alone.  The cell must not depend on where Packmol happens to put the
         # polymer chains, otherwise replicates of one condition end up with
@@ -1195,8 +1215,9 @@ class SystemBuilder:
                 extra_padding_nm=config.polymers.packing.padding,
             )
             LOGGER.info(
-                "Deterministic periodic cell from the protein + substrate diameter "
-                f"+ 2 x ({config.polymers.packing.padding} + {config.solvent.box.padding}) nm: "
+                "Deterministic periodic cell from the protein + substrate size "
+                f"+ 2 x ({config.polymers.packing.padding} + "
+                f"{config.solvent.box.padding_label}) nm: "
                 f"{box_vectors}"
             )
 
@@ -1383,6 +1404,51 @@ class SystemBuilder:
         if self._modified_protein is None:
             return []
         return self._modified_protein.glycam_sites
+
+    def _align_for_box(self, box: Any) -> None:
+        """Rotate the fixed solutes onto their principal axes for a rectangular box.
+
+        Every fixed solute (protein, attachments, substrate) turns together
+        about the centre of mass of the atoms that define the rotation, so their
+        relative geometry and every restraint distance are unchanged. The
+        rotation comes from the mass-weighted heavy atoms of the protein
+        segment and the other fixed solutes; a modified protein's attachment
+        segments (``G###``, ``P###``, ``M###``) are left out, because grafted
+        chains may be drawn per replicate and every replicate of a condition
+        must share one box. The longest principal axis ends up on z. The
+        rotation is recorded in the build provenance, and ``modified_protein.pdb``
+        is rewritten in the rotated frame, so it matches the solvated system.
+        """
+        if box.alignment != "principal_axes":
+            return
+        import numpy as np
+        from openff.units import Quantity
+
+        from polyzymd.utils.boxvectors import fixed_solute_alignment
+
+        topology = self._combined_topology
+        positions = np.asarray(topology.get_positions().m_as("nanometer"), dtype=float)
+        atoms = list(topology.atoms)
+        atomic_numbers = np.array([atom.atomic_number for atom in atoms])
+        masses = np.array([atom.mass.m_as("dalton") for atom in atoms], dtype=float)
+        exclude = np.zeros(len(atoms), dtype=bool)
+        if self._modified_protein is not None:
+            from polyzymd.modifying_proteins.topology import PROTEIN_SEGMENT
+
+            segments = list(self._modified_protein.record.segments)
+            exclude[: len(segments)] = [segment != PROTEIN_SEGMENT for segment in segments]
+        rotation, center = fixed_solute_alignment(positions, masses, atomic_numbers, exclude)
+        topology.set_positions(Quantity((positions - center) @ rotation.T + center, "nanometer"))
+        self._build_provenance["box_alignment"] = {
+            "method": "principal_axes",
+            "rotation": [[float(v) for v in row] for row in rotation],
+            "center_nm": [float(v) for v in center],
+            "excluded_attachment_atoms": int(exclude.sum()),
+        }
+        pdb_path = getattr(self._modified_protein, "pdb_path", None)
+        if pdb_path is not None and Path(pdb_path).exists():
+            _rotate_pdb_file(Path(pdb_path), rotation, center * 10.0)
+        LOGGER.info("Rotated the fixed solutes onto their principal axes (longest on z)")
 
     def _record_box_provenance(self, deterministic_box: bool) -> None:
         """Record the final cell in the build provenance.

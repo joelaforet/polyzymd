@@ -305,3 +305,30 @@ def test_a_mutation_s_handedness_changes_the_identity() -> None:
         )
 
     assert identity("L") != identity("D")
+
+
+# --- Rectangular boxes ---------------------------------------------------------------------
+
+
+def _quickstart_box(**box):
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+
+    data = yaml.safe_load(QUICKSTART_CONFIG.read_text())
+    data["solutes"][0]["pdb_path"] = str(QUICKSTART_CONFIG.parent / "trpcage.pdb")
+    data["solvent"]["box"] = {**data["solvent"].get("box", {}), **box}
+    return SimulationConfig.model_validate(data)
+
+
+def test_the_box_alignment_and_per_axis_padding_are_part_of_the_identity() -> None:
+    from polyzymd.analyses.identity import compute_config_hash
+
+    rect = {"shape": "rectangular", "padding": {"x": 1.0, "y": 1.2, "z": 1.6}}
+    aligned = compute_config_hash(_quickstart_box(**rect))
+    assert compute_config_hash(_quickstart_box(**rect, align="principal_axes")) == aligned
+    assert compute_config_hash(_quickstart_box(**rect, align="none")) != aligned
+    other = {**rect, "padding": {"x": 1.0, "y": 1.6, "z": 1.2}}
+    assert compute_config_hash(_quickstart_box(**other)) != aligned
+    # A box without the new keys keeps the identity it had.
+    assert compute_config_hash(_quickstart_box()) == "91f16dfc2809e001"
