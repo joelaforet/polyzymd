@@ -59,5 +59,6 @@ This page is generated from PolyzyMD's check registry
 | `parameters.modified_backbone` | each component (protein) | FAIL | the backbone (N, H, CA, HA, C, O) of a modified residue not on ff14SB: its charges and terms must match its unmodified neighbours' |
 | `parameters.nonbonded` | each component | FAIL | Lennard-Jones parameters not from the component's declared force field |
 | `parameters.one_four` | each component | FAIL | 1-2 and 1-3 exclusions or 1-4 pairs not as the owning force field scales them (GLYCAM06j leaves some glycan 1-4 pairs unscaled; one global scale gets them wrong) |
+| `parameters.rosemary_alpha` | each component (protein) | WARN | a protein charged whole with NAGL by its force field (OpenFF Rosemary): an alpha release is not for production, and OpenFF pairs Rosemary with OPC3 water; reported only for such proteins |
 | `restraint.atom_identity` | the system | FAIL | a restrained atom that is not the atom its selection names in its component |
 | `restraint.parameters` | the system | FAIL | a restraint whose form, distance or force constant differs from the config, or a restraint missing or extra |

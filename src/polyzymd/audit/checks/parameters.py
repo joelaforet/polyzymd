@@ -251,3 +251,60 @@ def coverage(context: AuditContext) -> list[Finding]:
 def comparisons(context: AuditContext) -> Any:
     """The domain comparisons the parameter checks read (for reports and tests)."""
     return _comparisons(context)
+
+
+@register(
+    CheckSpec(
+        "parameters.rosemary_alpha",
+        "component",
+        "WARN",
+        "a protein charged whole with NAGL by its force field (OpenFF Rosemary): an alpha "
+        "release is not for production, and OpenFF pairs Rosemary with OPC3 water; reported "
+        "only for such proteins",
+        ("protein",),
+    )
+)
+def rosemary_alpha(context: AuditContext) -> list[Finding]:
+    """Warn about a protein that one force field charges whole with NAGL (Rosemary).
+
+    Proteins on library charges (ff14SB) get no finding, so their reports are
+    unchanged.
+    """
+    from polyzymd.config.schema import is_rosemary
+
+    water = None
+    if context.config is not None:
+        solvent = getattr(context.config, "solvent", None)
+        model = getattr(getattr(solvent, "water", None), "model", None)
+        water = getattr(model, "value", model)
+    findings = []
+    for component in context.components:
+        if component.type != "protein":
+            continue
+        protein = next((d for d in component.domains if d.name == "protein"), None)
+        if protein is None or protein.charges.method != "nagl":
+            continue
+        force_fields = list(protein.force_field)
+        notes = []
+        if is_rosemary(force_fields):
+            notes.append(
+                f"{' + '.join(force_fields)} is an OpenFF Rosemary alpha release, not for "
+                "production"
+            )
+        if water is not None and str(water).lower() != "opc3":
+            notes.append(f"OpenFF pairs Rosemary with OPC3 water; this build uses {water}")
+        if notes:
+            detail = (
+                "; ".join(notes) + ". It parameterizes the whole protein, modifications included."
+            )
+            findings.append(Finding("parameters.rosemary_alpha", component.name, "WARN", detail))
+        else:
+            findings.append(
+                Finding(
+                    "parameters.rosemary_alpha",
+                    component.name,
+                    "PASS",
+                    f"{' + '.join(force_fields)} charges the whole protein with NAGL",
+                )
+            )
+    return findings

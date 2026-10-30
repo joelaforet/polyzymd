@@ -370,8 +370,8 @@ def sites(context: AuditContext) -> list[Finding]:
             )
         if reference.neutral_termini:
             problems.append(
-                "a neutral terminus is not supported in PolyzyMD 1.4 (no ff14SB template; "
-                "cap a truncated chain with ACE or NME instead): "
+                "a neutral terminus is not supported in PolyzyMD 1.4 (termini are simulated "
+                "charged at physiological pH; cap a truncated chain with ACE or NME instead): "
                 + ", ".join(reference.neutral_termini)
             )
         for domain in component.domains:

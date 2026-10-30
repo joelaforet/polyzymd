@@ -95,7 +95,7 @@ solutes:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `pdb_path` | path | Yes | Prepared, protonated PDB file. `validate` refuses a missing file or one without ATOM/HETATM records |
-| `charges` | object | Yes | `{method: library}`: a protein takes its force field's library charges |
+| `charges` | object | Yes | `{method: library}`: a protein takes its force field's library charges. On a force field that charges with NAGL (OpenFF Rosemary): `{method: nagl, model: ...}` (see [Rosemary alpha](#protein-rosemary-alpha)) |
 | `custom_substructures_path` | path | No | JSON file of residue templates for residues that OpenFF does not know, such as an N-terminal cystine. See {doc}`openff_pdb_ingestion` |
 | `description` | string | No | Human-readable description |
 | `mutations` | list | No | Side-chain changes, applied first and in order. See [Mutations and modifications](#mutations-and-modifications) |
@@ -103,6 +103,34 @@ solutes:
 | `modification_parameters` | object | With sites | Force field and charges of each site type: `glycan`, `polymer`, `generic`, `noncanonical` |
 | `max_charge_shift` | float | No | Largest uniform shift (e per atom) that brings a site to its integer charge. Default 0.005 |
 | `relax` | string | No | `joint` (default): place every change, then relax them together; `per_modification`; `none` |
+
+(protein-rosemary-alpha)=
+#### OpenFF Rosemary alpha (opt-in)
+
+```yaml
+  - type: protein
+    pdb_path: "structures/enzyme.pdb"
+    force_field: ["openff_no_water-3.0.0-alpha2b.offxml"]
+    charges: {method: nagl, model: openff-gnn-am1bcc-1.0.0.pt}
+```
+
+Rosemary is OpenFF's protein force field in development; this is an alpha
+release, not for production. The example names the newest candidate the
+pixi environments install (`openff-forcefields` 2026.09.0); earlier
+candidates such as `openff_no_water-3.0.0-alpha0.offxml` are still accepted. It parameterizes the whole protein component,
+mutations and modifications included, and NAGL charges the whole molecule, so
+the protein takes no `modification_parameters` and has no per-site domains.
+It must be the protein's only force field file. OpenFF pairs Rosemary with OPC3
+water, which PolyzyMD does not build yet; the audit warns about both
+(`parameters.rosemary_alpha`).
+
+PolyzyMD reads the force field file, not its name, to decide which charges
+apply: a file with protein library charges (ff14SB) takes
+`{method: library}`; a file that charges with NAGL and has no protein library
+charges (Rosemary, under any name or path) takes `{method: nagl, model: ...}`.
+The declared model is the one used, even if the file names another. PolyzyMD
+1.4 charges every NAGL component with one model per build, so the protein's
+model must match any NAGL-charged ligand or co-solvent.
 
 (mutations-and-modifications)=
 #### Mutations and modifications

@@ -4,9 +4,10 @@ A covalently modified protein is one molecule, so it is one component. Its
 atoms are written under several segment IDs (``PROT`` for the protein, one
 per attachment: ``G001``, ``P001``, ``M001``) and split into domains: the
 protein (ff14SB, library charges) and one domain per modification site (its
-parameter set). Every domain's reference names what the audit needs to
-rebuild the protein from its inputs alone: the input PDB file, the
-modification blocks and the parameter sets.
+parameter set). A protein on OpenFF Rosemary alpha is one domain (Rosemary,
+NAGL charges on the whole molecule), modifications included. Every domain's
+reference names what the audit needs to rebuild the protein from its inputs
+alone: the input PDB file, the modification blocks and the parameter sets.
 """
 
 from __future__ import annotations
@@ -70,14 +71,19 @@ def protein_component(
         },
         "max_charge_shift": record.max_charge_shift,
         "protein_force_field": list(record.protein_force_field),
+        "protein_charges": dict(record.protein_charges) if record.protein_charges else None,
         "constraints_from": constraints_from,
     }
+    whole = record.protein_charges
     domains = [
         Domain(
             name="protein",
             atoms=_ranges([index + start for index in range(n_atoms) if index not in in_site]),
             force_field=tuple(record.protein_force_field or PROTEIN_FORCE_FIELD),
-            charges=ChargeSource("library"),
+            # Rosemary alpha charges the whole protein with NAGL; ff14SB has library charges.
+            charges=(
+                ChargeSource("nagl", model=whole.get("model")) if whole else ChargeSource("library")
+            ),
             reference={"modified_protein": reference, "site": None, "site_type": None},
         )
     ]

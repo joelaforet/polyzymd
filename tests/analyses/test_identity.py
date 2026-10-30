@@ -162,8 +162,10 @@ def test_a_missing_input_file_hashes_the_same_wherever_it_was(tmp_path: Path) ->
         ("salt", lambda d: d["solvent"].setdefault("ions", {}).update(nacl_concentration=0.05)),
         ("box padding", lambda d: d["solvent"].setdefault("box", {}).update(padding=1.7)),
         (
-            "protein charges model",
-            lambda d: d["solutes"][0].update(force_field=["openff-2.3.0.offxml"]),
+            # Another ff14SB port release: a valid protein force field with library
+            # charges (Sage has none for proteins, so validation refuses it there).
+            "protein force field",
+            lambda d: d["solutes"][0].update(force_field=["ff14sb_off_impropers_0.0.3.offxml"]),
         ),
     ],
     ids=lambda c: c[0],

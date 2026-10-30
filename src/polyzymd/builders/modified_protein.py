@@ -128,13 +128,22 @@ class ModifiedProteinBuild:
             protein.save_pdb(pdb_path)
         sets = parameter_sets(solute)
         t0 = time.perf_counter()
-        result = mp.parameterize(
-            protein,
-            sets,
-            max_charge_shift=solute.max_charge_shift,
-            protein_force_field=tuple(solute.force_field),
-            constraints_from=constraints_from,
-        )
+        if solute.on_rosemary:
+            # One force field for the whole component, modifications included.
+            result = mp.parameterize_whole(
+                protein,
+                tuple(solute.force_field),
+                solute.charges.model_dump(exclude_none=True),
+                constraints_from=constraints_from,
+            )
+        else:
+            result = mp.parameterize(
+                protein,
+                sets,
+                max_charge_shift=solute.max_charge_shift,
+                protein_force_field=tuple(solute.force_field),
+                constraints_from=constraints_from,
+            )
         # The bare Interchange: GLYCAM06j pairs and masses are written at export.
         interchange, record = result.interchange_without_glycam_pairs, result.record
         timings["parameterize_s"] = time.perf_counter() - t0

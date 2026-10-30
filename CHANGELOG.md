@@ -29,6 +29,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cached exactly as before. A config with `sequence:`, `mutations:` or
   `modifications:` gets a `-seq`/`-mod` hash token in its run folder name; other
   configs keep their 1.3 names.
+- A protein solute may opt in to OpenFF Rosemary alpha
+  (`force_field: [openff_no_water-3.0.0-alpha2b.offxml]`,
+  `charges: {method: nagl, model: ...}`): one force field for the whole
+  protein component, mutations and modifications included, charged by NAGL on
+  the whole molecule. It takes no `modification_parameters`. Which charges a
+  protein takes is read from its force field file's content (protein library
+  charges, or a NAGLCharges section), not its name. The audit recomputes the
+  declared NAGL model's charges, fails library charges declared on a force
+  field without protein library charges, and warns
+  (`parameters.rosemary_alpha`, reported only for such proteins) that
+  Rosemary is an alpha release and that OpenFF pairs it with OPC3 water, which
+  PolyzyMD does not build yet. One NAGL model still charges every NAGL
+  component of a build, the protein included.
+- The `build` and `test` environments install `openff-forcefields` 2026.09.0
+  (was 2026.01.0), which adds the Rosemary candidate
+  `openff_no_water-3.0.0-alpha2b.offxml`. The other force field files PolyzyMD
+  uses are unchanged byte for byte.
 - A protein solute takes `mutations:` (applied first), `modifications:`
   (`deprotonate`, `protonate`, `attach`, in order) and `modification_parameters:`
   (one force field and charge set per site type). Sites are written `A:N58` or

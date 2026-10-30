@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import warnings
+from collections.abc import Sequence
 from enum import Enum
 from pathlib import Path
 from string import Formatter
@@ -340,11 +341,50 @@ from polyzymd.config.modifications import (  # noqa: E402
     required_site_types,
 )
 
+#: File-name prefixes of OpenFF's Rosemary alpha force fields. Rosemary
+#: parameterizes a whole protein, modifications included, and charges it with
+#: NAGL on the whole molecule; it is an alpha release, not for production.
+ROSEMARY_PREFIXES = (
+    "openff-3.0.0-alpha",
+    "openff_unconstrained-3.0.0-alpha",
+    "openff_no_water-3.0.0-alpha",
+    "openff_no_water_unconstrained-3.0.0-alpha",
+)
+
+
+def is_rosemary(force_field: Sequence[str | Path]) -> bool:
+    """Whether ``force_field`` names an OpenFF Rosemary alpha force field (by file name)."""
+
+    return any(Path(str(name)).name.startswith(ROSEMARY_PREFIXES) for name in force_field)
+
+
+@functools.lru_cache(maxsize=32)
+def protein_charge_handlers(force_field: tuple[str, ...]) -> tuple[str | None, bool]:
+    """Read how ``force_field`` would charge a protein, from the files' content.
+
+    Returns ``(nagl_model, protein_library_charges)``: the ``model_file`` of its
+    NAGLCharges section (None without one), and whether it holds library
+    charges of more than one atom (residue templates, as ff14SB has; monatomic
+    ion charges do not count).
+    """
+    from openff.toolkit import ForceField
+
+    loaded = ForceField(*force_field)
+    nagl_model = None
+    if "NAGLCharges" in loaded.registered_parameter_handlers:
+        nagl_model = loaded["NAGLCharges"].model_file
+    library = False
+    if "LibraryCharges" in loaded.registered_parameter_handlers:
+        library = any(len(p.charge) > 1 for p in loaded["LibraryCharges"].parameters)
+    return nagl_model, library
+
 
 class ProteinSolute(_Solute):
     """A protein (``type: protein``), read from a PDB file through residue templates.
 
-    Its charges are the protein force field's library charges.
+    Its charges are the protein force field's library charges (ff14SB), or NAGL
+    charges on the whole molecule when the protein opts in to OpenFF's Rosemary
+    alpha, which then parameterizes the whole component, modifications included.
 
     Attributes:
         pdb_path: PDB file of the protein, protonated.
@@ -365,7 +405,9 @@ class ProteinSolute(_Solute):
         ),
     )
     charges: ChargeSpec = Field(
-        ..., description="library: the protein force field's library charges"
+        ...,
+        description="library: the protein force field's library charges; nagl (with "
+        "model) only for a protein on OpenFF Rosemary alpha",
     )
     mutations: list[Mutation] = Field(
         default_factory=list,
@@ -410,17 +452,70 @@ class ProteinSolute(_Solute):
         return v
 
     @model_validator(mode="after")
-    def _library_charges(self) -> Self:
-        if self.charges.method != "library":
+    def _protein_charges(self) -> Self:
+        """Match the charges to what the force field files can do, read from their content.
+
+        A force field with protein library charges (ff14SB) takes ``library``;
+        one that charges with NAGL and has no protein library charges (OpenFF
+        Rosemary) takes ``nagl`` with a model, and then parameterizes the whole
+        protein, modifications included. The declared model is the one used,
+        even when the file names another.
+        """
+        try:
+            nagl_model, library = protein_charge_handlers(tuple(str(f) for f in self.force_field))
+        except Exception:  # noqa: BLE001  (an unknown file is reported by require_buildable)
+            nagl_model, library = None, self.charges.method == "library"
+        files = ", ".join(str(f) for f in self.force_field)
+        if self.charges.method == "library":
+            if library:
+                return self
+            if nagl_model is not None:
+                raise ValueError(
+                    f"{files} has no protein library charges; it charges with NAGL "
+                    f"({nagl_model}). Use charges: {{method: nagl, model: {nagl_model}}}; the "
+                    "force field then parameterizes the whole protein, modifications included"
+                )
             raise ValueError(
-                "a protein takes the library charges of its force field; use "
-                "charges: {method: library}"
+                f"{files} has neither protein library charges nor a NAGLCharges section, so "
+                "it cannot charge a protein; use ff14SB (ff14sb_off_impropers_0.0.4.offxml) "
+                "with charges: {method: library}"
+            )
+        if self.charges.method != "nagl":
+            raise ValueError(
+                "a protein takes its force field's library charges (charges: {method: library}) "
+                "or, on a force field that charges with NAGL such as OpenFF Rosemary alpha, "
+                f"charges: {{method: nagl, model: ...}}; not {self.charges.method}"
+            )
+        if nagl_model is None or library:
+            raise ValueError(
+                f"charges: {{method: nagl}} on a protein needs a force field that charges with "
+                f"NAGL and has no protein library charges (OpenFF Rosemary, e.g. "
+                f"openff_no_water-3.0.0-alpha2b.offxml); {files} has "
+                + (
+                    "protein library charges: use charges: {method: library}"
+                    if library
+                    else "no NAGLCharges section"
+                )
+            )
+        if len(self.force_field) != 1:
+            raise ValueError(
+                "a force field that charges the whole protein with NAGL parameterizes it on its "
+                f"own; name it as the protein's only force field file, not with {self.force_field}"
+            )
+        if self.modification_parameters is not None:
+            raise ValueError(
+                f"modification_parameters does not apply to a protein on {files}: it "
+                "parameterizes the whole protein component, modifications included. Remove "
+                "modification_parameters, or put the protein on ff14SB to give each site type "
+                "its own parameter set"
             )
         return self
 
     @model_validator(mode="after")
     def _parameter_sets_for_sites(self) -> Self:
-        """Every site type the entries create needs a parameter set."""
+        """Every site type the entries create needs a parameter set (on ff14SB)."""
+        if self.on_rosemary:
+            return self
         sets = self.modification_parameters.as_dict() if self.modification_parameters else {}
         missing: dict[str, str] = {}
         for site_type, reason in required_site_types(self.mutations, self.modifications):
@@ -452,6 +547,12 @@ class ProteinSolute(_Solute):
             if key in data and data[key] == default:
                 del data[key]
         return data
+
+    @property
+    def on_rosemary(self) -> bool:
+        """Whether one force field parameterizes the whole protein with NAGL charges
+        (OpenFF Rosemary); validation ties ``charges: nagl`` to such a force field."""
+        return self.charges.method == "nagl"
 
     @property
     def is_modified(self) -> bool:
@@ -2538,9 +2639,18 @@ class SimulationConfig(_ConfigModel):
                 )
         models = {charges.model for charges in self._charge_specs() if charges.method == "nagl"}
         if len(models) > 1:
+            named = [(s.name, s.type, s.charges) for s in self.solutes] + [
+                (c.name, "co-solvent", c.charges) for c in self.solvent.co_solvents
+            ]
+            who = "; ".join(
+                f"{name} ({kind}{', whole protein on its NAGL force field' if kind == 'protein' else ''}): "
+                f"{charges.model}"
+                for name, kind, charges in named
+                if charges.method == "nagl"
+            )
             raise ValueError(
-                f"components name different NAGL models ({', '.join(sorted(models))}); this "
-                "release charges every nagl component with one model"
+                f"components name different NAGL models ({who}); PolyzyMD 1.4 charges every "
+                "nagl component, a NAGL-charged protein included, with one model per build"
             )
         for restraint in self.restraints:
             for atom in (restraint.atom1, restraint.atom2):

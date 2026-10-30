@@ -74,6 +74,12 @@ solutes:
     description: "My enzyme description"
     force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
     charges: {method: library}
+    # OpenFF Rosemary alpha instead (OPTIONAL, alpha, not for production): one
+    # force field for the whole protein, modifications included, with NAGL
+    # charges on the whole molecule; no modification_parameters. OpenFF pairs it
+    # with OPC3 water, which PolyzyMD does not build yet (the audit warns).
+    # force_field: ["openff_no_water-3.0.0-alpha2b.offxml"]
+    # charges: {method: nagl, model: openff-gnn-am1bcc-1.0.0.pt}
     # Mutations, then covalent modifications, applied to the PDB in order
     # (OPTIONAL). Sites are chain:residue (A:N58 or A:ASN58), checked against the
     # PDB; `polyzymd validate --plans` lists every change before you build.

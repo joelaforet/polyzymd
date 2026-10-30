@@ -40,6 +40,7 @@ from polyzymd.modifying_proteins.parameters import (
     ParameterSet,
     SiteParameters,
     parameterize,
+    parameterize_whole,
 )
 from polyzymd.modifying_proteins.sites import Site, expand_sites, parse_site
 from polyzymd.modifying_proteins.spec import apply_spec, expand, to_spec, to_yaml
@@ -70,6 +71,7 @@ __all__ = [
     "modification_sites",
     "mutate",
     "parameterize",
+    "parameterize_whole",
     "parse_site",
     "plan_attach",
     "plan_deprotonate",

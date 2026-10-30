@@ -128,6 +128,9 @@ class SystemBuilder:
         self._build_provenance: Dict[str, Any] = {}
         #: The protein after its mutations and modifications, when it has any.
         self._modified_protein: Optional[ModifiedProteinBuild] = None
+        # NAGL model of a protein on OpenFF Rosemary alpha (None: library charges).
+        self._protein_nagl_model: Optional[str] = None
+        self._nagl_enzyme: Optional[List[Molecule]] = None
 
         # Molecule count tracking for PDB chain/residue assignment
         # These are set during build and used by _assign_pdb_identifiers()
@@ -161,6 +164,11 @@ class SystemBuilder:
             nagl_model=config.force_field.nagl_model,
         )
         builder._config = config
+        solute = getattr(config, "solute", None)
+        protein = solute("protein") if callable(solute) else None
+        if protein is not None and protein.charges.method == "nagl":
+            # OpenFF Rosemary alpha: NAGL charges on the whole protein, with its own model.
+            builder._protein_nagl_model = protein.charges.model
         return builder
 
     def build_enzyme(
@@ -594,6 +602,8 @@ class SystemBuilder:
             from polyzymd.modifying_proteins.parameters import charge_templates
 
             charge_from.extend(charge_templates(list(self._enzyme_topology.molecules)))
+        elif self._protein_nagl_model is not None:
+            charge_from.extend(self._nagl_charged_enzyme())
 
         seen_smiles: set = set()
         for mol in self._polymer_molecules:
@@ -657,9 +667,12 @@ class SystemBuilder:
         bonded, Lennard-Jones and constraint term wholly inside them is swapped
         for its counterpart, so the protein no longer depends on load order.
         Terms of other molecules and all charges stay as they are; the
-        protein's charges are already the ff14SB library charges. Constraints
-        follow the small-molecule force field's bonds-to-hydrogen policy, with
-        the protein force field's bond lengths.
+        protein's charges are already its declared ones (ff14SB library
+        charges, or NAGL charges for a protein on OpenFF Rosemary). Constraints
+        come from the protein force field's own Constraints section when it has
+        one (Rosemary); otherwise (the ff14SB port has none) they follow the
+        small-molecule force field's bonds-to-hydrogen policy, with the protein
+        force field's bond lengths.
 
         Impropers are not checked for coverage, because the two force fields
         define them differently; every other handler must cover the same
@@ -675,6 +688,7 @@ class SystemBuilder:
                 settings of the two force fields differ, or the first
                 molecules of the solvated topology are not the enzyme.
         """
+
         from openff.toolkit import ForceField, Topology
 
         if self._n_enzyme_molecules == 0:
@@ -691,15 +705,21 @@ class SystemBuilder:
             )
 
         t0 = time.perf_counter()
+        constraints_source = f"{self._sm_ff} policy at {self._protein_ff} bond lengths"
         if self._modified_protein is not None:
             # ff14SB outside the sites, each site from its parameter set, as
             # parameterization made them; atoms are in the same order.
             reference = self._modified_protein.interchange
+            if self._modified_protein.record.protein_charges:
+                # Parameterized whole (Rosemary), with its own Constraints section.
+                constraints_source = f"{self._protein_ff} Constraints"
         else:
             protein_ff = ForceField(self._protein_ff)
             small_molecule_ff = ForceField(self._sm_ff)
-            # The Amber port has no Constraints handler.
-            if "Constraints" not in protein_ff.registered_parameter_handlers:
+            # The Amber port has no Constraints handler; Rosemary has its own.
+            if "Constraints" in protein_ff.registered_parameter_handlers:
+                constraints_source = f"{self._protein_ff} Constraints"
+            else:
                 protein_ff.register_parameter_handler(small_molecule_ff["Constraints"])
             protein_topology = Topology.from_molecules(
                 [
@@ -707,7 +727,10 @@ class SystemBuilder:
                     for index in range(self._n_enzyme_molecules)
                 ]
             )
-            reference = protein_ff.create_interchange(protein_topology)
+            charged = self._nagl_charged_enzyme() if self._protein_nagl_model is not None else []
+            reference = protein_ff.create_interchange(
+                protein_topology, charge_from_molecules=charged
+            )
 
         for name in ("vdW", "Electrostatics"):
             for attribute in ("scale_12", "scale_13", "scale_14", "scale_15"):
@@ -752,14 +775,32 @@ class SystemBuilder:
             target.potentials = {
                 key: value for key, value in target.potentials.items() if key in used
             }
-            source_name = (
-                f"{self._sm_ff} policy at {self._protein_ff} bond lengths"
-                if name == "Constraints"
-                else self._protein_ff
-            )
+            source_name = constraints_source if name == "Constraints" else self._protein_ff
             LOGGER.info(f"  {name}: {len(source.key_map)} protein terms from {source_name}")
 
         LOGGER.info(f"  Protein force field applied in {time.perf_counter() - t0:.1f}s")
+
+    def _nagl_charged_enzyme(self) -> List[Molecule]:
+        """The distinct enzyme molecules, charged by NAGL with the protein's model.
+
+        Used for a protein on OpenFF Rosemary alpha, whose charges are NAGL
+        charges on the whole molecule rather than library charges.
+        """
+        if self._nagl_enzyme is None:
+            from openff.toolkit import Molecule
+            from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
+
+            charged: List[Molecule] = []
+            for molecule in self._enzyme_topology.molecules:
+                if any(molecule.is_isomorphic_with(other) for other in charged):
+                    continue
+                copy = Molecule(molecule)
+                NAGLToolkitWrapper().assign_partial_charges(
+                    copy, partial_charge_method=self._protein_nagl_model
+                )
+                charged.append(copy)
+            self._nagl_enzyme = charged
+        return self._nagl_enzyme
 
     def _renumber_chains(self, topology: Topology) -> None:
         """Normalize chain IDs before canonical PDB identifier assignment.
@@ -1468,7 +1509,11 @@ class SystemBuilder:
                             "protein",
                             tuple(atoms),
                             (self._protein_ff,),
-                            ChargeSource("library"),
+                            (
+                                ChargeSource("nagl", model=self._protein_nagl_model)
+                                if self._protein_nagl_model is not None
+                                else ChargeSource("library")
+                            ),
                             reference={
                                 "pdb": str(self._enzyme_builder.pdb_path),
                                 "custom_substructures": _optional_str(

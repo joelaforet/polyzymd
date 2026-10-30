@@ -231,6 +231,17 @@ def _build_reference(realized: Any, component: Any) -> ModifiedReference:
             f"(first difference at atom {_first_difference(elements, expected_elements) + offset})"
         )
     real = lambda local: local + offset  # noqa: E731
+    if recipe.get("protein_charges"):
+        ref = _whole_protein_reference(recipe, component, protein, molecule, keys, real)
+        ref.chemistry = chemistry
+        return ref
+    from polyzymd.config.schema import protein_charge_handlers
+
+    if not protein_charge_handlers(tuple(recipe["protein_force_field"]))[1]:
+        raise ValueError(
+            f"the protein declares library charges, but {', '.join(recipe['protein_force_field'])} "
+            "has no protein library charges"
+        )
 
     sites = modification_sites(protein)
     site_by_name = {site.name: site for site in sites}
@@ -429,6 +440,74 @@ def _build_reference(realized: Any, component: Any) -> ModifiedReference:
             or any(tuple(n[:3]) in residues for n in record.new_residues)
         )
         ref.site_formal[site.name] = (chemistry, float(recorded))
+    ref.protonation_warnings = protonation_warnings(protein)
+    return ref
+
+
+def _whole_protein_reference(
+    recipe: dict, component: Any, protein: Any, molecule: Any, keys: list, real
+) -> ModifiedReference:
+    """The reference of a protein one force field parameterizes whole (Rosemary alpha).
+
+    Every atom, modifications included, belongs to the protein domain: its
+    terms come from the declared force field on ``molecule`` (the chemistry
+    read independently with openff-pablo), and its charges from NAGL with the
+    declared model on each of its molecules, both computed here.
+    """
+    from openff.toolkit import Topology
+    from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
+
+    from polyzymd.modifying_proteins.parameters import charge_templates, split_molecules
+
+    n_atoms = len(keys)
+    # NAGL brings each molecule to its own formal charge: one call per
+    # connected component (chain, or chains joined by a bond), in atom order.
+    charged = []
+    for piece in split_molecules(molecule):
+        NAGLToolkitWrapper().assign_partial_charges(
+            piece, partial_charge_method=recipe["protein_charges"]["model"]
+        )
+        charged.append(piece)
+    system = reference_system(
+        recipe["protein_force_field"],
+        Topology.from_molecules(charged),
+        charge_templates(charged),
+        constraints_from=recipe["constraints_from"],
+    )
+    index = SystemIndex.from_system(system)
+    to_real = {i: real(i) for i in range(n_atoms)}
+    domain_of = {real(i): "protein" for i in range(n_atoms)}
+    expected: dict[str, dict[str, dict]] = {"protein": {kind: {} for kind in TERM_KINDS}}
+    _owned_terms(expected, index, to_real, domain_of, "protein")
+    per_atom = {real(i): index.particle[i] for i in range(n_atoms)}
+    charges = {i: per_atom[i][0] for i in per_atom}
+    for i, (q, lj, mass) in per_atom.items():
+        expected["protein"]["charge"][i] = q
+        expected["protein"]["lj"][i] = lj
+        expected["protein"]["mass"][i] = mass
+    ref = ModifiedReference(
+        component=component.name,
+        domain_of=domain_of,
+        expected=expected,
+        sites=[],
+        backbone={},
+        bonds={tuple(sorted((real(b.atom1_index), real(b.atom2_index)))) for b in molecule.bonds},
+        names=[_label(key) for key in keys],
+        site_types={},
+        site_force_fields={},
+    )
+    _expected_pairs(
+        ref, per_atom, charges, {"protein": _scales(recipe["protein_force_field"])}, None
+    )
+    # One domain by design: no site atoms (rule_atoms stays empty). The records
+    # are compared with the config's blocks by modifications.declared.
+    ref.records = list(protein.records)
+    ref.recipe = recipe
+    # A terminus changed by protonation alone is refused as for ff14SB proteins
+    # (termini are simulated charged); the atoms the changes touch say which.
+    touched = site_rule(protein, keys, real(0))[0]
+    termini = modified_termini(recipe["pdb"], keys, dict.fromkeys(touched, "touched"), real(0))
+    ref.neutral_termini = neutral_termini(termini, ref.records)
     ref.protonation_warnings = protonation_warnings(protein)
     return ref
 

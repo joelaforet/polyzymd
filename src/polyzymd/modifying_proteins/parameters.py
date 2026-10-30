@@ -159,6 +159,9 @@ class ParameterizationRecord:
     #: [start, stop) of each molecule (connected component) of the protein, in
     #: atom order: chains joined by a disulfide or a modification are one.
     molecules: list[list[int]] = field(default_factory=list)
+    #: Charges of the whole protein when one force field parameterizes all of it
+    #: (OpenFF Rosemary alpha with NAGL); None when ff14SB library charges apply.
+    protein_charges: dict | None = None
 
     @property
     def glycam_pairs(self) -> list[glycam.PairOverride]:
@@ -381,6 +384,63 @@ def parameterize(
     return ParameterizedProtein(interchange, record)
 
 
+def parameterize_whole(
+    protein: ModifiedProtein,
+    force_field: Sequence[str],
+    charges: Mapping[str, str],
+    *,
+    constraints_from: str = CONSTRAINTS_FROM,
+) -> "ParameterizedProtein":
+    """Parameterize all of ``protein`` with one OpenFF force field (Rosemary alpha).
+
+    There are no sites and no splice: every atom, modifications included, gets
+    ``force_field``'s terms, and the whole molecule is charged by NAGL with
+    the named model (``charges = {"method": "nagl", "model": ...}``).
+    """
+    from openff.toolkit import ForceField, Topology
+    from openff.units import unit
+
+    if charges.get("method") != "nagl" or not charges.get("model"):
+        raise ValueError(
+            "a protein parameterized whole takes NAGL charges on the whole molecule: "
+            "charges = {'method': 'nagl', 'model': ...}"
+        )
+    # A terminus changed by protonation alone is refused, as for ff14SB proteins:
+    # termini are simulated charged (Joe, 2026-10-29). Labels and caps stay allowed.
+    _refuse_neutral_termini(
+        protein,
+        modified_termini(protein, modification_sites(protein)),
+        WHOLE_PROTEIN_NEUTRAL_TERMINUS_MESSAGE,
+    )
+    molecule = to_openff(protein)
+    # NAGL brings each molecule to its own formal charge, so each connected
+    # component (chain, or chains joined by a bond) is charged on its own;
+    # identical copies (the protomers of a homo-oligomer) share one result.
+    pieces = split_molecules(molecule)
+    charged = nagl_charges_by_component(pieces, charges["model"])
+    total = float(
+        sum(piece.partial_charges.m_as(unit.elementary_charge).sum() for piece in charged)
+    )
+    formal = sum(atom.formal_charge.m_as(unit.elementary_charge) for atom in molecule.atoms)
+    if not np.isclose(total, formal, atol=1e-4):
+        raise ValueError(f"NAGL charges sum to {total:.6f}, not the formal charge {formal}.")
+    constraints = ForceField(constraints_from)["Constraints"]
+    whole = _with_constraints(ForceField(*force_field), constraints)
+    interchange = whole.create_interchange(
+        Topology.from_molecules(charged), charge_from_molecules=charge_templates(charged)
+    )
+    interchange.positions = molecule.conformers[0] if molecule.conformers else None
+    record = ParameterizationRecord(
+        protein_force_field=list(force_field),
+        max_charge_shift=0.0,
+        total_charge=total,
+        segments=segments(protein),
+        molecules=[[m.start, m.stop] for m in molecule_ranges(molecule)],
+        protein_charges=dict(charges),
+    )
+    return ParameterizedProtein(interchange, record)
+
+
 def resolve_parameter_sets(
     sites: Sequence[ModificationSite],
     parameter_sets: Mapping[str, ParameterSet],
@@ -556,7 +616,20 @@ NEUTRAL_TERMINUS_MESSAGE = (
 )
 
 
-def _refuse_neutral_termini(protein: ModifiedProtein, termini: Mapping) -> None:
+#: The same guard rail for a protein one force field parameterizes whole
+#: (Rosemary needs no residue templates; the reason is the physics).
+WHOLE_PROTEIN_NEUTRAL_TERMINUS_MESSAGE = (
+    "PolyzyMD 1.4 does not model a neutral N-terminus (NH2) or C-terminus (COOH): "
+    "protein termini are normally simulated charged at physiological pH. If your chain is "
+    "truncated, cap it instead: attach ACE at the N-terminus or NME at the C-terminus. If "
+    "you need a neutral terminus (e.g. a low- or high-pH study), please open an issue: "
+    "https://github.com/joelaforet/polyzymd/issues"
+)
+
+
+def _refuse_neutral_termini(
+    protein: ModifiedProtein, termini: Mapping, message: str = NEUTRAL_TERMINUS_MESSAGE
+) -> None:
     """Raise when a terminus is changed by protonation alone (Joe, 2026-10-28)."""
     for residue, terminus in termini.items():
         labelled = any(
@@ -568,8 +641,7 @@ def _refuse_neutral_termini(protein: ModifiedProtein, termini: Mapping) -> None:
         if not labelled:
             chain_id, resnum, icode = residue
             raise ValueError(
-                f"{NEUTRAL_TERMINUS_MESSAGE} (chain {chain_id} residue {resnum}{icode}, "
-                f"{terminus}-terminus)"
+                f"{message} (chain {chain_id} residue {resnum}{icode}, {terminus}-terminus)"
             )
 
 
@@ -626,6 +698,33 @@ def _cap(reference: ModifiedProtein, residue: tuple[str, int, str], terminus: st
             leaving_atom_names=["OXT"],
             relax=False,
         )
+
+
+def nagl_charges_by_component(molecules: Sequence, model: str) -> list:
+    """Copies of ``molecules`` charged by NAGL (``model``), one call per distinct chemistry.
+
+    NAGL brings a molecule to its own formal charge, so it is called per
+    connected component; copies identical in atom order reuse the charges.
+    """
+    from openff.toolkit import Molecule
+    from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
+
+    done: dict[tuple, Any] = {}
+    charged = []
+    for molecule in molecules:
+        key = (
+            tuple(atom.atomic_number for atom in molecule.atoms),
+            tuple(atom.formal_charge.m for atom in molecule.atoms),
+            tuple(sorted((b.atom1_index, b.atom2_index, b.bond_order) for b in molecule.bonds)),
+        )
+        copy = Molecule(molecule)
+        if key in done:
+            copy.partial_charges = done[key].partial_charges
+        else:
+            NAGLToolkitWrapper().assign_partial_charges(copy, partial_charge_method=model)
+            done[key] = copy
+        charged.append(copy)
+    return charged
 
 
 def charge_templates(molecules: Sequence) -> list:
