@@ -51,7 +51,7 @@ AVOGADRO_CONSTANT = 6.02214076e23
 ION_CHARGE_TOLERANCE = 1.0e-5
 
 # Water model type
-WaterModelType = Literal["tip3p"]
+WaterModelType = Literal["tip3p", "opc3"]
 
 # Box shape type
 BoxShapeType = Literal["cube", "rhombic_dodecahedron"]

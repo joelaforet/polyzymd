@@ -39,9 +39,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared NAGL model's charges, fails library charges declared on a force
   field without protein library charges, and warns
   (`parameters.rosemary_alpha`, reported only for such proteins) that
-  Rosemary is an alpha release and that OpenFF pairs it with OPC3 water, which
-  PolyzyMD does not build yet. One NAGL model still charges every NAGL
+  Rosemary is an alpha release. One NAGL model still charges every NAGL
   component of a build, the protein included.
+- OPC3 water (`solvent.water.model: opc3`) for any system, on OpenMM and
+  GROMACS (`settles`). PolyzyMD loads `opc3.offxml` (openff-forcefields) after
+  every other force field, so the water and the Na+ and Cl- ions take its
+  parameters: OPC3 and the Li/Merz 12-6 ion set fitted for OPC3 (Sengupta et
+  al. 2021), not Sage's Joung-Cheatham TIP3P ions. Waters are packed at OPC3's
+  rigid geometry. The build record lists `opc3.offxml` on the water and the
+  ions, the audit rebuilds them from the same files in the same order, and
+  "Methods to cite" lists OPC3 and the ion set. TIP3P builds are unchanged
+  byte for byte.
+- Audit check `solvent.rosemary_water` (FAIL): a protein on OpenFF Rosemary in
+  water other than OPC3, which OpenFF pairs with Rosemary. Accept it in
+  `modeling_exceptions` with a reason to keep another water model.
+- Audit INFO lines for a protein on Rosemary: `parameters.rosemary_components`
+  recommends Rosemary for polymers, ligands and co-solvents on another force
+  field (allowed; Rosemary is untested in production), and
+  `parameters.glycan_force_field` reports glycans parameterized by Rosemary
+  (whole-protein mode) instead of a GLYCAM06j finding. How-to:
+  `docs/source/how_to/rosemary_protein.md`.
 - The `build` and `test` environments install `openff-forcefields` 2026.09.0
   (was 2026.01.0), which adds the Rosemary candidate
   `openff_no_water-3.0.0-alpha2b.offxml`. The other force field files PolyzyMD

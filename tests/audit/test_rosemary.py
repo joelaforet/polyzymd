@@ -144,3 +144,112 @@ def test_the_audit_passes_a_neutral_terminus_on_rosemary(tmp_path, verb, site, a
     component = protein_component(protein, result.record, {}, name="trpcage")
     (finding,) = run_checks(realized, [component], ["modifications.sites"])
     assert finding.status == "PASS", finding.detail
+
+
+SAGE = "openff-2.3.0.offxml"
+
+
+def _solvated(water: str, co_solvent: str | None = None) -> list[ComponentRecord]:
+    """A Rosemary protein of 304 atoms, one water of ``water`` and optionally a co-solvent."""
+    water_atoms = (AtomRange(304, 307),)
+    domains = [
+        Domain(
+            "water",
+            water_atoms,
+            (SAGE, "opc3.offxml") if water == "opc3" else (SAGE,),
+            ChargeSource("water_model", water),
+            reference={"smiles": "O"},
+        )
+    ]
+    molecules = list(water_atoms)
+    if co_solvent is not None:
+        atoms = (AtomRange(307, 317),)
+        molecules += atoms
+        domains.append(
+            Domain(
+                "co_solvent:dmso",
+                atoms,
+                (co_solvent,),
+                ChargeSource("preset", source_file="dmso.sdf"),
+                reference={"smiles": "CS(=O)C"},
+            )
+        )
+    solvent = ComponentRecord(
+        name="solvent",
+        type="solvent",
+        segid="SOL",
+        placement="packed",
+        molecules=molecules,
+        domains=domains,
+    )
+    return [_component(304), solvent]
+
+
+def _audit(components, exceptions=()):
+    from types import SimpleNamespace
+
+    from polyzymd.audit.report import audit
+    from polyzymd.config.schema import ModelingException
+
+    config = SimpleNamespace(
+        modeling_exceptions=[ModelingException(**entry) for entry in exceptions]
+    )
+    realized = SimpleNamespace(n_atoms=317)
+    ids = ["solvent.rosemary_water", "parameters.rosemary_components"]
+    return {f.check: f for f in audit(realized, components, config, ids).findings}
+
+
+def test_a_rosemary_protein_in_tip3p_fails_rosemary_water() -> None:
+    finding = _audit(_solvated("tip3p"))["solvent.rosemary_water"]
+    assert finding.status == "FAIL"
+    assert "OPC3" in finding.detail and "solvent.water.model: opc3" in finding.detail
+
+
+def test_a_modeling_exception_accepts_rosemary_in_tip3p() -> None:
+    reason = "Comparing with earlier TIP3P runs"
+    findings = _audit(_solvated("tip3p"), [{"check": "solvent.rosemary_water", "reason": reason}])
+    finding = findings["solvent.rosemary_water"]
+    assert (finding.status, finding.accepted_from, finding.reason) == ("ACCEPTED", "FAIL", reason)
+    assert "modeling_exceptions.unused" not in findings
+
+
+def test_a_rosemary_protein_in_opc3_passes_rosemary_water() -> None:
+    assert _audit(_solvated("opc3"))["solvent.rosemary_water"].status == "PASS"
+
+
+def test_an_ff14sb_protein_in_tip3p_gets_no_rosemary_water_finding() -> None:
+    components = _solvated("tip3p")
+    components[0] = _component(
+        304, charges=ChargeSource("library"), force_field="ff14sb_off_impropers_0.0.4.offxml"
+    )
+    assert _audit(components) == {}
+
+
+def test_soluble_components_off_rosemary_get_an_info_recommendation() -> None:
+    finding = _audit(_solvated("opc3", co_solvent=SAGE))["parameters.rosemary_components"]
+    assert finding.status == "INFO"
+    assert "co-solvent dmso (openff-2.3.0.offxml) is not" in finding.detail
+    assert "recommended for them too" in finding.detail and ROSEMARY in finding.detail
+    on_rosemary = _audit(_solvated("opc3", co_solvent=ROSEMARY))
+    assert on_rosemary["parameters.rosemary_components"].status == "PASS"
+
+
+def test_glycans_on_a_rosemary_protein_are_an_info_line(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from polyzymd.audit.checks import modifications
+
+    reference = SimpleNamespace(
+        recipe={"protein_charges": {"method": "nagl", "model": MODEL}},
+        records=[
+            SimpleNamespace(type="glycan", site="A:N5"),
+            SimpleNamespace(type=None, site="A:K8"),
+        ],
+    )
+    monkeypatch.setattr(modifications, "is_modified", lambda component: True)
+    monkeypatch.setattr(modifications, "modified_reference", lambda context, c: reference)
+    (finding,) = run_checks(
+        SimpleNamespace(n_atoms=304), [_component(304)], ["parameters.glycan_force_field"]
+    )
+    assert finding.status == "INFO"
+    assert finding.detail == "glycans parameterized by Rosemary (whole-protein mode): 1 at A:N5"

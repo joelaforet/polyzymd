@@ -51,6 +51,8 @@ def _build(tmp_path: Path, protein: dict, *arguments: str, chains: int = 1) -> d
         _two_chains(folder / "trpcage.pdb")
     config = yaml.safe_load((QUICKSTART / "config.yaml").read_text())
     config["solutes"][0].update(protein)
+    # OpenFF pairs Rosemary with OPC3 water (solvent.rosemary_water).
+    config["solvent"]["water"]["model"] = "opc3"
     (folder / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
     result = subprocess.run(
         [sys.executable, "-W", "ignore", "-m", "polyzymd.cli.main", "build"]
@@ -70,8 +72,10 @@ def _passed_with_the_alpha_warning(record: dict) -> None:
     audit = record["audit"]
     flagged = {f["check"]: f for f in audit["findings"] if f["status"] in ("FAIL", "WARN")}
     alpha = flagged.pop("parameters.rosemary_alpha")
-    assert alpha["status"] == "WARN" and "OPC3" in alpha["detail"]
+    assert alpha["status"] == "WARN" and "alpha release" in alpha["detail"]
     assert audit["passed"] and not flagged, flagged
+    water = next(f for f in audit["findings"] if f["check"] == "solvent.rosemary_water")
+    assert water["status"] == "PASS"
 
 
 def _protein_domain(record: dict) -> dict:

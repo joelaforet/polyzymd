@@ -151,7 +151,10 @@ For any other file, cite its source.
 - Jorgensen, W. L., Chandrasekhar, J., Madura, J. D., Impey, R. W. and
   Klein, M. L. (1983). Comparison of simple potential functions for simulating
   liquid water. *Journal of Chemical Physics*, 79(2), 926-935.
-  doi:10.1063/1.445869. TIP3P, the only water model PolyzyMD builds.
+  doi:10.1063/1.445869. For `solvent.water.model: tip3p`.
+- Izadi, S. and Onufriev, A. V. (2016). Accuracy limit of rigid 3-point water
+  models. *Journal of Chemical Physics*, 145(7), 074501.
+  doi:10.1063/1.4960175. For `solvent.water.model: opc3` (`opc3.offxml`).
 - Joung, I. S. and Cheatham, T. E. (2008). Determination of alkali and halide
   monovalent ion parameters for use in explicitly solvated biomolecular
   simulations. *Journal of Physical Chemistry B*, 112(30), 9020-9041.
@@ -159,6 +162,12 @@ For any other file, cite its source.
   `openff-1.*` and `openff-2.*` are the TIP3P set of its Table 5. The
   openff-forcefields package keeps that table as `data/jc.csv`. The build
   cites it when it added Na+ or Cl- with one of these files.
+- Sengupta, A., Li, Z., Song, L. F., Li, P. and Merz, K. M. (2021).
+  Parameterization of monovalent ions for the OPC3, OPC, TIP3P-FB, and
+  TIP4P-FB water models. *Journal of Chemical Information and Modeling*,
+  61(2), 869-880. doi:10.1021/acs.jcim.0c01390. The Na+ and Cl- parameters
+  of `opc3.offxml` (the Li/Merz 12-6 set for OPC3), which an OPC3 build uses
+  instead of the solvent force field's ions.
 - Jakalian, A., Bush, B. L., Jack, D. B. and Bayly, C. I. (2000). Fast,
   efficient generation of high-quality atomic charges. AM1-BCC model: I.
   Method. *Journal of Computational Chemistry*, 21(2), 132-146.

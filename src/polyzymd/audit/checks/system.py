@@ -19,7 +19,8 @@ from polyzymd.core.components import is_attachment_segid
 
 #: Molar concentration of pure water, as the builder sizes salt and ionic strength.
 WATER_MOLARITY = 55.5
-#: Mass of one TIP3P water (Da), the unit of the builder's water-equivalents.
+#: Mass of one water molecule (Da), the unit of the builder's water-equivalents
+#: (the same for every water model it builds: TIP3P and OPC3 have the same atoms).
 WATER_MASS = 15.999 + 2 * 1.008
 
 
@@ -90,15 +91,25 @@ def declared(context: AuditContext) -> list[Finding]:
     if solvent is None:
         problems.append("the build has no solvent component")
     else:
+        from polyzymd.config.schema import water_force_fields
+
+        model = config.solvent.water.model.value
+        # Water and ions take the water model's own file (opc3.offxml) after
+        # the solvent force field; co-solvents take the solvent force field.
+        water_files = water_force_fields(config.solvent.force_field, model)
         for component in [solvent] + _of_type(context, "ions"):
             for domain in component.domains:
-                if list(domain.force_field) != list(config.solvent.force_field):
+                expected = (
+                    list(config.solvent.force_field)
+                    if domain.name.startswith("co_solvent:")
+                    else water_files
+                )
+                if list(domain.force_field) != expected:
                     problems.append(
                         f"{component.name}/{domain.name}: force field {list(domain.force_field)}, "
-                        f"config solvent says {config.solvent.force_field}"
+                        f"config solvent and water model say {expected}"
                     )
         water = _domain(solvent, "water")
-        model = config.solvent.water.model.value
         if water is None or (water.charges.method, water.charges.model) != ("water_model", model):
             problems.append(f"water is not built as {model}")
         for cosolvent in config.solvent.co_solvents:
@@ -544,7 +555,11 @@ def nonbonded(context: AuditContext) -> list[Finding]:
     from openff.toolkit import ForceField
     from openff.units import unit
 
-    force_field = ForceField(*config.solvent.force_field)
+    from polyzymd.config.schema import water_force_fields
+
+    force_field = ForceField(
+        *water_force_fields(config.solvent.force_field, config.solvent.water.model)
+    )
     vdw = force_field["vdW"]
     cutoff = vdw.cutoff.m_as(unit.nanometer)
     switch = cutoff - vdw.switch_width.m_as(unit.nanometer) if vdw.switch_width.m else None

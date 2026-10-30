@@ -1382,7 +1382,7 @@ class PositionRestraintGenerator:
 
             # Skip water/ion ITPs by checking molecule name and atom count
             mol_name = self._get_molecule_name_from_itp(itp_path)
-            if mol_name and mol_name.lower() in ("water", "sol", "tip3p", "tip4p", "spce"):
+            if mol_name and mol_name.lower() in ("water", "sol", "tip3p", "opc3", "tip4p", "spce"):
                 continue
 
             atom_count = self._get_atom_count_from_itp(itp_path)

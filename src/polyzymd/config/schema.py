@@ -88,10 +88,9 @@ class ChargeMethod(str, Enum):
 class WaterModel(str, Enum):
     """Water models a config may name.
 
-    Only TIP3P is built: the force fields PolyzyMD loads carry the TIP3P water
-    parameters. The other values stay loadable so configs of existing runs
-    still load for status and analysis; new builds refuse them
-    (:meth:`SimulationConfig.require_buildable`).
+    TIP3P and OPC3 are built (:data:`WATER_FORCE_FIELDS`). The other values
+    stay loadable so configs of existing runs still load for status and
+    analysis; new builds refuse them (:meth:`SimulationConfig.require_buildable`).
     """
 
     TIP3P = "tip3p"
@@ -99,6 +98,23 @@ class WaterModel(str, Enum):
     TIP4P = "tip4p"
     TIP4PEW = "tip4pew"
     OPC = "opc"
+    OPC3 = "opc3"
+
+
+#: The water models PolyzyMD builds, and the force field file that carries
+#: each one's water and ion parameters, loaded after every other force field
+#: (None: the solvent force field carries them, as Sage carries TIP3P water and
+#: its Joung-Cheatham ions). ``opc3.offxml`` of openff-forcefields holds OPC3
+#: water and the Li/Merz 12-6 ion set fitted for OPC3, so it replaces the
+#: solvent force field's ion parameters too.
+WATER_FORCE_FIELDS: dict[str, str | None] = {"tip3p": None, "opc3": "opc3.offxml"}
+
+
+def water_force_fields(solvent_force_field: Sequence[str], model: str) -> list[str]:
+    """The force field files of the water and ions: the solvent's, then the water model's own."""
+    model = getattr(model, "value", model)
+    extra = WATER_FORCE_FIELDS.get(str(model))
+    return list(solvent_force_field) + ([extra] if extra else [])
 
 
 class BoxShape(str, Enum):
@@ -1372,10 +1388,12 @@ class WaterConfig(_ConfigModel):
     """The water of the box.
 
     Attributes:
-        model: Water model; only TIP3P is built.
+        model: Water model; TIP3P and OPC3 are built. OPC3 loads
+            ``opc3.offxml`` (OPC3 water and its ions) after every other force
+            field; OpenFF pairs Rosemary with OPC3.
     """
 
-    model: WaterModel = Field(..., description="Water model (tip3p is the one built)")
+    model: WaterModel = Field(..., description="Water model (tip3p or opc3 are built)")
 
 
 class IonConfig(_ConfigModel):
@@ -1457,7 +1475,9 @@ class SolventConfig(_ConfigModel):
 
     Attributes:
         force_field: Force field files for water, ions and co-solvents. Sage
-            carries the TIP3P water and the ion parameters.
+            carries the TIP3P water and the ion parameters; with ``water.model:
+            opc3``, ``opc3.offxml`` is loaded after it and gives the water and
+            ions their parameters.
         water: The water model.
         co_solvents: Co-solvents, each with its amount and charges.
         ions: Salt and neutralizing ions.
@@ -2748,10 +2768,11 @@ class SimulationConfig(_ConfigModel):
         """
         engine = engine or self.engine
         model = self.solvent.water.model
-        if model != WaterModel.TIP3P:
+        if model.value not in WATER_FORCE_FIELDS:
             raise ValueError(
-                f"PolyzyMD cannot build water model '{model.value}' correctly: the force fields "
-                "it loads carry TIP3P water parameters; use model: tip3p for new systems."
+                f"PolyzyMD cannot build water model '{model.value}' correctly: it builds "
+                "tip3p and opc3 water only; use model: tip3p for new systems (or opc3, the "
+                "water OpenFF pairs with Rosemary)."
             )
         ions = self.solvent.ions
         for key in ("kcl_concentration", "mgcl2_concentration"):

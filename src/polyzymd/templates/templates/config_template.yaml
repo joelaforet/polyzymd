@@ -77,7 +77,7 @@ solutes:
     # OpenFF Rosemary alpha instead (OPTIONAL, alpha, not for production): one
     # force field for the whole protein, modifications included, with NAGL
     # charges on the whole molecule; no modification_parameters. OpenFF pairs it
-    # with OPC3 water, which PolyzyMD does not build yet (the audit warns).
+    # with OPC3 water: set solvent.water.model: "opc3" below.
     # force_field: ["openff_no_water-3.0.0-alpha2b.offxml"]
     # charges: {method: nagl, model: openff-gnn-am1bcc-1.0.0.pt}
     # Mutations, then covalent modifications, applied to the PDB in order
@@ -157,7 +157,10 @@ solutes:
 # the polymers and the solvent share one force field file: list the same file
 # here and on those solutes.
 #
-# water model: tip3p (the only model PolyzyMD builds; Sage carries it)
+# water model: tip3p (Sage carries it) or opc3 (loads opc3.offxml after the
+#   other force fields: OPC3 water and its own Na+/Cl- set). OpenFF pairs
+#   Rosemary with OPC3; a Rosemary protein in other water fails the audit
+#   (solvent.rosemary_water) unless modeling_exceptions accepts it.
 # box shape options: cube, rhombic_dodecahedron
 #
 solvent:

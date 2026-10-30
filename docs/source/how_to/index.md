@@ -46,6 +46,7 @@ Choose an analysis, run it on a study, and measure your own quantity.
 :maxdepth: 1
 
 rewrite_config_rc5
+rosemary_protein
 polymers
 dynamic_polymers
 cosolvents

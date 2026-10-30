@@ -255,12 +255,25 @@ def modified_backbone(context: AuditContext) -> list[Finding]:
         "component",
         "WARN",
         "a glycan not parameterized with GLYCAM06j, the recommended glycan force field "
-        "(general force fields give stiffer glycosidic angles and other torsion minima)",
+        "(general force fields give stiffer glycosidic angles and other torsion minima); a "
+        "protein on OpenFF Rosemary, glycans included, gets an INFO line instead",
         _PROTEIN,
     )
 )
 def glycan_force_field(context: AuditContext) -> list[Finding]:
     def run(component: Any, reference: Any) -> Finding:
+        if reference.recipe.get("protein_charges"):
+            # One force field (Rosemary) parameterizes the whole protein, glycans included.
+            glycans = [str(r.site) for r in reference.records if r.type == "glycan"]
+            if glycans:
+                return Finding(
+                    "parameters.glycan_force_field",
+                    component.name,
+                    "INFO",
+                    f"glycans parameterized by Rosemary (whole-protein mode): {len(glycans)} "
+                    f"at {', '.join(glycans)}",
+                )
+            return Finding("parameters.glycan_force_field", component.name, "PASS", "no glycans")
         others = [
             f"{name} on {' + '.join(reference.site_force_fields[name])}"
             for name, site_type in reference.site_types.items()

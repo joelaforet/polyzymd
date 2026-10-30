@@ -253,14 +253,26 @@ def comparisons(context: AuditContext) -> Any:
     return _comparisons(context)
 
 
+def rosemary_proteins(context: AuditContext) -> list[tuple[Any, list[str]]]:
+    """The proteins one force field parameterizes and charges whole with NAGL (Rosemary),
+    each with that force field's files."""
+    found = []
+    for component in context.components:
+        if component.type != "protein":
+            continue
+        protein = next((d for d in component.domains if d.name == "protein"), None)
+        if protein is not None and protein.charges.method == "nagl":
+            found.append((component, list(protein.force_field)))
+    return found
+
+
 @register(
     CheckSpec(
         "parameters.rosemary_alpha",
         "component",
         "WARN",
         "a protein charged whole with NAGL by its force field (OpenFF Rosemary): an alpha "
-        "release is not for production, and OpenFF pairs Rosemary with OPC3 water; reported "
-        "only for such proteins",
+        "release is not for production; reported only for such proteins",
         ("protein",),
     )
 )
@@ -268,34 +280,16 @@ def rosemary_alpha(context: AuditContext) -> list[Finding]:
     """Warn about a protein that one force field charges whole with NAGL (Rosemary).
 
     Proteins on library charges (ff14SB) get no finding, so their reports are
-    unchanged.
+    unchanged. Its water is checked by ``solvent.rosemary_water``.
     """
     from polyzymd.config.schema import is_rosemary
 
-    water = None
-    if context.config is not None:
-        solvent = getattr(context.config, "solvent", None)
-        model = getattr(getattr(solvent, "water", None), "model", None)
-        water = getattr(model, "value", model)
     findings = []
-    for component in context.components:
-        if component.type != "protein":
-            continue
-        protein = next((d for d in component.domains if d.name == "protein"), None)
-        if protein is None or protein.charges.method != "nagl":
-            continue
-        force_fields = list(protein.force_field)
-        notes = []
+    for component, force_fields in rosemary_proteins(context):
         if is_rosemary(force_fields):
-            notes.append(
-                f"{' + '.join(force_fields)} is an OpenFF Rosemary alpha release, not for "
-                "production"
-            )
-        if water is not None and str(water).lower() != "opc3":
-            notes.append(f"OpenFF pairs Rosemary with OPC3 water; this build uses {water}")
-        if notes:
             detail = (
-                "; ".join(notes) + ". It parameterizes the whole protein, modifications included."
+                f"{' + '.join(force_fields)} is an OpenFF Rosemary alpha release, not for "
+                "production. It parameterizes the whole protein, modifications included."
             )
             findings.append(Finding("parameters.rosemary_alpha", component.name, "WARN", detail))
         else:
@@ -308,3 +302,109 @@ def rosemary_alpha(context: AuditContext) -> list[Finding]:
                 )
             )
     return findings
+
+
+def _water_model(context: AuditContext) -> str | None:
+    """The water model the build declares for its water (the config's, without a record)."""
+    for component in context.components:
+        for domain in component.domains:
+            if domain.name == "water" and domain.charges.method == "water_model":
+                return str(domain.charges.model)
+    solvent = getattr(context.config, "solvent", None)
+    model = getattr(getattr(solvent, "water", None), "model", None)
+    return None if model is None else str(getattr(model, "value", model))
+
+
+@register(
+    CheckSpec(
+        "solvent.rosemary_water",
+        "system",
+        "FAIL",
+        "a protein on OpenFF Rosemary in water other than OPC3, the water model OpenFF "
+        "pairs with Rosemary; reported only for builds with such a protein",
+    )
+)
+def rosemary_water(context: AuditContext) -> list[Finding]:
+    """Fail a protein on Rosemary (whole-protein NAGL mode) in any water but OPC3."""
+    proteins = rosemary_proteins(context)
+    water = _water_model(context)
+    if not proteins or water is None:
+        return []
+    names = ", ".join(f"{c.name} ({' + '.join(ff)})" for c, ff in proteins)
+    if water.lower() == "opc3":
+        return [
+            Finding(
+                "solvent.rosemary_water",
+                "system",
+                "PASS",
+                f"{names} on OpenFF Rosemary in OPC3 water (opc3.offxml, loaded after it), as "
+                "OpenFF recommends",
+            )
+        ]
+    return [
+        Finding(
+            "solvent.rosemary_water",
+            "system",
+            "FAIL",
+            f"{names} is on OpenFF Rosemary, which OpenFF pairs with OPC3 water, but the water "
+            f"is {water}. Set solvent.water.model: opc3 (PolyzyMD then loads opc3.offxml, OPC3 "
+            "water and its ions, after the other force fields), or accept this check in "
+            "modeling_exceptions with a reason.",
+        )
+    ]
+
+
+@register(
+    CheckSpec(
+        "parameters.rosemary_components",
+        "system",
+        "INFO",
+        "polymers, ligands or co-solvents on other force fields beside a protein on OpenFF "
+        "Rosemary (Rosemary is recommended for them too); reported only for builds with "
+        "such a protein",
+    )
+)
+def rosemary_components(context: AuditContext) -> list[Finding]:
+    """Recommend Rosemary for the soluble components of a build whose protein is on it."""
+    from polyzymd.config.schema import is_rosemary
+
+    proteins = rosemary_proteins(context)
+    if not proteins:
+        return []
+    others = []
+    for component in context.components:
+        if component.type in ("protein", "ions"):
+            continue
+        for domain in component.domains:
+            if component.type == "solvent" and not domain.name.startswith("co_solvent:"):
+                continue
+            if not is_rosemary(domain.force_field):
+                what = (
+                    f"co-solvent {domain.name.split(':', 1)[1]}"
+                    if component.type == "solvent"
+                    else f"{component.type.replace('_', ' ')} {component.name}"
+                )
+                others.append(f"{what} ({' + '.join(domain.force_field)})")
+    others = list(dict.fromkeys(others))
+    if not others:
+        return [
+            Finding(
+                "parameters.rosemary_components",
+                "system",
+                "PASS",
+                "no polymer, ligand or co-solvent on another force field",
+            )
+        ]
+    rosemary = " + ".join(proteins[0][1])
+    return [
+        Finding(
+            "parameters.rosemary_components",
+            "system",
+            "INFO",
+            f"the protein is on OpenFF Rosemary, and {', '.join(others)} "
+            f"{'is' if len(others) == 1 else 'are'} not. Rosemary is "
+            f"recommended for them too (their force_field and solvent.force_field: {rosemary}); "
+            "keeping their force field is allowed, as Rosemary is an alpha release not yet "
+            "tested in production.",
+        )
+    ]

@@ -55,10 +55,12 @@ This page is generated from PolyzyMD's check registry
 | `parameters.bonded` | each component | FAIL | bonds, angles, torsions or impropers not from the component's declared force field |
 | `parameters.constraints` | each component | FAIL | constraints missing, extra, or at lengths other than the declared force field's |
 | `parameters.coverage` | the system | FAIL | atoms no component owns, molecules other than the components declare, or terms (bonds, constraints, exceptions) joining two molecules |
-| `parameters.glycan_force_field` | each component (protein) | WARN | a glycan not parameterized with GLYCAM06j, the recommended glycan force field (general force fields give stiffer glycosidic angles and other torsion minima) |
+| `parameters.glycan_force_field` | each component (protein) | WARN | a glycan not parameterized with GLYCAM06j, the recommended glycan force field (general force fields give stiffer glycosidic angles and other torsion minima); a protein on OpenFF Rosemary, glycans included, gets an INFO line instead |
 | `parameters.modified_backbone` | each component (protein) | FAIL | the backbone (N, H, CA, HA, C, O) of a modified residue not on ff14SB: its charges and terms must match its unmodified neighbours' |
 | `parameters.nonbonded` | each component | FAIL | Lennard-Jones parameters not from the component's declared force field |
 | `parameters.one_four` | each component | FAIL | 1-2 and 1-3 exclusions or 1-4 pairs not as the owning force field scales them (GLYCAM06j leaves some glycan 1-4 pairs unscaled; one global scale gets them wrong) |
-| `parameters.rosemary_alpha` | each component (protein) | WARN | a protein charged whole with NAGL by its force field (OpenFF Rosemary): an alpha release is not for production, and OpenFF pairs Rosemary with OPC3 water; reported only for such proteins |
+| `parameters.rosemary_alpha` | each component (protein) | WARN | a protein charged whole with NAGL by its force field (OpenFF Rosemary): an alpha release is not for production; reported only for such proteins |
+| `parameters.rosemary_components` | the system | INFO | polymers, ligands or co-solvents on other force fields beside a protein on OpenFF Rosemary (Rosemary is recommended for them too); reported only for builds with such a protein |
 | `restraint.atom_identity` | the system | FAIL | a restrained atom that is not the atom its selection names in its component |
 | `restraint.parameters` | the system | FAIL | a restraint whose form, distance or force constant differs from the config, or a restraint missing or extra |
+| `solvent.rosemary_water` | the system | FAIL | a protein on OpenFF Rosemary in water other than OPC3, the water model OpenFF pairs with Rosemary; reported only for builds with such a protein |

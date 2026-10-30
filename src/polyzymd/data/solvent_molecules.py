@@ -71,10 +71,19 @@ TIP3P_CHARGES = {
 }
 
 
+#: Names of OPC3 water, whose charges and geometry are read from its force field file.
+OPC3_NAMES = ("opc3", "water_opc3")
+#: The OpenFF force field file of OPC3 water (Izadi and Onufriev, 2016).
+OPC3_FORCE_FIELD = "opc3.offxml"
+
+
 def is_bundled_solvent(name: str) -> bool:
     """Return whether ``name`` has charges shipped with PolyzyMD (a water model or a bundled SDF)."""
     key = name.lower().strip()
-    return key in ("tip3p", "water_tip3p", "water") or (_SOLVENTS_DIR / f"{key}.sdf").exists()
+    return (
+        key in ("tip3p", "water_tip3p", "water", *OPC3_NAMES)
+        or (_SOLVENTS_DIR / f"{key}.sdf").exists()
+    )
 
 
 def get_solvent_molecule(
@@ -140,6 +149,10 @@ def get_solvent_molecule(
     if name_key in ("tip3p", "water_tip3p", "water"):
         if name_key not in _loaded_molecules:
             _loaded_molecules[name_key] = _create_tip3p_water()
+        return _loaded_molecules[name_key]
+    if name_key in OPC3_NAMES:
+        if name_key not in _loaded_molecules:
+            _loaded_molecules[name_key] = _create_rigid_water(OPC3_FORCE_FIELD, "OPC3")
         return _loaded_molecules[name_key]
 
     # Set default residue name
@@ -240,6 +253,55 @@ def _create_tip3p_water() -> Molecule:
         atom.metadata["residue_name"] = "HOH"
 
     LOGGER.debug("Created TIP3P water with literature charges")
+    return water
+
+
+#: SMIRKS of the water oxygen and hydrogens, and of the O-H and H-H
+#: constraints, in the OpenFF water model files.
+_WATER_O = "[#1]-[#8X2H2+0:1]-[#1]"
+_WATER_H = "[#1:1]-[#8X2H2+0]-[#1]"
+_WATER_OH = "[#1:1]-[#8X2H2+0:2]-[#1]"
+_WATER_HH = "[#1:1]-[#8X2H2+0]-[#1:2]"
+
+
+def _create_rigid_water(force_field_file: str, label: str) -> Molecule:
+    """A rigid three-site water with the charges and geometry of ``force_field_file``.
+
+    The charges are the file's library charges and the conformer, which
+    Packmol copies for every water, has the file's constrained O-H and H-H
+    distances, so the waters start at the model's own geometry.
+
+    Args:
+        force_field_file: OpenFF water model file, such as ``opc3.offxml``.
+        label: Name of the model in the molecule's name (``water_<label>``).
+
+    Returns:
+        OpenFF Molecule of the water, with charges and one conformer.
+    """
+    import numpy as np
+    from openff.toolkit import ForceField, Molecule
+    from openff.units import unit as offunit
+
+    force_field = ForceField(force_field_file)
+    charges = force_field["LibraryCharges"]
+    constraints = force_field["Constraints"]
+    q_oxygen = charges[_WATER_O].charge[0].m_as(offunit.elementary_charge)
+    q_hydrogen = charges[_WATER_H].charge[0].m_as(offunit.elementary_charge)
+    r_oh = constraints[_WATER_OH].distance.m_as(offunit.angstrom)
+    r_hh = constraints[_WATER_HH].distance.m_as(offunit.angstrom)
+
+    water = Molecule.from_smiles("O")
+    water.name = f"water_{label}"
+    water.partial_charges = [
+        q_oxygen if atom.symbol == "O" else q_hydrogen for atom in water.atoms
+    ] * offunit.elementary_charge
+    height = (r_oh**2 - (r_hh / 2) ** 2) ** 0.5
+    positions = {"O": [[0.0, 0.0, 0.0]], "H": [[r_hh / 2, height, 0.0], [-r_hh / 2, height, 0.0]]}
+    coordinates = [positions[atom.symbol].pop(0) for atom in water.atoms]
+    water.add_conformer(np.array(coordinates) * offunit.angstrom)
+    for atom in water.atoms:
+        atom.metadata["residue_name"] = "HOH"
+    LOGGER.debug(f"Created {label} water from {force_field_file}")
     return water
 
 
@@ -385,6 +447,7 @@ def list_available_solvents() -> Dict[str, str]:
 
     # Water models (always available)
     available["tip3p"] = "built-in"
+    available["opc3"] = "built-in"
 
     # Library solvents
     if _SOLVENTS_DIR.exists():

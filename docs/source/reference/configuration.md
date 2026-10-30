@@ -120,9 +120,10 @@ pixi environments install (`openff-forcefields` 2026.09.0); earlier
 candidates such as `openff_no_water-3.0.0-alpha0.offxml` are still accepted. It parameterizes the whole protein component,
 mutations and modifications included, and NAGL charges the whole molecule, so
 the protein takes no `modification_parameters` and has no per-site domains.
-It must be the protein's only force field file. OpenFF pairs Rosemary with OPC3
-water, which PolyzyMD does not build yet; the audit warns about both
-(`parameters.rosemary_alpha`).
+It must be the protein's only force field file. The audit warns that it is an
+alpha release (`parameters.rosemary_alpha`). OpenFF pairs Rosemary with OPC3
+water: set `solvent.water.model: opc3`, or the build fails
+`solvent.rosemary_water` (see {doc}`../how_to/rosemary_protein`).
 
 PolyzyMD reads the force field file, not its name, to decide which charges
 apply: a file with protein library charges (ff14SB) takes
@@ -448,7 +449,9 @@ solvent:
 ```
 
 `force_field` names the file that parameterizes water, ions and co-solvents;
-Sage carries the TIP3P water and the ion parameters. `water.model` is
+Sage carries the TIP3P water and the ion parameters. With `water.model: opc3`,
+the water and ions take their parameters from `opc3.offxml` instead (see
+[Water Models](#water-models)). `water.model` is
 required: PolyzyMD assumes no water model. Water and co-solvents carry
 segment ID `SOL` (co-solvents are told apart by residue name) and ions `ION`.
 
@@ -490,13 +493,31 @@ from the solute at solvation time. The number of waters and ions follows from th
 volume and `target_density`, so a deterministic box means deterministic
 solvent counts.
 
+(water-models)=
 ### Water Models
 
-`tip3p` (TIP3P) is the only water model PolyzyMD builds, and
-`solvent.water.model` must name it. The force fields it
-loads carry the TIP3P water parameters, so `validate`, `build`, `run` and
-`submit` refuse any other `model`. A config of an existing run with another
-model still loads for `status` and analysis.
+PolyzyMD builds two water models. Both are rigid three-site models without
+virtual sites; GROMACS runs them with `settles`.
+
+| `model` | Water parameters | Na+ and Cl- parameters | Use with |
+|---------|------------------|------------------------|----------|
+| `tip3p` | `solvent.force_field` (Sage carries TIP3P) | `solvent.force_field` (Sage: Joung and Cheatham, TIP3P set) | ff14SB and Sage |
+| `opc3` | `opc3.offxml` | `opc3.offxml` (Li/Merz 12-6 set for OPC3, Sengupta et al. 2021) | OpenFF Rosemary (required); allowed with ff14SB |
+
+`opc3.offxml` ships with `openff-forcefields`. PolyzyMD loads it after every
+other force field (protein, then `solvent.force_field`, then `opc3.offxml`),
+so its water and ion parameters replace those of `solvent.force_field`; its
+SMIRKS match only water and monatomic ions, so co-solvents, polymers and
+ligands keep `solvent.force_field`. The ions therefore always come from the
+water model's own set: the build record lists `opc3.offxml` as the last force
+field of the water and of the ions, and the audit rebuilds both from the same
+files in the same order. Each water is packed with the model's own rigid
+geometry (OPC3: O-H 0.978882 Å, H-H 1.598507 Å, read from `opc3.offxml`), and
+the water count follows from the box volume and `target_density` as for
+TIP3P.
+
+`validate`, `build`, `run` and `submit` refuse any other `model`. A config of
+an existing run with another model still loads for `status` and analysis.
 
 ### Box Shapes
 
@@ -716,6 +737,7 @@ All 12 library co-solvents plus water models have pre-computed charges:
 | Solvent | File | Charge Method |
 |---------|------|---------------|
 | TIP3P Water | `tip3p.sdf` | Literature values |
+| OPC3 Water | none (read from `opc3.offxml`) | Library charges of `opc3.offxml` |
 | DMSO | `dmso.sdf` | AM1BCC |
 | DMF | `dmf.sdf` | AM1BCC |
 | Acetonitrile | `acetonitrile.sdf` | AM1BCC |

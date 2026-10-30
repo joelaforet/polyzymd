@@ -558,13 +558,14 @@ class SystemBuilder:
         # library charges survive. _apply_protein_force_field restores the
         # protein terms. Loading ff14SB last instead is no fix: its cap and
         # amide SMIRKS then match acetone, acetates and amide polymers.
-        ff = ForceField(self._protein_ff, self._sm_ff)
+        # A water model with its own file (OPC3) is loaded after both, so its
+        # water and ion parameters replace the small-molecule force field's;
+        # its SMIRKS match only water and monatomic ions.
+        water_model = self._water_model()
+        ff = ForceField(*self._force_field_files(water_model))
 
         # Get water molecule with pre-computed charges for charge_from_molecules
         # Use PolyzyMD's cached water instead of Polymerist's for consistency
-        water_model = "tip3p"
-        if self._solvent_builder._composition:
-            water_model = self._solvent_builder._composition.water_model
         water_mol = get_solvent_molecule(water_model)
 
         LOGGER.info("Using single-call Interchange creation")
@@ -574,6 +575,22 @@ class SystemBuilder:
         LOGGER.info("Interchange created successfully")
 
         return self._interchange
+
+    def _water_model(self) -> str:
+        """The water model the solvent was built with (TIP3P when not solvated by config)."""
+        composition = self._solvent_builder._composition
+        return composition.water_model if composition else "tip3p"
+
+    def _water_force_fields(self, water_model: str) -> Tuple[str, ...]:
+        """The force field files of the water and ions: the small-molecule file, then the
+        water model's own file when it has one (``opc3.offxml``)."""
+        from polyzymd.config.schema import water_force_fields
+
+        return tuple(water_force_fields([self._sm_ff], water_model))
+
+    def _force_field_files(self, water_model: str) -> Tuple[str, ...]:
+        """Every force field file of the build, in load order: protein, small molecule, water."""
+        return (self._protein_ff, *self._water_force_fields(water_model))
 
     def _create_interchange_single_call(self, ff: ForceField, water_mol: Molecule) -> Interchange:
         """Create Interchange with a single ``ForceField.create_interchange()`` call.
@@ -1599,6 +1616,7 @@ class SystemBuilder:
         composition = self._solvent_builder._composition
         if counts is not None:
             water_model = composition.water_model if composition else "tip3p"
+            water_force_fields = self._water_force_fields(water_model)
             water = take(counts.water)
             na, cl = take(counts.na), take(counts.cl)
             solvent_molecules = list(water)
@@ -1606,7 +1624,7 @@ class SystemBuilder:
                 Domain(
                     "water",
                     tuple(water),
-                    (self._sm_ff,),
+                    water_force_fields,
                     ChargeSource("water_model", water_model),
                     reference={"smiles": "O"},
                 )
@@ -1657,7 +1675,7 @@ class SystemBuilder:
                             Domain(
                                 ion,
                                 tuple(atoms),
-                                (self._sm_ff,),
+                                water_force_fields,
                                 ChargeSource("library"),
                                 reference={"smiles": smiles},
                             )

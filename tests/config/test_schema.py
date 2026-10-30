@@ -1329,6 +1329,32 @@ def test_water_models_the_build_cannot_make_load_but_are_not_built(minimal_confi
         config.require_buildable()
 
 
+def test_opc3_water_is_built_with_its_own_file_after_the_solvent_force_field(
+    minimal_config_data,
+):
+    from polyzymd.config.schema import water_force_fields
+
+    minimal_config_data["solvent"] = {"force_field": [SAGE], "water": {"model": "opc3"}}
+    config = SimulationConfig(**minimal_config_data)
+    config.require_buildable(inputs=False)
+    assert water_force_fields(config.solvent.force_field, config.solvent.water.model) == [
+        SAGE,
+        "opc3.offxml",
+    ]
+    assert water_force_fields([SAGE], "tip3p") == [SAGE]
+
+
+def test_tip3p_configs_keep_their_build_hash() -> None:
+    """Adding OPC3 leaves the identity of every TIP3P config as it was."""
+    from polyzymd.config.loader import load_config
+    from polyzymd.simulation.artifact_integrity import config_hash
+
+    quickstart = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+    assert config_hash(load_config(quickstart / "config.yaml")) == (
+        "c5fb38361e015c2a96f105a976ce01f772d0b7411e14fd31fe88e59bd8248b89"
+    )
+
+
 _DISTANCE_RESTRAINT = {
     "type": "flat_bottom",
     "name": "substrate_active_site",
