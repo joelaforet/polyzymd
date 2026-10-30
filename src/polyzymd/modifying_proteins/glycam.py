@@ -23,11 +23,16 @@ force-field file in Interchange. They are built natively and copied in:
    the native system (Coulomb and Lennard-Jones separately) and kept as a
    per-pair override with the final charges and Lennard-Jones parameters;
    and GLYCAM's atom-type masses of the site atoms (an Interchange takes
-   masses from the elements). :func:`apply_to_openmm` writes both.
+   masses from the elements). :func:`apply_to_openmm` writes both into an
+   OpenMM System; :func:`apply_to_gromacs` writes the pairs as ``[ pairs ]``
+   function type 2 lines (``i j 2 fudgeQQ qi qj sigma epsilon``), because
+   function type 1 cannot scale the Coulomb part per pair, and the masses
+   into ``[ atoms ]``.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -488,6 +493,57 @@ def apply_to_openmm(system, sites, offset: int = 0) -> int:
         raise ValueError(
             f"Found {changed} of {len(wanted)} GLYCAM06j 1-4 exceptions in the system."
         )
+    return changed
+
+
+def apply_to_gromacs(path: str | Path, moleculetype: str, sites) -> int:
+    """Write the GLYCAM06j sites' 1-4 pairs and masses into a GROMACS file.
+
+    ``path`` is the ``.top`` or ``.itp`` holding ``[ moleculetype ]``
+    ``moleculetype``; atom indices are 1-based within that molecule. Each
+    site pair's ``[ pairs ]`` line becomes ``i j 2 fudgeQQ qi qj sigma
+    epsilon``, and each site atom's ``[ atoms ]`` mass becomes GLYCAM's.
+    Preprocessor lines are left alone. Every pair and atom must be found.
+    Returns the number of pair lines rewritten.
+    """
+    path = Path(path)
+    wanted = {(p.i + 1, p.j + 1): p for site in sites for p in site.pairs}
+    masses = {index + 1: mass for site in sites for index, mass in site.masses.items()}
+    out, section, current = [], None, None
+    changed = weighed = 0
+    for line in path.read_text().splitlines(keepends=True):
+        stripped = line.split(";")[0].strip()
+        header = re.match(r"\[\s*(\w+)\s*\]", stripped)
+        if header:
+            section = header.group(1).lower()
+        elif not stripped or stripped.startswith("#"):
+            pass
+        elif section == "moleculetype":
+            current = stripped.split()[0]
+        elif current == moleculetype and section == "pairs":
+            fields = stripped.split()
+            a, b = int(fields[0]), int(fields[1])
+            pair = wanted.get((min(a, b), max(a, b)))
+            if pair is not None:
+                line = (
+                    f"{a:7d} {b:7d}  2  {pair.charge_scale:.10f} {pair.charge_i:.10f} "
+                    f"{pair.charge_j:.10f} {pair.sigma:.10e} {pair.epsilon:.10e}\n"
+                )
+                changed += 1
+        elif current == moleculetype and section == "atoms":
+            fields = stripped.split()
+            mass = masses.get(int(fields[0]))
+            if mass is not None:
+                fields[7] = f"{mass:.6f}"
+                line = " ".join(fields) + "\n"
+                weighed += 1
+        out.append(line)
+    if changed != len(wanted) or weighed != len(masses):
+        raise ValueError(
+            f"Found {changed} of {len(wanted)} GLYCAM06j 1-4 pairs and {weighed} of "
+            f"{len(masses)} atoms in {path} ({moleculetype})."
+        )
+    path.write_text("".join(out))
     return changed
 
 

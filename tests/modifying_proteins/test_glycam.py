@@ -1,12 +1,15 @@
-"""GLYCAM06j glycan sites: native terms and per-pair 1-4 scales."""
+"""GLYCAM06j glycan sites: native terms, per-pair 1-4 scales, both engines."""
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from polyzymd import modifying_proteins as mp
+from polyzymd.audit.realized import read_gromacs_top, set_type2_pairs
 from polyzymd.modifying_proteins import glycam
 from polyzymd.modifying_proteins.parameters import (
     ParameterizedProtein,
@@ -19,6 +22,10 @@ TRPCAGE = ROOT / "examples" / "quickstart" / "trpcage.pdb"
 CHITOBIOSE = ROOT / "tests" / "data" / "modifying_proteins" / "glycam_G42666HT.pdb"
 
 GLYCAM = ParameterSet(["GLYCAM_06j-1.xml"], {"method": "library"})
+SAGE = ParameterSet(
+    ("openff-2.3.0.offxml",), {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"}
+)
+GMX = shutil.which("gmx")
 
 
 def _glycosylate(protein, site, atom_name, reaction, pdb_path=CHITOBIOSE):
@@ -34,10 +41,19 @@ def _glycosylate(protein, site, atom_name, reaction, pdb_path=CHITOBIOSE):
     )
 
 
-def _glycoprotein():
+def _glycoprotein(acylate: bool = False):
     """Trp-cage with an N-glycan on Asn5 (from Q5N) and an O-glycan on Ser13."""
     protein = mp.load_protein(TRPCAGE)
     mp.mutate(protein, "A:Q5", "ASN")
+    if acylate:
+        mp.deprotonate(protein, "A:K8", "NZ")
+        mp.attach(
+            protein,
+            {"smiles": "*C(=O)CCCCCCC", "resname": "OC8"},
+            type="generic",
+            site="A:K8",
+            atom_name="NZ",
+        )
     _glycosylate(protein, "A:N5", "ND2", "N-glycosylation")
     _glycosylate(protein, "A:S13", "OG", "O-glycosylation")
     return protein
@@ -51,6 +67,13 @@ def _parameterized(protein):
 @pytest.fixture(scope="module")
 def glycosylated():
     return _parameterized(_glycoprotein())
+
+
+@pytest.fixture(scope="module")
+def mixed():
+    protein = _glycoprotein(acylate=True)
+    sets = {"glycan": GLYCAM, "generic": SAGE}
+    return parameterize(protein, sets, max_charge_shift=0.005)
 
 
 def _native_system(interchange, record):
@@ -222,6 +245,135 @@ def test_without_the_pair_overrides_the_glycan_1_4_energy_is_wrong(glycosylated)
     assert abs(with_pairs - without) > 10.0  # kJ/mol; GLYCAM's unscaled pairs
 
 
+@pytest.mark.skipif(GMX is None, reason="GROMACS is not installed")
+def test_gromacs_export_matches_openmm_for_glycam_and_sage_sites(mixed, tmp_path) -> None:
+    import openmm
+    from openff.units import unit
+    from openmm import app
+
+    record = mixed.record
+    mixed.interchange_without_glycam_pairs.box = np.eye(3) * 10 * unit.nanometer
+    system = mixed.to_openmm()
+    # The protein's molecule type goes to its own .itp, as the builders write it.
+    mixed.to_gromacs(str(tmp_path / "sys"), monolithic=False)
+    top = tmp_path / "sys.top"
+
+    gro = app.GromacsGroFile(str(tmp_path / "sys.gro"))
+    gromacs = _gromacs_energies(tmp_path)
+    ours = _energies(system, gro.positions)
+    ours_14 = _one_four(system, np.array(gro.positions.value_in_unit(openmm.unit.nanometer)))
+    assert gromacs["Angle"] == pytest.approx(ours["HarmonicAngleForce"], rel=1e-5)
+    assert gromacs["Proper Dih."] + gromacs.get("Per. Imp. Dih.", 0.0) == pytest.approx(
+        ours["PeriodicTorsionForce"], rel=1e-5
+    )
+    assert gromacs["Coulomb-14"] == pytest.approx(ours_14["coulomb"], rel=1e-5)
+    assert gromacs["LJ-14"] == pytest.approx(ours_14["lj"], rel=1e-5)
+
+    # The audit's GROMACS reader recovers every GLYCAM 1-4 pair.
+    topology_file, pairs = read_gromacs_top(top)
+    read = topology_file.createSystem(nonbondedMethod=app.NoCutoff)
+    assert set_type2_pairs(read, topology_file, pairs) == len(record.glycam_pairs)
+    keys = [(pair.i, pair.j) for pair in record.glycam_pairs]
+    assert _exceptions(read, keys) == pytest.approx(_exceptions(system, keys), abs=1e-6)
+    # GLYCAM's masses reach the .itp, and GROMACS reads them back.
+    for site in record.glycam:
+        for index, mass in site.masses.items():
+            assert read.getParticleMass(index)._value == pytest.approx(mass, abs=1e-6)
+            assert system.getParticleMass(index)._value == mass
+
+
+def test_gromacs_rewrite_leaves_preprocessor_lines_and_other_molecules_alone(tmp_path) -> None:
+    pair = glycam.PairOverride(
+        i=0, j=3, charge_scale=1.0, charge_i=0.1, charge_j=-0.1, sigma=0.33, epsilon=0.4
+    )
+    site = glycam.GlycamSite(
+        name="G001", atom_indices=[3], linkage="", residue_templates=[], pairs=[pair]
+    )
+    site.masses = {3: 14.01}
+    itp = tmp_path / "m.itp"
+    atoms = "".join(f"{i} C 1 M C{i} {i} 0.0 12.011\n" for i in range(1, 5))
+    text = (
+        "[ moleculetype ]\nOTHER 3\n\n[ atoms ]\n" + atoms + "\n[ pairs ]\n1 4 1\n\n"
+        "[ moleculetype ]\nM 3\n\n[ atoms ]\n#ifdef HEAVY\n" + atoms + "#endif\n\n"
+        "[ pairs ]\n#ifdef PAIRS\n1 4 1 ; comment\n#endif\n"
+    )
+    itp.write_text(text)
+    assert glycam.apply_to_gromacs(itp, "M", [site]) == 1
+    written = itp.read_text().splitlines()
+    assert written.count("1 4 1") == 1  # the other molecule's pair is untouched
+    assert "#ifdef PAIRS" in written and "#endif" in written
+    assert any(line.split()[:3] == ["1", "4", "2"] for line in written)
+    assert "4 C 1 M C4 4 0.0 14.010000" in written
+
+
+def _gromacs_energies(directory: Path) -> dict[str, float]:
+    (directory / "rerun.mdp").write_text(
+        "integrator = md\nnsteps = 0\ncutoff-scheme = Verlet\npbc = xyz\n"
+        "verlet-buffer-tolerance = -1\nrlist = 4.5\ncoulombtype = Cut-off\nrcoulomb = 4.5\n"
+        "vdwtype = Cut-off\nvdw-modifier = None\nrvdw = 4.5\nDispCorr = no\n"
+        "constraints = none\nnstcalcenergy = 1\nnstenergy = 1\n"
+    )
+
+    def run(*arguments, stdin=None):
+        result = subprocess.run(
+            [GMX, *arguments], cwd=directory, capture_output=True, text=True, input=stdin
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+
+    # The net charge of the glycoprotein draws a grompp warning; energies are compared
+    # term by term, so the cut-off treatment of the nonbonded sum does not matter.
+    run(
+        "grompp",
+        "-f",
+        "rerun.mdp",
+        "-c",
+        "sys.gro",
+        "-p",
+        "sys.top",
+        "-o",
+        "r.tpr",
+        "-maxwarn",
+        "1",
+    )
+    run("mdrun", "-s", "r.tpr", "-rerun", "sys.gro", "-deffnm", "r", "-ntmpi", "1", "-ntomp", "1")
+    run("energy", "-f", "r.edr", "-o", "e.xvg", "-dp", stdin="1 2 3 4 5 6 7 8 9 0\n")
+    names, values = [], {}
+    for line in (directory / "e.xvg").read_text().splitlines():
+        match = re.match(r'^@ s\d+ legend "(.*)"', line)
+        if match:
+            names.append(match.group(1))
+        elif line and line[0] not in "#@":
+            values = dict(zip(names, (float(v) for v in line.split()[1:])))
+    return values
+
+
+def _one_four(system, positions_nm) -> dict[str, float]:
+    import openmm
+
+    force = next(f for f in system.getForces() if isinstance(f, openmm.NonbondedForce))
+    coulomb = lj = 0.0
+    for n in range(force.getNumExceptions()):
+        i, j, product, sigma, epsilon = force.getExceptionParameters(n)
+        product, sigma, epsilon = product._value, sigma._value, epsilon._value
+        if product == 0 and epsilon == 0:
+            continue
+        r = np.linalg.norm(positions_nm[i] - positions_nm[j])
+        coulomb += 138.935458 * product / r
+        lj += 4 * epsilon * ((sigma / r) ** 12 - (sigma / r) ** 6)
+    return {"coulomb": coulomb, "lj": lj}
+
+
+def _exceptions(system, keys) -> list[float]:
+    import openmm
+
+    force = next(f for f in system.getForces() if isinstance(f, openmm.NonbondedForce))
+    rows = {}
+    for n in range(force.getNumExceptions()):
+        i, j, product, sigma, epsilon = force.getExceptionParameters(n)
+        rows[(min(i, j), max(i, j))] = (product._value, sigma._value, epsilon._value)
+    return [value for key in keys for value in rows[key]]
+
+
 # ---------------------------------------------------------------------------
 # Inputs GLYCAM06j cannot use
 # ---------------------------------------------------------------------------
@@ -284,6 +436,30 @@ def test_interchange_holds_one_1_4_scale_per_collection() -> None:
     )
     assert isinstance(interchange["Electrostatics"].scale_14, float)
     assert not hasattr(interchange["Electrostatics"], "pair_scales")
+
+
+def test_openmm_gromacstopfile_rejects_pairs_of_function_type_2(tmp_path) -> None:
+    from openmm import app
+
+    top = tmp_path / "pairs.top"
+    top.write_text(
+        "[ defaults ]\n1 2 yes 0.5 0.833333\n\n[ atomtypes ]\nC 6 12.011 0.0 A 0.34 0.36\n\n"
+        "[ moleculetype ]\nM 3\n\n[ atoms ]\n"
+        + "".join(f"{i} C 1 M C{i} {i} 0.0 12.011\n" for i in range(1, 5))
+        + "\n[ bonds ]\n1 2 1 0.15 1000\n2 3 1 0.15 1000\n3 4 1 0.15 1000\n\n"
+        "[ pairs ]\n1 4 2 1.0 0.1 -0.1 0.34 0.36\n\n[ system ]\nx\n\n[ molecules ]\nM 1\n"
+    )
+    with pytest.raises(ValueError, match="Unsupported function type in \\[ pairs \\]"):
+        app.GromacsTopFile(str(top))
+
+
+def test_parmed_refuses_to_write_mixed_1_4_scaling_to_gromacs(glycosylated, tmp_path) -> None:
+    import parmed
+
+    interchange, _, system = glycosylated
+    structure = parmed.openmm.load_topology(interchange.to_openmm_topology(), system)
+    with pytest.raises(Exception, match="(?i)1-4"):
+        structure.save(str(tmp_path / "sys.top"))
 
 
 def test_interchange_gromacs_export_drops_an_improper_out_of_its_own_order(tmp_path) -> None:

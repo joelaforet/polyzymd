@@ -40,11 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GLYCAM's own scale (GLYCAM leaves many unscaled). `parameterize` returns a
   `ParameterizedProtein`; its `to_openmm()` writes those pairs as
   NonbondedForce exceptions and gives the glycan atoms GLYCAM's atom-type
-  masses (hydrogen mass repartitioning is refused with GLYCAM glycans). Its bare Interchange scales every 1-4 pair
-  uniformly, so it is named `interchange_without_glycam_pairs`, and
-  `.interchange` and `interchange, record = parameterize(...)` refuse when the
-  protein has GLYCAM06j glycans. The record lists each glycan's templates and
-  its number of unscaled 1-4 pairs.
+  masses (hydrogen mass repartitioning is refused with GLYCAM glycans). Its
+  bare Interchange scales every 1-4 pair uniformly, so it is named
+  `interchange_without_glycam_pairs`, and `.interchange` and
+  `interchange, record = parameterize(...)` refuse when the protein has
+  GLYCAM06j glycans. The record lists each glycan's templates and its number
+  of unscaled 1-4 pairs.
+- GLYCAM06j glycans in GROMACS: `ParameterizedProtein.to_gromacs()` (and
+  `glycam.apply_to_gromacs` for a topology written elsewhere) writes each
+  glycan's 1-4 pairs as `[ pairs ]` function type 2 (`i j 2 fudgeQQ qi qj
+  sigma epsilon`), the only form that scales the Coulomb part per pair, and
+  GLYCAM's masses into `[ atoms ]`. The audit's GROMACS reader reads those
+  lines itself (OpenMM's `GromacsTopFile` refuses them) and sets them as
+  exceptions, so GLYCAM builds are checked on both engines.
 
 ### Changed
 

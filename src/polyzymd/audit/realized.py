@@ -7,6 +7,9 @@ A build is checked against the files of the engine its config requests:
   OpenMM's ``GromacsTopFile`` with the settings of the production ``.mdp``,
   because GROMACS applies bond constraints, cutoffs, PME, switching and the
   dispersion correction through run parameters rather than the topology.
+  ``GromacsTopFile`` cannot read ``[ pairs ]`` of function type 2 (a 1-4 pair
+  with its own Coulomb scale, which GLYCAM06j glycans need), so those lines
+  are read here and set as exceptions after the rest is loaded.
 
 Either way the result is an OpenMM ``System`` plus coordinates and run settings,
 so every check is written once and reads both engines the same way.
@@ -15,7 +18,10 @@ so every check is written once and reads both engines the same way.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
@@ -164,8 +170,8 @@ class RealizedSystem:
         # choose blocks of the topology, so they are read as grompp would.
         defines = mdp_defines(parse_mdp(mdp).get("define", ""))
         gro_file = app.GromacsGroFile(str(gro))
-        topology_file = app.GromacsTopFile(
-            str(top), periodicBoxVectors=gro_file.getPeriodicBoxVectors(), defines=defines
+        topology_file, type2_pairs = read_gromacs_top(
+            top, periodicBoxVectors=gro_file.getPeriodicBoxVectors(), defines=defines
         )
         kwargs: dict[str, Any] = {
             "nonbondedMethod": app.PME,
@@ -178,6 +184,7 @@ class RealizedSystem:
         if modifier == "potential-switch":
             kwargs["switchDistance"] = float(options.get("rvdw-switch", 0.0)) * unit.nanometer
         system = topology_file.createSystem(**kwargs)
+        set_type2_pairs(system, topology_file, type2_pairs)
         for force in system.getForces():
             if force.__class__.__name__ == "NonbondedForce":
                 force.setUseDispersionCorrection(dispcorr == "enerpres")
@@ -225,6 +232,115 @@ def parse_mdp(path: Path) -> dict[str, str]:
         key, value = (part.strip() for part in line.split("=", 1))
         options[key.lower().replace("_", "-")] = value
     return options
+
+
+def read_gromacs_top(top: Path, **kwargs: Any) -> tuple[Any, dict[str, list[tuple]]]:
+    """Read ``top`` with OpenMM's ``GromacsTopFile``, function-type-2 pairs included.
+
+    Each ``[ pairs ]`` line of function type 2 (``i j 2 fudgeQQ qi qj sigma
+    epsilon``) is read here and handed to ``GromacsTopFile`` as a bare
+    ``i j 1`` line, so the 1-4 exception exists; :func:`set_type2_pairs` then
+    gives it the line's parameters. Removing the line instead would leave the
+    pair unexcluded at full strength. Returns the ``GromacsTopFile`` and the
+    type-2 pairs of each molecule type, as (i, j, fudgeQQ, qi, qj, sigma,
+    epsilon) with 1-based indices within the molecule.
+
+    ``kwargs`` go to ``GromacsTopFile``.
+    """
+    from openmm import app
+
+    top = Path(top)
+    files = [top.resolve()] + _includes(top)
+    pairs: dict[str, list[tuple]] = {}
+    rewritten = {path: _read_type2_pairs(path, pairs) for path in files}
+    if not pairs:
+        return app.GromacsTopFile(str(top), **kwargs), {}
+    root = Path(os.path.commonpath([path.parent for path in files]))
+    workdir = Path(tempfile.mkdtemp(prefix="polyzymd-top-"))
+    copies = {path: workdir / path.relative_to(root) for path in files}
+
+    def to_copy(match: re.Match, source: Path) -> str:
+        # Includes (Interchange writes absolute ones) must reach the rewritten copies.
+        included = (source.parent / match.group(2)).resolve()
+        if included not in copies:
+            return match.group(0)
+        relative = os.path.relpath(copies[included], copies[source].parent)
+        return f'{match.group(1)}"{relative}"'
+
+    try:
+        for path, text in rewritten.items():
+            text = re.sub(
+                r'^(\s*#include\s+)"([^"]+)"',
+                lambda match, path=path: to_copy(match, path),
+                text,
+                flags=re.MULTILINE,
+            )
+            copies[path].parent.mkdir(parents=True, exist_ok=True)
+            copies[path].write_text(text)
+        topology_file = app.GromacsTopFile(str(workdir / top.resolve().relative_to(root)), **kwargs)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    return topology_file, pairs
+
+
+def set_type2_pairs(system: Any, topology_file: Any, pairs: dict[str, list[tuple]]) -> int:
+    """Give the exceptions of type-2 pairs their own parameters (see :func:`read_gromacs_top`).
+
+    Returns the number of exceptions set; every pair must find its exception.
+    """
+    import openmm
+
+    if not pairs:
+        return 0
+    wanted: dict[tuple[int, int], tuple[float, float, float]] = {}
+    offset = 0
+    # GromacsTopFile keeps the [ molecules ] list and molecule types privately.
+    for name, count in topology_file._molecules:
+        n_atoms = len(topology_file._moleculeTypes[name].atoms)
+        for copy in range(count):
+            base = offset + copy * n_atoms
+            for i, j, fudge, qi, qj, sigma, epsilon in pairs.get(name, ()):
+                a, b = base + i - 1, base + j - 1
+                wanted[(min(a, b), max(a, b))] = (fudge * qi * qj, sigma, epsilon)
+        offset += count * n_atoms
+    force = next(f for f in system.getForces() if isinstance(f, openmm.NonbondedForce))
+    found = 0
+    for n in range(force.getNumExceptions()):
+        i, j, *_ = force.getExceptionParameters(n)
+        parameters = wanted.get((min(i, j), max(i, j)))
+        if parameters is not None:
+            force.setExceptionParameters(n, i, j, *parameters)
+            found += 1
+    if found != len(wanted):
+        raise ValueError(
+            f"Found {found} of {len(wanted)} [ pairs ] of function type 2 among the "
+            f"system's 1-4 exceptions. {ASK_FOR_SUPPORT}"
+        )
+    return found
+
+
+def _read_type2_pairs(path: Path, pairs: dict[str, list[tuple]]) -> str:
+    """Collect the type-2 pairs of ``path`` and return its text with them as bare type 1."""
+    out = []
+    section = molecule = None
+    for line in path.read_text().splitlines(keepends=True):
+        content = line.split(";")[0].strip()
+        header = re.match(r"\[\s*(\w+)\s*\]", content)
+        if header:
+            section = header.group(1).lower()
+        elif section == "moleculetype" and content:
+            molecule = content.split()[0]
+        elif section == "pairs" and content and not content.startswith("#"):
+            fields = content.split()
+            if len(fields) >= 8 and fields[2] == "2":
+                i, j = int(fields[0]), int(fields[1])
+                pairs.setdefault(molecule, []).append(
+                    (i, j, *(float(value) for value in fields[3:8]))
+                )
+                out.append(f"{i} {j} 1\n")
+                continue
+        out.append(line)
+    return "".join(out)
 
 
 def _includes(top: Path) -> list[Path]:

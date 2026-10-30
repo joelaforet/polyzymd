@@ -56,8 +56,10 @@ needed. The capped-model machinery belongs to this method.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -192,7 +194,7 @@ class ParameterizedProtein:
                 "This protein has GLYCAM06j glycans, whose 1-4 pairs an Interchange "
                 "cannot hold: export with to_openmm() / to_gromacs(), or take "
                 "interchange_without_glycam_pairs and apply glycam_pairs yourself "
-                "(glycam.apply_to_openmm)."
+                "(glycam.apply_to_openmm / apply_to_gromacs)."
             )
         return self.interchange_without_glycam_pairs
 
@@ -216,6 +218,33 @@ class ParameterizedProtein:
         if self.record.glycam:
             glycam.apply_to_openmm(system, self.record.glycam)
         return system
+
+    def to_gromacs(self, prefix: str, **kwargs) -> None:
+        """Write ``{prefix}.top`` and ``{prefix}.gro``, GLYCAM06j pairs and masses included.
+
+        ``kwargs`` go to ``Interchange.to_gromacs`` (``monolithic=False``
+        writes the protein's molecule type to its own ``.itp``).
+        """
+        self.interchange_without_glycam_pairs.to_gromacs(prefix=prefix, **kwargs)
+        if not self.record.glycam:
+            return
+        top = Path(f"{prefix}.top")
+        files = [top] + [
+            top.parent / name
+            for name in re.findall(r'^\s*#include\s+"([^"]+)"', top.read_text(), re.MULTILINE)
+        ]
+        for path in files:
+            if not path.is_file():
+                continue
+            names = re.findall(
+                r"^\s*\[\s*moleculetype\s*\]\s*\n(?:\s*;.*\n)*\s*(\S+)",
+                path.read_text(),
+                re.MULTILINE,
+            )
+            if names:
+                glycam.apply_to_gromacs(path, names[0], self.record.glycam)
+                return
+        raise ValueError(f"No [ moleculetype ] for the protein in {top} or its includes.")
 
 
 def parameterize(
