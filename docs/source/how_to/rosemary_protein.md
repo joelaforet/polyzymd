@@ -1,4 +1,4 @@
-# Put a protein on OpenFF Rosemary alpha
+# Parameterize a protein with OpenFF Rosemary alpha
 
 This guide sets up a protein on OpenFF Rosemary alpha in OPC3 water. Rosemary
 is OpenFF's protein force field in development; the alpha is not for
@@ -10,7 +10,7 @@ reference.
 Run `polyzymd` from the `build` pixi environment (`pixi run -e build ...`).
 :::
 
-## 1. Name Rosemary on the protein
+## 1. Use Rosemary for the protein
 
 ```yaml
 solutes:
