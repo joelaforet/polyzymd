@@ -1,14 +1,19 @@
 """Force-field parameters and charges for a modified protein.
 
-The protein keeps its own force field (ff14SB). Each modification site takes
-the parameter set of its type (glycan, polymer, generic, noncanonical):
+The protein keeps its declared force field, one with residue library charges
+(ff14SB's OpenFF port by default). Each modification site takes the parameter
+set of its type (glycan, polymer, generic, noncanonical):
 
 - Atoms outside every site keep the protein's parameters and library
   charges.
 - The backbone of a modified residue (N, H, CA, HA, C, O) keeps the protein's
   parameters and the library charges of the residue as it was before any
   site-creating change (the input residue, or the canonical residue a
-  mutation made), so it matches its neighbours.
+  mutation made), so it matches its neighbours. These charges come from the
+  declared protein force field run on that residue, never from another
+  copy of the force field (Joe, 2026-10-30). A force field that charges
+  proteins with NAGL (OpenFF Rosemary) has no library charges and
+  parameterizes the whole protein instead (:func:`parameterize_whole`).
 - Site atoms (the side chain from CB outward plus everything attached) take
   the parameter set's force field. Their charges come from NAGL on a capped
   model of the site, shifted uniformly over the site atoms so that the site
@@ -176,7 +181,7 @@ def parameterize(
     absent = [str(keys[index]) for index in outside if keys[index] not in library]
     if absent:
         raise ValueError(
-            "These protein atoms have no counterpart in the ff14SB reference: "
+            "These protein atoms have no counterpart in the protein force field's reference: "
             + ", ".join(absent[:10])
         )
 
@@ -266,8 +271,7 @@ def resolve_parameter_sets(
         missing = [name for name in names if name not in parameter_sets]
         if missing:
             raise ValueError(
-                f"No parameter set for the site type(s) {', '.join(missing)} "
-                f"(site {site.name})."
+                f"No parameter set for the site type(s) {', '.join(missing)} (site {site.name})."
             )
         chosen = parameter_sets[names[0]]
         for name in names[1:]:
