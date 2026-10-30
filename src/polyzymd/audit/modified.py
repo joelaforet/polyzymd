@@ -15,7 +15,10 @@ component record's reference alone:
   mBuild, and without relaxation; parameters do not depend on coordinates);
 - **protein** terms and library charges: an OpenFF Interchange of the
   protein with only ff14SB residues (canonical mutations and ff14SB-variant
-  protonations replayed), built here with the protein force field;
+  protonations replayed), built here with the declared protein force field.
+  A modified terminus is capped with ACE or NME in that reference, so it
+  takes the force field's main-chain charges; no other source of protein
+  charges is read;
 - **OpenFF site** terms: an Interchange of the whole modified protein with the
   site's force field; site charges: NAGL with the declared model on a capped
   model built here (the site, two bonds of neighbours, every cut bond capped
@@ -223,7 +226,8 @@ def build_reference(realized: Any, component: Any) -> ModifiedReference:
     site_sets = {site.name: _site_set(protein, site, sets) for site in sites}
     site_force_fields = {name: tuple(s["force_field"]) for name, s in site_sets.items()}
 
-    # The protein: ff14SB on the reference with only ff14SB residues.
+    # The protein: the declared protein force field on the reference, the
+    # input protein with only the residues that force field has templates for.
     reference = to_openff(reference_protein(protein, sites))
     reference_keys = [_key(atom) for atom in reference.atoms]
     position = {key: i for i, key in enumerate(keys)}
@@ -243,25 +247,17 @@ def build_reference(realized: Any, component: Any) -> ModifiedReference:
     library = {
         to_real_from_reference[k]: protein_index.particle[k][0] for k in to_real_from_reference
     }
-    # A terminus a site touches takes the main-chain template (ASN, not NASN or CASN).
-    resname = {keys[i][:3]: built_molecule.atom(i).metadata["residue_name"] for i in range(n_atoms)}
+    # A terminus a site touches takes the main-chain template (ASN, not NASN
+    # or CASN): the reference caps it with ACE or NME, so the declared protein
+    # force field charges it as in the middle of a chain. The termini are
+    # found here from the input PDB, and each must be capped in the reference.
     termini = modified_termini(recipe["pdb"], keys, domain_of, offset)
-    for residue in termini:
-        atoms = [
-            real(i)
-            for i in range(n_atoms)
-            if keys[i][:3] == residue and domain_of[real(i)] == "protein"
-        ]
-        side_chain = {keys[i - offset][3] for i in atoms if keys[i - offset][3] not in BACKBONE}
-        template = main_chain_charges(resname[residue], side_chain)
-        for i in atoms:
-            name = keys[i - offset][3]
-            if name not in template:
-                raise ValueError(
-                    f"{_label(keys[i - offset])} has no charge in ff14SB's main-chain "
-                    f"{resname[residue]} template"
-                )
-            library[i] = template[name]
+    uncapped = uncapped_termini(reference, termini)
+    if uncapped:
+        raise ValueError(
+            "the reference does not cap these modified termini with ACE or NME: "
+            + ", ".join(uncapped)
+        )
 
     expected: dict[str, dict[str, dict]] = {
         name: {kind: {} for kind in TERM_KINDS} for name in domain_names
@@ -627,16 +623,6 @@ def _show(change: Optional[tuple]) -> str:
     return "nothing" if change is None else repr(change)
 
 
-#: Residues whose main-chain ff14SB template has protonation variants.
-_VARIANT_TEMPLATES = {
-    "LYS": ("LYS", "LYN"),
-    "HIS": ("HIP", "HID", "HIE"),
-    "ASP": ("ASP", "ASH"),
-    "GLU": ("GLU", "GLH"),
-    "CYS": ("CYS", "CYM", "CYX"),
-}
-
-
 def modified_termini(pdb: str, keys: list[tuple], domain_of: dict, offset: int = 0) -> dict:
     """Terminal residues of the input whose terminus a site holds.
 
@@ -690,26 +676,29 @@ def neutral_termini(termini: dict, records: list) -> list[str]:
     return found
 
 
-def main_chain_charges(resname: str, side_chain: set[str]) -> dict[str, float]:
-    """The charges of ff14SB's main-chain template for a residue, by atom name.
+#: The cap residue and the atom it bonds to, for each terminus.
+_CAPS = {"N": ("ACE", "N"), "C": ("NME", "C")}
 
-    Read from OpenMM's ``amber14/protein.ff14SB.xml``; among a residue's
-    protonation variants, the template whose side chain has these atom names.
+
+def uncapped_termini(reference: Any, termini: dict) -> list[str]:
+    """Modified termini (``{residue: "N" or "C"}``) that ``reference`` does not cap.
+
+    A terminus is capped when an atom of an ACE (N-terminus) or NME
+    (C-terminus) residue is bonded to the residue's N or C.
     """
-    import xml.etree.ElementTree as ET
-
-    from openmm.app import forcefield
-
-    path = Path(forcefield.__file__).parent / "data" / "amber14" / "protein.ff14SB.xml"
-    templates = {
-        residue.get("name"): {a.get("name"): float(a.get("charge")) for a in residue.iter("Atom")}
-        for residue in ET.parse(path).getroot().iter("Residue")
-    }
-    for name in _VARIANT_TEMPLATES.get(resname, (resname,)):
-        template = templates.get(name)
-        if template and {a for a in template if a not in BACKBONE} == side_chain:
-            return template
-    raise ValueError(f"no main-chain ff14SB template of {resname} has the side chain {side_chain}")
+    found = []
+    for residue, terminus in termini.items():
+        cap, anchor = _CAPS[terminus]
+        capped = any(
+            _key(atom) == (*residue, anchor) and other.metadata["residue_name"] == cap
+            for bond in reference.bonds
+            for atom, other in ((bond.atom1, bond.atom2), (bond.atom2, bond.atom1))
+        )
+        if not capped:
+            found.append(
+                f"chain {residue[0]} residue {residue[1]}{residue[2]} ({terminus}-terminus)"
+            )
+    return found
 
 
 def _input_formal_charges(pdb: str) -> Optional[dict[tuple, float]]:

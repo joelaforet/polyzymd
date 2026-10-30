@@ -603,16 +603,33 @@ def test_a_neutral_terminus_fails_modifications_sites(monkeypatch, tmp_path) -> 
     assert "residue 1 (N-terminus)" in status["modifications.sites"][1]
 
 
-def test_the_terminal_template_on_a_modified_terminus_fails(monkeypatch, tmp_path) -> None:
-    """A build that leaves an acetylated N-terminus on NASN's charges (not ASN's)."""
+def test_a_modified_terminus_left_uncapped_in_the_reference_fails(monkeypatch, tmp_path) -> None:
+    """A reference that leaves an acetylated N-terminus on NASN's charges (not ASN's).
+
+    The build and the audit share ``reference_protein``; the audit finds the
+    modified termini itself and fails when one is not capped.
+    """
     from polyzymd.modifying_proteins import parameters
 
     monkeypatch.setattr(parameters, "modified_termini", lambda reference, sites: {})
     # On the terminal template the site needs a larger shift than the default bound.
     built = _terminus("acetyl", max_charge_shift=0.05)
     status = _status(_realize(built, "openmm", tmp_path), built[3])
-    assert status["charges.source"][0] == "FAIL"
-    assert "protein" in status["charges.source"][1]
+    assert status["modifications.sites"][0] == "FAIL"
+    assert "does not cap these modified termini" in status["modifications.sites"][1]
+    assert "residue 1 (N-terminus)" in status["modifications.sites"][1]
+
+
+def test_uncapped_termini_reads_the_caps_of_the_reference() -> None:
+    from polyzymd.audit.modified import uncapped_termini
+    from polyzymd.modifying_proteins.parameters import reference_protein, to_openff
+
+    protein, *_ = _terminus("acetyl")
+    sites = mp.modification_sites(protein)
+    capped = to_openff(reference_protein(protein, sites))
+    assert uncapped_termini(capped, {("A", 1, ""): "N"}) == []
+    # Ser20's C-terminus is not modified, so the reference does not cap it.
+    assert uncapped_termini(capped, {("A", 20, ""): "C"}) == ["chain A residue 20 (C-terminus)"]
 
 
 def test_the_declared_blocks_are_compared_with_the_build(acylated, tmp_path) -> None:
@@ -677,7 +694,8 @@ def test_a_neutral_aspartate_from_a_ccd_mutation_warns(tmp_path) -> None:
     built = _build("asp", {})
     status = _status(_realize(built, "openmm", tmp_path), built[3])
     assert status["modifications.protonation_state"][0] == "WARN"
-    assert "deprotonate: {site: A:ASP13, atom_name: OD2}" in (
-        status["modifications.protonation_state"][1]
+    assert (
+        "deprotonate: {site: A:ASP13, atom_name: OD2}"
+        in (status["modifications.protonation_state"][1])
     )
     assert _not_passing(status, allowed=("modifications.protonation_state",)) == {}
