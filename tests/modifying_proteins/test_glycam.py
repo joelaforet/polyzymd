@@ -168,8 +168,10 @@ def test_a_glycam_result_exports_only_with_its_pairs(glycosylated) -> None:
         _ = result.interchange
     with pytest.raises(ValueError, match="to_openmm"):
         _, _ = result
-    with pytest.raises(ValueError, match="repartitioning"):
+    with pytest.raises(ValueError, match="repartitioning") as refused:
         result.to_openmm(hydrogen_mass=3.0)
+    assert "not supported yet" in str(refused.value)
+    assert "https://github.com/joelaforet/polyzymd/issues" in str(refused.value)
     positions = interchange.positions.to_openmm()
     exported = _energies(result.to_openmm(), positions)["NonbondedForce"]
     assert exported == pytest.approx(_energies(ours, positions)["NonbondedForce"], rel=1e-12)

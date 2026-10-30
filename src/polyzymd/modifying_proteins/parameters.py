@@ -208,8 +208,9 @@ class ParameterizedProtein:
         kwargs["combine_nonbonded_forces"] = True
         if self.record.glycam and kwargs.get("hydrogen_mass") not in (None, 1.007947):
             raise ValueError(
-                "Hydrogen mass repartitioning is not supported with GLYCAM06j glycans, "
-                "whose atoms keep GLYCAM's masses."
+                "Hydrogen mass repartitioning with GLYCAM06j glycans is not "
+                "supported yet. If you need it, open an issue at "
+                "https://github.com/joelaforet/polyzymd/issues"
             )
         system = self.interchange_without_glycam_pairs.to_openmm(**kwargs)
         if self.record.glycam:
