@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A `polyzymd-organize` agent skill.**  `.claude/skills/polyzymd-organize/SKILL.md` tells an agent how to lay out a project: where configs, inputs, runs, job scripts and results go; how to choose studies (one control each, so a polymer comparison at a second temperature is its own study); `project init`, `add-study` and `add-condition` with a check and a commit after each; setting `scratch_directory` on a cluster, because `add-condition` sets it to null for a config without runs; and bringing in runs that already exist, including chains still running.
 
+### Fixed
+
+- **NPT equilibration stages run at `thermodynamics.pressure`.**  With `engine: openmm`, every NPT equilibration stage ran its barostat at 1 atm, whatever `thermodynamics.pressure` said; production and the GROMACS engine used the configured pressure. Stages now use it too, and the stage results record `pressure_atm`. Configs at 1 atm, the default, run as before. The configuration reference now states that PolyzyMD runs the ensemble each phase names: `NVT` phases run no barostat and `NPT` phases run it at `thermodynamics.pressure`.
+
 ## [1.3.0] - 2026-10-24
 
 ### What changed for you (read this first)

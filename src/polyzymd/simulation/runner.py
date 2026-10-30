@@ -690,6 +690,7 @@ class SimulationRunner:
         self,
         temperature: float,
         config: "SimulationPhasesConfig",
+        pressure: float = 1.0,
     ) -> Dict[str, Any]:
         """Run equilibration phase.
 
@@ -700,6 +701,8 @@ class SimulationRunner:
         Args:
             temperature: Temperature in Kelvin
             config: SimulationPhasesConfig containing equilibration stages
+            pressure: Pressure in atmospheres for NPT stages (the config's
+                ``thermodynamics.pressure``)
 
         Returns:
             Dictionary with equilibration results
@@ -747,6 +750,7 @@ class SimulationRunner:
         default_friction: float = 1.0,
         resume_from_step: int = 0,
         resume_temperature: float | None = None,
+        pressure: float = 1.0,
     ) -> Dict[str, Any]:
         """Run a single equilibration stage with optional position restraints.
 
@@ -769,6 +773,8 @@ class SimulationRunner:
             resume_temperature: Current temperature when resuming a temperature-ramping
                 stage. Only used when ``resume_from_step > 0`` and the stage uses
                 temperature ramping.
+            pressure: Pressure in atmospheres for an NPT stage (the config's
+                ``thermodynamics.pressure``). An NVT stage runs no barostat.
 
         Returns:
             Dictionary with stage results
@@ -806,7 +812,6 @@ class SimulationRunner:
         barostat_freq = None
         if stage.ensemble == Ensemble.NPT:
             self._remove_barostat()
-            pressure = 1.0  # Default pressure for NPT stages
             barostat_freq = stage.barostat_frequency if stage.barostat_frequency else 25
             start_temp = stage.get_start_temperature()
             self._add_barostat(
@@ -1149,6 +1154,7 @@ class SimulationRunner:
             "stage_index": stage_index,
             "stage_name": stage.name,
             "ensemble": stage.ensemble.value,
+            "pressure_atm": pressure if stage.ensemble == Ensemble.NPT else None,
             "duration_ns": stage.resolved_duration,
             "total_steps": total_steps,
             "temperature_start_K": stage.get_start_temperature(),
@@ -1485,6 +1491,7 @@ class SimulationRunner:
                     stage_index=i,
                     resume_from_step=resume_step,
                     resume_temperature=resume_temp,
+                    pressure=pressure,
                 )
                 results["stages"].append(stage_result)
                 results["total_duration_ns"] += stage.resolved_duration
@@ -1504,6 +1511,7 @@ class SimulationRunner:
                 reference_positions=reference_positions,
                 atom_group_resolver=atom_group_resolver,
                 stage_index=i,
+                pressure=pressure,
             )
             results["stages"].append(stage_result)
             results["total_duration_ns"] += stage.resolved_duration
