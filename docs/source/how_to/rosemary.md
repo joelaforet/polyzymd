@@ -78,9 +78,10 @@ The audit reports glycans under Rosemary as an INFO line of
 `parameters.glycan_force_field`: "glycans parameterized by Rosemary
 (whole-protein mode)".
 
-The same limits apply as on ff14SB: a neutral N- or C-terminus (NH2 or
-COOH, with no group attached) is refused, and a truncated chain is capped with
-ACE or NME instead.
+Unlike the ff14SB path, Rosemary accepts a neutral N- or C-terminus (NH2 or
+COOH, with no group attached): it charges whatever chemistry it is given. A
+truncated chain is still better capped with ACE or NME, so that its ends are
+not charged artificially.
 
 ## Step 4: Decide on the other components
 
