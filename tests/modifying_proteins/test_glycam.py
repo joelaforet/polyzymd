@@ -384,6 +384,47 @@ def _edited_glycan(tmp_path: Path, edit) -> Path:
     return path
 
 
+def test_a_glycan_file_without_conect_records_is_refused(tmp_path) -> None:
+    path = _edited_glycan(
+        tmp_path, lambda lines: [line for line in lines if not line.startswith("CONECT")]
+    )
+    protein = mp.load_protein(TRPCAGE)
+    with pytest.raises(ValueError, match="no CONECT records"):
+        _glycosylate(protein, "A:S13", "OG", "O-glycosylation", path)
+
+
+def test_a_glycan_file_missing_a_conect_bond_names_the_bond(tmp_path) -> None:
+    def drop_o3_h3o(lines):
+        serials = {
+            line[12:16].strip(): int(line[6:11])
+            for line in lines
+            if line.startswith(("ATOM", "HETATM")) and line[22:26].strip() == "3"
+        }
+        o3, h3o = serials["O3"], serials["H3O"]
+        kept = []
+        for line in lines:
+            if line.startswith("CONECT"):
+                numbers = [int(line[i : i + 5]) for i in range(6, len(line.rstrip()), 5)]
+                if numbers[0] in (o3, h3o):
+                    other = h3o if numbers[0] == o3 else o3
+                    numbers = [n for n in numbers if n != other]
+                    line = "CONECT" + "".join(f"{n:5d}" for n in numbers) + "\n"
+            kept.append(line)
+        return kept
+
+    path = _edited_glycan(tmp_path, drop_o3_h3o)
+    protein = mp.load_protein(TRPCAGE)
+    with pytest.raises(ValueError, match="0YB3 H3O-O3"):
+        _glycosylate(protein, "A:S13", "OG", "O-glycosylation", path)
+
+
+def test_a_glycan_file_without_its_reducing_end_hydroxyl_is_refused(tmp_path) -> None:
+    path = _edited_glycan(tmp_path, lambda lines: [line for line in lines if " ROH " not in line])
+    protein = mp.load_protein(TRPCAGE)
+    with pytest.raises(ValueError, match="no ROH residue"):
+        _glycosylate(protein, "A:S13", "OG", "O-glycosylation", path)
+
+
 def test_a_glycan_not_named_for_glycam_is_refused_by_glycam(tmp_path) -> None:
     path = _edited_glycan(tmp_path, lambda lines: [line.replace("0YB", "XYZ") for line in lines])
     protein = mp.load_protein(TRPCAGE)

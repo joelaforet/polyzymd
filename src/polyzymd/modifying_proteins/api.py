@@ -263,6 +263,12 @@ def plan_attach(
     if type not in ATTACHMENT_TYPES:
         raise ValueError(f"Attachment type {type!r}; use one of {', '.join(ATTACHMENT_TYPES)}.")
     site, residue = _site(protein, site)
+    if type == "glycan":
+        source = fragment if isinstance(fragment, dict) else fragment_source(fragment)
+        if source and "pdb_path" in source:
+            from polyzymd.modifying_proteins.glycam import check_glycan_pdb
+
+            check_glycan_pdb(source["pdb_path"])
     if isinstance(fragment, dict):
         fragment = _fragment_from_source(protein, fragment)
     source = fragment_source(fragment)

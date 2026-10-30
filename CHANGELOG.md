@@ -53,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GLYCAM's masses into `[ atoms ]`. The audit's GROMACS reader reads those
   lines itself (OpenMM's `GromacsTopFile` refuses them) and sets them as
   exceptions, so GLYCAM builds are checked on both engines.
+- A glycan read from a PDB file is refused, with what to do, when the file has
+  no CONECT records (GlyGen and GLYCAM-Web files often lack them), lacks a
+  CONECT record for a bond its GLYCAM residue template has (the error names
+  each missing bond), or has no ROH reducing end (the bond to the protein
+  replaces the anomeric hydroxyl).
 
 ### Changed
 

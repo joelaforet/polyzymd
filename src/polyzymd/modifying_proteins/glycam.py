@@ -32,6 +32,7 @@ force-field file in Interchange. They are built natively and copied in:
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -112,12 +113,77 @@ def is_glycam(force_field) -> bool:
 
 def glycam_residue_names() -> set[str]:
     """The residue templates GLYCAM06j defines."""
+    return set(_glycam_template_bonds())
+
+
+@functools.cache
+def _glycam_template_bonds() -> dict[str, frozenset[frozenset[str]]]:
+    """Each GLYCAM06j residue template's bonds, as pairs of atom names."""
     import xml.etree.ElementTree as ET
 
     from openmm.app import forcefield
 
     path = Path(forcefield.__file__).parent / "data" / OPENMM_FILES[1]
-    return {residue.get("name") for residue in ET.parse(path).getroot().iter("Residue")}
+    return {
+        residue.get("name"): frozenset(
+            frozenset((bond.get("atomName1"), bond.get("atomName2")))
+            for bond in residue.findall("Bond")
+        )
+        for residue in ET.parse(path).getroot().iter("Residue")
+    }
+
+
+def check_glycan_pdb(path: str | Path) -> None:
+    """Refuse a glycan PDB file that cannot bond to a protein as GLYCAM expects."""
+    text = Path(path).read_text().splitlines()
+    residues = {line[17:20].strip() for line in text if line.startswith(("ATOM", "HETATM"))}
+    if not any(line.startswith("CONECT") for line in text):
+        raise ValueError(
+            f"{path} has no CONECT records. A glycan's bonds are read from CONECT records; "
+            "GLYCAM PDB files from GlyGen or GLYCAM-Web often lack them. Add them (for "
+            "example by loading the file in PyMOL and saving it with CONECT records) and "
+            "check every bond."
+        )
+    if "ROH" not in residues:
+        raise ValueError(
+            f"{path} has no ROH residue at the reducing end. The bond to the protein replaces "
+            "the anomeric hydroxyl (ROH), so without it the anomeric carbon has nothing to "
+            "leave. Use the GLYCAM file of the glycan with its reducing-end ROH."
+        )
+    missing = _missing_template_bonds(text)
+    if missing:
+        raise ValueError(
+            f"{path} lacks CONECT records for bonds its GLYCAM06j residues have: "
+            + ", ".join(missing[:10])
+            + (f" (and {len(missing) - 10} more)" if len(missing) > 10 else "")
+            + ". Add every bond as a CONECT record."
+        )
+
+
+def _missing_template_bonds(lines: list[str]) -> list[str]:
+    """Bonds of each GLYCAM06j residue in the file that no CONECT record gives."""
+    atoms = {}
+    for line in lines:
+        if line.startswith(("ATOM", "HETATM")):
+            residue = (line[17:20].strip(), line[21], line[22:27].strip())
+            atoms[int(line[6:11])] = (residue, line[12:16].strip())
+    bonded: set[tuple] = set()
+    for line in lines:
+        if line.startswith("CONECT"):
+            serials = [int(line[i : i + 5]) for i in range(6, len(line.rstrip()), 5)]
+            first = atoms.get(serials[0])
+            for other in serials[1:]:
+                second = atoms.get(other)
+                if first and second and first[0] == second[0]:
+                    bonded.add((first[0], frozenset((first[1], second[1]))))
+    templates = _glycam_template_bonds()
+    missing = []
+    for residue in dict.fromkeys(residue for residue, _ in atoms.values()):
+        names = {name for key, name in atoms.values() if key == residue}
+        for bond in sorted(templates.get(residue[0], ()), key=sorted):
+            if bond <= names and (residue, bond) not in bonded:
+                missing.append(f"{residue[0]}{residue[2]} {'-'.join(sorted(bond))}")
+    return missing
 
 
 def glycam_site_terms(molecule, site, library: dict, keys) -> tuple[_NativeTerms, GlycamSite]:
