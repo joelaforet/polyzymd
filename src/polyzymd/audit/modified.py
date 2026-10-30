@@ -34,6 +34,10 @@ What is shared with the build: reading the modified protein's chemistry
 (``to_openff``), deriving its sites (``modification_sites``) and replaying
 the ff14SB-only reference (``reference_protein``). The values (force-field
 assignment, charges, the shift and every 1-4 pair) are computed here.
+
+Status: this module checks the interim ff14SB + Sage/NAGL method alongside
+the whole-protein path. It may change after the OpenFF Rosemary benchmark
+(issue #307).
 """
 
 from __future__ import annotations
@@ -51,7 +55,7 @@ from polyzymd.audit.terms import TERM_KINDS, SystemIndex, compare
 #: Atoms that are not a residue's side chain (the side chain runs from CB outward).
 BACKBONE = frozenset({"N", "H", "CA", "HA", "HA2", "HA3", "C", "O", "H1", "H2", "H3", "OXT", "HXT"})
 
-#: The atoms a change to a backbone atom brings into a site (Joe, 2026-10-28):
+#: The atoms a change to a backbone atom brings into a site:
 #: the touched atom and its hydrogens; a change to the C-terminal carboxylate
 #: takes the whole carboxyl and CA, which share ff14SB's terminal charge.
 TOUCHED_BACKBONE = {
@@ -639,7 +643,7 @@ def modified_termini(pdb: str, keys: list[tuple], domain_of: dict, offset: int =
     A residue's N-terminus is modified when the input residue is N-terminal
     (it has H1, H2 or H3) and a site holds its N; its C-terminus when the
     input residue is C-terminal (it has OXT) and a site holds its C, O, OXT
-    or HXT (Joe, 2026-10-28). The input PDB is read here, line by line.
+    or HXT. The input PDB is read here, line by line.
     Returns ``{residue: "N" or "C"}``.
     """
     names: dict[tuple, set[str]] = collections.defaultdict(set)
@@ -667,8 +671,9 @@ TERMINAL_ANCHORS = {"N": frozenset({"N"}), "C": frozenset({"C", "O", "OXT"})}
 def neutral_termini(termini: dict, records: list) -> list[str]:
     """Modified termini that no attachment labels: a terminus changed by protonation alone.
 
-    PolyzyMD 1.4 does not model a neutral N-terminus (NH2) or C-terminus
-    (COOH) (Joe, 2026-10-28).
+    These are refused because ff14SB has no templates for a neutral
+    N-terminus (NH2) or C-terminus (COOH). If you need one, open an issue at
+    https://github.com/joelaforet/polyzymd/issues
     """
     found = []
     for residue, terminus in termini.items():
