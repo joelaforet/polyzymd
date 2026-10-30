@@ -140,9 +140,26 @@ def test_every_rc5_key_keeps_its_meaning() -> None:
             )
             if tighter:
                 problems.append(f"{key}: bound {name} {before} -> {value}")
-    added = [key for key in now if key not in frozen and now[key]["required"]]
+    # A new required key needs an edit only where its section already existed:
+    # a key required inside a new optional section is asked for only by
+    # configs that use that section.
+    added = [
+        key
+        for key in now
+        if key not in frozen and now[key]["required"] and _section_existed(_parent(key), frozen)
+    ]
     problems += [f"{key}: a new key that is required" for key in added]
     assert not problems, "an rc.5 config would need editing:\n" + "\n".join(problems)
+
+
+def _parent(key: str) -> str:
+    """The section holding ``key`` (``""`` for a top-level key)."""
+    return key.rsplit(".", 1)[0] if "." in key else ""
+
+
+def _section_existed(section: str, frozen: dict) -> bool:
+    """Whether rc.5 had ``section`` (the top level, a key, or keys inside it)."""
+    return section == "" or section in frozen or any(k.startswith(section + ".") for k in frozen)
 
 
 def _loaded(path: Path) -> Any:

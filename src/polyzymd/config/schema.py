@@ -330,6 +330,16 @@ class _Solute(_ConfigModel):
         return self
 
 
+# The modification models build on _ConfigModel and ChargeSpec above, so they are
+# imported here rather than at the top of the module.
+from polyzymd.config.modifications import (  # noqa: E402
+    Modification,
+    ModificationParameters,
+    Mutation,
+    required_site_types,
+)
+
+
 class ProteinSolute(_Solute):
     """A protein (``type: protein``), read from a PDB file through residue templates.
 
@@ -355,6 +365,30 @@ class ProteinSolute(_Solute):
     )
     charges: ChargeSpec = Field(
         ..., description="library: the protein force field's library charges"
+    )
+    mutations: list[Mutation] = Field(
+        default_factory=list,
+        description="Side-chain changes, applied first and in order (see modifications)",
+    )
+    modifications: list[Modification] = Field(
+        default_factory=list,
+        description="deprotonate, protonate and attach entries, applied in order after mutations",
+    )
+    modification_parameters: ModificationParameters | None = Field(
+        None,
+        description="Force field and charges of each site type: glycan, polymer, generic, "
+        "noncanonical",
+    )
+    max_charge_shift: float = Field(
+        0.005,
+        gt=0,
+        description="Largest uniform charge shift (e per atom) that brings a site to its "
+        "integer charge",
+    )
+    relax: Literal["joint", "per_modification", "none"] = Field(
+        "joint",
+        description="joint: place every change, then relax them together; per_modification: "
+        "relax after each; none",
     )
 
     @field_validator("custom_substructures_path")
@@ -382,6 +416,46 @@ class ProteinSolute(_Solute):
                 "charges: {method: library}"
             )
         return self
+
+    @model_validator(mode="after")
+    def _parameter_sets_for_sites(self) -> Self:
+        """Every site type the entries create needs a parameter set."""
+        sets = self.modification_parameters.as_dict() if self.modification_parameters else {}
+        missing: dict[str, str] = {}
+        for site_type, reason in required_site_types(self.mutations, self.modifications):
+            if site_type not in sets:
+                missing.setdefault(site_type, reason)
+        if missing:
+            raise ValueError(
+                "no parameter set for "
+                + "; ".join(f"{t} sites ({why})" for t, why in missing.items())
+                + ". Add modification_parameters: {"
+                + ", ".join(f"{t}: {{force_field: [...], charges: {{...}}}}" for t in missing)
+                + "}"
+            )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Omit the modification keys at their defaults, so an unmodified protein keeps
+        the build hash it had before they existed."""
+        data = handler(self)
+        defaults = {
+            "mutations": [],
+            "modifications": [],
+            "modification_parameters": None,
+            "max_charge_shift": 0.005,
+            "relax": "joint",
+        }
+        for key, default in defaults.items():
+            if key in data and data[key] == default:
+                del data[key]
+        return data
+
+    @property
+    def is_modified(self) -> bool:
+        """Whether the protein has mutations or modifications to apply."""
+        return bool(self.mutations or self.modifications)
 
 
 class SmallMoleculeSolute(_Solute):

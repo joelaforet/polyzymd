@@ -33,6 +33,9 @@ PATH_KEYS = frozenset(
         "sdf_path",
         "sdf_directory",
         "cache_directory",
+        "sites_file",
+        "glycan_library",
+        "ccd_file",
     }
 )
 #: Where runs and job files go. They are resolved against the config's folder,
@@ -495,6 +498,7 @@ def load_config(path: Union[str, Path]) -> SimulationConfig:
 
     data = ConfigLoader(base_path).load(path)
     _place_default_polymer_cache(data, base_path)
+    _place_default_glycan_library(data, base_path)
 
     return SimulationConfig.model_validate(data)
 
@@ -509,6 +513,19 @@ def _place_default_polymer_cache(data: Dict[str, Any], base_path: Path) -> None:
     for solute in data.get("solutes") or []:
         if isinstance(solute, dict) and solute.get("type") == "polymer":
             solute.setdefault("cache_directory", str(base_path / ".polymer_cache"))
+
+
+def _place_default_glycan_library(data: Dict[str, Any], base_path: Path) -> None:
+    """Point glycan groups without a ``glycan_library`` at ``structures/glycans`` beside the config."""
+    for solute in data.get("solutes") or []:
+        if not (isinstance(solute, dict) and solute.get("type") == "protein"):
+            continue
+        for entry in solute.get("modifications") or []:
+            attach = entry.get("attach") if isinstance(entry, dict) else None
+            if not isinstance(attach, dict) or "glycan_library" in attach:
+                continue
+            if "glycans" in attach or ("sites_file" in attach and "fragment" not in attach):
+                attach["glycan_library"] = str(base_path / "structures" / "glycans")
 
 
 def _without_unread_fields(model: BaseModel, data: Dict[str, Any]) -> Dict[str, Any]:
