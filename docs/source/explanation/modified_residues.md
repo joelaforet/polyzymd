@@ -8,6 +8,12 @@ amino acids. A glycan, a dye, a grafted polymer or a non-canonical amino acid
 has no ff14SB parameters. This page explains the rule PolyzyMD 1.4 uses for
 those atoms, why, and what the audit checks.
 
+**Status.** This per-site method is interim. A benchmark against OpenFF
+Rosemary ([#307](https://github.com/joelaforet/polyzymd/issues/307)) will
+decide whether it is still needed; Rosemary, one force field for the whole
+protein, is the intended long-term path. Neutral termini (NH2, COOH) are
+refused only on the ff14SB path; on Rosemary they build.
+
 ## The rule
 
 Each mutation to a non-canonical residue and each attachment defines a
@@ -36,11 +42,11 @@ shift means the site is too small to absorb its charge without distorting it.
 
 **Termini.** When a change touches a terminus (an N-terminal label, a
 C-terminal amide), the untouched atoms of that residue take ff14SB's
-main-chain template, as Amber caps a chain with ACE and NME. A terminus left
-neutral without any group on it (NH2 or COOH) is refused: ff14SB has no
-template for it, and protein termini are normally simulated charged at
-physiological pH. Cap a truncated chain with ACE or NME instead; if you need
-a neutral terminus (a low- or high-pH study), please
+main-chain template, as Amber caps a chain with ACE and NME. On the ff14SB
+path, a terminus left neutral without any group on it (NH2 or COOH) is
+refused: ff14SB has no template for it, and protein termini are normally
+simulated charged at physiological pH. Cap a truncated chain with ACE or NME
+instead; if you need a neutral terminus (a low- or high-pH study), please
 [open an issue](https://github.com/joelaforet/polyzymd/issues).
 
 **Canonical changes.** A mutation to one of the 20 canonical residues, its D
