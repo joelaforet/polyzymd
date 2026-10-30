@@ -901,7 +901,8 @@ A config of 1.3.0rc4 or earlier that named no small-molecule force field was
 built with `openff-2.0.0.offxml`; name that file to build the same physics.
 
 Each component is parameterized by its own files alone. The
-`parameters.bonded`, `parameters.nonbonded` and `charges.source` checks rebuild
+`parameters.bonded`, `parameters.nonbonded`, `parameters.one_four` and
+`charges.source` checks rebuild
 every component from the files its entry names and compare the built system
 with them term by term, so a term taken from another component's force field
 fails the build.

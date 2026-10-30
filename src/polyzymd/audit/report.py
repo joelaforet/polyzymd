@@ -106,9 +106,13 @@ def audit(
     components: Sequence[Any],
     config: Any = None,
     ids: Optional[Sequence[str]] = None,
+    declared: Optional[dict[str, Any]] = None,
 ) -> AuditReport:
-    """Run the checks on ``realized`` and apply the config's ``modeling_exceptions``."""
-    findings = run_checks(realized, components, ids, config)
+    """Run the checks on ``realized`` and apply the config's ``modeling_exceptions``.
+
+    ``declared`` is passed to :func:`~polyzymd.audit.findings.run_checks`.
+    """
+    findings = run_checks(realized, components, ids, config, declared)
     exceptions = list(getattr(config, "modeling_exceptions", []) or [])
     atoms_of = {c.name: _ranges(c) for c in components}
     used = [False] * len(exceptions)

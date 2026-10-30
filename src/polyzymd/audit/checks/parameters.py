@@ -9,13 +9,15 @@ from __future__ import annotations
 from typing import Any
 
 from polyzymd.audit.findings import AuditContext, Finding
+from polyzymd.audit.modified import build_reference, compare_domains, is_modified
 from polyzymd.audit.references import CONSTRAINTS_FROM, DomainComparison, compare_component
 from polyzymd.audit.registry import CheckSpec, register
 
 #: The kinds of term each check reads.
 _KINDS = {
     "parameters.bonded": ("bonds", "angles", "torsions"),
-    "parameters.nonbonded": ("lj", "exceptions"),
+    "parameters.nonbonded": ("lj",),
+    "parameters.one_four": ("exceptions",),
     "parameters.constraints": ("constraints",),
     "charges.source": ("charge",),
     "masses": ("mass",),
@@ -35,10 +37,46 @@ def _comparisons(context: AuditContext) -> dict[str, list[DomainComparison]]:
     if "references" not in context.cache:
         source = _constraints_from(context.components)
         context.cache["references"] = {
-            component.name: compare_component(context.realized, component, source)
+            component.name: (
+                _modified_comparisons(context, component)
+                if is_modified(component)
+                else compare_component(context.realized, component, source)
+            )
             for component in context.components
         }
     return context.cache["references"]
+
+
+def modified_reference(context: AuditContext, component: Any) -> Any:
+    """The rebuilt reference of a modified protein (built once per audit), or the error."""
+    cache = context.cache.setdefault("modified", {})
+    if component.name not in cache:
+        try:
+            cache[component.name] = build_reference(context.realized, component)
+        except Exception as error:  # rebuilding runs mBuild, OpenFF and OpenMM
+            cache[component.name] = f"could not rebuild it: {type(error).__name__}: {error}"
+    return cache[component.name]
+
+
+def _modified_comparisons(context: AuditContext, component: Any) -> list[DomainComparison]:
+    """Compare each domain of a modified protein with the terms its owner predicts."""
+    reference = modified_reference(context, component)
+    results = []
+    for domain in component.domains:
+        label = f"{' + '.join(domain.force_field)}, charges {domain.charges.method}"
+        if domain.charges.method == "nagl":
+            label += f" {domain.charges.model}"
+        result = DomainComparison(component.name, domain.name, label, n_molecules=1)
+        if isinstance(reference, str):
+            result.errors.append(reference)
+        results.append(result)
+    if isinstance(reference, str):
+        return results
+    comparisons = compare_domains(context.realized, component, reference)
+    for result in results:
+        for kind, comparison in comparisons[result.domain].items():
+            result.kinds[kind].add(comparison.matched, comparison.total, comparison.mismatches)
+    return results
 
 
 def _findings(check: str, severity: str, context: AuditContext) -> list[Finding]:
@@ -105,7 +143,14 @@ for _spec in (
         "parameters.nonbonded",
         "component",
         "FAIL",
-        "Lennard-Jones or 1-4 terms not from the component's declared force field",
+        "Lennard-Jones parameters not from the component's declared force field",
+    ),
+    CheckSpec(
+        "parameters.one_four",
+        "component",
+        "FAIL",
+        "1-2 and 1-3 exclusions or 1-4 pairs not as the owning force field scales them "
+        "(GLYCAM06j leaves some glycan 1-4 pairs unscaled; one global scale gets them wrong)",
     ),
     CheckSpec(
         "parameters.constraints",
@@ -178,6 +223,18 @@ def coverage(context: AuditContext) -> list[Finding]:
         problems.append(
             f"{len(spanning)} terms join two molecules (first: {spanning[0][0]} {spanning[0][1]})"
         )
+    for component in context.components:
+        if not is_modified(component):
+            continue
+        reference = modified_reference(context, component)
+        if isinstance(reference, str):
+            continue
+        conflicts = reference.conflicts(index)
+        if conflicts:
+            problems.append(
+                f"{component.name}: {len(conflicts)} terms touch two modification sites, so "
+                f"no force field owns them (first: {conflicts[0][0]} {conflicts[0][1]})"
+            )
     if problems:
         return [Finding("parameters.coverage", "system", "FAIL", "; ".join(problems))]
     return [

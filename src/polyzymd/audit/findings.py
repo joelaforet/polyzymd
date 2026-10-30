@@ -59,6 +59,10 @@ class AuditContext:
     config: Any = None
     #: Work several checks share (such as the reference comparisons), by key.
     cache: dict[str, Any] = field(default_factory=dict)
+    #: What the caller declares for each modified protein, by component name:
+    #: ``{"spec": blocks, "parameter_sets": {...}, "base_dir": path}``, read from
+    #: the config, independent of the build's own records.
+    declared: Optional[dict[str, Any]] = None
 
 
 def run_checks(
@@ -66,15 +70,18 @@ def run_checks(
     components: Sequence[Any],
     ids: Optional[Sequence[str]] = None,
     config: Any = None,
+    declared: Optional[dict[str, Any]] = None,
 ) -> list[Finding]:
     """Run every registered check (or those in ``ids``) and return their findings.
 
     ``config`` is the SimulationConfig of the build; checks that compare the
-    system with the config report INFO "not checked" without it.
+    system with the config report INFO "not checked" without it. ``declared``
+    holds the modification blocks and parameter sets the config declares for
+    each modified protein (see :attr:`AuditContext.declared`).
     """
     import polyzymd.audit.checks  # noqa: F401  # registers the checks
 
-    context = AuditContext(realized, components, config)
+    context = AuditContext(realized, components, config, declared=declared)
     findings: list[Finding] = []
     for spec in registry.catalog():
         if ids is not None and spec.id not in ids:

@@ -24,6 +24,8 @@ This page is generated from PolyzyMD's check registry
 
 | Check | Runs on | Default | Catches |
 |---|---|---|---|
+| `charges.site_integer` | each component (protein) | FAIL | a modification site whose charges, with the rest of its residues, do not sum to their formal charge |
+| `charges.site_shift` | each component (protein) | FAIL | a site whose NAGL charges need a uniform shift above the bound to reach its integer charge (the capped model and the site disagree) |
 | `charges.source` | each component | FAIL | partial charges that differ from the declared source (library, NAGL model, preset file) |
 | `components.declared` | the system | FAIL | a component, its segment ID, force field or charge source that differs from the config |
 | `composition.counts` | the system | FAIL | a molecule or chain count that differs from the config |
@@ -43,10 +45,18 @@ This page is generated from PolyzyMD's check registry
 | `ions.salt` | the system | FAIL | NaCl pairs more than one pair away from the configured concentration |
 | `masses` | each component | FAIL | atom masses that differ from the force field's (unintended hydrogen mass repartitioning) |
 | `modeling_exceptions.unused` | the system | WARN | a modeling_exceptions entry that accepted nothing (stale in a published config) |
+| `modifications.applied` | each component (protein) | FAIL | a planned modification missing from the built system: a bond it forms, an atom it adds or removes, or an atom renamed |
+| `modifications.chemistry` | each component (protein) | FAIL | a modified protein whose chemistry (elements, bond orders, formal charges) differs from an independent reading of its structure with openff-pablo |
+| `modifications.declared` | each component (protein) | FAIL | a built protein whose modifications or parameter sets differ from the config's mutations:, modifications: and parameter sets |
+| `modifications.protonation_state` | each component (protein) | WARN | a mutation that leaves a side chain in a state other than the usual one at pH 7 (a CCD component's neutral Asp or Glu, or doubly protonated His) |
+| `modifications.sites` | each component (protein) | FAIL | a modification site whose atoms are not those its changes define (side chain from CB of the anchor, touched backbone atoms, added atoms, attached residues), or that differ from the component record's |
 | `nonbonded.settings` | the system | FAIL | a cutoff, switching distance, PME or dispersion correction other than the force field's |
 | `parameters.bonded` | each component | FAIL | bonds, angles, torsions or impropers not from the component's declared force field |
 | `parameters.constraints` | each component | FAIL | constraints missing, extra, or at lengths other than the declared force field's |
 | `parameters.coverage` | the system | FAIL | atoms no component owns, molecules other than the components declare, or terms (bonds, constraints, exceptions) joining two molecules |
-| `parameters.nonbonded` | each component | FAIL | Lennard-Jones or 1-4 terms not from the component's declared force field |
+| `parameters.glycan_force_field` | each component (protein) | WARN | a glycan not parameterized with GLYCAM06j, the recommended glycan force field (general force fields give stiffer glycosidic angles and other torsion minima) |
+| `parameters.modified_backbone` | each component (protein) | FAIL | the backbone (N, H, CA, HA, C, O) of a modified residue not on ff14SB: its charges and terms must match its unmodified neighbours' |
+| `parameters.nonbonded` | each component | FAIL | Lennard-Jones parameters not from the component's declared force field |
+| `parameters.one_four` | each component | FAIL | 1-2 and 1-3 exclusions or 1-4 pairs not as the owning force field scales them (GLYCAM06j leaves some glycan 1-4 pairs unscaled; one global scale gets them wrong) |
 | `restraint.atom_identity` | the system | FAIL | a restrained atom that is not the atom its selection names in its component |
 | `restraint.parameters` | the system | FAIL | a restraint whose form, distance or force constant differs from the config, or a restraint missing or extra |

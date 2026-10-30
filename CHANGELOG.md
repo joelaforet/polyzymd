@@ -58,8 +58,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CONECT record for a bond its GLYCAM residue template has (the error names
   each missing bond), or has no ROH reducing end (the bond to the protein
   replaces the anomeric hydroxyl).
+- The physics audit checks modified proteins. A modified protein is one
+  component, its attachments written under their own segment IDs (`G001`,
+  `P001`, `M001`) and its atoms split into domains (the protein, one per site).
+  Every term, 1-4 pairs included, belongs to the domain all its atoms belong to
+  or else the site it touches; the audit rebuilds the protein from the input
+  PDB and the modification blocks and compares each term with its owner's force
+  field: ff14SB, the site's OpenFF force field with NAGL charges on a capped
+  model, or OpenMM's own GLYCAM06j. New checks: `parameters.one_four` (1-4
+  pairs as the owner scales them, so GLYCAM's unscaled pairs written with one
+  global scale fail), `charges.site_integer`, `charges.site_shift`,
+  `modifications.applied`, `parameters.modified_backbone`, `modifications.sites`
+  (each site holds exactly the atoms its changes define, by a rule the audit
+  reads from the modification records itself, and the atoms the component
+  record lists), `modifications.declared` (the build's changes and parameter
+  sets are the ones the caller declares; INFO when none are given), and the
+  warnings `parameters.glycan_force_field` and `modifications.protonation_state`.
+  `charges.site_integer` also checks each site's formal charge against the
+  input residues plus the recorded changes. A terminus a site touches (an N-terminal label,
+  a C-terminal amide) is expected on ff14SB's main-chain template for the
+  residue's other atoms, read from OpenMM's ff14SB. A terminus changed by
+  protonation alone (a neutral NH2 or COOH, which 1.4 does not model) fails
+  `modifications.sites`. The audit reads a modified protein's chemistry again,
+  independently, from its PDB file with openff-pablo (residues no modification
+  touched from their Chemical Component Dictionary definitions), uses that
+  reading for every expected value, and fails `modifications.chemistry` when the
+  build's elements, bond orders or formal charges differ from it.
 
 ### Changed
+
+- `parameters.nonbonded` checks Lennard-Jones parameters; exclusions and 1-4
+  pairs are checked by `parameters.one_four`. A `modeling_exceptions` entry
+  that accepted a 1-4 problem under `parameters.nonbonded` must now name
+  `parameters.one_four`. A term touching two modification sites fails
+  `parameters.coverage`.
 
 - The `build` and `test` environments install openff-pablo 0.2.2 (from its git
   tag, with gemmi, pyxdg and rustworkx, which it imports but does not declare),
