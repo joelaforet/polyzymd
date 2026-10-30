@@ -763,6 +763,7 @@ class TestRunInitialSegmentEquilibrationSkip:
         self._create_system_files(tmp_path)
 
         sim_config = self._make_sim_config_staged(n_stages=0)
+        sim_config.thermodynamics.pressure = 100.0
 
         mock_runner = MagicMock()
         mock_runner.run_equilibration.return_value = {"type": "staged_equilibration", "stages": []}
@@ -804,6 +805,9 @@ class TestRunInitialSegmentEquilibrationSkip:
         call_kwargs = mock_runner.run_production.call_args[1]
         assert (call_kwargs["ensemble"], call_kwargs["thermostat"]) == ("NVT", "Langevin")
         assert call_kwargs["friction"] == pytest.approx(0.5)
+        # thermodynamics.pressure reaches the NPT equilibration stages and production
+        assert mock_runner.run_equilibration.call_args[1]["pressure"] == 100.0
+        assert call_kwargs["pressure"] == 100.0
 
         # Should NOT have used the fast path
         mock_runner._load_eq_stage_state.assert_not_called()
