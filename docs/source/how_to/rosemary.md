@@ -1,4 +1,4 @@
-# Use OpenFF Rosemary (alpha) for a protein
+# Parameterize a protein with OpenFF Rosemary alpha
 
 ```{index} !rosemary, !openff-3.0.0, !protein force field
 ```
@@ -17,7 +17,7 @@ Rosemary is an alpha release, not for production. The audit reports it
 Run `polyzymd` from the `build` pixi environment (`pixi run -e build ...`).
 :::
 
-## Step 1: Name the force field and the charges
+## Step 1: Use Rosemary for the protein
 
 ```yaml
 solutes:
