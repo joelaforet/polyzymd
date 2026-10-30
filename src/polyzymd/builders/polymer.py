@@ -72,6 +72,30 @@ def generate_random_sequence(
     return "".join(random.choices(characters, weights=probabilities, k=length))
 
 
+def draw_units(
+    pattern: List[Optional[str]],
+    characters: List[str],
+    probabilities: List[float],
+) -> str:
+    """Fill a sequence pattern: keep its labels, draw its None positions.
+
+    The open positions are drawn together, in one call, from the monomers'
+    probabilities, so a pattern with every position open draws exactly what
+    ``generate_random_sequence`` draws for the same seed.
+
+    Args:
+        pattern: Label of each position, or None where a draw fills it.
+        characters: Monomer labels.
+        probabilities: Their probabilities.
+
+    Returns:
+        The sequence of repeat-unit labels.
+    """
+    open_positions = [i for i, label in enumerate(pattern) if label is None]
+    drawn = iter(generate_random_sequence(len(open_positions), characters, probabilities))
+    return "".join(label if label is not None else next(drawn) for label in pattern)
+
+
 class PolymerBuilder:
     """Builder for loading and generating polymer structures.
 
@@ -132,6 +156,7 @@ class PolymerBuilder:
         charger_type: str = "nagl",
         max_retries: int = 10,
         nagl_model: Optional[str] = None,
+        sequence_pattern: Optional[List[Optional[str]]] = None,
     ) -> None:
         """Initialize the PolymerBuilder.
 
@@ -154,6 +179,8 @@ class PolymerBuilder:
             charger_type: Charge method ("nagl", "espaloma", "am1bcc") for dynamic mode.
             max_retries: Builds tried before a chain with a pierced ring or
                 overlapping atoms is refused.
+            sequence_pattern: Label of each repeat unit, None where it is drawn
+                from the probabilities; None draws every unit (the default).
 
         Raises:
             ValueError: If probabilities don't sum to 1.0 or lengths mismatch.
@@ -182,6 +209,7 @@ class PolymerBuilder:
         self._charger_type = charger_type.lower()
         self._max_retries = max_retries
         self._nagl_model = nagl_model
+        self._sequence_pattern = sequence_pattern
 
         # Validate dynamic mode requirements
         if self._generation_mode == "dynamic":
@@ -355,6 +383,7 @@ class PolymerBuilder:
         self._generation_mode = config.generation_mode.value
         self._charger_type = config.charger.value
         self._max_retries = config.max_retries
+        self._sequence_pattern = config.sequence_pattern()
 
         # Extract monomer-related mappings for dynamic mode
         if config.generation_mode.value == "dynamic":
@@ -390,12 +419,18 @@ class PolymerBuilder:
     def _draw_sequence(self) -> str:
         """Draw one chain's sequence, with its two cap labels when the config gives caps."""
         if not self._end_groups:
-            return generate_random_sequence(self._length, self._characters, self._probabilities)
+            return self._draw_units(self._length)
         # With caps the length counts the two ends: a 5-mer is a head cap,
         # three repeat units and a tail cap.
         head = self._draw_cap("head")
-        middle = generate_random_sequence(self._length - 2, self._characters, self._probabilities)
+        middle = self._draw_units(self._length - 2)
         return head + middle + self._draw_cap("tail")
+
+    def _draw_units(self, n_units: int) -> str:
+        """Draw the repeat units, following the configured sequence pattern if any."""
+        if self._sequence_pattern is None:
+            return generate_random_sequence(n_units, self._characters, self._probabilities)
+        return draw_units(self._sequence_pattern, self._characters, self._probabilities)
 
     def _draw_cap(self, end: str) -> str:
         """Draw the label of one end's cap from its options' probabilities."""

@@ -270,7 +270,28 @@ that kept its C=C double bond:
 | `charges` | object | Yes | - | `preset` in cached mode (the charges in the SDFs); `nagl` (with `model`), `am1bcc` or `espaloma` in dynamic mode |
 | `max_retries` | int | No | 10 | Builds tried before a chain with a pierced ring or overlapping atoms is refused (dynamic mode) |
 | `random_seed` | int | No | null | Seed for polymer sequence draws (default: the replicate number) |
+| `sequence` | object | No | null | How the repeat units are chosen; see below |
 | `packing` | object | No | see below | PACKMOL placement settings |
+
+### Sequence (`sequence`)
+
+Positions count repeat units from 1 at the head; the end caps come from
+`end_groups`, so a chain of `length` 15 with caps has 13 repeat units.
+Monomers are named by `label` or `name`. Without `sequence`, every repeat
+unit is drawn from the probabilities, as in 1.3.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `mode` | string | No | "statistical" | `statistical`: draw each open position from the probabilities (seeded, per chain); `block`: runs in order; `explicit`: every unit listed |
+| `blocks` | list | In block mode | - | Runs, each `{monomer: count}`; the counts sum to the number of repeat units |
+| `units` | list | In explicit mode | - | Every repeat unit, head to tail |
+| `fixed` | object | No | {} | Pinned positions `{position: monomer}` in any mode. A monomer used only at pinned positions may have probability 0 |
+
+```yaml
+sequence:
+  mode: statistical
+  fixed: {7: NHS}      # NHS in the middle of 13 repeat units; the rest drawn
+```
 
 ### Packing Options (`packing`)
 

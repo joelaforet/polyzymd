@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A polymer solute takes a `sequence:` block: `mode: statistical` (the default,
+  drawn from the monomers' probabilities), `block` (`blocks: [{SBMA: 6}, {NHS: 1},
+  {SBMA: 6}]`) or `explicit` (`units: [...]`), and `fixed: {7: NHS}` pins positions
+  in any mode. Positions count repeat units from the head; monomers are named by
+  label or name, and a monomer used only at pinned positions may have probability
+  0. Without `sequence:` chains are drawn and cached exactly as before.
 - A protein solute takes `mutations:` (applied first), `modifications:`
   (`deprotonate`, `protonate`, `attach`, in order) and `modification_parameters:`
   (one force field and charge set per site type). Sites are written `A:N58` or

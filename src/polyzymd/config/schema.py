@@ -620,6 +620,90 @@ class MonomerSpec(_ConfigModel):
         return self
 
 
+class PolymerSequence(_ConfigModel):
+    """How the repeat units of each chain are chosen.
+
+    Positions count repeat units only, from 1 at the head; the end caps come
+    from ``end_groups``. A chain of ``length`` 15 with caps has 13 repeat
+    units. ``statistical`` draws every unpinned position from the monomers'
+    probabilities (seeded, per chain); ``block`` lays out runs
+    (``[{SBMA: 6}, {NHS: 1}, {SBMA: 6}]``); ``explicit`` lists every unit.
+    ``fixed`` pins positions in any mode (``{7: NHS}``). Monomers are named
+    by label or by name.
+    """
+
+    mode: Literal["statistical", "block", "explicit"] = Field(
+        "statistical", description="statistical (default), block or explicit"
+    )
+    blocks: list[dict[str, int]] | None = Field(
+        None, description="block mode: runs in order, each {monomer: count}"
+    )
+    units: list[str] | None = Field(None, description="explicit mode: every repeat unit in order")
+    fixed: dict[int, str] = Field(
+        default_factory=dict, description="Pinned positions {position: monomer}, from 1"
+    )
+
+    @model_validator(mode="after")
+    def _keys_of_mode(self) -> "PolymerSequence":
+        if self.mode == "block" and not self.blocks:
+            raise ValueError("sequence mode block needs `blocks`, e.g. [{SBMA: 6}, {NHS: 1}]")
+        if self.mode != "block" and self.blocks is not None:
+            raise ValueError(f"`blocks` is for mode block, not mode {self.mode}")
+        if self.mode == "explicit" and not self.units:
+            raise ValueError("sequence mode explicit needs `units`, every repeat unit in order")
+        if self.mode != "explicit" and self.units is not None:
+            raise ValueError(f"`units` is for mode explicit, not mode {self.mode}")
+        for block in self.blocks or []:
+            if len(block) != 1:
+                raise ValueError(
+                    f"each block is one {{monomer: count}}; got {block}. Write one entry per run"
+                )
+            (count,) = block.values()
+            if count < 1:
+                raise ValueError(f"block {block}: a run has at least 1 unit")
+        return self
+
+    def pattern(self, n_units: int, label_of: dict[str, str]) -> list[str | None]:
+        """Return the label of each position, None where a statistical draw fills it.
+
+        ``label_of`` maps every monomer label and name to its label.
+        """
+
+        def label(name: str, where: str) -> str:
+            if name not in label_of:
+                known = ", ".join(sorted(label_of))
+                raise ValueError(f"sequence {where}: unknown monomer {name!r}; use one of {known}")
+            return label_of[name]
+
+        if self.mode == "block":
+            pattern: list[str | None] = []
+            for block in self.blocks:
+                ((name, count),) = block.items()
+                pattern += [label(name, "blocks")] * count
+            if len(pattern) != n_units:
+                raise ValueError(
+                    f"sequence blocks hold {len(pattern)} repeat units but the chain has "
+                    f"{n_units} (length minus the two end caps)"
+                )
+        elif self.mode == "explicit":
+            pattern = [label(name, "units") for name in self.units]
+            if len(pattern) != n_units:
+                raise ValueError(
+                    f"sequence units list {len(pattern)} repeat units but the chain has "
+                    f"{n_units} (length minus the two end caps)"
+                )
+        else:
+            pattern = [None] * n_units
+        for position, name in sorted(self.fixed.items()):
+            if not 1 <= position <= n_units:
+                raise ValueError(
+                    f"sequence fixed position {position} is outside the chain's repeat units "
+                    f"1..{n_units}"
+                )
+            pattern[position - 1] = label(name, "fixed")
+        return pattern
+
+
 class PolymerGenerationMode(str, Enum):
     """Mode for polymer generation."""
 
@@ -752,6 +836,11 @@ class PolymerSolute(_Solute):
         None,
         description="Random seed for polymer sequence generation. If None, uses replicate number.",
     )
+    sequence: PolymerSequence | None = Field(
+        None,
+        description="How repeat units are chosen: statistical (default), block or explicit, "
+        "with pinned positions",
+    )
 
     @model_validator(mode="after")
     def validate_probabilities_sum_to_one(self) -> "PolymerSolute":
@@ -760,6 +849,41 @@ class PolymerSolute(_Solute):
         if abs(total - 1.0) > 1e-6:
             raise ValueError(f"Monomer probabilities must sum to 1.0, got {total}")
         return self
+
+    @property
+    def n_units(self) -> int:
+        """Repeat units per chain: the length without the two end caps, when there are caps."""
+        return self.length - 2 if self.end_groups is not None else self.length
+
+    def label_of(self) -> dict[str, str]:
+        """Return each monomer's label, keyed by its label and by its name."""
+        names = {m.label: m.label for m in self.monomers}
+        names.update({m.name: m.label for m in self.monomers if m.name})
+        return names
+
+    def sequence_pattern(self) -> list[str | None] | None:
+        """Return the label of each repeat unit (None where drawn), or None without `sequence`."""
+        if self.sequence is None:
+            return None
+        return self.sequence.pattern(self.n_units, self.label_of())
+
+    @model_validator(mode="after")
+    def _sequence_fits(self) -> "PolymerSolute":
+        """A `sequence` block must fit the chain and name configured monomers."""
+        pattern = self.sequence_pattern()
+        if pattern is not None and None in pattern:
+            drawn = {m.label for m in self.monomers if m.probability > 0}
+            if not drawn:
+                raise ValueError("statistical positions need a monomer with probability above 0")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Omit `sequence` when unset, so a polymer without it keeps its build hash."""
+        data = handler(self)
+        if data.get("sequence", 0) is None:
+            del data["sequence"]
+        return data
 
     @model_validator(mode="before")
     @classmethod

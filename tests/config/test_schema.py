@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 
 import pytest
@@ -1482,3 +1483,67 @@ class TestIonicStrengthConfig:
 
         assert "ionic_strength" not in IonConfig().model_dump(mode="json")
         assert IonConfig(ionic_strength=0.13).model_dump(mode="json")["ionic_strength"] == 0.13
+
+
+class TestPolymerSequence:
+    """The `sequence` block of a polymer: modes, pinned positions and its errors."""
+
+    @staticmethod
+    def _polymer(sequence=None, length=9, **extra):
+        from polyzymd.config.schema import PolymerSolute
+
+        data = {
+            "type": "polymer",
+            "type_prefix": "TP",
+            "generation_mode": "dynamic",
+            "monomers": [
+                {"label": "A", "name": "SBMA", "probability": 0.7, "smiles": "[*]CC([*])C"},
+                {"label": "B", "name": "EGPMA", "probability": 0.3, "smiles": "[*]CC([*])CC"},
+                {"label": "N", "name": "NHS", "probability": 0.0, "smiles": "[*]CC([*])CO"},
+            ],
+            "end_groups": {
+                "head": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+                "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+            },
+            "length": length,
+            "count": 2,
+            "force_field": ["openff-2.3.0.offxml"],
+            "charges": {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"},
+            **extra,
+        }
+        if sequence is not None:
+            data["sequence"] = sequence
+        return PolymerSolute(**data)
+
+    def test_without_sequence_nothing_is_pinned_and_the_dump_is_unchanged(self) -> None:
+        polymer = self._polymer()
+        assert polymer.sequence_pattern() is None
+        assert "sequence" not in polymer.model_dump()
+
+    def test_fixed_positions_count_repeat_units_and_take_names_or_labels(self) -> None:
+        polymer = self._polymer({"fixed": {4: "NHS", 1: "B"}})
+        assert polymer.sequence_pattern() == ["B", None, None, "N", None, None, None]
+
+    def test_blocks_lay_out_runs(self) -> None:
+        polymer = self._polymer({"mode": "block", "blocks": [{"SBMA": 3}, {"N": 1}, {"A": 3}]})
+        assert polymer.sequence_pattern() == list("AAANAAA")
+
+    def test_explicit_units(self) -> None:
+        polymer = self._polymer({"mode": "explicit", "units": list("AABNBAA")})
+        assert polymer.sequence_pattern() == list("AABNBAA")
+
+    @pytest.mark.parametrize(
+        ("sequence", "message"),
+        [
+            ({"mode": "block", "blocks": [{"A": 3}, {"N": 1}]}, "hold 4 repeat units but"),
+            ({"mode": "explicit", "units": ["A"] * 8}, "list 8 repeat units but the chain has 7"),
+            ({"fixed": {8: "N"}}, "position 8 is outside the chain's repeat units 1..7"),
+            ({"fixed": {2: "PEG"}}, "unknown monomer 'PEG'"),
+            ({"mode": "block"}, "mode block needs `blocks`"),
+            ({"units": ["A"] * 7}, "`units` is for mode explicit"),
+            ({"mode": "block", "blocks": [{"A": 3, "N": 4}]}, "each block is one"),
+        ],
+    )
+    def test_errors_name_the_problem(self, sequence, message) -> None:
+        with pytest.raises(ValidationError, match=re.escape(message)):
+            self._polymer(sequence)
