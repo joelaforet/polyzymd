@@ -45,13 +45,12 @@ check that it points inside the worktree.
 
 - **Branches:** `main` (released), `release/*` (release integration), short-lived
   `fix/*` and `feature/*` branches (atomic work)
-- Until the branch migration is complete, treat `feature/v1.3.0-rc5` as
-  `release/1.3` and `conjugation-engine-refactor` as `release/1.4`.
-- Mark beta snapshots with immutable SemVer prerelease tags such as
-  `v1.3.0-rc.1`; do not create a new mutable branch for each snapshot.
-- Forward-integrate stabilized v1.3 fixes into the v1.4 integration branch so
-  conjugation work does not drift. Prefer merges for published/shared stacks
-  and rebases for unpublished local work.
+- `release/1.4` integrates the 1.4 work. Branch each change from it as
+  `feat/*`, `fix/*`, `docs/*` or `chore/*`, and open a draft pull request
+  against it (stack a pull request on the branch it builds on).
+- Mark release candidates with immutable SemVer prerelease tags on the
+  release branch, such as `v1.4.0-rc.1`; Joe tags. Do not create a new
+  mutable branch for each snapshot.
 - Use conventional commits with an imperative subject near 50 characters.
   Keep each commit atomic and explain important reasoning in the body.
 - Commit as Joe (`git config user.name`/`user.email`). Do not add
