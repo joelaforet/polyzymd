@@ -15,9 +15,6 @@ solutes:
       - attach:
           type: glycan
           reaction: N-glycosylation      # bonds C1 to ND2; HD22 and the ROH group leave
-          atom_name: ND2
-          fragment_atom_name: C1         # the anomeric carbon of the first sugar
-          fragment_resnum: 2             # residue 1 of a GlyGen file is ROH
           chains: [A]
           glycans: {G42666HT: [N60]}     # read from structures/glycans/glycam_G42666HT.pdb
     modification_parameters:

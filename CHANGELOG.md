@@ -99,6 +99,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `parameters.glycan_force_field` reports glycans parameterized by Rosemary
   (whole-protein mode) instead of a GLYCAM06j finding. How-to:
   `docs/source/how_to/rosemary.md`.
+- A glycan attachment's bonding atoms default, so a glycan entry needs only
+  its type, reaction, sites and glycans: Asn ND2, Ser OG or Thr OG1 on the
+  protein, and C1 of the first residue with one in the glycan file (the
+  reducing-end sugar, after the ROH aglycone). Any of them can still be given;
+  the build record lists the atoms used.
 - For benchmarking, a protein on Rosemary may give its glycans GLYCAM06j
   (`modification_parameters: {glycan: {force_field: [GLYCAM_06j-1.xml],
   charges: {method: library}}}`, glycans only). Each glycan site takes

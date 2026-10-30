@@ -106,6 +106,40 @@ class _NativeTerms:
     masses: dict[int, float]
 
 
+#: The protein atom a glycan bonds to, by linkage residue (N- or O-glycosylation).
+GLYCAN_LINK_ATOMS = {"ASN": "ND2", "SER": "OG", "THR": "OG1"}
+
+
+def glycan_attachment_defaults(
+    resname: str,
+    atom_name: str | None,
+    fragment_atom_name: str | None,
+    fragment_resnum: int | None,
+    pdb_path: str | Path | None,
+) -> tuple[str | None, str, int | None]:
+    """Fill the atoms a glycan attachment bonds, where not given.
+
+    - ``atom_name``: the linkage atom of the residue, Asn ND2, Ser OG or Thr
+      OG1 (None on any other residue).
+    - ``fragment_atom_name``: C1, the anomeric carbon of the reducing-end sugar.
+    - ``fragment_resnum`` (when the fragment atom is C1): the first residue of
+      the glycan file with a C1. GLYCAM-Web and GlyGen files start with the
+      ROH aglycone, which has none, so this is the reducing-end sugar.
+    """
+    if atom_name is None:
+        atom_name = GLYCAN_LINK_ATOMS.get(resname.upper())
+    if fragment_atom_name is None:
+        fragment_atom_name = "C1"
+    if fragment_resnum is None and fragment_atom_name == "C1" and pdb_path is not None:
+        path = Path(pdb_path)
+        if path.is_file():
+            for line in path.read_text().splitlines():
+                if line.startswith(("ATOM  ", "HETATM")) and line[12:16].strip() == "C1":
+                    fragment_resnum = int(line[22:26])
+                    break
+    return atom_name, fragment_atom_name, fragment_resnum
+
+
 def is_glycam(force_field) -> bool:
     """Whether a parameter set's force-field list names GLYCAM."""
     return any("glycam" in str(name).lower() for name in force_field)

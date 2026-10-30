@@ -165,9 +165,7 @@ def _modification_selection_warnings(config: Any) -> list[str]:
     """
     from polyzymd.config.modifications import has_attachments, unscoped_residue_selection
 
-    modified = {
-        s.name for s in getattr(config, "solutes", None) or [] if has_attachments(s)
-    }
+    modified = {s.name for s in getattr(config, "solutes", None) or [] if has_attachments(s)}
     warnings = []
     for restraint in getattr(config, "restraints", None) or []:
         for which in ("atom1", "atom2"):
@@ -510,7 +508,14 @@ def _require_one_change_per_atom(config: Any, solute: Any) -> None:
         if item["kind"] == "mutate":
             key = ("mutate", item["site"])
         elif item["kind"] == "attach":
-            key = ("attach", item["site"], item["atom_name"])
+            atom = item.get("atom_name")
+            if atom is None and item.get("type") == "glycan":
+                # A glycan bonds the linkage atom of its residue by default.
+                from polyzymd.modifying_proteins.glycam import GLYCAN_LINK_ATOMS
+                from polyzymd.modifying_proteins.sites import parse_site
+
+                atom = GLYCAN_LINK_ATOMS.get(parse_site(item["site"]).resname)
+            key = ("attach", item["site"], atom)
         else:
             key = (item["kind"], item["site"], item["atom_name"])
         if key in seen:

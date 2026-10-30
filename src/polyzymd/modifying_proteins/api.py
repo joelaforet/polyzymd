@@ -236,7 +236,7 @@ def plan_attach(
     *,
     type: str,
     site: str | Site,
-    atom_name: str,
+    atom_name: str | None = None,
     reaction: str | None = None,
     fragment_atom_name: str | None = None,
     fragment_resnum: int | None = None,
@@ -260,16 +260,33 @@ def plan_attach(
     ``{"ccd": ..., "link_atom": ...}``). ``parameters`` names the parameter
     set a config declares for this attachment; it is recorded, not used here.
     The other arguments are mBuild's.
+
+    A glycan's bonding atoms default when not given (see
+    :func:`~polyzymd.modifying_proteins.glycam.glycan_attachment_defaults`):
+    Asn ND2, Ser OG or Thr OG1 on the protein, and C1 of the first residue
+    with one in the glycan file. The record holds the atoms used.
     """
     if type not in ATTACHMENT_TYPES:
         raise ValueError(f"Attachment type {type!r}; use one of {', '.join(ATTACHMENT_TYPES)}.")
     site, residue = _site(protein, site)
     if type == "glycan":
-        source = fragment if isinstance(fragment, dict) else fragment_source(fragment)
-        if source and "pdb_path" in source:
-            from polyzymd.modifying_proteins.glycam import check_glycan_pdb
+        from polyzymd.modifying_proteins.glycam import (
+            check_glycan_pdb,
+            glycan_attachment_defaults,
+        )
 
-            check_glycan_pdb(source["pdb_path"])
+        source = fragment if isinstance(fragment, dict) else fragment_source(fragment)
+        pdb_path = source.get("pdb_path") if source else None
+        if pdb_path:
+            check_glycan_pdb(pdb_path)
+        atom_name, fragment_atom_name, fragment_resnum = glycan_attachment_defaults(
+            residue.name, atom_name, fragment_atom_name, fragment_resnum, pdb_path
+        )
+    if atom_name is None:
+        raise ValueError(
+            f"Give atom_name, the atom of {site} that bonds; it defaults only for a glycan "
+            "on Asn (ND2), Ser (OG) or Thr (OG1)."
+        )
     if attach_at is not None:
         polymer = fragment.get("polymer") if isinstance(fragment, dict) else None
         if polymer is None:
@@ -452,8 +469,7 @@ def _site(protein: ModifiedProtein, site: str | Site):
 def _check_mutations_first(protein: ModifiedProtein) -> None:
     if any(record.kind != "mutate" for record in protein.records):
         raise ValueError(
-            "Mutations come before protonation changes and attachments. Apply every "
-            "mutation first."
+            "Mutations come before protonation changes and attachments. Apply every mutation first."
         )
 
 

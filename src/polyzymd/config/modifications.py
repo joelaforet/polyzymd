@@ -15,9 +15,6 @@ A protein solute lists what to change and in which order::
           - attach:
               type: glycan
               reaction: N-glycosylation
-              atom_name: ND2
-              fragment_atom_name: C1
-              fragment_resnum: 2
               chains: [A, C, E]
               glycans: {G55220VL: [N58, N107]}
         modification_parameters:                  # one set per site type
@@ -116,7 +113,9 @@ class SmilesSideChain(_ConfigModel):
     """A side chain from SMILES; ``*`` marks the atom that bonds to CA."""
 
     smiles: str = Field(..., description="Side chain SMILES with one * (the bond to CA)")
-    resname: str = Field(..., min_length=1, max_length=3, description="Residue name, 1-3 characters")
+    resname: str = Field(
+        ..., min_length=1, max_length=3, description="Residue name, 1-3 characters"
+    )
 
 
 class CcdFile(_ConfigModel):
@@ -307,7 +306,11 @@ class Attachment(_Sites):
     name: Optional[str] = Field(
         None, max_length=4, description="Segment name (default G001, P001, M001 in order)"
     )
-    atom_name: str = Field(..., description="Atom of the protein residue that bonds (ND2, NZ)")
+    atom_name: Optional[str] = Field(
+        None,
+        description="Atom of the protein residue that bonds (ND2, NZ); a glycan defaults to "
+        "Asn ND2, Ser OG or Thr OG1",
+    )
     fragment: Optional[Fragment] = Field(None, description="The group to bond")
     glycans: Optional[dict[str, Union[list[str], str]]] = Field(
         None, description="Glycan accession: residues it goes on ({G42666HT: [N103]})"
@@ -316,8 +319,14 @@ class Attachment(_Sites):
         None, description="Folder of glycam_<accession>.pdb files (default structures/glycans)"
     )
     reaction: Optional[str] = Field(None, description="mBuild named reaction or reaction SMARTS")
-    fragment_atom_name: Optional[str] = Field(None, description="Atom of the fragment that bonds")
-    fragment_resnum: Optional[int] = Field(None, description="Residue of the fragment that bonds")
+    fragment_atom_name: Optional[str] = Field(
+        None, description="Atom of the fragment that bonds (a glycan defaults to C1)"
+    )
+    fragment_resnum: Optional[int] = Field(
+        None,
+        description="Residue of the fragment that bonds (a glycan defaults to the first "
+        "residue of its file with a C1)",
+    )
     fragment_resname: Optional[str] = Field(None, description="Residue name of the fragment")
     leaving_atom_names: Optional[Union[str, list[str]]] = Field(
         None, description="Protein atoms that leave"
@@ -328,7 +337,9 @@ class Attachment(_Sites):
     merge: bool = Field(False, description="Merge the fragment into the residue (ring closures)")
     bond_order: int = Field(1, ge=1, le=3, description="Order of the new bond")
     attach_at: Optional[int] = Field(
-        None, ge=1, description="Position of a polymer fragment that bonds, 1..length (caps 1, length)"
+        None,
+        ge=1,
+        description="Position of a polymer fragment that bonds, 1..length (caps 1, length)",
     )
 
     @model_validator(mode="before")
@@ -354,6 +365,11 @@ class Attachment(_Sites):
 
     @model_validator(mode="after")
     def _where_and_what(self) -> "Attachment":
+        if self.atom_name is None and self.type != "glycan":
+            raise ValueError(
+                f"a {self.type} attachment needs atom_name, the protein atom that bonds; only "
+                "a glycan's defaults (Asn ND2, Ser OG, Thr OG1)"
+            )
         if self.glycans is not None:
             if self.type != "glycan":
                 raise ValueError(f"`glycans` is for type: glycan, not type: {self.type}")
