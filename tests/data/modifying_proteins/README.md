@@ -1,0 +1,7 @@
+# Inputs for the modifying_proteins tests
+
+- `glycam_G42666HT.pdb`: chitobiose (GlcNAc-b1-4-GlcNAc-b1-OH) with GLYCAM06
+  residue names and CONECT records, built from GlyGen accession G42666HT
+  (GlyGen data are CC BY 4.0).
+- `4II.cif`: the wwPDB Chemical Component Dictionary entry for
+  p-azido-L-phenylalanine (CCD data are CC0).
