@@ -944,14 +944,14 @@ runtime-only setting: changing it does not alter the built system or its
 simulation_phases:
   minimization:
     freeze_solute: true      # hold protein + substrate heavy atoms fixed
-    max_iterations: 1000     # 0 = run to convergence
+    max_iterations: 0        # 0 (default) = run to convergence
     tolerance: 10.0          # kJ/mol/nm
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `freeze_solute` | bool | true | Freeze every protein and substrate **heavy** atom (the `solute_heavy` atom group) during minimization; only solvent, polymers, and the solute hydrogens relax. The prepared heavy-atom structure enters equilibration with its coordinates unchanged; PolyzyMD verifies a zero heavy-atom displacement and records it, together with `hydrogen_max_displacement_angstrom`, in `minimization/phase.json`. Solute hydrogens stay mobile on purpose so the minimizer places them on the force field's X–H constraint lengths rather than keeping the input PDB's |
-| `max_iterations` | int | 1000 | Maximum minimizer iterations (0 = until convergence) |
+| `max_iterations` | int | 0 | Maximum minimizer iterations; 0 runs until the RMS force is below `tolerance`. After minimizing, PolyzyMD checks the RMS force and the most stretched bond: a capped run that stopped unconverged, or any state with a bond stretched more than 50 % over its equilibrium length, is minimized again to convergence once, and the run stops with the offending atoms named if that fails. The outcome (`rms_force`, `max_force`, `worst_bond_stretch`, `converged`, `reminimized`) is recorded in `minimization/phase.json` |
 | `tolerance` | float | 10.0 | Energy tolerance in kJ/mol/nm |
 
 See {doc}`../explanation/simulation_safeguards` for why the solute is frozen.

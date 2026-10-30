@@ -1957,7 +1957,10 @@ class MinimizationConfig(_ConfigModel):
             structure therefore enters equilibration with its coordinates
             unchanged (solute RMSD to the input structure is zero), and no
             packing artefact can be "accommodated" by protein deformation.
-        max_iterations: Maximum minimiser iterations (0 = until convergence).
+        max_iterations: Maximum minimiser iterations; 0 (the default) runs
+            until OpenMM's minimiser converges. A capped run that stops above
+            ``tolerance``, or any run that leaves a bond torn, is continued to
+            convergence once, and the run fails if a bond is still torn.
         tolerance: Energy tolerance in kJ/mol/nm.
     """
 
@@ -1966,7 +1969,9 @@ class MinimizationConfig(_ConfigModel):
     freeze_solute: bool = Field(
         True, description="Freeze protein and substrate atoms during minimisation"
     )
-    max_iterations: int = Field(1000, ge=0, description="Maximum minimiser iterations")
+    max_iterations: int = Field(
+        0, ge=0, description="Maximum minimiser iterations (0 = until convergence)"
+    )
     tolerance: float = Field(10.0, gt=0, description="Energy tolerance in kJ/mol/nm")
 
 

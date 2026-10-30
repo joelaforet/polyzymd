@@ -25,6 +25,17 @@ class PhaseRecord(BaseModel):
     frozen_atoms: int | None = None
     frozen_rmsd_angstrom: float | None = None
     hydrogen_max_displacement_angstrom: float | None = None
+    #: Minimization outcome: RMS force as OpenMM's minimizer measures it and the
+    #: largest per-atom force (kJ/mol/nm; atoms held fixed count as zero), the
+    #: most stretched bond relative to its equilibrium length and its atoms,
+    #: whether the state converged (false on a failed run), and whether a
+    #: capped run had to be continued.
+    rms_force: float | None = None
+    max_force: float | None = None
+    worst_bond_stretch: float | None = None
+    worst_bond: str | None = None
+    converged: bool | None = None
+    reminimized: bool | None = None
     #: Seeds of every job that ran this phase, oldest first; a resumed
     #: equilibration stage keeps the seeds of the attempts before it.
     seeds_by_attempt: list[dict[str, int | None]] = []

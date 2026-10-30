@@ -994,18 +994,19 @@ class TestMinimizationConfig:
         cfg = SimulationConfig(**minimal_config_data)
         m = cfg.simulation_phases.minimization
         assert m.freeze_solute is True
-        assert m.max_iterations == 1000
+        assert m.max_iterations == 0
         assert m.tolerance == pytest.approx(10.0)
 
     def test_explicit_values_are_honoured(self, minimal_config_data):
         minimal_config_data["simulation_phases"]["minimization"] = {
             "freeze_solute": False,
-            "max_iterations": 0,
+            "max_iterations": 500,
             "tolerance": 1.0,
         }
         cfg = SimulationConfig(**minimal_config_data)
         assert cfg.simulation_phases.minimization.freeze_solute is False
-        assert cfg.simulation_phases.minimization.max_iterations == 0
+        assert cfg.simulation_phases.minimization.max_iterations == 500
+        assert cfg.simulation_phases.minimization.tolerance == pytest.approx(1.0)
 
     def test_rejects_unknown_keys(self, minimal_config_data):
         minimal_config_data["simulation_phases"]["minimization"] = {"freeze_protein": True}
