@@ -59,8 +59,10 @@ from polyzymd.utils.mbuild_logs import quiet_mbuild
 
 LOGGER = logging.getLogger(__name__)
 
-#: The backbone of a GLYCAM06j linkage residue, which takes the hybrid's charge shift.
-_GLYCAM_BACKBONE = frozenset({"N", "H", "CA", "HA", "C", "O"})
+#: Backbone atom names (glycine's two alpha hydrogens included): in the
+#: Rosemary/GLYCAM06j hybrid, the backbones of a linkage residue and its two
+#: neighbours take the charge shift.
+_GLYCAM_BACKBONE = frozenset({"N", "H", "CA", "HA", "HA2", "HA3", "C", "O"})
 
 #: Atoms that are not a residue's side chain (the side chain runs from CB outward).
 BACKBONE = frozenset({"N", "H", "CA", "HA", "HA2", "HA3", "C", "O", "H1", "H2", "H3", "OXT", "HXT"})
@@ -459,8 +461,9 @@ def _whole_protein_reference(
 
     In the Rosemary/GLYCAM06j hybrid (a GLYCAM06j glycan parameter set), each
     glycan site is its own domain with OpenMM's GLYCAM06j terms, charges and
-    1-4 pairs, and the linkage residue's backbone takes its NAGL charges
-    shifted uniformly by NAGL's sum over the site minus GLYCAM's.
+    1-4 pairs, and the backbones of the linkage residue and the residues
+    before and after it take their NAGL charges shifted uniformly by NAGL's
+    sum over the site minus GLYCAM's.
     """
     from openff.toolkit import Topology
     from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
@@ -506,10 +509,21 @@ def _whole_protein_reference(
         native = _native_glycam(recipe, protein, glycam_sites, keys, real)
         for site in glycam_sites:
             atoms = [real(i) for i in site.atom_indices]
+            # The linkage residue and the residues peptide-bonded to it, read
+            # from the independently perceived chemistry.
+            linking = site.residues[0]
+            ends = {keys[i][3]: i for i in range(n_atoms) if keys[i][:3] == linking}
+            residues = {linking}
+            for bond in molecule.bonds:
+                pair = (bond.atom1_index, bond.atom2_index)
+                for a, b in (pair, pair[::-1]):
+                    if (a, keys[b][3]) in ((ends["N"], "C"), (ends["C"], "N")):
+                        residues.add(keys[b][:3])
+            in_site = set(site.atom_indices)
             linkage = [
                 real(i)
                 for i in range(n_atoms)
-                if keys[i][:3] == site.residues[0] and keys[i][3] in _GLYCAM_BACKBONE
+                if keys[i][:3] in residues and keys[i][3] in _GLYCAM_BACKBONE and i not in in_site
             ]
             nagl_sum = float(sum(charges[i] for i in atoms))
             glycam_sum = float(sum(native["particle"][i][0] for i in atoms))

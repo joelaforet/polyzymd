@@ -29,8 +29,8 @@ CHITOBIOSE = ROOT / "tests" / "data" / "modifying_proteins" / "glycam_G42666HT.p
 GLYCAM = ParameterSet(["GLYCAM_06j-1.xml"], {"method": "library"})
 ROSEMARY = newest_rosemary()
 NAGL = {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"}
-#: The O-glycan on Ser13 needs about 0.0095 e per backbone atom.
-BOUND = 0.01
+#: The default bound: spread over three backbones, every site fits under it.
+BOUND = 0.005
 CHECKS = [
     "charges.source",
     "charges.site_integer",
@@ -100,13 +100,19 @@ def test_glycan_sites_take_glycam_and_the_backbone_keeps_the_charge(hybrid) -> N
     protein, result = hybrid
     record = result.record
     assert [site.name for site in record.sites] == ["G001", "G002"]
-    assert [site.backbone_residues for site in record.sites] == [["ASN"], ["SER"]]
+    # Trp-cage 4-6 (with Q5N) and 12-14: the linkage residue and its two neighbours.
+    assert [site.backbone_residues for site in record.sites] == [
+        ["ILE", "ASN", "TRP"],
+        ["PRO", "SER", "SER"],
+    ]
     assert len(record.glycam) == 2 and all(g.n_pairs > 0 for g in record.glycam)
     assert record.total_charge == pytest.approx(1.0, abs=1e-6)
     for site in record.sites:
-        # The shift moves NAGL's site sum minus GLYCAM's onto six backbone atoms.
+        # NAGL's site sum minus GLYCAM's, over three backbones of six atoms
+        # each (Pro12 has no H).
         assert site.shift_total == pytest.approx(site.nagl_sum - site.target)
-        assert site.shift_per_atom == pytest.approx(site.shift_total / 6)
+        n = 17 if site.name == "G002" else 18
+        assert site.shift_per_atom == pytest.approx(site.shift_total / n)
         assert abs(site.shift_per_atom) <= BOUND
 
 
@@ -114,7 +120,9 @@ def test_a_backbone_shift_above_the_bound_is_refused() -> None:
     from polyzymd import modifying_proteins as mp
 
     with pytest.raises(ValueError, match="Raise max_charge_shift"):
-        mp.parameterize_whole(_glycoprotein(), (ROSEMARY,), NAGL, glycan=GLYCAM)
+        mp.parameterize_whole(
+            _glycoprotein(), (ROSEMARY,), NAGL, glycan=GLYCAM, max_charge_shift=0.001
+        )
 
 
 def test_the_audit_passes_the_hybrid_and_warns_that_it_is_one(hybrid, tmp_path) -> None:
@@ -153,4 +161,5 @@ def test_the_audit_fails_an_unshifted_linkage_backbone(hybrid, tmp_path) -> None
     realized, component = _realize(protein, result, tmp_path, edit=undo_shift)
     (finding,) = run_checks(realized, [component], ["parameters.modified_backbone"])
     assert finding.status == "FAIL"
-    assert np.isclose(abs(serine.shift_per_atom), 0.0095, atol=0.002)
+    # About 0.057 e over 17 atoms.
+    assert np.isclose(abs(serine.shift_per_atom), 0.0034, atol=0.001)

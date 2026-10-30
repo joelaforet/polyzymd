@@ -95,12 +95,13 @@ This hybrid is for benchmarking, not the recommended setup. Each glycan and
 its linkage side chain (from CB outward) take GLYCAM06j's charges, terms and
 1-4 pairs, as on ff14SB; the rest of the protein stays on Rosemary with NAGL
 charges. The charge the swap removes or adds (NAGL's sum over the site minus
-GLYCAM06j's) is spread uniformly over the linkage residue's backbone (N, H,
-CA, HA, C, O), so the protein keeps its total charge. The shift per atom is
-recorded for each site and bounded by `max_charge_shift` (0.005 e per atom
-by default). An O-glycan on serine needs about 0.0095 e per atom, because
-GLYCAM06j's serine linkage side chain is built to balance ff14SB's backbone;
-raise `max_charge_shift` to accept it. The audit marks the build with a WARN
+GLYCAM06j's) is spread uniformly over the backbones (N, H, CA, HA, C, O) of
+the linkage residue and the residues before and after it, so the protein
+keeps its total charge. The shift per atom is recorded for each site and
+bounded by `max_charge_shift` (0.005 e per atom by default). An O-glycan on
+serine moves the most charge, about 0.057 e, because GLYCAM06j's serine
+linkage side chain is built to balance ff14SB's backbone; over three
+backbones that is about 0.0034 e per atom. The audit marks the build with a WARN
 of `parameters.glycan_force_field` ("Rosemary/GLYCAM06j hybrid") and checks
 the shifted backbone charges.
 

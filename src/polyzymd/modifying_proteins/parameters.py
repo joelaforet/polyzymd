@@ -404,8 +404,9 @@ def parameterize_whole(
     site (the glycan and its linkage side chain) takes GLYCAM06j's charges,
     terms and 1-4 pairs, as on ff14SB. The charge that swap removes or adds
     (NAGL's sum over the site minus GLYCAM's) is spread uniformly over the
-    linkage residue's backbone (N, H, CA, HA, C, O), so the protein keeps its
-    total charge; a shift above ``max_charge_shift`` (e per atom) raises.
+    backbones (N, H, CA, HA, C, O) of the linkage residue and the residues
+    before and after it, so the protein keeps its total charge; a shift above
+    ``max_charge_shift`` (e per atom) raises.
     """
     from openff.toolkit import ForceField, Topology
     from openff.units import unit
@@ -454,7 +455,7 @@ def parameterize_whole(
                 molecule, site, nagl, keys, check_backbone=False
             )
             site_atoms = list(site.atom_indices)
-            backbone = sorted(terms.backbone_charges)
+            backbone = _linkage_backbone(molecule, keys, site)
             nagl_sum = float(values[site_atoms].sum())
             glycam_sum = float(sum(terms.charges[i] for i in site_atoms))
             shift_total = nagl_sum - glycam_sum
@@ -469,13 +470,19 @@ def parameterize_whole(
             values[site_atoms] = [terms.charges[i] for i in site_atoms]
             values[backbone] += shift
             native.append((terms, glycam_site))
-            linking = molecule.atom(backbone[0]).metadata["residue_name"]
+            residues = sorted({(keys[i].chain_id, keys[i].resnum, keys[i].icode) for i in backbone})
+            names = {
+                (keys[i].chain_id, keys[i].resnum, keys[i].icode): molecule.atom(i).metadata[
+                    "residue_name"
+                ]
+                for i in backbone
+            }
             record.sites.append(
                 SiteParameters(
                     name=site.name,
                     type=site.type,
                     atom_indices=site_atoms,
-                    backbone_residues=[linking],
+                    backbone_residues=[names[r] for r in residues],
                     force_field=list(glycan.force_field),
                     charges=dict(glycan.charges),
                     nagl_sum=nagl_sum,
@@ -500,6 +507,33 @@ def parameterize_whole(
         _check_charges(interchange, values)
     interchange.positions = molecule.conformers[0] if molecule.conformers else None
     return ParameterizedProtein(interchange, record)
+
+
+#: Backbone atom names, glycine's two alpha hydrogens included.
+_MAIN_CHAIN = frozenset({"N", "H", "CA", "HA", "HA2", "HA3", "C", "O"})
+
+
+def _linkage_backbone(molecule, keys, site) -> list[int]:
+    """Backbone atoms of a glycan's linkage residue and of the residues bonded before and after it.
+
+    The neighbours are found through the peptide bonds (linkage N to the
+    previous C, linkage C to the next N); GLYCAM06j refuses a glycan on a
+    chain's first or last residue, so both exist.
+    """
+    linking = site.residues[0]
+    residue = {i: (key.chain_id, key.resnum, key.icode) for i, key in enumerate(keys)}
+    anchor = {keys[i].atom_name: i for i in residue if residue[i] == linking}
+    neighbours = {linking}
+    for bond in molecule.bonds:
+        for a, b in ((bond.atom1_index, bond.atom2_index), (bond.atom2_index, bond.atom1_index)):
+            if (a, keys[b].atom_name) in ((anchor["N"], "C"), (anchor["C"], "N")):
+                neighbours.add(residue[b])
+    in_site = set(site.atom_indices)
+    return [
+        i
+        for i in residue
+        if residue[i] in neighbours and keys[i].atom_name in _MAIN_CHAIN and i not in in_site
+    ]
 
 
 def resolve_parameter_sets(

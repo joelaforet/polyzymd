@@ -103,8 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`modification_parameters: {glycan: {force_field: [GLYCAM_06j-1.xml],
   charges: {method: library}}}`, glycans only). Each glycan site takes
   GLYCAM06j's charges, terms and 1-4 pairs; the charge difference from
-  Rosemary's NAGL charges is spread over the linkage residue's backbone
-  (bounded by `max_charge_shift`, recorded per site). The audit checks the
+  Rosemary's NAGL charges is spread over the backbones of the linkage residue
+  and its two neighbours (bounded by `max_charge_shift`, recorded per site). The audit checks the
   hybrid and marks it with a `parameters.glycan_force_field` WARN.
 - The `build` and `test` environments install `openff-forcefields` 2026.09.0
   (was 2026.01.0), which adds the Rosemary candidate
