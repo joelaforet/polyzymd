@@ -60,7 +60,48 @@ def test_a_modified_protein_is_two_domains() -> None:
         "model": "model.pt",
         "source_file": None,
     }
-    assert "later domain" in data["boundary_rule"]
+    assert "touching a site belongs to that site" in data["boundary_rule"]
+
+
+def test_a_modified_protein_writes_its_attachments_under_their_own_segments() -> None:
+    """One component (one molecule), several segment IDs: the attachments' atoms."""
+    atoms = (AtomRange(0, 10),)
+    domain = Domain("protein", atoms, ("ff",), ChargeSource("library"))
+    record = ComponentRecord(
+        "protein",
+        "protein",
+        "PROT",
+        "fixed",
+        list(atoms),
+        [domain],
+        segments={"G001": (AtomRange(6, 8),), "M001": (AtomRange(8, 10),)},
+    )
+    segids = record.segid_of()
+    assert [segids[i] for i in range(10)] == ["PROT"] * 6 + ["G001"] * 2 + ["M001"] * 2
+    assert record.to_dict()["segments"] == {"G001": [[6, 8]], "M001": [[8, 10]]}
+    with pytest.raises(ValueError, match="distinct atoms"):
+        ComponentRecord(
+            "p",
+            "protein",
+            "PROT",
+            "fixed",
+            list(atoms),
+            [domain],
+            segments={"G001": (AtomRange(6, 8),), "G002": (AtomRange(7, 9),)},
+        )
+    with pytest.raises(ValueError, match="1-4 ASCII"):
+        ComponentRecord(
+            "p",
+            "protein",
+            "PROT",
+            "fixed",
+            list(atoms),
+            [domain],
+            segments={"G0001": (AtomRange(6, 8),)},
+        )
+    other = _record("ligand", "G001", 10, 12)
+    with pytest.raises(ValueError, match="segid 'G001'"):
+        check_layout([record, other], 12)
 
 
 def test_layout_must_cover_the_system_once_with_unique_handles() -> None:

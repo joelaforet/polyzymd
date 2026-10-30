@@ -7,8 +7,8 @@ solvent, the ions). Each component records three things:
   them, so nothing has to recover a component's atoms from chain letters later;
 - **its contract**: per-atom *domains*, each naming where the atoms' valence terms
   (bonds, angles, torsions, impropers, Lennard-Jones) and their partial charges
-  come from. A term whose atoms lie in different domains takes the source of the
-  domain listed later (see :data:`BOUNDARY_RULE`);
+  come from. A term whose atoms lie in different domains belongs to the
+  modification site it touches (see :data:`BOUNDARY_RULE`);
 - **its provenance**: the inputs and settings it was made from.
 
 The builders produce these records and the physics audit (:mod:`polyzymd.audit`)
@@ -35,11 +35,14 @@ DEFAULT_SEGIDS: dict[str, str] = {
 SEGID_MAX_LENGTH = 4
 
 #: How a term whose atoms lie in different domains is assigned: it belongs to a
-#: domain only if every one of its atoms does; otherwise it takes the source of
-#: the domain listed later in :attr:`ComponentRecord.domains`. A modified protein
-#: lists the protein first and the modification site after it, so every term that
-#: touches the site comes from the site's source.
-BOUNDARY_RULE = "a term belongs to a domain only if all its atoms do; otherwise the later domain"
+#: domain if every one of its atoms does; a term touching a modification site
+#: (any domain listed after the first) belongs to that site, so CA-CB, the angles
+#: at CA involving CB and chi1 of a modified residue are the site's; a term
+#: touching two sites belongs to neither and fails ``parameters.coverage``.
+BOUNDARY_RULE = (
+    "a term belongs to a domain if all its atoms do; a term touching a site belongs to "
+    "that site; a term touching two sites has no source"
+)
 
 ChargeMethod = Literal["library", "nagl", "am1bcc", "espaloma", "preset", "water_model"]
 
@@ -111,6 +114,10 @@ class ComponentRecord:
         molecules: Atom range of every molecule, in system order.
         domains: Where the atoms' parameters and charges come from.
         provenance: Inputs, their SHA-256, counts and settings.
+        segments: Atoms written under a segment ID other than ``segid``, by
+            segment ID: the attachments of a covalently modified protein
+            (``G001``, ``P001``, ...), which belong to the protein's component
+            because they are one molecule with it. Empty for most components.
     """
 
     name: str
@@ -120,9 +127,21 @@ class ComponentRecord:
     molecules: list[AtomRange]
     domains: list[Domain]
     provenance: dict[str, Any] = field(default_factory=dict)
+    segments: dict[str, tuple[AtomRange, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         validate_segid(self.segid)
+        owned_set = set(self.atom_indices())
+        segmented: list[int] = []
+        for segid, ranges in self.segments.items():
+            validate_segid(segid)
+            if segid == self.segid:
+                raise ValueError(f"component {self.name!r}: segment {segid!r} is its own segid")
+            segmented += [i for r in ranges for i in r]
+        if len(segmented) != len(set(segmented)) or not set(segmented) <= owned_set:
+            raise ValueError(
+                f"component {self.name!r}: its segments must hold distinct atoms of the component"
+            )
         owned = set(self.atom_indices())
         covered = [i for d in self.domains for i in d.atom_indices()]
         if len(covered) != len(set(covered)) or set(covered) != owned:
@@ -143,6 +162,15 @@ class ComponentRecord:
     def atom_indices(self) -> list[int]:
         return [i for r in self.molecules for i in r]
 
+    def segid_of(self) -> dict[int, str]:
+        """Return the segment ID of each of the component's atoms."""
+        segids = dict.fromkeys(self.atom_indices(), self.segid)
+        for segid, ranges in self.segments.items():
+            for r in ranges:
+                for i in r:
+                    segids[i] = segid
+        return segids
+
     def to_dict(self) -> dict[str, Any]:
         """Return the record as plain data, with atom ranges merged where contiguous."""
         data = asdict(self)
@@ -151,6 +179,10 @@ class ComponentRecord:
         data["molecules"] = [[r.start, r.stop] for r in merge_ranges(self.molecules)]
         for domain, raw in zip(self.domains, data["domains"]):
             raw["atoms"] = [[r.start, r.stop] for r in merge_ranges(domain.atoms)]
+        data["segments"] = {
+            segid: [[r.start, r.stop] for r in merge_ranges(ranges)]
+            for segid, ranges in self.segments.items()
+        }
         data["boundary_rule"] = BOUNDARY_RULE
         return data
 
@@ -208,6 +240,8 @@ def check_layout(components: Sequence[ComponentRecord], n_atoms: int) -> None:
         )
     for attribute in ("name", "segid"):
         values = [getattr(c, attribute) for c in components]
+        if attribute == "segid":
+            values += [s for c in components for s in getattr(c, "segments", {})]
         duplicates = sorted({v for v in values if values.count(v) > 1})
         if duplicates:
             raise ValueError(f"two components share the {attribute} {duplicates[0]!r}")
@@ -217,8 +251,8 @@ def atom_segids(components: Sequence[ComponentRecord], n_atoms: int) -> list[str
     """Return the segment ID of every atom of the system, in atom order."""
     segids = [""] * n_atoms
     for component in components:
-        for i in component.atom_indices():
-            segids[i] = component.segid
+        for i, segid in component.segid_of().items():
+            segids[i] = segid
     return segids
 
 
@@ -250,14 +284,26 @@ def write_index(path: Path | str, components: Sequence[ComponentRecord]) -> Path
     """Write a GROMACS index file with one group per component, named by the component.
 
     GROMACS atom numbers count from 1. Each group is also written under its
-    segment ID when that differs from the name, so either handle selects it.
+    segment ID when that differs from the name, so either handle selects it; a
+    component with several segments (a protein with attachments) also gets one
+    group per segment.
     """
     path = Path(path)
     blocks = []
-    for component in components:
-        numbers = [str(i + 1) for i in component.atom_indices()]
+
+    def block(group: str, atoms: Iterable[int]) -> str:
+        numbers = [str(i + 1) for i in atoms]
         rows = [" ".join(numbers[k : k + 15]) for k in range(0, len(numbers), 15)]
+        return f"[ {group} ]\n" + "\n".join(rows) + "\n"
+
+    for component in components:
+        segids = component.segid_of()
         for group in dict.fromkeys((component.name, component.segid)):
-            blocks.append(f"[ {group} ]\n" + "\n".join(rows) + "\n")
+            atoms = component.atom_indices() if group == component.name else None
+            if atoms is None:
+                atoms = [i for i in component.atom_indices() if segids[i] == component.segid]
+            blocks.append(block(group, atoms))
+        for segid in component.segments:
+            blocks.append(block(segid, [i for i in component.atom_indices() if segids[i] == segid]))
     path.write_text("\n".join(blocks))
     return path

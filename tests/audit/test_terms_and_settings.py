@@ -41,6 +41,15 @@ def test_a_torsion_on_permuted_atoms_is_a_different_torsion() -> None:
     assert not compare("torsions", permuted["torsions"], reference["torsions"]).ok
 
 
+def test_a_domain_can_own_terms_that_reach_outside_it() -> None:
+    """With an ownership rule, a site owns the torsion that crosses into the protein."""
+    index = SystemIndex.from_system(_system(4, _torsion(0, 1, 2, 3)))
+    assert index.extract([2, 3])["torsions"] == {}
+    owned = index.extract([2, 3], owned=lambda atoms: 3 in atoms, terms_of=range(4))
+    assert list(owned["torsions"]) == [(0, 1, 2, 3)]
+    assert set(owned["charge"]) == {2, 3}
+
+
 def test_a_force_the_index_cannot_read_is_refused() -> None:
     """LJ in a CustomNonbondedForce would read as zero on both sides, so it must not be skipped."""
     custom = openmm.CustomNonbondedForce("4*epsilon*((sigma/r)^12-(sigma/r)^6)")

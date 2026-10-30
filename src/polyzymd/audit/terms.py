@@ -153,11 +153,27 @@ class SystemIndex:
         return cls(molecule_of, dict(terms), particle, dict(bonded_to), restraint_forces)
 
     def extract(
-        self, atoms: Iterable[int], index_map: Optional[Mapping[int, int]] = None
+        self,
+        atoms: Iterable[int],
+        index_map: Optional[Mapping[int, int]] = None,
+        owned: Optional[Callable[[tuple[int, ...]], bool]] = None,
+        terms_of: Optional[Iterable[int]] = None,
     ) -> dict[str, dict]:
-        """Return every term wholly inside ``atoms``, keyed in ``index_map``'s indices."""
+        """Return the terms of ``atoms``, keyed in ``index_map``'s indices.
+
+        Per-atom values (charge, Lennard-Jones, mass) are those of ``atoms``.
+        Without ``owned``, the terms are those wholly inside ``atoms``. With
+        ``owned``, they are the terms of the molecules of ``terms_of`` (default
+        ``atoms``) for which ``owned`` is true; it is called with the term's
+        atoms in this system's indices, so a domain can own a term that also
+        touches atoms outside it (the boundary rule of
+        :mod:`polyzymd.core.components`).
+        """
         atoms = set(atoms)
         m: Callable[[int], int] = (lambda i: i) if index_map is None else index_map.__getitem__
+        if owned is None:
+            owned = atoms.issuperset
+        molecules = {self.molecule_of[i] for i in (atoms if terms_of is None else terms_of)}
         out: dict[str, dict] = {kind: {} for kind in TERM_KINDS}
         torsions: dict[tuple, list] = collections.defaultdict(list)
         for i in atoms:
@@ -165,10 +181,10 @@ class SystemIndex:
             out["charge"][m(i)] = q
             out["lj"][m(i)] = lj
             out["mass"][m(i)] = mass
-        for molecule in {self.molecule_of[i] for i in atoms}:
+        for molecule in molecules:
             for kind, entries in self.terms.get(molecule, {}).items():
                 for term_atoms, value in entries:
-                    if not atoms.issuperset(term_atoms):
+                    if not owned(term_atoms):
                         continue
                     mapped = tuple(m(i) for i in term_atoms)
                     if kind == "angles":
