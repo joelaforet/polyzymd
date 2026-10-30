@@ -1325,13 +1325,17 @@ class SystemBuilder:
 
         from openff.interchange.interop.openmm._positions import to_openmm_positions
 
+        from polyzymd.utils.molecule_index import indexed_molecules
+
         t0 = time.perf_counter()
-        omm_topology = self._interchange.to_openmm_topology()
+        with indexed_molecules():
+            omm_topology = self._interchange.to_openmm_topology()
         t_topo = time.perf_counter() - t0
         LOGGER.info("  to_openmm_topology: %.1fs", t_topo)
 
         t0 = time.perf_counter()
-        omm_system = self._interchange.to_openmm(combine_nonbonded_forces=True)
+        with indexed_molecules():
+            omm_system = self._interchange.to_openmm(combine_nonbonded_forces=True)
         if self.glycam_sites:
             from polyzymd.modifying_proteins.glycam import apply_to_openmm
 

@@ -107,5 +107,7 @@ def reference_system(
     force_field = ForceField(*force_field_files)
     if constraints_from and "Constraints" not in force_field.registered_parameter_handlers:
         force_field.register_parameter_handler(ForceField(constraints_from)["Constraints"])
+    # Exported with the toolkit's own molecule lookup: the audit's systems are small, and the
+    # reference must not depend on the builder's export machinery.
     interchange = force_field.create_interchange(topology, charge_from_molecules=list(charge_from))
     return interchange.to_openmm(combine_nonbonded_forces=True)

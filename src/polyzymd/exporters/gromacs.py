@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from polyzymd.core.branding import FULL_CREDIT_LINE, SHORT_CREDIT_LINE
+from polyzymd.utils.molecule_index import indexed_molecules
 from polyzymd.utils.templates import render_package_template
 from polyzymd.workflow.slurm import _validate_script_value
 
@@ -2016,7 +2017,8 @@ class GromacsExporter:
         result["posres_defines"] = {}
         if self._component_info is not None:
             logger.info("Adding position restraints to molecule ITP files...")
-            topology = self._interchange.to_openmm_topology()
+            with indexed_molecules():
+                topology = self._interchange.to_openmm_topology()
             posres_generator = PositionRestraintGenerator(topology, self._component_info)
             posres_defines = posres_generator.add_posres_to_itp_files(
                 self._config, output_dir, prefix
@@ -2072,11 +2074,12 @@ class GromacsExporter:
 
         # Export using Interchange
         output_prefix = str(output_dir / prefix)
-        self._interchange.to_gromacs(
-            prefix=output_prefix,
-            monolithic=False,
-            _merge_atom_types=True,
-        )
+        with indexed_molecules():
+            self._interchange.to_gromacs(
+                prefix=output_prefix,
+                monolithic=False,
+                _merge_atom_types=True,
+            )
 
         gro_path = output_dir / f"{prefix}.gro"
         top_path = output_dir / f"{prefix}.top"
