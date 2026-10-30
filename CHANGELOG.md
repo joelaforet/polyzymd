@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A replicate still writing its first production segment no longer stops an analysis.**  Without `--include-running`, a running segment is left out, so such a replicate had no frames and every run of `analyze` failed for all replicates with `No production trajectory files found`. It is now left out of its condition with a warning, listed in the report's `excluded_replicates`, and the report is `partial`. When every replicate of a condition is in that state, the error says to wait or use `--include-running`.
 - **The equilibration window is measured on the frames the analysis reads.**  The window's frame interval and first frame time came from a universe loaded without the running segments even when they were read, so a replicate with only a running segment failed there.
+- **NPT equilibration stages run at `thermodynamics.pressure`.**  With `engine: openmm`, every NPT equilibration stage ran its barostat at 1 atm, whatever `thermodynamics.pressure` said; production and the GROMACS engine used the configured pressure. Stages now use it too, and the stage results record `pressure_atm`. Configs at 1 atm, the default, run as before. The configuration reference now states that PolyzyMD runs the ensemble each phase names: `NVT` phases run no barostat and `NPT` phases run it at `thermodynamics.pressure`.
 
 ## [1.3.0] - 2026-10-24
 

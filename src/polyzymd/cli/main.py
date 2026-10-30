@@ -3292,7 +3292,7 @@ def _run_initial_segment(
     phases = sim_config.simulation_phases
     eq_duration = phases.total_equilibration_duration
     colored_echo(f"Running staged equilibration: {eq_duration:.3f} ns...", phase="simulation")
-    eq_result = runner.run_equilibration(temperature=temperature, config=phases)
+    eq_result = runner.run_equilibration(temperature=temperature, config=phases, pressure=pressure)
 
     # Save equilibration progress so a resubmitted job knows eq is done
     from polyzymd.simulation.progress import load_progress as _load_progress
