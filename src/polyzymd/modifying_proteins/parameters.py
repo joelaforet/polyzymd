@@ -41,6 +41,10 @@ canonical mutations and protonation changes to an ff14SB variant (LYN, ASH,
 ...) on residues outside every site. Residues outside the sites are then
 identical in the reference and the modified protein, and each site residue
 keeps the residue it had before the changes that made it a site.
+
+Status: this ff14SB + Sage/NAGL site method is interim. It stays until a
+benchmark against OpenFF Rosemary (issue #307) decides whether it is still
+needed. The capped-model machinery belongs to this method.
 """
 
 from __future__ import annotations
