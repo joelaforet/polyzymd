@@ -710,6 +710,28 @@ def test_planned_names_are_compared_as_openmms_pdb_reader_names_them() -> None:
     assert _as_read("ALA", "CA") == "CA"
 
 
+def test_a_declared_grafted_chain_is_compared_without_its_draw() -> None:
+    """The declared chain has no drawn sequence or replicate; the rest must match."""
+    from pathlib import Path
+
+    from polyzymd.audit.modified import _fragment
+
+    declared = {"polymer": {"monomers": [{"label": "A"}], "length": 9, "force_field": []}}
+    built = {
+        "polymer": {
+            "monomers": [{"label": "A"}],
+            "length": 9,
+            "force_field": ["openff-2.3.0.offxml"],
+            "drawn": "HAAAAAAAH",
+            "replicate": 2,
+        }
+    }
+    assert _fragment(declared, Path(".")) == _fragment(built, Path("."))
+    longer = {"polymer": {**built["polymer"], "length": 11}}
+    assert _fragment(declared, Path(".")) != _fragment(longer, Path("."))
+    assert _fragment(declared, Path(".")) != _fragment({"smiles": None}, Path("."))
+
+
 def test_a_fragment_placed_through_the_protein_fails_the_clash_check(acylated, tmp_path) -> None:
     from polyzymd.audit.findings import run_checks
 

@@ -37,7 +37,7 @@ import re
 from pathlib import Path
 from typing import Any, Literal, Optional, Union
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from polyzymd.config.schema import ChargeSpec, _ConfigModel
 
@@ -157,8 +157,88 @@ class Protonation(_Sites):
         return self
 
 
+class GraftPolymer(_ConfigModel):
+    """A polymer chain built for an attachment of ``type: polymer``.
+
+    The monomers and caps come from a ``type: polymer`` solute
+    (``monomers_from: <its name>``) or are written here as for a solute.
+    ``length`` counts the two caps, and positions (in ``sequence`` and the
+    attachment's ``attach_at``) count the whole chain, caps included. The
+    chain is drawn anew for each replicate; ``random_seed`` fixes one chain
+    for every replicate.
+    """
+
+    monomers_from: Optional[str] = Field(None, description="Name of a type: polymer solute")
+    monomers: Optional[list[dict[str, Any]]] = Field(None, description="Monomers, as for a solute")
+    end_groups: Optional[dict[str, Any]] = Field(None, description="Caps, as for a solute")
+    length: int = Field(..., ge=3, description="Units of the chain, the two caps included")
+    sequence: Optional[dict[str, Any]] = Field(None, description="As for a solute")
+    random_seed: Optional[int] = Field(
+        None, description="One chain for every replicate (default: drawn per replicate)"
+    )
+    _resolved: Optional[dict[str, Any]] = PrivateAttr(None)
+
+    @model_validator(mode="after")
+    def _monomers_given_once(self) -> "GraftPolymer":
+        if (self.monomers_from is None) == (self.monomers is None):
+            raise ValueError(
+                "a polymer fragment takes its monomers from a polymer solute "
+                "(monomers_from: <name>) or lists them (monomers + end_groups), not both"
+            )
+        if self.monomers is not None:
+            if self.end_groups is None:
+                raise ValueError("a polymer fragment that lists monomers needs end_groups")
+            self.resolve(self.monomers, self.end_groups)
+        elif self.end_groups is not None:
+            raise ValueError("with monomers_from the caps come from that solute too")
+        return self
+
+    def resolve(self, monomers: list[dict[str, Any]], end_groups: dict[str, Any]) -> None:
+        """Check and keep the chain's monomers and caps (from this entry or a solute)."""
+        from polyzymd.config.schema import MonomerSpec, PolymerEndGroups, PolymerSequence
+
+        specs = [MonomerSpec.model_validate(m) for m in monomers]
+        missing = [m.label for m in specs if not m.smiles or not m.name]
+        if missing:
+            raise ValueError(
+                f"grafted chain monomers {missing} need `name` and star-sited `smiles`"
+            )
+        caps = PolymerEndGroups.model_validate(end_groups)
+        label_of = {m.label: m.label for m in specs}
+        label_of.update({m.name: m.label for m in specs})
+        cap_labels = {
+            end: {
+                **{o.label: o.label for o in getattr(caps, end)},
+                **{o.name: o.label for o in getattr(caps, end) if o.name},
+            }
+            for end in ("head", "tail")
+        }
+        PolymerSequence.model_validate(self.sequence or {}).pattern(
+            self.length, label_of, cap_labels
+        )
+        self._resolved = {
+            "monomers": [m.model_dump(exclude_none=True) for m in specs],
+            "end_groups": caps.model_dump(exclude_none=True),
+        }
+
+    def as_source(self, force_field: list[str]) -> dict[str, Any]:
+        """Return the chain as ``polyzymd.modifying_proteins`` takes it."""
+        if self._resolved is None:
+            raise ValueError(
+                f"monomers_from {self.monomers_from!r} was not resolved; it names a polymer "
+                "solute of the same config"
+            )
+        source: dict[str, Any] = {**self._resolved, "length": self.length}
+        if self.sequence:
+            source["sequence"] = self.sequence
+        if self.random_seed is not None:
+            source["random_seed"] = self.random_seed
+        source["force_field"] = list(force_field)
+        return source
+
+
 class Fragment(_ConfigModel):
-    """The group an attachment bonds: SMILES, a PDB file, or a CCD component."""
+    """The group an attachment bonds: SMILES, a PDB file, a CCD component or a polymer."""
 
     smiles: Optional[str] = Field(None, description="SMILES with * at the bond site")
     resname: Optional[str] = Field(None, max_length=3, description="Residue name with smiles")
@@ -169,6 +249,7 @@ class Fragment(_ConfigModel):
         None, description="Local CCD definition (.cif) of the fragment, named <CODE>.cif"
     )
     link_atom: Optional[str] = Field(None, description="Atom of the CCD fragment that bonds")
+    polymer: Optional[GraftPolymer] = Field(None, description="A chain built for a polymer graft")
 
     @model_validator(mode="after")
     def _one_source(self) -> "Fragment":
@@ -179,13 +260,14 @@ class Fragment(_ConfigModel):
                 ("pdb_path", self.pdb_path is not None),
                 ("ccd", self.ccd is not None),
                 ("ccd_file", self.ccd_file is not None),
+                ("polymer", self.polymer is not None),
             )
             if present
         ]
         if len(given) != 1:
             raise ValueError(
-                "a fragment is one of {smiles, resname}, {pdb_path}, {ccd, link_atom} or "
-                f"{{ccd_file, link_atom}}; got {', '.join(given) or 'none'}"
+                "a fragment is one of {smiles, resname}, {pdb_path}, {ccd, link_atom}, "
+                f"{{ccd_file, link_atom}} or {{polymer}}; got {', '.join(given) or 'none'}"
             )
         if self.smiles is not None and not self.resname:
             raise ValueError("a SMILES fragment needs `resname` (1-3 characters)")
@@ -193,8 +275,10 @@ class Fragment(_ConfigModel):
             raise ValueError("a CCD fragment needs `link_atom`, the atom that bonds")
         return self
 
-    def as_source(self) -> dict[str, Any]:
+    def as_source(self, polymer_force_field: Optional[list[str]] = None) -> dict[str, Any]:
         """Return the fragment as polyzymd.modifying_proteins takes it."""
+        if self.polymer is not None:
+            return {"polymer": self.polymer.as_source(list(polymer_force_field or []))}
         if self.smiles is not None:
             return {"smiles": self.smiles, "resname": self.resname}
         if self.pdb_path is not None:
@@ -243,6 +327,9 @@ class Attachment(_Sites):
     )
     merge: bool = Field(False, description="Merge the fragment into the residue (ring closures)")
     bond_order: int = Field(1, ge=1, le=3, description="Order of the new bond")
+    attach_at: Optional[int] = Field(
+        None, ge=1, description="Position of a polymer fragment that bonds, 1..length (caps 1, length)"
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -285,6 +372,25 @@ class Attachment(_Sites):
                     "an attachment needs `fragment` ({smiles, resname}, {pdb_path} or "
                     "{ccd, link_atom}); a glycan group may use `glycans:` or a sites_file "
                     "with a `glycan` column instead"
+                )
+        polymer = self.fragment is not None and self.fragment.polymer is not None
+        if polymer and self.type != "polymer":
+            raise ValueError(f"a polymer fragment is attached with type: polymer, not {self.type}")
+        if polymer and self.attach_at is None:
+            raise ValueError(
+                "a grafted chain needs `attach_at`: the position that bonds, 1..length with the "
+                "caps at 1 and length"
+            )
+        if self.attach_at is not None and not polymer:
+            raise ValueError("`attach_at` is for polymer fragments; use fragment_resnum otherwise")
+        if polymer and self.fragment_resnum is not None:
+            raise ValueError("give attach_at for a grafted chain, not fragment_resnum")
+        if polymer and self.attach_at is not None:
+            length = self.fragment.polymer.length
+            if self.attach_at > length:
+                raise ValueError(
+                    f"attach_at {self.attach_at} is outside the chain's positions 1..{length} "
+                    f"(the caps are 1 and {length})"
                 )
         if self.name is not None and self._is_group:
             raise ValueError("a group entry cannot set `name`; its sites are named in order")
@@ -461,7 +567,9 @@ def declared_modifications(
         for key in ("leaving_atom_names", "fragment_leaving_atom_names"):
             if isinstance(fields.get(key), str):
                 fields[key] = [fields[key]]
-        for site, fragment in _attachment_sites(arguments):
+        polymer_set = sets.get("polymer")
+        polymer_force_field = list(polymer_set.force_field) if polymer_set else []
+        for site, fragment in _attachment_sites(arguments, polymer_force_field):
             declared.append(
                 {
                     "entry": where,
@@ -543,7 +651,9 @@ def _expand(entry: _Sites) -> list[str]:
     return [str(parse_site(row["site"])) for row in _csv_rows(entry.sites_file)]
 
 
-def _attachment_sites(attachment: Attachment) -> list[tuple[str, dict[str, Any]]]:
+def _attachment_sites(
+    attachment: Attachment, polymer_force_field: Optional[list[str]] = None
+) -> list[tuple[str, dict[str, Any]]]:
     from polyzymd.modifying_proteins.sites import parse_site
 
     library = attachment.glycan_library
@@ -562,7 +672,7 @@ def _attachment_sites(attachment: Attachment) -> list[tuple[str, dict[str, Any]]
             (str(parse_site(row["site"])), _file_data(_glycan_path(library, _glycan_of(row))))
             for row in _csv_rows(attachment.sites_file)
         ]
-    fragment = _fragment_data(attachment.fragment)
+    fragment = _fragment_data(attachment.fragment, polymer_force_field)
     return [(site, fragment) for site in _expand(attachment)]
 
 
@@ -603,7 +713,9 @@ def _file_data(path: Path) -> dict[str, Any]:
     return {"pdb_path": str(path), "sha256": digest}
 
 
-def _fragment_data(fragment: Fragment) -> dict[str, Any]:
+def _fragment_data(
+    fragment: Fragment, polymer_force_field: Optional[list[str]] = None
+) -> dict[str, Any]:
     if fragment.pdb_path is not None:
         return _file_data(fragment.pdb_path)
     if fragment.ccd_file is not None:
@@ -613,7 +725,37 @@ def _fragment_data(fragment: Fragment) -> dict[str, Any]:
             "sha256": digest,
             "link_atom": fragment.link_atom,
         }
-    return fragment.as_source()
+    return fragment.as_source(polymer_force_field)
+
+
+def resolve_grafts(solutes: list[Any]) -> None:
+    """Give each grafted chain with ``monomers_from`` the monomers and caps of that solute."""
+    polymers = {solute.name: solute for solute in solutes if solute.type == "polymer"}
+    for solute in solutes:
+        for modification in getattr(solute, "modifications", None) or []:
+            attachment = modification.attach
+            if attachment is None or attachment.fragment is None:
+                continue
+            chain = attachment.fragment.polymer
+            if chain is None or chain.monomers_from is None:
+                continue
+            source = polymers.get(chain.monomers_from)
+            if source is None:
+                known = ", ".join(sorted(polymers)) or "none"
+                raise ValueError(
+                    f"monomers_from {chain.monomers_from!r} names no polymer solute "
+                    f"(polymer solutes: {known})"
+                )
+            if source.end_groups is None or any(m.smiles is None for m in source.monomers):
+                raise ValueError(
+                    f"monomers_from {chain.monomers_from!r}: a grafted chain is built from "
+                    "star-sited SMILES and end_groups, which that solute does not give "
+                    "(use generation_mode: dynamic there, or list the monomers here)"
+                )
+            chain.resolve(
+                [monomer.model_dump(exclude_none=True) for monomer in source.monomers],
+                source.end_groups.model_dump(exclude_none=True),
+            )
 
 
 def _target_data(target) -> Any:

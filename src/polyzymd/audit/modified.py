@@ -623,6 +623,7 @@ def _attachment_details(arguments: dict) -> tuple:
         arguments.get("fragment_resname"),
         names(arguments.get("leaving_atom_names")),
         names(arguments.get("fragment_leaving_atom_names")),
+        arguments.get("attach_at"),
         bool(arguments.get("merge", False)),
         int(arguments.get("bond_order", 1)),
     )
@@ -654,7 +655,17 @@ def _target(to: Any, base: Path) -> Any:
     return ("smiles", to.get("smiles"), to.get("resname"))
 
 
+#: What identifies a grafted chain: its monomers, caps, length, sequence block and seed.
+#: Its drawn sequence and replicate are left out, since each replicate draws anew.
+_CHAIN_KEYS = ("monomers", "end_groups", "length", "sequence", "random_seed")
+
+
 def _fragment(fragment: dict, base: Path) -> tuple:
+    if "polymer" in fragment:
+        import json
+
+        chain = {key: fragment["polymer"].get(key) for key in _CHAIN_KEYS}
+        return ("polymer", json.dumps(chain, sort_keys=True, default=str))
     if "pdb_path" in fragment:
         return ("pdb", fragment.get("sha256") or _sha256(base / fragment["pdb_path"]))
     if "ccd" in fragment:

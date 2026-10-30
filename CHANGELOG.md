@@ -9,12 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A polymer solute takes a `sequence:` block: `mode: statistical` (the default,
-  drawn from the monomers' probabilities), `block` (`blocks: [{SBMA: 6}, {NHS: 1},
-  {SBMA: 6}]`) or `explicit` (`units: [...]`), and `fixed: {7: NHS}` pins positions
-  in any mode. Positions count repeat units from the head; monomers are named by
-  label or name, and a monomer used only at pinned positions may have probability
-  0. Without `sequence:` chains are drawn and cached exactly as before.
+- Polymer chains grafted onto a protein: an `attach` of `type: polymer` whose
+  `fragment: {polymer: ...}` is built by the star-sited polymer generator, from
+  the monomers of a polymer solute (`monomers_from`) or its own, with `sequence`;
+  each replicate draws its own chain unless `random_seed` fixes one. `attach_at`
+  names the position that bonds; the stated
+  `reaction` bonds it. The whole chain is one site (NAGL on its capped model,
+  Sage), its own segment (`P001`, ...), and its drawn sequence is recorded.
+  Grafted chains count toward `composition.polymer_mass_fraction` and are listed
+  by `composition.polymer_sequences`; the `contacts` analysis takes
+  `polymers: soluble | attached | all` (default `soluble`); a null
+  `protein_selection` leaves a protein's attachment segments out.
+- A polymer solute takes a `sequence:` block: `mode: statistical` (the default),
+  `block` (`blocks: [{H: 1}, {SBMA: 5}, {NHS: 1}, {SBMA: 5}, {H: 1}]`) or
+  `explicit` (`units: [...]`), and `fixed: {7: NHS}` pins positions in any mode.
+  Positions count the whole chain, 1 to `length`, the caps being 1 and `length`;
+  monomers and caps are named by label or name, and a monomer used only at pinned
+  positions may have probability 0. Without `sequence:` chains are drawn and
+  cached exactly as before. A config with `sequence:`, `mutations:` or
+  `modifications:` gets a `-seq`/`-mod` hash token in its run folder name; other
+  configs keep their 1.3 names.
 - A protein solute takes `mutations:` (applied first), `modifications:`
   (`deprotonate`, `protonate`, `attach`, in order) and `modification_parameters:`
   (one force field and charge set per site type). Sites are written `A:N58` or

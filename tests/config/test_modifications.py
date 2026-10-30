@@ -200,6 +200,33 @@ def test_declared_modifications_expand_every_group_form(tmp_path) -> None:
     ]
 
 
+def test_attach_at_must_be_a_position_of_the_chain() -> None:
+    chain = {
+        "monomers": [{"label": "A", "name": "SBMA", "smiles": "[*]CC([*])C", "probability": 1.0}],
+        "end_groups": {
+            "head": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+            "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+        },
+        "length": 9,
+        "random_seed": 1,
+    }
+    graft = {
+        "type": "polymer",
+        "site": "A:K8",
+        "atom_name": "NZ",
+        "fragment": {"polymer": chain},
+    }
+    message = _error(
+        modifications=[{"attach": {**graft, "attach_at": 10}}],
+        modification_parameters={"polymer": SAGE},
+    )
+    assert "attach_at 10 is outside the chain's positions 1..9" in message
+    _protein(
+        modifications=[{"attach": {**graft, "attach_at": 5}}],
+        modification_parameters={"polymer": SAGE},
+    )
+
+
 # --- What `validate` checks before a build ------------------------------------------------
 
 QUICKSTART = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
@@ -369,6 +396,48 @@ def test_validate_warns_about_a_restraint_by_residue_number_on_a_glycosylated_pr
     assert not any(
         "restraint" in w for w in collect_protocol_warnings(load_config(folder / "config.yaml"))
     )
+
+
+def test_graft_fields_are_part_of_the_modification_identity() -> None:
+    """Grafts that differ only in attach_at or in their sequence are different systems."""
+    from polyzymd.config.modifications import modification_identity
+
+    chain = {
+        "monomers": [
+            {"label": "A", "name": "SBMA", "smiles": "[*]CC([*])C", "probability": 1.0},
+            {"label": "N", "name": "NHS", "smiles": "[*]CC([*])CO", "probability": 0.0},
+        ],
+        "end_groups": {
+            "head": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+            "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+        },
+        "length": 9,
+        "sequence": {"fixed": {5: "NHS"}},
+    }
+
+    def identity(attach_at: int = 5, sequence: dict | None = None) -> str:
+        polymer = {**chain, **({"sequence": sequence} if sequence else {})}
+        return modification_identity(
+            _protein(
+                modifications=[
+                    {
+                        "attach": {
+                            "type": "polymer",
+                            "site": "A:K8",
+                            "atom_name": "NZ",
+                            "attach_at": attach_at,
+                            "fragment": {"polymer": polymer},
+                        }
+                    }
+                ],
+                modification_parameters={"polymer": SAGE},
+            )
+        )
+
+    base = identity()
+    assert base and base == identity()
+    assert identity(attach_at=4) != base
+    assert identity(sequence={"fixed": {4: "NHS"}}) != base
 
 
 def test_a_ccd_file_fragment_needs_a_link_atom_and_an_existing_file(tmp_path) -> None:

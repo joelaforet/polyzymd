@@ -41,7 +41,8 @@ def test_without_a_pattern_the_chain_sequence_is_unchanged() -> None:
 
 
 def test_a_pinned_position_keeps_its_monomer_and_the_rest_are_drawn() -> None:
-    pattern = [None, None, None, "N", None, None, None]
+    # Positions count the whole chain: 1 and 9 are the caps, 5 the middle unit.
+    pattern = [None, None, None, None, "N", None, None, None, None]
     random.seed(3)
     chains = [_builder(pattern)._draw_sequence() for _ in range(20)]
     assert all(chain[0] == "H" and chain[-1] == "T" for chain in chains)
@@ -51,7 +52,7 @@ def test_a_pinned_position_keeps_its_monomer_and_the_rest_are_drawn() -> None:
 
 
 def test_a_full_pattern_is_the_same_for_every_chain() -> None:
-    pattern = list("AAANAAA")
+    pattern = list("HAAANAAAT")
     random.seed(0)
     assert {_builder(pattern)._draw_sequence() for _ in range(5)} == {"HAAANAAAT"}
 
@@ -72,7 +73,10 @@ def test_build_from_config_follows_the_sequence_block(monkeypatch) -> None:
         count=3,
         force_field=["openff-2.3.0.offxml"],
         charges={"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"},
-        sequence={"mode": "block", "blocks": [{"SBMA": 3}, {"NHS": 1}, {"SBMA": 3}]},
+        sequence={
+            "mode": "block",
+            "blocks": [{"H": 1}, {"SBMA": 3}, {"NHS": 1}, {"SBMA": 3}, {"T": 1}],
+        },
     )
     builder = PolymerBuilder(characters=["A"], probabilities=[1.0], length=9, type_prefix="TP")
     monkeypatch.setattr(builder, "_get_or_create_molecule", lambda sequence: sequence)

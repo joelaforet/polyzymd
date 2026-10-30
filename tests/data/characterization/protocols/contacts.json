@@ -374,6 +374,6 @@
  },
  "unknown setting": {
   "hint": "Run polyzymd analyze contacts -c A/config.yaml --set method=..., one of the settings above.",
-  "message": "contacts takes no setting other than method, polymer_selection, protein_selection, polymer_types, use_pbc, regions, cutoff, heavy_atoms, exposed_threshold, buried_threshold, max_asa, probe_radius_nm, n_sphere_points, tolerance_ps."
+  "message": "contacts takes no setting other than method, polymer_selection, protein_selection, polymers, polymer_types, use_pbc, regions, cutoff, heavy_atoms, exposed_threshold, buried_threshold, max_asa, probe_radius_nm, n_sphere_points, tolerance_ps."
  }
 }

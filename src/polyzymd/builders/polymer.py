@@ -179,8 +179,9 @@ class PolymerBuilder:
             charger_type: Charge method ("nagl", "espaloma", "am1bcc") for dynamic mode.
             max_retries: Builds tried before a chain with a pierced ring or
                 overlapping atoms is refused.
-            sequence_pattern: Label of each repeat unit, None where it is drawn
-                from the probabilities; None draws every unit (the default).
+            sequence_pattern: Label at each position of the chain (caps
+                included), None where it is drawn; None draws every position
+                (the default).
 
         Raises:
             ValueError: If probabilities don't sum to 1.0 or lengths mismatch.
@@ -417,20 +418,27 @@ class PolymerBuilder:
         return self.build(config.count, seed=seed)
 
     def _draw_sequence(self) -> str:
-        """Draw one chain's sequence, with its two cap labels when the config gives caps."""
+        """Draw one chain's sequence, with its two cap labels when the config gives caps.
+
+        A configured sequence pattern covers every position, caps included;
+        its pinned positions are kept and the rest drawn in the same order
+        (head cap, repeat units, tail cap) as without a pattern.
+        """
+        pattern = self._sequence_pattern
         if not self._end_groups:
-            return self._draw_units(self._length)
+            return self._draw_units(self._length, pattern)
         # With caps the length counts the two ends: a 5-mer is a head cap,
         # three repeat units and a tail cap.
-        head = self._draw_cap("head")
-        middle = self._draw_units(self._length - 2)
-        return head + middle + self._draw_cap("tail")
+        head = pattern[0] if pattern is not None and pattern[0] else self._draw_cap("head")
+        middle = self._draw_units(self._length - 2, None if pattern is None else pattern[1:-1])
+        tail = pattern[-1] if pattern is not None and pattern[-1] else self._draw_cap("tail")
+        return head + middle + tail
 
-    def _draw_units(self, n_units: int) -> str:
-        """Draw the repeat units, following the configured sequence pattern if any."""
-        if self._sequence_pattern is None:
+    def _draw_units(self, n_units: int, pattern: Optional[List[Optional[str]]]) -> str:
+        """Draw the repeat units, keeping the pattern's pinned ones if there is a pattern."""
+        if pattern is None:
             return generate_random_sequence(n_units, self._characters, self._probabilities)
-        return draw_units(self._sequence_pattern, self._characters, self._probabilities)
+        return draw_units(pattern, self._characters, self._probabilities)
 
     def _draw_cap(self, end: str) -> str:
         """Draw the label of one end's cap from its options' probabilities."""

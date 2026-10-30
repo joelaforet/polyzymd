@@ -247,6 +247,7 @@ def plan_attach(
     bond_order: int = 1,
     name: str | None = None,
     parameters: str | None = None,
+    attach_at: int | None = None,
     relax: bool = True,
     minimize: bool = True,
     platform: str | None = None,
@@ -269,6 +270,16 @@ def plan_attach(
             from polyzymd.modifying_proteins.glycam import check_glycan_pdb
 
             check_glycan_pdb(source["pdb_path"])
+    if attach_at is not None:
+        polymer = fragment.get("polymer") if isinstance(fragment, dict) else None
+        if polymer is None:
+            raise ValueError("attach_at names a repeat unit of a polymer fragment ({polymer: ...})")
+        if fragment_resnum is not None:
+            raise ValueError("give attach_at or fragment_resnum, not both")
+        from polyzymd.modifying_proteins.polymers import anchor_residue, draw_chain
+
+        fragment = {"polymer": {**polymer, "drawn": draw_chain(polymer, site=str(site))}}
+        fragment_resnum = anchor_residue(fragment["polymer"], attach_at)
     if isinstance(fragment, dict):
         fragment = _fragment_from_source(protein, fragment)
     source = fragment_source(fragment)
@@ -288,6 +299,9 @@ def plan_attach(
         arguments["bond_order"] = bond_order
     if parameters is not None:
         arguments["parameters"] = parameters
+    if attach_at is not None:
+        arguments["attach_at"] = attach_at
+        arguments.pop("fragment_resnum", None)
     plan = protein.mbuild.plan_attach(
         fragment,
         fragment_atom_name,
@@ -492,9 +506,15 @@ def _fragment_from_source(protein: ModifiedProtein, source: dict):
             "link_atom": source["link_atom"],
         }
         return fragment
+    if "polymer" in source:
+        from polyzymd.modifying_proteins.polymers import fragment_from_polymer
+
+        fragment, recorded = fragment_from_polymer(source["polymer"])
+        _FRAGMENT_SOURCES[fragment] = recorded
+        return fragment
     raise ValueError(
         f"Cannot build a fragment from {source!r}; give smiles + resname, pdb_path, "
-        "ccd + link_atom, or ccd_file + link_atom."
+        "ccd + link_atom, ccd_file + link_atom, or polymer."
     )
 
 

@@ -199,13 +199,17 @@ class SystemBuilder:
         return self._enzyme_topology
 
     def build_modified_enzyme(
-        self, solute: "ProteinSolute", base_dir: Union[str, Path, None] = None
+        self,
+        solute: "ProteinSolute",
+        base_dir: Union[str, Path, None] = None,
+        replicate: Optional[int] = None,
     ) -> Topology:
         """Build a protein with mutations or modifications, parameterized site by site.
 
         Every change is applied (and so checked against the structure) before
         anything is packed. The protein is written to the run folder as
-        ``modified_protein.pdb``.
+        ``modified_protein.pdb``. ``replicate`` seeds grafted chains that are
+        drawn per replicate.
         """
         from openff.toolkit import Topology
 
@@ -214,6 +218,7 @@ class SystemBuilder:
             constraints_from=self._sm_ff,
             working_dir=self._working_dir,
             base_dir=base_dir,
+            replicate=replicate,
         )
         molecules = self._modified_protein.molecules()
         self._enzyme_topology = Topology.from_molecules(molecules)
@@ -1099,7 +1104,9 @@ class SystemBuilder:
         # 1. Build enzyme
         LOGGER.info(f"Building enzyme: {config.enzyme.name}")
         if getattr(config.enzyme, "is_modified", False):
-            self.build_modified_enzyme(config.enzyme, getattr(config, "_config_dir", None))
+            self.build_modified_enzyme(
+                config.enzyme, getattr(config, "_config_dir", None), replicate=polymer_seed
+            )
         else:
             self.build_enzyme(config.enzyme.pdb_path, config.enzyme.custom_substructures_path)
 

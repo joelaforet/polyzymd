@@ -621,15 +621,16 @@ class MonomerSpec(_ConfigModel):
 
 
 class PolymerSequence(_ConfigModel):
-    """How the repeat units of each chain are chosen.
+    """How the units of each chain are chosen.
 
-    Positions count repeat units only, from 1 at the head; the end caps come
-    from ``end_groups``. A chain of ``length`` 15 with caps has 13 repeat
-    units. ``statistical`` draws every unpinned position from the monomers'
-    probabilities (seeded, per chain); ``block`` lays out runs
-    (``[{SBMA: 6}, {NHS: 1}, {SBMA: 6}]``); ``explicit`` lists every unit.
-    ``fixed`` pins positions in any mode (``{7: NHS}``). Monomers are named
-    by label or by name.
+    Positions count the whole chain, 1 to ``length``; with ``end_groups`` the
+    caps are positions 1 and ``length`` and take only a cap of that end.
+    ``statistical`` draws every unpinned position (caps from their
+    probabilities, repeat units from the monomers'; seeded, per chain);
+    ``block`` lays out runs (``[{H: 1}, {SBMA: 5}, {NHS: 1}, {SBMA: 5}, {H: 1}]``);
+    ``explicit`` lists every position. ``fixed`` pins positions in any mode
+    (``{7: NHS}`` is the middle of a 13-unit chain). Monomers and caps are
+    named by label or by name.
     """
 
     mode: Literal["statistical", "block", "explicit"] = Field(
@@ -663,44 +664,75 @@ class PolymerSequence(_ConfigModel):
                 raise ValueError(f"block {block}: a run has at least 1 unit")
         return self
 
-    def pattern(self, n_units: int, label_of: dict[str, str]) -> list[str | None]:
-        """Return the label of each position, None where a statistical draw fills it.
+    def pattern(
+        self,
+        length: int,
+        label_of: dict[str, str],
+        caps: dict[str, dict[str, str]] | None = None,
+    ) -> list[str | None]:
+        """Return the label at each position 1..``length``, None where a draw fills it.
 
-        ``label_of`` maps every monomer label and name to its label.
+        ``label_of`` maps every monomer label and name to its label. ``caps``
+        maps, for ``head`` and ``tail``, every cap label and name to its label;
+        with caps, positions 1 and ``length`` are the caps and take only a cap
+        of that end (a monomer only when a cap of that end carries its label).
         """
 
-        def label(name: str, where: str) -> str:
+        def label(name: str, position: int, where: str) -> str:
+            end = None
+            if caps is not None and position == 1:
+                end = "head"
+            elif caps is not None and position == length:
+                end = "tail"
+            if end is not None:
+                allowed = dict(caps[end])
+                allowed.update(
+                    {key: value for key, value in label_of.items() if value in caps[end].values()}
+                )
+                if name not in allowed:
+                    choices = ", ".join(sorted(set(caps[end].values())))
+                    raise ValueError(
+                        f"sequence {where}: position {position} is the {end} cap, so it takes "
+                        f"one of the end_groups.{end} labels ({choices}), not {name!r}"
+                    )
+                return allowed[name]
             if name not in label_of:
                 known = ", ".join(sorted(label_of))
-                raise ValueError(f"sequence {where}: unknown monomer {name!r}; use one of {known}")
+                raise ValueError(
+                    f"sequence {where}: unknown monomer {name!r} at position {position}; "
+                    f"use one of {known}"
+                )
             return label_of[name]
 
+        span = "1.." + str(length) + (" (the caps are 1 and " + str(length) + ")" if caps else "")
         if self.mode == "block":
-            pattern: list[str | None] = []
+            names = []
             for block in self.blocks:
                 ((name, count),) = block.items()
-                pattern += [label(name, "blocks")] * count
-            if len(pattern) != n_units:
+                names += [name] * count
+            if len(names) != length:
                 raise ValueError(
-                    f"sequence blocks hold {len(pattern)} repeat units but the chain has "
-                    f"{n_units} (length minus the two end caps)"
+                    f"sequence blocks hold {len(names)} positions but the chain has {length} "
+                    f"({span})"
                 )
+            pattern: list[str | None] = [
+                label(name, i, "blocks") for i, name in enumerate(names, start=1)
+            ]
         elif self.mode == "explicit":
-            pattern = [label(name, "units") for name in self.units]
-            if len(pattern) != n_units:
+            if len(self.units) != length:
                 raise ValueError(
-                    f"sequence units list {len(pattern)} repeat units but the chain has "
-                    f"{n_units} (length minus the two end caps)"
+                    f"sequence units list {len(self.units)} positions but the chain has "
+                    f"{length} ({span})"
                 )
+            pattern = [label(name, i, "units") for i, name in enumerate(self.units, start=1)]
         else:
-            pattern = [None] * n_units
+            pattern = [None] * length
         for position, name in sorted(self.fixed.items()):
-            if not 1 <= position <= n_units:
+            if not 1 <= position <= length:
                 raise ValueError(
-                    f"sequence fixed position {position} is outside the chain's repeat units "
-                    f"1..{n_units}"
+                    f"sequence fixed position {position} is outside the chain's positions {span}"
                 )
-            pattern[position - 1] = label(name, "fixed")
+            pattern[position - 1] = label(name, position, "fixed")
         return pattern
 
 
@@ -850,28 +882,37 @@ class PolymerSolute(_Solute):
             raise ValueError(f"Monomer probabilities must sum to 1.0, got {total}")
         return self
 
-    @property
-    def n_units(self) -> int:
-        """Repeat units per chain: the length without the two end caps, when there are caps."""
-        return self.length - 2 if self.end_groups is not None else self.length
-
     def label_of(self) -> dict[str, str]:
         """Return each monomer's label, keyed by its label and by its name."""
         names = {m.label: m.label for m in self.monomers}
         names.update({m.name: m.label for m in self.monomers if m.name})
         return names
 
+    def cap_labels(self) -> dict[str, dict[str, str]] | None:
+        """Return, for each end, every cap label and name mapped to its label; None without caps."""
+        if self.end_groups is None:
+            return None
+        return {
+            end: {
+                **{o.label: o.label for o in getattr(self.end_groups, end)},
+                **{o.name: o.label for o in getattr(self.end_groups, end) if o.name},
+            }
+            for end in ("head", "tail")
+        }
+
     def sequence_pattern(self) -> list[str | None] | None:
-        """Return the label of each repeat unit (None where drawn), or None without `sequence`."""
+        """Return the label at each position 1..length (None where drawn), or None without
+        `sequence`. With caps, positions 1 and length are the caps."""
         if self.sequence is None:
             return None
-        return self.sequence.pattern(self.n_units, self.label_of())
+        return self.sequence.pattern(self.length, self.label_of(), self.cap_labels())
 
     @model_validator(mode="after")
     def _sequence_fits(self) -> "PolymerSolute":
         """A `sequence` block must fit the chain and name configured monomers."""
         pattern = self.sequence_pattern()
-        if pattern is not None and None in pattern:
+        units = pattern[1:-1] if pattern is not None and self.end_groups is not None else pattern
+        if units is not None and None in units:
             drawn = {m.label for m in self.monomers if m.probability > 0}
             if not drawn:
                 raise ValueError("statistical positions need a monomer with probability above 0")
@@ -1888,6 +1929,15 @@ def expand_path(path: Path) -> Path:
     return Path(expanded)
 
 
+def _short_hash(data: Any) -> str:
+    """Return the first six hex digits of the SHA-256 of ``data`` as sorted JSON."""
+    import hashlib
+    import json
+
+    text = json.dumps(data, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:6]
+
+
 #: Placeholders ``output.naming_template`` may use.
 NAMING_PLACEHOLDERS = (
     "enzyme",
@@ -2467,6 +2517,9 @@ class SimulationConfig(_ConfigModel):
                     f"segid {solute.segid} is used by more than one solute; each solute "
                     "needs its own segment ID"
                 )
+        from polyzymd.config.modifications import resolve_grafts
+
+        resolve_grafts(self.solutes)
         for solute in self.solutes:
             if len(solute.force_field) != 1:
                 raise ValueError(
@@ -2860,6 +2913,27 @@ class SimulationConfig(_ConfigModel):
 
         return "_".join(token for _, token in sorted(tokens, key=lambda item: item[0]))
 
+    def _modification_token(self) -> str:
+        """Six hex digits of the protein's modification identity, for the run-folder name.
+
+        The identity is :func:`~polyzymd.config.modifications.modification_identity`,
+        which the analysis identity uses too. When an input file is missing, the
+        build refuses the config and names the file; the token then comes from
+        the blocks as written.
+        """
+        from polyzymd.config.modifications import modification_identity
+
+        protein = self.enzyme
+        try:
+            return modification_identity(protein)[:6]
+        except (OSError, ValueError):
+            return _short_hash(
+                {
+                    "mutations": [m.model_dump(mode="json") for m in protein.mutations],
+                    "modifications": [m.model_dump(mode="json") for m in protein.modifications],
+                }
+            )
+
     def _run_directory_template_values(self, replicate: int | str = 1) -> dict[str, Any]:
         """Build centralized values for run-directory naming templates.
 
@@ -2879,6 +2953,14 @@ class SimulationConfig(_ConfigModel):
             sorted_labels = sorted(probs.keys())
             composition = "_".join(f"{lbl}{probs[lbl] * 100:.0f}" for lbl in sorted_labels)
             polymer_type = f"{self.polymers.type_prefix}_{composition}"
+            # Only a config that uses a sequence block gets the token, so the
+            # names of configs without one are those of 1.3.
+            if self.polymers.sequence is not None:
+                sequence = self.polymers.sequence.model_dump(mode="json")
+                polymer_type += f"-seq{_short_hash(sequence)}"
+        enzyme = self.enzyme.name
+        if getattr(self.enzyme, "is_modified", False):
+            enzyme += f"-mod{self._modification_token()}"
 
         substrate_name = self.substrate.name if self.substrate else "apo"
         primary_solvent = self._primary_solvent_token()
@@ -2888,7 +2970,7 @@ class SimulationConfig(_ConfigModel):
             solvent_composition = f"{primary_solvent}_{cosolvent_composition}"
 
         return {
-            "enzyme": self.enzyme.name,
+            "enzyme": enzyme,
             "substrate": substrate_name.replace("-", ""),
             "polymer_type": polymer_type,
             "temperature": int(self.thermodynamics.temperature),

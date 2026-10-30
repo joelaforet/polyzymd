@@ -142,7 +142,7 @@ residues, read from `glycan_library` (default `structures/glycans`, files
 |-------|--------|
 | mutation | `to`: a CCD code, `{smiles, resname}` (a side chain, `*` bonds to CA) or `{ccd_file}`; `stereo`: `L` or `D` |
 | `deprotonate`, `protonate` | `atom_name`: the atom that loses or gains H |
-| `attach` | `type` (glycan, polymer, generic), `atom_name`, `fragment` (`{smiles, resname}`, `{pdb_path}` or `{ccd, link_atom}`), `reaction` (mBuild named reaction or SMARTS), `fragment_atom_name`, `fragment_resnum`, `leaving_atom_names`, `fragment_leaving_atom_names`, `merge`, `bond_order`, `name` (4 characters; default `G001`, `P001`, `M001` in order) |
+| `attach` | `type` (glycan, polymer, generic), `atom_name`, `fragment` (`{smiles, resname}`, `{pdb_path}`, `{ccd, link_atom}` or `{polymer}`), `reaction` (mBuild named reaction or SMARTS), `attach_at` (polymer fragments), `fragment_atom_name`, `fragment_resnum`, `leaving_atom_names`, `fragment_leaving_atom_names`, `merge`, `bond_order`, `name` (4 characters; default `G001`, `P001`, `M001` in order) |
 
 A mutation to one of the 20 canonical residues (or its D form) stays on
 ff14SB. Every other mutation and every attachment makes a site: the side chain
@@ -156,6 +156,44 @@ numbered from 1, so select protein residues by segment: `segid PROT and resid 14
 Sites in `mutations:` and `modifications:` use the residue numbers of the input PDB; the
 written structures number the protein from 1 (as an unmodified build does), and restraints
 and analysis selections use those written numbers.
+
+A grafted chain is an `attach` of `type: polymer` whose fragment is a chain the
+polymer generator builds. Its monomers and caps come from a `type: polymer`
+solute of the same config (`monomers_from: <name>`, which must be dynamic) or
+are listed in the fragment as for a solute. `length` counts the two caps, and
+`sequence` works as for a solute. Each replicate draws its own chain, seeded by
+the replicate number and the site; `random_seed` gives one chain for every
+replicate instead. Each site of an entry with several sites draws its own
+chain. `attach_at` is the position that bonds, counted over the whole chain as
+in `sequence` (a cap position only when that cap is a monomer's end unit), and
+`reaction` decides which atoms bond and leave. The whole chain is one site of
+type `polymer` (segment `P001`, ...), and each replicate's drawn sequence is
+recorded in its build record.
+
+```yaml
+    modifications:
+      - deprotonate: {site: A:K8, atom_name: NZ}
+      - attach:
+          type: polymer
+          site: A:K8
+          atom_name: NZ
+          # NHS ester aminolysis: the amine bonds the ester carbon, NHS leaves
+          reaction: "[N:1]([H:2])[H].[C:3](=[O:4])[O][N]>>[N:1]([H:2])[C:3]=[O:4]"
+          attach_at: 8                  # the middle of the 15 positions
+          fragment:
+            polymer:
+              monomers_from: pSBMA      # a type: polymer solute
+              length: 15                # two caps (1 and 15) and 13 repeat units
+              sequence: {fixed: {8: NHS}}
+    modification_parameters:
+      polymer: {force_field: [openff-2.3.0.offxml], charges: {method: nagl, model: openff-gnn-am1bcc-1.0.0.pt}}
+```
+
+Grafted chains count toward `composition.polymer_mass_fraction`, and
+`composition.polymer_sequences` lists them apart from the soluble chains. The
+`contacts` analysis takes `polymers: soluble | attached | all` (default
+`soluble`, the packed chains), and a null `protein_selection` leaves the
+protein's attachment segments out.
 
 ### Small molecule (`type: small_molecule`)
 
@@ -275,22 +313,23 @@ that kept its C=C double bond:
 
 ### Sequence (`sequence`)
 
-Positions count repeat units from 1 at the head; the end caps come from
-`end_groups`, so a chain of `length` 15 with caps has 13 repeat units.
-Monomers are named by `label` or `name`. Without `sequence`, every repeat
-unit is drawn from the probabilities, as in 1.3.
+Positions count the whole chain, 1 to `length`. With `end_groups`, positions 1
+and `length` are the caps: they take only a cap of that end (by label or name),
+or a monomer whose end unit is one of that end's caps. Monomers are named by
+`label` or `name`. Without `sequence`, every position is drawn, as in 1.3.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `mode` | string | No | "statistical" | `statistical`: draw each open position from the probabilities (seeded, per chain); `block`: runs in order; `explicit`: every unit listed |
-| `blocks` | list | In block mode | - | Runs, each `{monomer: count}`; the counts sum to the number of repeat units |
-| `units` | list | In explicit mode | - | Every repeat unit, head to tail |
+| `blocks` | list | In block mode | - | Runs, each `{monomer: count}` (caps included); the counts sum to `length` |
+| `units` | list | In explicit mode | - | Every position, head cap to tail cap |
 | `fixed` | object | No | {} | Pinned positions `{position: monomer}` in any mode. A monomer used only at pinned positions may have probability 0 |
 
 ```yaml
+length: 13
 sequence:
   mode: statistical
-  fixed: {7: NHS}      # NHS in the middle of 13 repeat units; the rest drawn
+  fixed: {7: NHS}      # NHS in the middle of the 13 positions; the rest drawn
 ```
 
 ### Packing Options (`packing`)
@@ -940,15 +979,21 @@ template without `{replicate}`, since the replicates would share one folder.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `{enzyme}` | Name of the protein solute | "LipA" |
+| `{enzyme}` | Name of the protein solute; with `mutations` or `modifications`, followed by `-mod` and a six-digit hash of the declared changes | "LipA", "LipA-mod3f9a1c" |
 | `{substrate}` | Name of the small-molecule solute (hyphens removed), or `apo` without one | "ResorufinButyrate" |
-| `{polymer_type}` | Polymer type prefix and composition, or `none` without polymers | "SBMA-EGPMA_A70_B30" |
+| `{polymer_type}` | Polymer type prefix and composition, or `none` without polymers; with a `sequence` block, followed by `-seq` and a six-digit hash of it | "SBMA-EGPMA_A70_B30", "SBMA-EGPMA_A70_B30-seq0b42de" |
 | `{duration}` | Production duration in ns: whole ns from 1 ns up, in full below 1 ns | "100", "0.005" |
 | `{temperature}` | Temperature in K | "300" |
 | `{replicate}` | Replicate number | "1" |
 | `{primary_solvent}` | Primary solvent token | "water_tip3p" |
 | `{cosolvent_composition}` | Co-solvents sorted by normalized name, or `none` | "dmso_30molpct_urea_2p5M" |
 | `{solvent_composition}` | Primary solvent plus co-solvents when present | "water_tip3p_dmso_30molpct" |
+
+The `-mod` and `-seq` tokens appear only when a config uses those blocks, so a
+config without them keeps the folder name it had in 1.3. The `-mod` hash covers
+every change, expanded one per site, with its parameter set, and names input
+files by their SHA-256, so the same changes give the same folder name on any
+machine; a modified and an unmodified protein of one name never share a folder.
 
 Mole-fraction co-solvents use mol-percent naming tokens with the `molpct`
 suffix. Concentration-based co-solvents use molarity tokens such as `2p5M`.

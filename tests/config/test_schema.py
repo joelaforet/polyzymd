@@ -366,6 +366,57 @@ class TestRunDirectoryNaming:
         assert config.format_run_directory_name(4) == "TestEnzyme_apo_none_1ns_300K_run4"
         assert calls == [config._run_directory_template_values(4)]
 
+    def test_a_modified_protein_gets_a_token_from_its_declared_changes(self, minimal_config_data):
+        """Mutations or modifications add -mod<hash>; an unmodified protein keeps its 1.3 name."""
+        import copy
+        import re
+
+        from polyzymd.config.schema import SimulationConfig
+
+        plain = SimulationConfig(**minimal_config_data).format_run_directory_name(1)
+        assert plain == "TestEnzyme_apo_none_1ns_300K_run1"
+
+        def name(to: str) -> str:
+            data = copy.deepcopy(minimal_config_data)
+            data["solutes"][0]["mutations"] = [{"site": "A:G1", "to": to}]
+            return SimulationConfig(**data).format_run_directory_name(1)
+
+        alanine = name("ALA")
+        assert re.fullmatch(r"TestEnzyme-mod[0-9a-f]{6}_apo_none_1ns_300K_run1", alanine)
+        assert alanine == name("ALA") != name("SER")
+
+    def test_a_polymer_sequence_block_gets_a_token(self, minimal_config_data, tmp_path):
+        """Block and statistical chains of one composition get different names."""
+        import copy
+
+        from polyzymd.config.schema import SimulationConfig
+
+        def name(sequence=None) -> str:
+            data = copy.deepcopy(minimal_config_data)
+            polymer = {
+                "type": "polymer",
+                "type_prefix": "TP",
+                "monomers": [
+                    {"label": "A", "probability": 0.5},
+                    {"label": "B", "probability": 0.5},
+                ],
+                "length": 4,
+                "count": 2,
+                "sdf_directory": str(tmp_path),
+                "force_field": [SAGE],
+                "charges": {"method": "preset"},
+            }
+            if sequence is not None:
+                polymer["sequence"] = sequence
+            data["solutes"].append(polymer)
+            return SimulationConfig(**data).format_run_directory_name(1)
+
+        statistical = name()
+        assert statistical == "TestEnzyme_apo_TP_A50_B50_1ns_300K_run1"
+        block = name({"mode": "block", "blocks": [{"A": 2}, {"B": 2}]})
+        assert block.startswith("TestEnzyme_apo_TP_A50_B50-seq") and block != statistical
+        assert name({"mode": "block", "blocks": [{"B": 2}, {"A": 2}]}) != block
+
     def test_solvent_token_formatting(self, minimal_config_data):
         """Solvent placeholders should render safe composition tokens."""
         minimal_config_data["solvent"] = {
@@ -1520,30 +1571,55 @@ class TestPolymerSequence:
         assert polymer.sequence_pattern() is None
         assert "sequence" not in polymer.model_dump()
 
-    def test_fixed_positions_count_repeat_units_and_take_names_or_labels(self) -> None:
-        polymer = self._polymer({"fixed": {4: "NHS", 1: "B"}})
-        assert polymer.sequence_pattern() == ["B", None, None, "N", None, None, None]
+    def test_fixed_positions_count_the_whole_chain_and_take_names_or_labels(self) -> None:
+        polymer = self._polymer({"fixed": {5: "NHS", 2: "B"}})
+        assert polymer.sequence_pattern() == [None, "B", None, None, "N", None, None, None, None]
 
-    def test_blocks_lay_out_runs(self) -> None:
-        polymer = self._polymer({"mode": "block", "blocks": [{"SBMA": 3}, {"N": 1}, {"A": 3}]})
-        assert polymer.sequence_pattern() == list("AAANAAA")
+    def test_blocks_lay_out_runs_over_every_position(self) -> None:
+        polymer = self._polymer(
+            {"mode": "block", "blocks": [{"H": 1}, {"SBMA": 3}, {"N": 1}, {"A": 3}, {"H": 1}]}
+        )
+        assert polymer.sequence_pattern() == list("HAAANAAAH")
 
     def test_explicit_units(self) -> None:
-        polymer = self._polymer({"mode": "explicit", "units": list("AABNBAA")})
-        assert polymer.sequence_pattern() == list("AABNBAA")
+        polymer = self._polymer({"mode": "explicit", "units": list("HAABNBAAH")})
+        assert polymer.sequence_pattern() == list("HAABNBAAH")
+
+    def test_a_cap_position_takes_a_monomer_only_when_a_cap_carries_its_label(self) -> None:
+        caps = {
+            "head": [{"label": "A", "smiles": "[*]C", "probability": 1.0}],
+            "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+        }
+        polymer = self._polymer({"fixed": {1: "SBMA"}}, end_groups=caps)
+        assert polymer.sequence_pattern()[0] == "A"
 
     @pytest.mark.parametrize(
         ("sequence", "message"),
         [
-            ({"mode": "block", "blocks": [{"A": 3}, {"N": 1}]}, "hold 4 repeat units but"),
-            ({"mode": "explicit", "units": ["A"] * 8}, "list 8 repeat units but the chain has 7"),
-            ({"fixed": {8: "N"}}, "position 8 is outside the chain's repeat units 1..7"),
-            ({"fixed": {2: "PEG"}}, "unknown monomer 'PEG'"),
+            ({"mode": "block", "blocks": [{"A": 3}, {"N": 1}]}, "hold 4 positions but"),
+            ({"mode": "explicit", "units": ["A"] * 8}, "list 8 positions but the chain has 9"),
+            ({"fixed": {10: "N"}}, "position 10 is outside the chain's positions 1..9"),
+            ({"fixed": {2: "PEG"}}, "unknown monomer 'PEG' at position 2"),
+            ({"fixed": {1: "SBMA"}}, "position 1 is the head cap, so it takes one of the"),
+            ({"fixed": {9: "N"}}, "position 9 is the tail cap"),
             ({"mode": "block"}, "mode block needs `blocks`"),
-            ({"units": ["A"] * 7}, "`units` is for mode explicit"),
+            ({"units": ["A"] * 9}, "`units` is for mode explicit"),
             ({"mode": "block", "blocks": [{"A": 3, "N": 4}]}, "each block is one"),
         ],
     )
     def test_errors_name_the_problem(self, sequence, message) -> None:
         with pytest.raises(ValidationError, match=re.escape(message)):
             self._polymer(sequence)
+
+
+def test_the_mod_token_is_the_start_of_the_modification_identity(minimal_config_data) -> None:
+    import copy
+
+    from polyzymd.config.modifications import modification_identity
+    from polyzymd.config.schema import SimulationConfig
+
+    data = copy.deepcopy(minimal_config_data)
+    data["solutes"][0]["mutations"] = [{"site": "A:G1", "to": "ALA"}]
+    config = SimulationConfig(**data)
+    token = modification_identity(config.enzyme)[:6]
+    assert config.format_run_directory_name(1) == f"TestEnzyme-mod{token}_apo_none_1ns_300K_run1"

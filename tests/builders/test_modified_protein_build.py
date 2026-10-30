@@ -188,6 +188,65 @@ def test_an_acylated_lysine_builds_with_sage_and_nagl(tmp_path: Path) -> None:
     assert site["name"] == "M001" and abs(site["shift_per_atom"]) < 0.005
 
 
+#: NHS ester aminolysis: the amine bonds the ester carbon, N-hydroxysuccinimide leaves.
+NHS_AMINOLYSIS = "[N:1]([H:2])[H].[C:3](=[O:4])[O][N]>>[N:1]([H:2])[C:3]=[O:4]"
+CAP = [{"label": "H", "smiles": "[*][H]", "probability": 1.0}]
+GRAFT_MONOMERS = [
+    {
+        "label": "A",
+        "name": "SBMA",
+        "residue_name": "SBM",
+        "smiles": "[*]CC([*])(C)C(=O)OCC[N+](C)(C)CCCS(=O)(=O)[O-]",
+        "probability": 1.0,
+    },
+    {
+        "label": "N",
+        "name": "NHS",
+        "residue_name": "NHS",
+        "smiles": "[*]CC([*])(C)C(=O)ON1C(=O)CCC1=O",
+        "probability": 0.0,
+    },
+]
+#: Trp-cage Lys8 carrying a 9-position SBMA chain through an NHS linker in the middle.
+GRAFTED = {
+    "modifications": [
+        {"deprotonate": {"site": "A:K8", "atom_name": "NZ"}},
+        {
+            "attach": {
+                "type": "polymer",
+                "site": "A:K8",
+                "atom_name": "NZ",
+                "reaction": NHS_AMINOLYSIS,
+                "attach_at": 5,
+                "fragment": {
+                    "polymer": {
+                        "monomers": GRAFT_MONOMERS,
+                        "end_groups": {"head": CAP, "tail": CAP},
+                        "length": 9,
+                        "sequence": {"fixed": {5: "NHS"}},
+                        "random_seed": 3,
+                    }
+                },
+            }
+        },
+    ],
+    "modification_parameters": {"polymer": SAGE},
+}
+
+
+def test_a_grafted_polymer_chain_builds_as_one_site_and_passes_the_audit(tmp_path: Path) -> None:
+    record = _build(_folder(tmp_path, GRAFTED))
+    _passed(record)
+    modifications = record["provenance"]["protein_modifications"]
+    (site,) = modifications["parameterization"]["sites"]
+    assert site["name"] == "P001" and abs(site["shift_per_atom"]) < 0.005
+    (graft,) = [e["attach"] for e in modifications["applied"]["modifications"] if "attach" in e]
+    assert graft["fragment"]["polymer"]["drawn"] == "HAAANAAAH"
+    assert graft["attach_at"] == 5
+    declared = {f["check"]: f for f in record["audit"]["findings"]}["modifications.declared"]
+    assert declared["status"] == "PASS", declared
+
+
 def test_a_click_onto_a_noncanonical_residue_merges_into_one_site(tmp_path: Path) -> None:
     folder = _folder(
         tmp_path,
@@ -278,6 +337,63 @@ def test_ubiquitin_with_a_high_mannose_glycan(tmp_path: Path) -> None:
     _passed(record)
 
 
+@pytest.mark.skipif(
+    not os.environ.get("POLYZYMD_ACCEPTANCE"),
+    reason="local acceptance build; set POLYZYMD_ACCEPTANCE=1 (needs the LipA movie files)",
+)
+def test_lipa_with_a_grafted_20mer_and_soluble_chains_of_the_same_polymer(tmp_path: Path) -> None:
+    """The LipA graft of the attach movie: a 20-mer on Lys44 through an NHS linker in its middle.
+
+    The chain is drawn for replicate 1 (no random_seed)."""
+    lipa = Path.home() / "Shirts-Lab-Linux/mbuild_attach_movie/lipa/data/lipa_prepared.pdb"
+    if not lipa.is_file():
+        pytest.skip("acceptance inputs are not on this machine")
+    egpma = {
+        "label": "B",
+        "name": "EGPMA",
+        "residue_name": "EGP",
+        "smiles": "[*]CC([*])(C)C(=O)OCCOc1ccccc1",
+        "probability": 0.05,
+    }
+    monomers = [{**GRAFT_MONOMERS[0], "probability": 0.95}, egpma, GRAFT_MONOMERS[1]]
+    graft = copy.deepcopy(GRAFTED)
+    attach = graft["modifications"][1]["attach"]
+    attach.update(site="A:K44", attach_at=11)
+    attach["fragment"] = {
+        "polymer": {
+            "monomers_from": "pSBMA",
+            "length": 22,
+            "sequence": {"fixed": {11: "NHS"}},
+        }
+    }
+    graft["modifications"][0]["deprotonate"]["site"] = "A:K44"
+    folder = _folder(tmp_path, {"pdb_path": "lipa_prepared.pdb", **graft})
+    shutil.copy(lipa, folder)
+    config = yaml.safe_load((folder / "config.yaml").read_text())
+    config["solutes"].append(
+        {
+            "type": "polymer",
+            "name": "pSBMA",
+            "generation_mode": "dynamic",
+            "type_prefix": "SBMA-EGPMA",
+            "monomers": monomers,
+            "end_groups": {"head": CAP, "tail": CAP},
+            "length": 7,
+            "count": 2,
+            "force_field": ["openff-2.3.0.offxml"],
+            "charges": SAGE["charges"],
+        }
+    )
+    (folder / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
+    record = _build(folder)
+    _passed(record)
+    (site,) = record["provenance"]["protein_modifications"]["parameterization"]["sites"]
+    assert site["name"] == "P001"
+    findings = {f["check"]: f["detail"] for f in record["audit"]["findings"]}
+    assert "grafted in 1 chain" in findings["composition.polymer_mass_fraction"]
+    assert "grafted P001" in findings["composition.polymer_sequences"]
+
+
 def _validate(folder: Path, *arguments: str) -> subprocess.CompletedProcess:
     environment = {**os.environ, "HOME": str(folder / "home")}
     return subprocess.run(
@@ -322,6 +438,31 @@ def test_validate_plans_names_a_site_that_is_not_in_the_structure(tmp_path: Path
     result = _validate(_folder(tmp_path, wrong))
     assert result.returncode != 0
     assert "residue 6 of chain A is TRP" in result.stdout + result.stderr
+
+
+def test_a_graft_without_random_seed_is_seeded_by_the_replicate() -> None:
+    from polyzymd.builders.modified_protein import config_spec
+    from polyzymd.config.schema import ProteinSolute
+
+    def chain(protein: dict, replicate: int) -> dict:
+        solute = ProteinSolute.model_validate(
+            {
+                "type": "protein",
+                "pdb_path": str(QUICKSTART / "trpcage.pdb"),
+                "force_field": ["ff14sb_off_impropers_0.0.4.offxml"],
+                "charges": {"method": "library"},
+                **protein,
+            }
+        )
+        (graft,) = [
+            e["attach"] for e in config_spec(solute, replicate)["modifications"] if "attach" in e
+        ]
+        return graft["fragment"]["polymer"]
+
+    per_replicate = copy.deepcopy(GRAFTED)
+    del per_replicate["modifications"][1]["attach"]["fragment"]["polymer"]["random_seed"]
+    assert chain(per_replicate, 2)["replicate"] == 2
+    assert "replicate" not in chain(GRAFTED, 2)
 
 
 #: The donor dye of the FRET labeling demo (mbuild_protein_demos notebook 04): a cyanine
@@ -471,8 +612,8 @@ def test_the_audit_fails_a_build_that_drops_a_declared_glycan(tmp_path, monkeypa
     folder = _folder(tmp_path, GLYCOSYLATED)
     original = modified_protein.config_spec
 
-    def without_the_last_glycan(solute):
-        spec = original(solute)
+    def without_the_last_glycan(solute, *args, **kwargs):
+        spec = original(solute, *args, **kwargs)
         spec["modifications"] = spec["modifications"][:-1]
         return spec
 
@@ -647,8 +788,8 @@ def test_the_audit_fails_a_build_with_a_hydrogen_placed_through_the_protein(
 
     original = modified_protein.apply_modifications
 
-    def with_a_hydrogen_overlap(solute, base_dir, relax):
-        protein = original(solute, base_dir, relax)
+    def with_a_hydrogen_overlap(solute, base_dir, relax, *args, **kwargs):
+        protein = original(solute, base_dir, relax, *args, **kwargs)
         if relax == "none":
             return protein  # the audit's replay
         atoms = list(protein.mbuild.particles())

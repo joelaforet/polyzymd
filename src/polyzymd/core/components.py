@@ -18,6 +18,7 @@ checks the built system against them, so this module imports neither.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Literal, Optional, Sequence
@@ -33,6 +34,17 @@ DEFAULT_SEGIDS: dict[str, str] = {
 }
 #: PSF segment IDs hold at most four characters.
 SEGID_MAX_LENGTH = 4
+#: Segment IDs of a protein's attachments: a letter for the kind (G glycan,
+#: P grafted polymer chain, M other group) and three digits, such as ``G001``
+#: or ``P012``. These are the segments new residues get; a mutated residue,
+#: canonical or not, stays in the protein's segment.
+ATTACHMENT_SEGID_PATTERN = re.compile(r"[GPM][0-9]{3}")
+
+
+def is_attachment_segid(segid: str, kinds: str = "GPM") -> bool:
+    """Return whether ``segid`` names an attachment of one of ``kinds`` (e.g. ``"P"``)."""
+    return bool(ATTACHMENT_SEGID_PATTERN.fullmatch(segid)) and segid[0] in kinds
+
 
 #: How a term whose atoms lie in different domains is assigned: it belongs to a
 #: domain if every one of its atoms does; a term touching a modification site

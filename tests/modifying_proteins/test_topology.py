@@ -250,3 +250,15 @@ def test_an_attachment_to_the_n_terminal_amine_takes_the_amine_into_its_site() -
     names = {atom.atom_name for atom in site.atoms if atom.resnum == 1}
     assert site.name == record.name
     assert "N" in names and not names & {"CA", "HA", "C", "O", "CB", "CG"}
+
+
+def test_a_noncanonical_mutation_stays_in_the_protein_segment_and_selection() -> None:
+    from polyzymd.core.components import is_attachment_segid
+
+    protein = mp.load_protein(TRPCAGE)
+    mp.mutate(protein, "A:Y3", {"ccd_file": str(AZIDOPHENYLALANINE)}, relax=False)
+    segments = mp.segments(protein)
+    assert set(segments) == {"PROT"}
+    assert not any(is_attachment_segid(segid) for segid in segments)
+    assert not is_attachment_segid("R001")
+    assert [is_attachment_segid(s) for s in ("G001", "P012", "M003")] == [True] * 3

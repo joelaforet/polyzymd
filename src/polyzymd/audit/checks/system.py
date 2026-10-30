@@ -15,6 +15,7 @@ import numpy as np
 
 from polyzymd.audit.findings import AuditContext, Finding
 from polyzymd.audit.registry import CheckSpec, register
+from polyzymd.core.components import is_attachment_segid
 
 #: Molar concentration of pure water, as the builder sizes salt and ionic strength.
 WATER_MOLARITY = 55.5
@@ -173,6 +174,25 @@ def counts(context: AuditContext) -> list[Finding]:
     ]
 
 
+def _grafts(context: AuditContext) -> list[tuple[str, list[int]]]:
+    """Return each polymer chain grafted onto a component: its segment and atoms."""
+    grafts = []
+    for component in context.components:
+        for segid, ranges in sorted(getattr(component, "segments", {}).items()):
+            if is_attachment_segid(segid, kinds="P"):
+                grafts.append((segid, [i for r in ranges for i in r]))
+    return grafts
+
+
+def _graft_sequences(context: AuditContext) -> list[tuple[str, str]]:
+    """Return (segment, drawn sequence) of each grafted chain the build recorded."""
+    return [
+        (chain["segment"], chain["sequence"])
+        for component in context.components
+        for chain in component.provenance.get("grafted_chains", [])
+    ]
+
+
 @register(
     CheckSpec(
         "composition.polymer_sequences",
@@ -184,7 +204,15 @@ def counts(context: AuditContext) -> list[Finding]:
 )
 def polymer_sequences(context: AuditContext) -> list[Finding]:
     polymers = _of_type(context, "polymer")
+    grafted = ""
+    if _grafts(context):
+        grafted = "; grafted " + (
+            ", ".join(f"{name} {sequence}" for name, sequence in _graft_sequences(context))
+            or ", ".join(segid for segid, _ in _grafts(context))
+        )
     if not polymers:
+        if grafted:
+            return [Finding("composition.polymer_sequences", "system", "INFO", grafted[2:])]
         return []
     chains = Counter()
     for domain in polymers[0].domains:
@@ -230,8 +258,9 @@ def polymer_sequences(context: AuditContext) -> list[Finding]:
             for end, counter in ends.items()
         )
     detail = (
-        f"{len(chains)} sequences over {sum(chains.values())} chains; monomer fractions "
-        f"{reached}{configured}{caps}"
+        f"{len(chains)} sequences over {sum(chains.values())} {'soluble ' if grafted else ''}"
+        f"chains; monomer fractions "
+        f"{reached}{configured}{caps}{grafted}"
     )
     return [Finding("composition.polymer_sequences", polymers[0].name, "INFO", detail)]
 
@@ -254,9 +283,12 @@ def _mass(context: AuditContext, atoms: Any) -> float:
 )
 def polymer_mass_fraction(context: AuditContext) -> list[Finding]:
     polymers = _of_type(context, "polymer")
-    if not polymers:
+    grafts = _grafts(context)
+    if not polymers and not grafts:
         return []
-    polymer = _mass(context, polymers[0].atom_indices())
+    soluble = _mass(context, polymers[0].atom_indices()) if polymers else 0.0
+    grafted = sum(_mass(context, atoms) for _, atoms in grafts)
+    polymer = soluble + grafted
     solvent = sum(
         _mass(context, c.atom_indices())
         for c in context.components
@@ -266,9 +298,15 @@ def polymer_mass_fraction(context: AuditContext) -> list[Finding]:
     return [
         Finding(
             "composition.polymer_mass_fraction",
-            polymers[0].name,
+            polymers[0].name if polymers else "system",
             "INFO",
-            f"{100 * fraction:.2f} wt% polymer of polymer + solvent ({polymer / 1000:.1f} kDa)",
+            f"{100 * fraction:.2f} wt% polymer of polymer + solvent ({polymer / 1000:.1f} kDa"
+            + (
+                f"; {soluble / 1000:.1f} kDa soluble, {grafted / 1000:.1f} kDa grafted in "
+                f"{len(grafts)} chain(s))"
+                if grafts
+                else ")"
+            ),
         )
     ]
 

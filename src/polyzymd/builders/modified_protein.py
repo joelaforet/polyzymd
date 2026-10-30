@@ -31,15 +31,32 @@ LOGGER = logging.getLogger(__name__)
 MODIFIED_PROTEIN_PDB = "modified_protein.pdb"
 
 
-def config_spec(solute: "ProteinSolute") -> dict[str, list[dict[str, Any]]]:
-    """Return the solute's blocks as the plain data ``apply_spec`` takes."""
+def config_spec(
+    solute: "ProteinSolute", replicate: int | None = None
+) -> dict[str, list[dict[str, Any]]]:
+    """Return the solute's blocks as the plain data ``apply_spec`` takes.
+
+    A grafted chain without ``random_seed`` gets ``replicate``, which seeds its
+    draw: each replicate then carries its own chain.
+    """
 
     def plain(model) -> dict[str, Any]:
         return model.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
 
+    def modification(entry) -> dict[str, Any]:
+        arguments = plain(entry.arguments)
+        fragment = getattr(entry.arguments, "fragment", None)
+        if fragment is not None and fragment.polymer is not None:
+            chosen = solute.modification_parameters and solute.modification_parameters.polymer
+            arguments["fragment"] = fragment.as_source(list(chosen.force_field) if chosen else [])
+            chain = arguments["fragment"]["polymer"]
+            if chain.get("random_seed") is None and replicate is not None:
+                chain["replicate"] = replicate
+        return {entry.verb: arguments}
+
     return {
         "mutations": [plain(mutation) for mutation in solute.mutations],
-        "modifications": [{entry.verb: plain(entry.arguments)} for entry in solute.modifications],
+        "modifications": [modification(entry) for entry in solute.modifications],
     }
 
 
@@ -81,6 +98,7 @@ class ModifiedProteinBuild:
         constraints_from: str,
         working_dir: Path | None = None,
         base_dir: Path | None = None,
+        replicate: int | None = None,
     ) -> "ModifiedProteinBuild":
         """Apply and parameterize the modifications of ``solute``.
 
@@ -97,7 +115,7 @@ class ModifiedProteinBuild:
         )
         timings: dict[str, float] = {}
         t0 = time.perf_counter()
-        protein = apply_modifications(solute, base_dir, solute.relax)
+        protein = apply_modifications(solute, base_dir, solute.relax, replicate)
         timings["modify_s"] = time.perf_counter() - t0
         LOGGER.info(
             f"Applied {len(protein.records)} modification(s) to {solute.name} "
@@ -182,6 +200,18 @@ class ModifiedProteinBuild:
         # What the config asks for, expanded from the config alone, for the
         # audit to compare with what the build made.
         component.provenance["declared_modifications"] = self.declared
+        # The drawn sequence of each grafted chain, for the composition report.
+        component.provenance["grafted_chains"] = [
+            {
+                "segment": record.name,
+                "sequence": record.arguments["fragment"]["polymer"]["drawn"],
+                "replicate": record.arguments["fragment"]["polymer"].get("replicate"),
+            }
+            for record in self.protein.records
+            if record.kind == "attach"
+            and isinstance(record.arguments.get("fragment"), dict)
+            and "polymer" in record.arguments["fragment"]
+        ]
         return component
 
     def provenance(self) -> dict[str, Any]:
@@ -264,8 +294,12 @@ def apply_glycam_to_gromacs_export(top_path: Path, sites: list[Any], molecules=N
     return apply_to_gromacs_topology(top_path, sites, molecules, first_molecule=0)
 
 
-def apply_modifications(solute: "ProteinSolute", base_dir: Path, relax: str) -> Any:
+def apply_modifications(
+    solute: "ProteinSolute", base_dir: Path, relax: str, replicate: int | None = None
+) -> Any:
     """Load the solute's PDB and apply its blocks; any failure is a ``ValueError``.
+
+    ``replicate`` seeds grafted chains drawn per replicate (see ``config_spec``).
 
     mBuild raises its own errors (a reaction that matches nothing, a fragment
     it cannot place); they come out as ``ValueError`` with a fix line, as a
@@ -275,10 +309,11 @@ def apply_modifications(solute: "ProteinSolute", base_dir: Path, relax: str) -> 
 
     try:
         protein = mp.load_protein(solute.pdb_path)
+        spec = config_spec(solute, replicate)
         if relax == "joint":
-            _apply_then_relax_jointly(protein, config_spec(solute), base_dir)
+            _apply_then_relax_jointly(protein, spec, base_dir)
         else:
-            mp.apply_spec(protein, config_spec(solute), base_dir=base_dir, relax=relax)
+            mp.apply_spec(protein, spec, base_dir=base_dir, relax=relax)
     except ValueError:
         raise
     except Exception as exc:  # mBuild's MBuildError, RDKit embedding failures
@@ -340,7 +375,8 @@ def plan_rows(solute: "ProteinSolute", base_dir: Path | None = None) -> list[dic
     # Placement without relaxation leaves close contacts; mBuild warns about
     # them, but a plan is not a structure to simulate, so its log is muted.
     with quiet_mbuild():
-        protein = apply_modifications(solute, base_dir or Path.cwd(), "none")
+        # Plans show replicate 1's grafted chains.
+        protein = apply_modifications(solute, base_dir or Path.cwd(), "none", replicate=1)
     sets = solute.modification_parameters.as_dict() if solute.modification_parameters else {}
     owner = {}
     for site in mp.modification_sites(protein):
