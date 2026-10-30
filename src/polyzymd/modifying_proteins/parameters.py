@@ -39,6 +39,8 @@ set of its type (glycan, polymer, generic, noncanonical):
 - Bonds to hydrogen are constrained everywhere, with or without sites, by one
   force field's Constraints handler (``constraints_from``), each at the bond
   length of the force field that owns the bond.
+- A glycan site whose parameter set is GLYCAM06j takes GLYCAM's own charges,
+  terms and per-pair 1-4 scales instead (see :mod:`.glycam`).
 
 The protein's terms come from a reference built by reloading the input PDB
 and replaying only the changes that keep every residue an ff14SB residue:
@@ -59,6 +61,7 @@ from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
+from polyzymd.modifying_proteins import glycam
 from polyzymd.modifying_proteins.api import ModifiedProtein, attach, load_protein, mutate
 from polyzymd.modifying_proteins.api import deprotonate as _deprotonate
 from polyzymd.modifying_proteins.api import protonate as _protonate
@@ -102,15 +105,26 @@ class ParameterSet:
         object.__setattr__(self, "force_field", tuple(self.force_field))
         if not self.force_field:
             raise ValueError("A parameter set needs at least one force field file.")
+        if self.is_glycam:
+            if (
+                self.force_field != (glycam.GLYCAM_FORCE_FIELD,)
+                or self.charges.get("method") != "library"
+            ):
+                raise ValueError(
+                    f"A GLYCAM06j parameter set is force_field=['{glycam.GLYCAM_FORCE_FIELD}'] "
+                    "with charges={'method': 'library'}: GLYCAM's residue templates carry "
+                    "both."
+                )
+            return
         if self.charges.get("method") != "nagl" or not self.charges.get("model"):
             raise ValueError(
                 "Site charges come from NAGL on a capped model: give "
                 "charges={'method': 'nagl', 'model': '<model .pt file>'}."
             )
-        if any("glycam" in name.lower() for name in self.force_field):
-            raise NotImplementedError(
-                "GLYCAM06 parameter sets are not supported yet; give an OpenFF force field."
-            )
+
+    @property
+    def is_glycam(self) -> bool:
+        return glycam.is_glycam(self.force_field)
 
 
 @dataclass
@@ -123,11 +137,11 @@ class SiteParameters:
     backbone_residues: list[str]
     force_field: list[str]
     charges: dict
-    capped_model_atoms: int
-    nagl_sum: float
-    target: float
-    shift_total: float
-    shift_per_atom: float
+    capped_model_atoms: int | None = None  # None for GLYCAM06j sites
+    nagl_sum: float | None = None
+    target: float | None = None
+    shift_total: float | None = None
+    shift_per_atom: float | None = None
 
 
 @dataclass
@@ -139,9 +153,68 @@ class ParameterizationRecord:
     total_charge: float
     segments: list[str]
     sites: list[SiteParameters] = field(default_factory=list)
+    glycam: list[glycam.GlycamSite] = field(default_factory=list)
+
+    @property
+    def glycam_pairs(self) -> list[glycam.PairOverride]:
+        """The 1-4 overrides of every GLYCAM06j site, in protein atom indices."""
+        return [pair for site in self.glycam for pair in site.pairs]
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        data["glycam"] = [site.to_dict() for site in self.glycam]
+        return data
+
+
+@dataclass
+class ParameterizedProtein:
+    """The parameterized protein: its Interchange, record and export methods.
+
+    Export through :meth:`to_openmm` and :meth:`to_gromacs`: they write each
+    GLYCAM06j glycan's own 1-4 scales, which an Interchange cannot hold.
+    :attr:`interchange_without_glycam_pairs` is the bare Interchange, whose
+    own exports scale every 1-4 pair uniformly; :attr:`interchange` returns
+    it only when there is no GLYCAM06j site. For tuple unpacking,
+    ``interchange, record = parameterize(...)`` works the same way.
+    """
+
+    interchange_without_glycam_pairs: object
+    record: ParameterizationRecord
+
+    @property
+    def glycam_pairs(self) -> list[glycam.PairOverride]:
+        return self.record.glycam_pairs
+
+    @property
+    def interchange(self):
+        if self.record.glycam:
+            raise ValueError(
+                "This protein has GLYCAM06j glycans, whose 1-4 pairs an Interchange "
+                "cannot hold: export with to_openmm() / to_gromacs(), or take "
+                "interchange_without_glycam_pairs and apply glycam_pairs yourself "
+                "(glycam.apply_to_openmm)."
+            )
+        return self.interchange_without_glycam_pairs
+
+    def __iter__(self):
+        return iter((self.interchange, self.record))
+
+    def to_openmm(self, **kwargs):
+        """Return the OpenMM System, GLYCAM06j 1-4 pairs and masses included.
+
+        ``kwargs`` go to ``Interchange.to_openmm``; nonbonded forces are
+        always combined, because the pairs are NonbondedForce exceptions.
+        """
+        kwargs["combine_nonbonded_forces"] = True
+        if self.record.glycam and kwargs.get("hydrogen_mass") not in (None, 1.007947):
+            raise ValueError(
+                "Hydrogen mass repartitioning is not supported with GLYCAM06j glycans, "
+                "whose atoms keep GLYCAM's masses."
+            )
+        system = self.interchange_without_glycam_pairs.to_openmm(**kwargs)
+        if self.record.glycam:
+            glycam.apply_to_openmm(system, self.record.glycam)
+        return system
 
 
 def parameterize(
@@ -152,7 +225,7 @@ def parameterize(
     protein_force_field: Sequence[str] = PROTEIN_FORCE_FIELD,
     constraints_from: str = CONSTRAINTS_FROM,
 ):
-    """Return the Interchange of ``protein`` and the record of what it holds.
+    """Return the parameterized protein (:class:`ParameterizedProtein`).
 
     ``parameter_sets`` maps each site type (``glycan``, ``polymer``,
     ``generic``, ``noncanonical``) to its :class:`ParameterSet`; a type with
@@ -169,6 +242,13 @@ def parameterize(
 
     sites = modification_sites(protein)
     site_sets = resolve_parameter_sets(sites, parameter_sets)
+    misused = sorted(
+        site.name for site in sites if site_sets[site.name].is_glycam and site.type != "glycan"
+    )
+    if misused:
+        raise ValueError(
+            f"GLYCAM06j parameterizes glycan sites only; {', '.join(misused)} are not glycans."
+        )
 
     molecule = to_openff(protein)
     reference = to_openff(reference_protein(protein, sites))
@@ -196,11 +276,17 @@ def parameterize(
         total_charge=0.0,
         segments=segments(protein),
     )
+    native = []
     for site in sites:
         parameter_set = site_sets[site.name]
-        site_charges, info = site_charges_from_capped_model(
-            molecule, site, library, parameter_set.charges["model"], max_charge_shift
-        )
+        if parameter_set.is_glycam:
+            terms, glycam_site = glycam.glycam_site_terms(molecule, site, library, keys)
+            native.append((terms, glycam_site))
+            site_charges, info = [terms.charges[i] for i in site.atom_indices], {}
+        else:
+            site_charges, info = site_charges_from_capped_model(
+                molecule, site, library, parameter_set.charges["model"], max_charge_shift
+            )
         charges[list(site.atom_indices)] = site_charges
         record.sites.append(
             SiteParameters(
@@ -228,12 +314,18 @@ def parameterize(
     for site_type in sorted(parameter_sets):
         for site in sites:
             if site.type == site_type:
-                force_field = site_sets[site.name].force_field
+                parameter_set = site_sets[site.name]
+                # GLYCAM sites are typed by a placeholder whose terms are then replaced.
+                force_field = (
+                    glycam.PLACEHOLDER_FORCE_FIELD
+                    if parameter_set.is_glycam
+                    else parameter_set.force_field
+                )
                 groups.setdefault(force_field, set()).update(site.atom_indices)
     if not groups:
         interchange = protein_ff.create_interchange(topology, charge_from_molecules=[molecule])
         interchange.positions = positions
-        return interchange, record
+        return ParameterizedProtein(interchange, record)
 
     site_interchanges = [
         (
@@ -249,9 +341,12 @@ def parameterize(
     position = {keys[index]: index for index in outside}
     mapping = {index: position[key] for index, key in enumerate(reference_keys) if key in position}
     interchange = _splice(site_interchanges, reference_interchange, mapping, set(outside))
+    for terms, glycam_site in native:
+        glycam.inject(interchange, terms, glycam_site)
+        record.glycam.append(glycam_site)
     _check_charges(interchange, charges)
     interchange.positions = positions
-    return interchange, record
+    return ParameterizedProtein(interchange, record)
 
 
 def resolve_parameter_sets(

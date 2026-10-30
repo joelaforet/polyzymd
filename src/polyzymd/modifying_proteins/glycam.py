@@ -1,0 +1,507 @@
+"""GLYCAM06j parameters for glycan sites.
+
+GLYCAM06j ships as an OpenMM force field (``amber14/GLYCAM_06j-1.xml``), not
+as a SMIRNOFF file, and it leaves selected 1-4 pairs unscaled (a ``<Script>``
+in the XML). OpenFF Interchange holds one 1-4 scale per collection and drops
+NonbondedForce exceptions on import, so GLYCAM terms never pass through a
+force-field file in Interchange. They are built natively and copied in:
+
+1. For each glycan site, a small OpenMM topology is cut out of the protein:
+   the linking residue renamed to its GLYCAM linkage template (ASN -> NLN,
+   SER -> OLS, THR -> OLT), the glycan residues, and the neighbouring peptide
+   groups as ACE and NME caps. ``ForceField(protein.ff14SB.xml,
+   GLYCAM_06j-1.xml)`` parameterizes it with an explicit template for every
+   residue (mannose and glucose epimers share a bonding graph).
+2. Every bonded term touching a site atom, and the charge and Lennard-Jones
+   parameters of every site atom, are copied into the protein's Interchange
+   in place of the placeholder terms the site was typed with. A term touching
+   a site atom reaches at most the previous residue's C and the next
+   residue's N, which the caps reproduce. The linkage templates' backbone
+   charges equal ff14SB's, which is checked.
+3. Two things an Interchange cannot hold are stored on the site and written
+   at export: the 1-4 scale of every pair touching a site atom, read from
+   the native system (Coulomb and Lennard-Jones separately) and kept as a
+   per-pair override with the final charges and Lennard-Jones parameters;
+   and GLYCAM's atom-type masses of the site atoms (an Interchange takes
+   masses from the elements). :func:`apply_to_openmm` writes both.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+import numpy as np
+
+#: The parameter-set name of GLYCAM06j.
+GLYCAM_FORCE_FIELD = "GLYCAM_06j-1.xml"
+
+#: The OpenMM force-field files that hold GLYCAM06j and its protein side.
+OPENMM_FILES = ("amber14/protein.ff14SB.xml", "amber14/GLYCAM_06j-1.xml")
+
+#: GLYCAM's template for a residue that carries a glycan.
+LINKAGE_TEMPLATES = {"ASN": "NLN", "SER": "OLS", "THR": "OLT"}
+
+#: The force field that types glycan atoms before their GLYCAM terms replace them.
+PLACEHOLDER_FORCE_FIELD = ("openff-2.3.0.offxml",)
+
+#: ff14SB's 1-4 scales, used where a pair's scale cannot be read (a zero charge or epsilon).
+_DEFAULT_SCALES = (1 / 1.2, 0.5)
+
+_BACKBONE = ("N", "H", "CA", "HA", "C", "O")
+
+
+@dataclass
+class PairOverride:
+    """The 1-4 interaction of one pair of atoms, in protein atom indices."""
+
+    i: int
+    j: int
+    charge_scale: float
+    charge_i: float  # e
+    charge_j: float  # e
+    sigma: float  # nm
+    epsilon: float  # kJ/mol, scale included
+
+    @property
+    def charge_product(self) -> float:
+        return self.charge_scale * self.charge_i * self.charge_j
+
+
+@dataclass
+class GlycamSite:
+    """What one glycan site received from GLYCAM06j."""
+
+    name: str
+    atom_indices: list[int]
+    linkage: str  # e.g. "A:ASN60 -> NLN"
+    residue_templates: list[str]
+    n_pairs: int = 0
+    n_unscaled_pairs: int = 0
+    pairs: list[PairOverride] = field(default_factory=list, repr=False)
+    masses: dict[int, float] = field(default_factory=dict, repr=False)  # Da
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data.pop("pairs")
+        data.pop("masses")
+        return data
+
+
+@dataclass
+class _NativeTerms:
+    charges: dict[int, float]
+    lennard_jones: dict[int, tuple[float, float]]  # sigma nm, epsilon kJ/mol
+    backbone_charges: dict[int, float]
+    bonds: list[tuple[int, int, float, float]]
+    angles: list[tuple[int, int, int, float, float]]
+    torsions: list[tuple[int, int, int, int, int, float, float]]
+    scales: dict[tuple[int, int], tuple[float, float]]
+    masses: dict[int, float]
+
+
+def is_glycam(force_field) -> bool:
+    """Whether a parameter set's force-field list names GLYCAM."""
+    return any("glycam" in str(name).lower() for name in force_field)
+
+
+def glycam_residue_names() -> set[str]:
+    """The residue templates GLYCAM06j defines."""
+    import xml.etree.ElementTree as ET
+
+    from openmm.app import forcefield
+
+    path = Path(forcefield.__file__).parent / "data" / OPENMM_FILES[1]
+    return {residue.get("name") for residue in ET.parse(path).getroot().iter("Residue")}
+
+
+def glycam_site_terms(molecule, site, library: dict, keys) -> tuple[_NativeTerms, GlycamSite]:
+    """Parameterize one glycan site natively with GLYCAM06j.
+
+    ``molecule`` is the OpenFF Molecule of the whole protein, ``site`` its
+    :class:`~polyzymd.modifying_proteins.topology.ModificationSite`,
+    ``library`` the ff14SB library charge of every protein atom by key.
+    """
+    import openmm
+    from openmm import app
+
+    site_atoms = set(site.atom_indices)
+    linking = site.residues[0]
+    by_residue: dict[tuple, list[int]] = {}
+    for index, key in enumerate(keys):
+        by_residue.setdefault((key.chain_id, key.resnum, key.icode), []).append(index)
+    neighbours = [set() for _ in range(molecule.n_atoms)]
+    for bond in molecule.bonds:
+        neighbours[bond.atom1_index].add(bond.atom2_index)
+        neighbours[bond.atom2_index].add(bond.atom1_index)
+
+    linking_atoms = by_residue[linking]
+    name_of = {index: keys[index].atom_name for index in range(molecule.n_atoms)}
+    parent = molecule.atom(linking_atoms[0]).metadata["residue_name"]
+    label = f"{linking[0]}:{parent}{linking[1]}{linking[2]}"
+    if parent not in LINKAGE_TEMPLATES:
+        raise ValueError(
+            f"GLYCAM06j links glycans to ASN, SER or THR; site {site.name} is on {label}."
+        )
+    atom_by_name = {name_of[index]: index for index in linking_atoms}
+    previous_c = [j for j in neighbours[atom_by_name["N"]] if name_of[j] == "C"]
+    next_n = [j for j in neighbours[atom_by_name["C"]] if name_of[j] == "N"]
+    if not previous_c or not next_n:
+        raise ValueError(
+            f"Refused: glycan {site.name} on {label}, the first or last residue of its "
+            f"chain. GLYCAM06j's linkage residue ({LINKAGE_TEMPLATES[parent]}) is "
+            "parameterized with a neighbouring residue on each side, and a chain-terminal "
+            "residue lacks one. File an issue at "
+            "https://github.com/joelaforet/polyzymd/issues if you meant to do this and "
+            "want this capability."
+        )
+    glycan_residues = sorted(
+        {(keys[i].chain_id, keys[i].resnum, keys[i].icode) for i in site_atoms} - {linking},
+        key=lambda residue: min(by_residue[residue]),
+    )
+    known = glycam_residue_names()
+    unknown = sorted(
+        {
+            molecule.atom(by_residue[residue][0]).metadata["residue_name"]
+            for residue in glycan_residues
+        }
+        - known
+    )
+    if unknown:
+        raise ValueError(
+            f"Site {site.name} has residues GLYCAM06j does not define: {', '.join(unknown)}. "
+            "GLYCAM06j needs glycans named as GLYCAM residues (GLYCAM-Web or GlyGen files)."
+        )
+
+    # The small topology: ACE caps the previous residue, NME the next.
+    top = app.Topology()
+    chain = top.addChain("A")
+    to_local: dict[int, object] = {}
+    templates = {}
+    previous_residue = (
+        keys[previous_c[0]].chain_id,
+        keys[previous_c[0]].resnum,
+        keys[previous_c[0]].icode,
+    )
+    next_residue = (keys[next_n[0]].chain_id, keys[next_n[0]].resnum, keys[next_n[0]].icode)
+
+    cap_methyls: set[int] = set()
+
+    def add_cap(residue_key, kept_names, cap_name):
+        residue = top.addResidue(cap_name, chain)
+        templates[residue] = cap_name
+        kept = {name_of[i]: i for i in by_residue[residue_key] if name_of[i] in kept_names}
+        for name, index in kept.items():
+            element = app.Element.getByAtomicNumber(molecule.atom(index).atomic_number)
+            to_local[index] = top.addAtom("CH3" if name == "CA" else name, element, residue)
+        methyl = to_local[kept["CA"]]
+        cap_methyls.add(kept["CA"])
+        for n in range(3):
+            hydrogen = top.addAtom(f"HH3{n + 1}", app.element.hydrogen, residue)
+            top.addBond(methyl, hydrogen)
+        if cap_name == "NME" and "H" not in kept:
+            hydrogen = top.addAtom("H", app.element.hydrogen, residue)
+            top.addBond(to_local[kept["N"]], hydrogen)
+
+    add_cap(previous_residue, {"CA", "C", "O"}, "ACE")
+    linkage_template = LINKAGE_TEMPLATES[parent]
+    for residue_key, template in [(linking, linkage_template)] + [
+        (residue, molecule.atom(by_residue[residue][0]).metadata["residue_name"])
+        for residue in glycan_residues
+    ]:
+        residue = top.addResidue(template, chain)
+        templates[residue] = template
+        for index in by_residue[residue_key]:
+            element = app.Element.getByAtomicNumber(molecule.atom(index).atomic_number)
+            to_local[index] = top.addAtom(name_of[index], element, residue)
+    add_cap(next_residue, {"N", "H", "CA"}, "NME")
+    for bond in molecule.bonds:
+        if bond.atom1_index in to_local and bond.atom2_index in to_local:
+            top.addBond(to_local[bond.atom1_index], to_local[bond.atom2_index])
+
+    system = app.ForceField(*OPENMM_FILES).createSystem(
+        top,
+        nonbondedMethod=app.NoCutoff,
+        constraints=None,
+        rigidWater=False,
+        removeCMMotion=False,
+        residueTemplates=templates,
+    )
+    # Cap methyls stand in for the neighbours' CA; no term touching the site
+    # may reach them, so they map to nothing.
+    global_of = {
+        local.index: index for index, local in to_local.items() if index not in cap_methyls
+    }
+    site_local = {to_local[index].index for index in site_atoms}
+    local_neighbours: dict[int, set[int]] = {}
+    for a, b in top.bonds():
+        local_neighbours.setdefault(a.index, set()).add(b.index)
+        local_neighbours.setdefault(b.index, set()).add(a.index)
+
+    def touching(atoms) -> bool:
+        return any(atom in site_local for atom in atoms)
+
+    def mapped(atoms) -> tuple[int, ...]:
+        try:
+            return tuple(global_of[atom] for atom in atoms)
+        except KeyError:
+            raise ValueError(
+                f"A GLYCAM06j term of site {site.name} reaches a cap atom; the site is too "
+                "close to the end of its chain."
+            ) from None
+
+    terms = _NativeTerms({}, {}, {}, [], [], [], {}, {})
+    for local, index in global_of.items():
+        if index in site_atoms:
+            terms.masses[index] = system.getParticleMass(local)._value
+    for force in system.getForces():
+        if isinstance(force, openmm.HarmonicBondForce):
+            for n in range(force.getNumBonds()):
+                i, j, length, k = force.getBondParameters(n)
+                if touching((i, j)):
+                    terms.bonds.append((*mapped((i, j)), length._value, k._value))
+        elif isinstance(force, openmm.HarmonicAngleForce):
+            for n in range(force.getNumAngles()):
+                i, j, k_, angle, k = force.getAngleParameters(n)
+                if touching((i, j, k_)):
+                    terms.angles.append((*mapped((i, j, k_)), angle._value, k._value))
+        elif isinstance(force, openmm.PeriodicTorsionForce):
+            for n in range(force.getNumTorsions()):
+                i, j, k_, l_, periodicity, phase, k = force.getTorsionParameters(n)
+                if touching((i, j, k_, l_)):
+                    terms.torsions.append(
+                        (*mapped((i, j, k_, l_)), periodicity, phase._value, k._value)
+                    )
+        elif isinstance(force, openmm.NonbondedForce):
+            for local, index in global_of.items():
+                charge, sigma, epsilon = force.getParticleParameters(local)
+                if index in site_atoms:
+                    terms.charges[index] = charge._value
+                    terms.lennard_jones[index] = (sigma._value, epsilon._value)
+                elif index in linking_atoms and name_of[index] in _BACKBONE:
+                    terms.backbone_charges[index] = charge._value
+            for n in range(force.getNumExceptions()):
+                i, j, product, sigma, epsilon = force.getExceptionParameters(n)
+                if not touching((i, j)) or not _is_one_four(i, j, local_neighbours):
+                    continue
+                qi, _, ei = force.getParticleParameters(i)
+                qj, _, ej = force.getParticleParameters(j)
+                charge_scale = (
+                    product._value / (qi._value * qj._value)
+                    if abs(qi._value * qj._value) > 1e-12
+                    else _DEFAULT_SCALES[0]
+                )
+                lj_scale = (
+                    epsilon._value / np.sqrt(ei._value * ej._value)
+                    if ei._value * ej._value > 1e-12
+                    else _DEFAULT_SCALES[1]
+                )
+                pair = tuple(sorted(mapped((i, j))))
+                terms.scales[pair] = (charge_scale, lj_scale)
+
+    for index, charge in terms.backbone_charges.items():
+        if abs(charge - library[keys[index]]) > 1e-4:
+            raise ValueError(
+                f"GLYCAM06j's {linkage_template} backbone charge of {name_of[index]} "
+                f"({charge:+.4f}) differs from ff14SB's ({library[keys[index]]:+.4f})."
+            )
+    record = GlycamSite(
+        name=site.name,
+        atom_indices=sorted(site_atoms),
+        linkage=f"{label} -> {linkage_template}",
+        residue_templates=[linkage_template]
+        + [molecule.atom(by_residue[r][0]).metadata["residue_name"] for r in glycan_residues],
+    )
+    return terms, record
+
+
+def inject(interchange, terms: _NativeTerms, record: GlycamSite) -> None:
+    """Replace the placeholder terms of a site's atoms with GLYCAM's, in place.
+
+    Fills ``record.pairs`` with the 1-4 override of every pair touching the
+    site, from the final charges and Lennard-Jones parameters.
+    """
+    from openff.interchange.components.potentials import Potential
+    from openff.interchange.models import (
+        AngleKey,
+        BondKey,
+        PotentialKey,
+        ProperTorsionKey,
+        TopologyKey,
+    )
+    from openff.units import unit
+
+    site = set(record.atom_indices)
+    tag = f"glycam::{record.name}::"
+
+    def replace(collection_name, new_terms):
+        collection = interchange[collection_name]
+        removed = [key for key in collection.key_map if set(key.atom_indices) & site]
+        before = {tuple(sorted(key.atom_indices)) for key in removed}
+        for key in removed:
+            del collection.key_map[key]
+        for topology_key, parameters in new_terms:
+            potential_key = PotentialKey(
+                id=tag + "-".join(map(str, topology_key.atom_indices)),
+                mult=getattr(topology_key, "mult", None),
+                associated_handler=collection_name,
+            )
+            collection.key_map[topology_key] = potential_key
+            collection.potentials[potential_key] = Potential(parameters=parameters)
+        used = set(collection.key_map.values())
+        collection.potentials = {k: v for k, v in collection.potentials.items() if k in used}
+        return before
+
+    nm, kj = unit.nanometer, unit.kilojoule_per_mole
+    before = replace(
+        "Bonds",
+        [
+            (BondKey(atom_indices=(i, j)), {"length": r0 * nm, "k": k * kj / nm**2})
+            for i, j, r0, k in terms.bonds
+        ],
+    )
+    _same_terms("bonds", before, terms.bonds, 2, record.name)
+    before = replace(
+        "Angles",
+        [
+            (
+                AngleKey(atom_indices=(i, j, k_)),
+                {"angle": a * unit.radian, "k": k * kj / unit.radian**2},
+            )
+            for i, j, k_, a, k in terms.angles
+        ],
+    )
+    _same_terms("angles", before, terms.angles, 3, record.name)
+    # GLYCAM's impropers go in with the propers: both are periodic torsions
+    # over the atoms in the order given, and Interchange's GROMACS export
+    # drops an improper whose atoms are not in its own central-atom-first
+    # order. The placeholder's impropers on the site are removed.
+    multiplicity: dict[tuple, int] = {}
+    torsions = []
+    for i, j, k_, l_, periodicity, phase, k in terms.torsions:
+        atoms = (i, j, k_, l_)
+        mult = multiplicity.get(atoms, 0)
+        multiplicity[atoms] = mult + 1
+        torsions.append(
+            (
+                ProperTorsionKey(atom_indices=atoms, mult=mult),
+                {
+                    "k": k * kj,
+                    "periodicity": periodicity * unit.dimensionless,
+                    "phase": phase * unit.radian,
+                    "idivf": 1.0 * unit.dimensionless,
+                },
+            )
+        )
+    replace("ProperTorsions", torsions)
+    if "ImproperTorsions" in interchange.collections:
+        replace("ImproperTorsions", [])
+
+    vdw = interchange["vdW"]
+    for index in site:
+        sigma, epsilon = terms.lennard_jones[index]
+        potential_key = PotentialKey(id=f"{tag}vdW-{index}", associated_handler="vdW")
+        vdw.key_map[TopologyKey(atom_indices=(index,))] = potential_key
+        vdw.potentials[potential_key] = Potential(
+            parameters={"sigma": sigma * nm, "epsilon": epsilon * kj}
+        )
+    used = set(vdw.key_map.values())
+    vdw.potentials = {k: v for k, v in vdw.potentials.items() if k in used}
+
+    if "Constraints" in interchange.collections:
+        lengths = {frozenset((i, j)): r0 for i, j, r0, _ in terms.bonds}
+        constraints = interchange["Constraints"]
+        for key in [k for k in constraints.key_map if set(k.atom_indices) & site]:
+            potential_key = PotentialKey(
+                id=tag + "constraint-" + "-".join(map(str, key.atom_indices)),
+                associated_handler="Bonds",
+            )
+            constraints.key_map[key] = potential_key
+            constraints.potentials[potential_key] = Potential(
+                parameters={"distance": lengths[frozenset(key.atom_indices)] * nm}
+            )
+        used = set(constraints.key_map.values())
+        constraints.potentials = {k: v for k, v in constraints.potentials.items() if k in used}
+
+    charges = {
+        key.atom_indices[0]: charge.m_as(unit.elementary_charge)
+        for key, charge in interchange["Electrostatics"].charges.items()
+    }
+    lennard_jones = {
+        key.atom_indices[0]: (
+            vdw.potentials[potential_key].parameters["sigma"].m_as(nm),
+            vdw.potentials[potential_key].parameters["epsilon"].m_as(kj),
+        )
+        for key, potential_key in vdw.key_map.items()
+    }
+    record.masses = dict(terms.masses)
+    record.pairs = []
+    for (i, j), (charge_scale, lj_scale) in sorted(terms.scales.items()):
+        (si, ei), (sj, ej) = lennard_jones[i], lennard_jones[j]
+        record.pairs.append(
+            PairOverride(
+                i=i,
+                j=j,
+                charge_scale=float(charge_scale),
+                charge_i=float(charges[i]),
+                charge_j=float(charges[j]),
+                sigma=float(0.5 * (si + sj)),
+                epsilon=float(lj_scale * np.sqrt(ei * ej)),
+            )
+        )
+    record.n_pairs = len(record.pairs)
+    record.n_unscaled_pairs = int(
+        sum(
+            abs(scale[0] - 1.0) < 1e-6 and abs(scale[1] - 1.0) < 1e-6
+            for scale in terms.scales.values()
+        )
+    )
+
+
+def apply_to_openmm(system, sites, offset: int = 0) -> int:
+    """Write the GLYCAM06j sites' 1-4 pairs and masses into ``system``.
+
+    ``sites`` are :class:`GlycamSite` records; ``offset`` is the index of the
+    protein's first atom in ``system``. The pairs become NonbondedForce
+    exceptions; every pair must find its exception. Returns the number of
+    exceptions changed.
+    """
+    import openmm
+
+    for site in sites:
+        for index, mass in site.masses.items():
+            system.setParticleMass(index + offset, mass)
+    pairs = [pair for site in sites for pair in site.pairs]
+    forces = [f for f in system.getForces() if isinstance(f, openmm.NonbondedForce)]
+    if len(forces) != 1:
+        raise ValueError("Expected one NonbondedForce (combine_nonbonded_forces=True).")
+    force = forces[0]
+    wanted = {(p.i + offset, p.j + offset): p for p in pairs}
+    changed = 0
+    for n in range(force.getNumExceptions()):
+        i, j, *_ = force.getExceptionParameters(n)
+        pair = wanted.get((min(i, j), max(i, j)))
+        if pair is not None:
+            force.setExceptionParameters(n, i, j, pair.charge_product, pair.sigma, pair.epsilon)
+            changed += 1
+    if changed != len(wanted):
+        raise ValueError(
+            f"Found {changed} of {len(wanted)} GLYCAM06j 1-4 exceptions in the system."
+        )
+    return changed
+
+
+def _same_terms(kind, before, new_terms, n_atoms, name) -> None:
+    after = {tuple(sorted(term[:n_atoms])) for term in new_terms}
+    if before != after:
+        raise ValueError(
+            f"GLYCAM06j and the placeholder force field disagree on which {kind} touch "
+            f"site {name}; the site's bonding differs from GLYCAM's templates."
+        )
+
+
+def _is_one_four(i: int, j: int, neighbours: dict[int, set[int]]) -> bool:
+    first = neighbours.get(i, set())
+    second = {k for n in first for k in neighbours.get(n, set())}
+    third = {k for n in second for k in neighbours.get(n, set())}
+    return j in third and j not in second and j not in first and j != i

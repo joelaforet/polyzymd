@@ -210,11 +210,9 @@ def test_a_site_type_without_a_parameter_set_is_refused() -> None:
         parameterize(_acylated_lysine(), {"glycan": SAGE}, max_charge_shift=0.005)
 
 
-def test_parameter_sets_need_nagl_charges_and_an_openff_force_field() -> None:
+def test_openff_parameter_sets_need_nagl_charges() -> None:
     with pytest.raises(ValueError, match="NAGL"):
         ParameterSet(("openff-2.3.0.offxml",), {"method": "am1bcc"})
-    with pytest.raises(NotImplementedError, match="GLYCAM06"):
-        ParameterSet(("GLYCAM_06j-1.xml",), {"method": "nagl", "model": "m.pt"})
 
 
 def test_a_mutated_then_modified_residue_keeps_the_mutants_backbone_charges() -> None:

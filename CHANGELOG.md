@@ -33,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   constrained everywhere at the length of the force field that owns them.
   Sites may use different OpenFF force fields. The result exports to OpenMM
   and GROMACS.
+- Glycan sites can take GLYCAM06j (`force_field: [GLYCAM_06j-1.xml]`,
+  `charges: {method: library}`). Each glycan's charges, Lennard-Jones and
+  bonded terms come from OpenMM's own GLYCAM06j force field, on the residue
+  renamed NLN, OLS or OLT, and every 1-4 pair touching the glycan keeps
+  GLYCAM's own scale (GLYCAM leaves many unscaled). `parameterize` returns a
+  `ParameterizedProtein`; its `to_openmm()` writes those pairs as
+  NonbondedForce exceptions and gives the glycan atoms GLYCAM's atom-type
+  masses (hydrogen mass repartitioning is refused with GLYCAM glycans). Its bare Interchange scales every 1-4 pair
+  uniformly, so it is named `interchange_without_glycam_pairs`, and
+  `.interchange` and `interchange, record = parameterize(...)` refuse when the
+  protein has GLYCAM06j glycans. The record lists each glycan's templates and
+  its number of unscaled 1-4 pairs.
 
 ### Changed
 
