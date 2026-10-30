@@ -72,11 +72,37 @@ The build record then lists the finding as ACCEPTED, with the reason.
 Mutations and modifications work as on ff14SB, but the protein takes no
 `modification_parameters`: Rosemary parameterizes every atom of the protein
 component, glycans and attached groups included. A config with both is
-refused. For glycans on GLYCAM06j, keep the protein on ff14SB.
+refused, with one exception (below). For glycans on GLYCAM06j in a
+production run, keep the protein on ff14SB.
 
 The audit reports glycans under Rosemary as an INFO line of
 `parameters.glycan_force_field`: "glycans parameterized by Rosemary
 (whole-protein mode)".
+
+### Benchmarking: GLYCAM06j glycans on a Rosemary protein
+
+To compare Rosemary's glycans with GLYCAM06j's on the same protein, give the
+glycans GLYCAM06j and nothing else:
+
+```yaml
+modification_parameters:
+  glycan:
+    force_field: [GLYCAM_06j-1.xml]
+    charges: {method: library}
+```
+
+This hybrid is for benchmarking, not the recommended setup. Each glycan and
+its linkage side chain (from CB outward) take GLYCAM06j's charges, terms and
+1-4 pairs, as on ff14SB; the rest of the protein stays on Rosemary with NAGL
+charges. The charge the swap removes or adds (NAGL's sum over the site minus
+GLYCAM06j's) is spread uniformly over the linkage residue's backbone (N, H,
+CA, HA, C, O), so the protein keeps its total charge. The shift per atom is
+recorded for each site and bounded by `max_charge_shift` (0.005 e per atom
+by default). An O-glycan on serine needs about 0.0095 e per atom, because
+GLYCAM06j's serine linkage side chain is built to balance ff14SB's backbone;
+raise `max_charge_shift` to accept it. The audit marks the build with a WARN
+of `parameters.glycan_force_field` ("Rosemary/GLYCAM06j hybrid") and checks
+the shifted backbone charges.
 
 Unlike the ff14SB path, Rosemary accepts a neutral N- or C-terminus (NH2 or
 COOH, with no group attached): it charges whatever chemistry it is given. A

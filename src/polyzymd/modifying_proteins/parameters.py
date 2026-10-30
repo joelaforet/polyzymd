@@ -389,6 +389,8 @@ def parameterize_whole(
     force_field: Sequence[str],
     charges: Mapping[str, str],
     *,
+    glycan: ParameterSet | None = None,
+    max_charge_shift: float = DEFAULT_MAX_CHARGE_SHIFT,
     constraints_from: str = CONSTRAINTS_FROM,
 ) -> "ParameterizedProtein":
     """Parameterize all of ``protein`` with one OpenFF force field (Rosemary alpha).
@@ -396,6 +398,14 @@ def parameterize_whole(
     There are no sites and no splice: every atom, modifications included, gets
     ``force_field``'s terms, and the whole molecule is charged by NAGL with
     the named model (``charges = {"method": "nagl", "model": ...}``).
+
+    ``glycan`` (a GLYCAM06j :class:`ParameterSet`) makes a Rosemary/GLYCAM06j
+    hybrid, an expert option for benchmarking (Joe, 2026-10-30): each glycan
+    site (the glycan and its linkage side chain) takes GLYCAM06j's charges,
+    terms and 1-4 pairs, as on ff14SB. The charge that swap removes or adds
+    (NAGL's sum over the site minus GLYCAM's) is spread uniformly over the
+    linkage residue's backbone (N, H, CA, HA, C, O), so the protein keeps its
+    total charge; a shift above ``max_charge_shift`` (e per atom) raises.
     """
     from openff.toolkit import ForceField, Topology
     from openff.units import unit
@@ -405,6 +415,11 @@ def parameterize_whole(
             "a protein parameterized whole takes NAGL charges on the whole molecule: "
             "charges = {'method': 'nagl', 'model': ...}"
         )
+    if glycan is not None and not glycan.is_glycam:
+        raise ValueError(
+            "a protein parameterized whole takes a glycan parameter set only for GLYCAM06j "
+            f"glycans (the Rosemary/GLYCAM06j hybrid), not {_describe(glycan)}"
+        )
     # A neutral terminus (NH2, COOH) is allowed here: Rosemary needs no residue
     # templates, and NAGL charges the molecule as built.
     molecule = to_openff(protein)
@@ -413,26 +428,77 @@ def parameterize_whole(
     # identical copies (the protomers of a homo-oligomer) share one result.
     pieces = split_molecules(molecule)
     charged = nagl_charges_by_component(pieces, charges["model"])
-    total = float(
-        sum(piece.partial_charges.m_as(unit.elementary_charge).sum() for piece in charged)
+    values = np.concatenate(
+        [piece.partial_charges.m_as(unit.elementary_charge) for piece in charged]
     )
+    total = float(values.sum())
     formal = sum(atom.formal_charge.m_as(unit.elementary_charge) for atom in molecule.atoms)
     if not np.isclose(total, formal, atol=1e-4):
         raise ValueError(f"NAGL charges sum to {total:.6f}, not the formal charge {formal}.")
-    constraints = ForceField(constraints_from)["Constraints"]
-    whole = _with_constraints(ForceField(*force_field), constraints)
-    interchange = whole.create_interchange(
-        Topology.from_molecules(charged), charge_from_molecules=charge_templates(charged)
-    )
-    interchange.positions = molecule.conformers[0] if molecule.conformers else None
     record = ParameterizationRecord(
         protein_force_field=list(force_field),
-        max_charge_shift=0.0,
+        max_charge_shift=max_charge_shift if glycan is not None else 0.0,
         total_charge=total,
         segments=segments(protein),
         molecules=[[m.start, m.stop] for m in molecule_ranges(molecule)],
         protein_charges=dict(charges),
     )
+    native = []
+    if glycan is not None:
+        keys = _keys(molecule)
+        nagl = dict(zip(keys, values))
+        for site in modification_sites(protein):
+            if site.type != "glycan":
+                continue
+            terms, glycam_site = glycam.glycam_site_terms(
+                molecule, site, nagl, keys, check_backbone=False
+            )
+            site_atoms = list(site.atom_indices)
+            backbone = sorted(terms.backbone_charges)
+            nagl_sum = float(values[site_atoms].sum())
+            glycam_sum = float(sum(terms.charges[i] for i in site_atoms))
+            shift_total = nagl_sum - glycam_sum
+            shift = shift_total / len(backbone)
+            if abs(shift) > max_charge_shift:
+                raise ValueError(
+                    f"Glycan {site.name} on Rosemary needs a backbone charge shift of "
+                    f"{shift:+.4f} e per atom (NAGL gives the site {nagl_sum:+.4f} e, GLYCAM06j "
+                    f"{glycam_sum:+.4f} e), more than the bound of {max_charge_shift} e. "
+                    "Raise max_charge_shift to accept it for this benchmark build."
+                )
+            values[site_atoms] = [terms.charges[i] for i in site_atoms]
+            values[backbone] += shift
+            native.append((terms, glycam_site))
+            linking = molecule.atom(backbone[0]).metadata["residue_name"]
+            record.sites.append(
+                SiteParameters(
+                    name=site.name,
+                    type=site.type,
+                    atom_indices=site_atoms,
+                    backbone_residues=[linking],
+                    force_field=list(glycan.force_field),
+                    charges=dict(glycan.charges),
+                    nagl_sum=nagl_sum,
+                    target=glycam_sum,
+                    shift_total=shift_total,
+                    shift_per_atom=shift,
+                )
+            )
+        if native:
+            for piece, (start, stop) in zip(charged, record.molecules):
+                piece.partial_charges = values[start:stop] * unit.elementary_charge
+            record.total_charge = float(values.sum())
+    constraints = ForceField(constraints_from)["Constraints"]
+    whole = _with_constraints(ForceField(*force_field), constraints)
+    interchange = whole.create_interchange(
+        Topology.from_molecules(charged), charge_from_molecules=charge_templates(charged)
+    )
+    for terms, glycam_site in native:
+        glycam.inject(interchange, terms, glycam_site)
+        record.glycam.append(glycam_site)
+    if native:
+        _check_charges(interchange, values)
+    interchange.positions = molecule.conformers[0] if molecule.conformers else None
     return ParameterizedProtein(interchange, record)
 
 
@@ -729,9 +795,7 @@ def charge_templates(molecules: Sequence) -> list:
         )
         first = templates.setdefault(key, molecule)
         if first is not molecule and molecule.partial_charges is not None:
-            if not np.allclose(
-                first.partial_charges.m, molecule.partial_charges.m, atol=1e-6
-            ):
+            if not np.allclose(first.partial_charges.m, molecule.partial_charges.m, atol=1e-6):
                 raise ValueError(
                     "Two copies of one chain carry different charges; give them the same "
                     "modifications or make them differ in chemistry."

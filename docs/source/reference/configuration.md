@@ -120,6 +120,9 @@ pixi environments install (`openff-forcefields` 2026.09.0); earlier
 candidates such as `openff_no_water-3.0.0-alpha0.offxml` are still accepted. It parameterizes the whole protein component,
 mutations and modifications included, and NAGL charges the whole molecule, so
 the protein takes no `modification_parameters` and has no per-site domains.
+The one exception is a benchmarking hybrid: `modification_parameters` with a
+GLYCAM06j `glycan` set and nothing else gives each glycan GLYCAM06j (see the
+Rosemary how-to).
 It must be the protein's only force field file. The audit warns that it is an
 alpha release (`parameters.rosemary_alpha`). OpenFF pairs Rosemary with OPC3
 water: set `solvent.water.model: opc3`, or the build fails

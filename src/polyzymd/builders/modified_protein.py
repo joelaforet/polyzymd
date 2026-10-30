@@ -134,6 +134,9 @@ class ModifiedProteinBuild:
                 protein,
                 tuple(solute.force_field),
                 solute.charges.model_dump(exclude_none=True),
+                # GLYCAM06j glycans on Rosemary: the expert hybrid for benchmarking.
+                glycan=sets.get("glycan"),
+                max_charge_shift=solute.max_charge_shift,
                 constraints_from=constraints_from,
             )
         else:

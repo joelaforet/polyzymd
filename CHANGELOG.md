@@ -99,6 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `parameters.glycan_force_field` reports glycans parameterized by Rosemary
   (whole-protein mode) instead of a GLYCAM06j finding. How-to:
   `docs/source/how_to/rosemary.md`.
+- For benchmarking, a protein on Rosemary may give its glycans GLYCAM06j
+  (`modification_parameters: {glycan: {force_field: [GLYCAM_06j-1.xml],
+  charges: {method: library}}}`, glycans only). Each glycan site takes
+  GLYCAM06j's charges, terms and 1-4 pairs; the charge difference from
+  Rosemary's NAGL charges is spread over the linkage residue's backbone
+  (bounded by `max_charge_shift`, recorded per site). The audit checks the
+  hybrid and marks it with a `parameters.glycan_force_field` WARN.
 - The `build` and `test` environments install `openff-forcefields` 2026.09.0
   (was 2026.01.0), which adds the Rosemary candidate
   `openff_no_water-3.0.0-alpha2b.offxml`. The other force field files PolyzyMD

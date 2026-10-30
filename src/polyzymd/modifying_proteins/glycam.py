@@ -186,12 +186,17 @@ def _missing_template_bonds(lines: list[str]) -> list[str]:
     return missing
 
 
-def glycam_site_terms(molecule, site, library: dict, keys) -> tuple[_NativeTerms, GlycamSite]:
+def glycam_site_terms(
+    molecule, site, library: dict, keys, *, check_backbone: bool = True
+) -> tuple[_NativeTerms, GlycamSite]:
     """Parameterize one glycan site natively with GLYCAM06j.
 
     ``molecule`` is the OpenFF Molecule of the whole protein, ``site`` its
     :class:`~polyzymd.modifying_proteins.topology.ModificationSite`,
     ``library`` the ff14SB library charge of every protein atom by key.
+    ``check_backbone`` checks that GLYCAM's linkage-residue backbone charges
+    are ff14SB's; a Rosemary protein (whose backbone carries NAGL charges)
+    turns it off.
     """
     import openmm
     from openmm import app
@@ -371,7 +376,7 @@ def glycam_site_terms(molecule, site, library: dict, keys) -> tuple[_NativeTerms
                 terms.scales[pair] = (charge_scale, lj_scale)
 
     for index, charge in terms.backbone_charges.items():
-        if abs(charge - library[keys[index]]) > 1e-4:
+        if check_backbone and abs(charge - library[keys[index]]) > 1e-4:
             raise ValueError(
                 f"GLYCAM06j's {linkage_template} backbone charge of {name_of[index]} "
                 f"({charge:+.4f}) differs from ff14SB's ({library[keys[index]]:+.4f})."
