@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import re
 from pathlib import Path
 from typing import Any, Literal, Optional, Union
 
@@ -164,6 +165,9 @@ class Fragment(_ConfigModel):
     pdb_path: Optional[Path] = Field(None, description="PDB file with CONECT records")
     charge: int = Field(0, description="Net formal charge of a pdb_path fragment")
     ccd: Optional[str] = Field(None, description="CCD code of the fragment")
+    ccd_file: Optional[Path] = Field(
+        None, description="Local CCD definition (.cif) of the fragment, named <CODE>.cif"
+    )
     link_atom: Optional[str] = Field(None, description="Atom of the CCD fragment that bonds")
 
     @model_validator(mode="after")
@@ -174,17 +178,18 @@ class Fragment(_ConfigModel):
                 ("smiles", self.smiles is not None),
                 ("pdb_path", self.pdb_path is not None),
                 ("ccd", self.ccd is not None),
+                ("ccd_file", self.ccd_file is not None),
             )
             if present
         ]
         if len(given) != 1:
             raise ValueError(
-                "a fragment is one of {smiles, resname}, {pdb_path}, or {ccd, link_atom}; "
-                f"got {', '.join(given) or 'none'}"
+                "a fragment is one of {smiles, resname}, {pdb_path}, {ccd, link_atom} or "
+                f"{{ccd_file, link_atom}}; got {', '.join(given) or 'none'}"
             )
         if self.smiles is not None and not self.resname:
             raise ValueError("a SMILES fragment needs `resname` (1-3 characters)")
-        if self.ccd is not None and not self.link_atom:
+        if (self.ccd is not None or self.ccd_file is not None) and not self.link_atom:
             raise ValueError("a CCD fragment needs `link_atom`, the atom that bonds")
         return self
 
@@ -197,6 +202,8 @@ class Fragment(_ConfigModel):
             if self.charge:
                 source["charge"] = self.charge
             return source
+        if self.ccd_file is not None:
+            return {"ccd_file": str(self.ccd_file), "link_atom": self.link_atom}
         return {"ccd": self.ccd, "link_atom": self.link_atom}
 
 
@@ -242,9 +249,9 @@ class Attachment(_Sites):
     def _no_per_entry_parameters(cls, data: Any) -> Any:
         if isinstance(data, dict) and "parameters" in data:
             raise ValueError(
-                "`parameters` is set once per site type under modification_parameters "
-                f"(glycan, polymer, generic, noncanonical), not per entry; remove it from "
-                f"this {data.get('type', '')} entry"
+                "one parameter set per attachment type in 1.4: set it under "
+                "modification_parameters (glycan, polymer, generic, noncanonical) and "
+                f"remove `parameters` from this {data.get('type', '')} entry"
             )
         return data
 
@@ -422,33 +429,106 @@ def declared_modifications(
     """
     sets = parameters.as_dict() if parameters else {}
     declared = []
-    for mutation in mutations:
+    for n, mutation in enumerate(mutations):
         for site in _expand(mutation):
-            entry = {"kind": "mutate", "site": site, "to": _target_data(mutation.to)}
+            entry = {
+                "entry": f"mutations.{n}",
+                "kind": "mutate",
+                "site": site,
+                "to": _target_data(mutation.to),
+            }
             if mutation.stereo:
                 entry["stereo"] = mutation.stereo
             if not mutation.is_canonical:
                 entry["parameters"] = _set_data(sets.get("noncanonical"))
             declared.append(entry)
-    for modification in modifications:
+    for n, modification in enumerate(modifications):
         verb, arguments = modification.verb, modification.arguments
+        where = f"modifications.{n}.{verb}"
         if verb != "attach":
             for site in _expand(arguments):
-                declared.append({"kind": verb, "site": site, "atom_name": arguments.atom_name})
+                declared.append(
+                    {"entry": where, "kind": verb, "site": site, "atom_name": arguments.atom_name}
+                )
             continue
+        # Every field that changes the chemistry: all of the entry but how it names
+        # its sites (and the fragment, replaced by its source data and hash).
+        fields = {
+            key: value
+            for key, value in arguments.model_dump(mode="json", exclude=_SITE_FORM_KEYS).items()
+            if value is not None
+        }
+        for key in ("leaving_atom_names", "fragment_leaving_atom_names"):
+            if isinstance(fields.get(key), str):
+                fields[key] = [fields[key]]
         for site, fragment in _attachment_sites(arguments):
             declared.append(
                 {
+                    "entry": where,
                     "kind": "attach",
-                    "type": arguments.type,
                     "site": site,
-                    "atom_name": arguments.atom_name,
-                    "reaction": arguments.reaction,
+                    **fields,
                     "fragment": fragment,
                     "parameters": _set_data(sets.get(arguments.type)),
                 }
             )
     return declared
+
+
+#: Keys that say where an entry applies, not what it does.
+_SITE_FORM_KEYS = {
+    "site",
+    "sites",
+    "chains",
+    "residues",
+    "sites_file",
+    "glycans",
+    "glycan_library",
+    "name",
+    "fragment",
+}
+
+
+def modification_fingerprint(solute: Any) -> dict[str, Any]:
+    """Everything about a protein's modifications that changes the system, as plain data.
+
+    One entry per site with every chemistry field (files by SHA-256, not path),
+    the parameter sets, ``max_charge_shift`` and ``relax``; empty for an
+    unmodified solute. The analysis identity and the run-folder token hash it.
+    """
+    if not getattr(solute, "is_modified", False):
+        return {}
+
+    def portable(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                k: portable(v)
+                for k, v in value.items()
+                if k not in ("pdb_path", "ccd_file", "entry")
+            }
+        if isinstance(value, list):
+            return [portable(v) for v in value]
+        return value
+
+    declared = declared_modifications(
+        solute.mutations, solute.modifications, solute.modification_parameters
+    )
+    return {
+        "modifications": [portable(item) for item in declared],
+        "max_charge_shift": solute.max_charge_shift,
+        "relax": solute.relax,
+    }
+
+
+def modification_identity(solute: Any) -> str:
+    """SHA-256 (hex) of :func:`modification_fingerprint`; "" for an unmodified solute."""
+    import json
+
+    fingerprint = modification_fingerprint(solute)
+    if not fingerprint:
+        return ""
+    encoded = json.dumps(fingerprint, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _expand(entry: _Sites) -> list[str]:
@@ -479,11 +559,20 @@ def _attachment_sites(attachment: Attachment) -> list[tuple[str, dict[str, Any]]
         ]
     if attachment.sites_file is not None and attachment.fragment is None:
         return [
-            (str(parse_site(row["site"])), _file_data(_glycan_path(library, row["glycan"])))
+            (str(parse_site(row["site"])), _file_data(_glycan_path(library, _glycan_of(row))))
             for row in _csv_rows(attachment.sites_file)
         ]
     fragment = _fragment_data(attachment.fragment)
     return [(site, fragment) for site in _expand(attachment)]
+
+
+def _glycan_of(row: dict[str, str]) -> str:
+    if not row.get("glycan"):
+        raise ValueError(
+            f"sites file row {row} names no glycan; a glycan group read from a sites file "
+            "needs a `glycan` column (an accession)"
+        )
+    return row["glycan"]
 
 
 def _csv_rows(path: Path) -> list[dict[str, str]]:
@@ -492,6 +581,12 @@ def _csv_rows(path: Path) -> list[dict[str, str]]:
             {key.strip(): (value or "").strip() for key, value in row.items() if key}
             for row in csv.DictReader(handle)
         ]
+
+
+def glycan_file(library: Optional[Path], accession: str) -> Path:
+    """The file of glycan ``accession`` in ``library``: ``glycam_<ID>.pdb`` or ``<ID>.pdb``
+    (the first when neither exists)."""
+    return _glycan_path(library, accession)
 
 
 def _glycan_path(library: Optional[Path], accession: str) -> Path:
@@ -511,6 +606,13 @@ def _file_data(path: Path) -> dict[str, Any]:
 def _fragment_data(fragment: Fragment) -> dict[str, Any]:
     if fragment.pdb_path is not None:
         return _file_data(fragment.pdb_path)
+    if fragment.ccd_file is not None:
+        digest = _file_data(fragment.ccd_file)["sha256"]
+        return {
+            "ccd_file": str(fragment.ccd_file),
+            "sha256": digest,
+            "link_atom": fragment.link_atom,
+        }
     return fragment.as_source()
 
 
@@ -529,3 +631,46 @@ def _set_data(parameter_set: Optional[ModificationParameterSet]) -> Optional[dic
         "force_field": list(parameter_set.force_field),
         "charges": parameter_set.charges.model_dump(exclude_none=True),
     }
+
+
+def declared_for_audit(config: Any) -> Optional[dict[str, dict[str, Any]]]:
+    """What each modified protein of ``config`` declares, for ``modifications.declared``.
+
+    ``{solute name: {"spec", "parameter_sets", "base_dir"}}``, or None when no
+    protein has modifications.
+    """
+    if config is None:
+        return None
+    declared = {}
+    for solute in getattr(config, "solutes", None) or []:
+        if not getattr(solute, "is_modified", False):
+            continue
+        sets = solute.modification_parameters.as_dict() if solute.modification_parameters else {}
+        declared[solute.name] = {
+            # The config's own expansion, one entry per site; not the builder's.
+            "entries": declared_modifications(
+                solute.mutations, solute.modifications, solute.modification_parameters
+            ),
+            "parameter_sets": {name: _set_data(chosen) for name, chosen in sets.items()},
+            "base_dir": str(getattr(config, "_config_dir", None) or "."),
+        }
+    return declared or None
+
+
+_RESIDUE_NUMBER = re.compile(r"\b(resid|resnum|resSeq|residue)\b")
+_SEGMENT_SCOPE = re.compile(r"\b(segid|protein)\b")
+
+
+def has_attachments(solute: Any) -> bool:
+    """Whether a protein solute attaches anything (so it has segments beside PROT)."""
+    return any(entry.verb == "attach" for entry in getattr(solute, "modifications", None) or [])
+
+
+def unscoped_residue_selection(selection: str) -> bool:
+    """Whether ``selection`` picks residues by number without naming a segment.
+
+    A modified protein's attachments are segments of their own whose residues
+    are numbered from 1, so ``resid 1-10`` also matches glycan, graft and
+    label residues; ``segid PROT and resid 1-10`` (or ``protein and ...``) does not.
+    """
+    return bool(_RESIDUE_NUMBER.search(selection)) and not _SEGMENT_SCOPE.search(selection)

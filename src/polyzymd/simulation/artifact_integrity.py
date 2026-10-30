@@ -257,7 +257,9 @@ def _audit(realize: Any, components: Sequence[Any] | None, config: Any) -> Any:
 
     try:
         realized = realize() if callable(realize) else realize
-        return audit(realized, components, config)
+        from polyzymd.config.modifications import declared_for_audit
+
+        return audit(realized, components, config, declared=declared_for_audit(config))
     except Exception as error:  # an audit that cannot run must not pass silently
         return AuditReport(
             [
@@ -315,12 +317,72 @@ def provenance_markdown(record: dict[str, Any], audit: Any = None) -> str:
         "The software, force fields, models and methods this build used:",
         "",
     ] + ([f"- {reference}" for reference in record.get("cite") or []] or ["- none recorded"])
-    seeds = record.get("provenance") or {}
+    seeds = dict(record.get("provenance") or {})
+    modifications = seeds.pop("protein_modifications", None)
+    if modifications:
+        lines += ["", *_modifications_markdown(modifications)]
     if seeds:
         lines += ["", "## Inputs and seeds", ""] + [
             f"- {k}: `{v}`" for k, v in sorted(seeds.items())
         ]
     return "\n".join(lines) + "\n"
+
+
+def _modifications_markdown(modifications: dict[str, Any]) -> list[str]:
+    """A modified protein's changes, segments and sites, for people (the JSON has all)."""
+    from collections import Counter
+
+    lines = [
+        "## Protein modifications",
+        "",
+        "| # | Change | Site | Type | Fragment | Reaction |",
+        "|---|---|---|---|---|---|",
+    ]
+    for n, item in enumerate(modifications.get("declared") or [], start=1):
+        fragment = item.get("fragment") or item.get("to") or ""
+        if isinstance(fragment, dict):
+            fragment = (
+                Path(fragment.get("pdb_path") or fragment.get("ccd_file") or "").name
+                or fragment.get("resname")
+                or fragment.get("ccd")
+                or ""
+            )
+        lines.append(
+            f"| {n} | {item.get('kind')} | {item.get('site')} | {item.get('type') or ''} | "
+            f"{fragment} | {item.get('reaction') or ''} |"
+        )
+    parameterization = modifications.get("parameterization") or {}
+    counts = Counter(parameterization.get("segments") or [])
+    if counts:
+        lines += ["", "Segments: " + ", ".join(f"{k} {v} atoms" for k, v in counts.items())]
+    sites = parameterization.get("sites") or []
+    if sites:
+        lines += [
+            "",
+            "| Site | Type | Atoms | Force field | Charges | Shift (e/atom) |",
+            "|---|---|---|---|---|---|",
+        ]
+        for site in sites:
+            charges = site.get("charges") or {}
+            shift = site.get("shift_per_atom")
+            lines.append(
+                f"| {site.get('name')} | {site.get('type')} | "
+                f"{len(site.get('atom_indices') or [])} | {', '.join(site.get('force_field') or [])} | "
+                f"{charges.get('method', '')} {charges.get('model') or ''} | "
+                f"{'' if shift is None else f'{shift:+.5f}'} |"
+            )
+    for key in ("mbuild", "openff_pablo"):
+        info = modifications.get(key) or {}
+        if info:
+            lines.append(
+                f"\n- {key}: {info.get('version')} {info.get('requested_revision') or ''} "
+                f"{info.get('commit') or ''}".rstrip()
+            )
+    timings = modifications.get("timings_s") or {}
+    if timings:
+        lines.append("- timings: " + ", ".join(f"{k} {v} s" for k, v in timings.items()))
+    lines.append("- the full record is in build_provenance.json")
+    return lines
 
 
 def write_gromacs_build_manifest(
@@ -433,7 +495,8 @@ def publish_build_bundle(
         if segids is not None:
             from polyzymd.core.components import write_pdb_segids
 
-            write_pdb_segids(pdb_path, segids)
+            attachments = {segid for c in components or () for segid in c.segments}
+            write_pdb_segids(pdb_path, segids, separate=attachments)
         system_path.write_text(XmlSerializer.serialize(system))
         written = list(_BUILD_ARTIFACTS)
         if write_analysis_topology(topology, system, positions, staging / ANALYSIS_TOPOLOGY_NAME):

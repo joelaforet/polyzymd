@@ -74,6 +74,32 @@ solutes:
     description: "My enzyme description"
     force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
     charges: {method: library}
+    # Mutations, then covalent modifications, applied to the PDB in order
+    # (OPTIONAL). Sites are chain:residue (A:N58 or A:ASN58), checked against the
+    # PDB; `polyzymd validate --plans` lists every change before you build.
+    # mutations:
+    #   - {site: A:S13, to: CYS}                    # a CCD code: ALA, 4II, DLE, ...
+    #   - {chains: [A, C, E], residues: [T301], to: ASN}
+    # modifications:
+    #   - deprotonate: {site: A:K63, atom_name: NZ}
+    #   - attach:                                   # one glycan per listed residue
+    #       type: glycan                            # glycan, polymer or generic
+    #       reaction: N-glycosylation
+    #       atom_name: ND2
+    #       fragment_atom_name: C1
+    #       fragment_resnum: 2
+    #       chains: [A]
+    #       glycans: {G42666HT: [N58, N107]}        # structures/glycans/glycam_<ID>.pdb
+    #   - attach:
+    #       type: generic
+    #       site: A:K63
+    #       atom_name: NZ
+    #       fragment: {smiles: "*C(=O)CCCCCCC", resname: OC8}
+    # modification_parameters:                      # one set per site type used
+    #   glycan: {force_field: [GLYCAM_06j-1.xml], charges: {method: library}}
+    #   generic:
+    #     force_field: [openff-2.3.0.offxml]
+    #     charges: {method: nagl, model: openff-gnn-am1bcc-1.0.0.pt}
 
   # A docked small molecule, placed as given (OPTIONAL).
   # - type: small_molecule

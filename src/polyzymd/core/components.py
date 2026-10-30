@@ -256,28 +256,48 @@ def atom_segids(components: Sequence[ComponentRecord], n_atoms: int) -> list[str
     return segids
 
 
-def write_pdb_segids(path: Path | str, segids: Sequence[str]) -> None:
+def write_pdb_segids(
+    path: Path | str, segids: Sequence[str], separate: Iterable[str] = ()
+) -> None:
     """Write each atom's segment ID into columns 73-76 of a PDB file, in place.
 
     MDAnalysis reads these columns as ``segid`` and PyMOL as ``segi``. The
     ATOM and HETATM records must be in system atom order, as OpenMM writes them.
 
+    A ``TER`` record is written wherever the segment changes into or out of
+    one of ``separate`` (a modified protein's attachment segments). Their
+    residues are numbered from 1 within each segment, and a reader that keys
+    residues by chain, number and name (OpenMM's) would otherwise read two
+    adjacent one-residue glycans as one residue with alternate locations.
+
     Raises:
         ValueError: If the file holds a different number of atoms.
     """
     path = Path(path)
+    separate = set(separate)
     lines = path.read_text().splitlines(keepends=True)
+    out = []
     atom = 0
-    for k, line in enumerate(lines):
+    for line in lines:
         if line.startswith(("ATOM  ", "HETATM")):
             if atom >= len(segids):
                 raise ValueError(f"{path} holds more than the {len(segids)} atoms given")
+            segid = segids[atom]
+            if (
+                atom
+                and segid != segids[atom - 1]
+                and {segid, segids[atom - 1]} & separate
+                and out
+                and not out[-1].startswith("TER")
+            ):
+                out.append("TER\n")
             body = line.rstrip("\r\n").ljust(80)
-            lines[k] = body[:72] + segids[atom].ljust(4) + body[76:].rstrip() + "\n"
+            line = body[:72] + segid.ljust(4) + body[76:].rstrip() + "\n"
             atom += 1
+        out.append(line)
     if atom != len(segids):
         raise ValueError(f"{path} holds {atom} atoms, not {len(segids)}")
-    path.write_text("".join(lines))
+    path.write_text("".join(out))
 
 
 def write_index(path: Path | str, components: Sequence[ComponentRecord]) -> Path:

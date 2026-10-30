@@ -37,6 +37,7 @@ This page is generated from PolyzyMD's check registry
 | `geometry.buried_water` | the system (protein) | WARN | water buried inside the protein (may be deliberate, as a crystal water) |
 | `geometry.image_bridging` | the system (polymer) | FAIL | a polymer chain touching both the protein and the protein's periodic image |
 | `geometry.interchain_overlap` | the system | WARN | polymer chains clashing with each other (usually resolved by minimization; a sign of a forced Packmol result) |
+| `geometry.modified_protein_clash` | each component (protein) | FAIL | atoms of a modified protein without a bond or angle between them closer than 1.0 Å (heavy-heavy, hydrogen-heavy) or 0.8 Å (hydrogen-hydrogen): a fragment or side chain placed through the protein, which minimization can only fix by stretching bonds or moving the protein |
 | `geometry.periodic_image` | the system | FAIL | a fixed component closer to its own periodic image than the box padding guarantees |
 | `geometry.polymer_overlap` | the system | FAIL | a polymer heavy atom clashing with the protein or ligand |
 | `geometry.water_overlap` | the system | FAIL | a solvent heavy atom clashing with a solute heavy atom (closer than half the Packmol tolerance the build used) |

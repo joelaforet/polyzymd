@@ -699,3 +699,71 @@ def test_a_neutral_aspartate_from_a_ccd_mutation_warns(tmp_path) -> None:
         in (status["modifications.protonation_state"][1])
     )
     assert _not_passing(status, allowed=("modifications.protonation_state",)) == {}
+
+
+def test_planned_names_are_compared_as_openmms_pdb_reader_names_them() -> None:
+    from polyzymd.audit.checks.modifications import _as_read
+
+    # An input NME cap's CCD amide hydrogen HN2 is read back as H2.
+    assert _as_read("NME", "HN2") == "H2"
+    assert _as_read("NME", "H1") == "H1"
+    assert _as_read("ALA", "CA") == "CA"
+
+
+def test_a_fragment_placed_through_the_protein_fails_the_clash_check(acylated, tmp_path) -> None:
+    from polyzymd.audit.findings import run_checks
+
+    protein, interchange, record, component = acylated
+    system = interchange.to_openmm(combine_nonbonded_forces=True)
+    # A box wider than the protein: OpenMM's default 2 nm box would bring the
+    # protein's ends onto each other's images.
+    system.setDefaultPeriodicBoxVectors(*(openmm.Vec3(*row) for row in 5.0 * np.eye(3)))
+    (tmp_path / "system.xml").write_text(openmm.XmlSerializer.serialize(system))
+    protein.save_pdb(tmp_path / "protein.pdb")
+    keys = protein.atom_keys()
+    acyl = next(
+        i for i, s in enumerate(record.segments) if s != "PROT" and keys[i].atom_name[0] == "C"
+    )
+    target = next(i for i, k in enumerate(keys) if k.resnum == 20 and k.atom_name == "CA")
+    lines = (tmp_path / "protein.pdb").read_text().splitlines()
+    atoms = [k for k, line in enumerate(lines) if line.startswith(("ATOM", "HETATM"))]
+    x, y, z = (float(lines[atoms[target]][c : c + 8]) for c in (30, 38, 46))
+    line = lines[atoms[acyl]]
+    lines[atoms[acyl]] = f"{line[:30]}{x + 0.5:8.3f}{y:8.3f}{z:8.3f}{line[54:]}"
+    clashing = tmp_path / "clashing.pdb"
+    clashing.write_text("\n".join(lines) + "\n")
+
+    def status(pdb):
+        realized = RealizedSystem.from_openmm(tmp_path / "system.xml", pdb)
+        (finding,) = [
+            f
+            for f in run_checks(realized, [component], ["geometry.modified_protein_clash"])
+            if f.check == "geometry.modified_protein_clash"
+        ]
+        return finding
+
+    passed = status(tmp_path / "protein.pdb")
+    assert passed.status == "PASS", passed.detail
+    failed = status(clashing)
+    assert failed.status == "FAIL" and "1 heavy-heavy pairs closer than 1.0 Å" in failed.detail
+    assert ":CA" in failed.detail
+
+    # A fragment hydrogen 0.6 Å from a protein hydrogen, and 1.7 Å from its carbon,
+    # leaves every heavy atom clear: the check fails on the hydrogens alone.
+    hydrogen = next(
+        i for i, s in enumerate(record.segments) if s != "PROT" and keys[i].atom_name[0] == "H"
+    )
+    ha = next(i for i, k in enumerate(keys) if k.resnum == 20 and k.atom_name in ("HA", "HA2"))
+    lines = (tmp_path / "protein.pdb").read_text().splitlines()
+    ca_xyz, ha_xyz = (
+        np.array([float(lines[atoms[i]][c : c + 8]) for c in (30, 38, 46)]) for i in (target, ha)
+    )
+    x, y, z = ha_xyz + 0.6 * (ha_xyz - ca_xyz) / np.linalg.norm(ha_xyz - ca_xyz)
+    line = lines[atoms[hydrogen]]
+    lines[atoms[hydrogen]] = f"{line[:30]}{x:8.3f}{y:8.3f}{z:8.3f}{line[54:]}"
+    clashing = tmp_path / "hydrogen_clash.pdb"
+    clashing.write_text("\n".join(lines) + "\n")
+    failed = status(clashing)
+    assert failed.status == "FAIL", failed.detail
+    assert "1 hydrogen-hydrogen pairs closer than 0.8 Å" in failed.detail
+    assert "heavy-heavy" not in failed.detail and ":HA" in failed.detail

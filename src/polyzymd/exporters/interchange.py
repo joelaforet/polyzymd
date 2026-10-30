@@ -40,6 +40,8 @@ def export_system(
     prefix: str | None = None,
     gmx_command: str = "gmx",
     replicate: int | None = None,
+    glycam_sites: list | None = None,
+    protein_molecules: list | None = None,
 ) -> dict[str, Any]:
     """Export a parameterized system to a requested MD engine format.
 
@@ -59,6 +61,12 @@ def export_system(
         Filename prefix for exported files. If None, exporter derives a default
     replicate : int, optional
         The replicate number, which seeds the dynamics in the GROMACS MDP files.
+    glycam_sites : list, optional
+        GLYCAM06j sites of the first molecule, from ``SystemBuilder.glycam_sites``:
+        their 1-4 pairs and masses are written into its GROMACS molecule types.
+    protein_molecules : list, optional
+        ``[start, stop)`` atom ranges of the protein's molecules, from
+        ``SystemBuilder.protein_molecule_ranges``.
     gmx_command : str, optional
         GROMACS executable command used by generated run scripts, by default ``"gmx"``
 
@@ -82,7 +90,15 @@ def export_system(
         )
 
     return _export_gromacs(
-        interchange, config, output_dir, component_info, prefix, gmx_command, replicate
+        interchange,
+        config,
+        output_dir,
+        component_info,
+        prefix,
+        gmx_command,
+        replicate,
+        glycam_sites,
+        protein_molecules,
     )
 
 
@@ -94,6 +110,8 @@ def _export_gromacs(
     prefix: str | None,
     gmx_command: str,
     replicate: int | None = None,
+    glycam_sites: list | None = None,
+    protein_molecules: list | None = None,
 ) -> dict[str, Any]:
     """Export to GROMACS format via :class:`GromacsExporter`.
 
@@ -125,6 +143,8 @@ def _export_gromacs(
         config=config,
         component_info=component_info,
         replicate=replicate,
+        glycam_sites=glycam_sites,
+        protein_molecules=protein_molecules,
     )
     return exporter.export(
         output_dir=output_dir,

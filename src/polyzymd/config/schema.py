@@ -24,6 +24,7 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    PrivateAttr,
     SerializerFunctionWrapHandler,
     Tag,
     field_validator,
@@ -2259,6 +2260,10 @@ class SimulationConfig(_ConfigModel):
         "polymers": "a solutes entry with type: polymer",
         "force_field": "force_field lists on each solute and on solvent",
     }
+
+    #: Folder of the YAML file the config was loaded from (None when built in
+    #: Python); relative paths a build records are relative to it.
+    _config_dir: Path | None = PrivateAttr(default=None)
 
     name: str = Field(..., description="Simulation identifier")
     description: str | None = Field(None, description="Simulation description")

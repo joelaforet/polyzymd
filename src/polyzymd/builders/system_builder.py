@@ -16,10 +16,11 @@ if TYPE_CHECKING:
     from openff.interchange import Interchange
     from openff.toolkit import ForceField, Molecule, Topology
 
-    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.config.schema import ProteinSolute, SimulationConfig
     from polyzymd.core.components import ChargeSource, ComponentRecord
 
 from polyzymd.builders.enzyme import EnzymeBuilder
+from polyzymd.builders.modified_protein import ModifiedProteinBuild
 from polyzymd.builders.polymer import PolymerBuilder
 from polyzymd.builders.solvent import SolventBuilder, SolventComposition
 from polyzymd.builders.substrate import SubstrateBuilder
@@ -125,6 +126,8 @@ class SystemBuilder:
         self._interchange: Optional[Interchange] = None
         self._working_dir: Optional[Path] = None
         self._build_provenance: Dict[str, Any] = {}
+        #: The protein after its mutations and modifications, when it has any.
+        self._modified_protein: Optional[ModifiedProteinBuild] = None
 
         # Molecule count tracking for PDB chain/residue assignment
         # These are set during build and used by _assign_pdb_identifiers()
@@ -193,6 +196,29 @@ class SystemBuilder:
                 "Enzyme topology contains %d protein molecules; retaining all on chain A",
                 self._n_enzyme_molecules,
             )
+        return self._enzyme_topology
+
+    def build_modified_enzyme(
+        self, solute: "ProteinSolute", base_dir: Union[str, Path, None] = None
+    ) -> Topology:
+        """Build a protein with mutations or modifications, parameterized site by site.
+
+        Every change is applied (and so checked against the structure) before
+        anything is packed. The protein is written to the run folder as
+        ``modified_protein.pdb``.
+        """
+        from openff.toolkit import Topology
+
+        self._modified_protein = ModifiedProteinBuild.build(
+            solute,
+            constraints_from=self._sm_ff,
+            working_dir=self._working_dir,
+            base_dir=base_dir,
+        )
+        molecules = self._modified_protein.molecules()
+        self._enzyme_topology = Topology.from_molecules(molecules)
+        self._n_enzyme_molecules = len(molecules)
+        self._build_provenance["protein_modifications"] = self._modified_protein.provenance()
         return self._enzyme_topology
 
     def build_substrate(
@@ -557,6 +583,12 @@ class SystemBuilder:
         # Build charge templates: one per unique species
         t0 = time.perf_counter()
         charge_from: List[Molecule] = [water_mol]
+        if self._modified_protein is not None:
+            # A modified protein has no ff14SB library charges for its sites;
+            # its charges are the ones parameterization assigned, site by site.
+            from polyzymd.modifying_proteins.parameters import charge_templates
+
+            charge_from.extend(charge_templates(list(self._enzyme_topology.molecules)))
 
         seen_smiles: set = set()
         for mol in self._polymer_molecules:
@@ -654,15 +686,23 @@ class SystemBuilder:
             )
 
         t0 = time.perf_counter()
-        protein_ff = ForceField(self._protein_ff)
-        small_molecule_ff = ForceField(self._sm_ff)
-        # The Amber port has no Constraints handler.
-        if "Constraints" not in protein_ff.registered_parameter_handlers:
-            protein_ff.register_parameter_handler(small_molecule_ff["Constraints"])
-        protein_topology = Topology.from_molecules(
-            [self._solvated_topology.molecule(index) for index in range(self._n_enzyme_molecules)]
-        )
-        reference = protein_ff.create_interchange(protein_topology)
+        if self._modified_protein is not None:
+            # ff14SB outside the sites, each site from its parameter set, as
+            # parameterization made them; atoms are in the same order.
+            reference = self._modified_protein.interchange
+        else:
+            protein_ff = ForceField(self._protein_ff)
+            small_molecule_ff = ForceField(self._sm_ff)
+            # The Amber port has no Constraints handler.
+            if "Constraints" not in protein_ff.registered_parameter_handlers:
+                protein_ff.register_parameter_handler(small_molecule_ff["Constraints"])
+            protein_topology = Topology.from_molecules(
+                [
+                    self._solvated_topology.molecule(index)
+                    for index in range(self._n_enzyme_molecules)
+                ]
+            )
+            reference = protein_ff.create_interchange(protein_topology)
 
         for name in ("vdW", "Electrostatics"):
             for attribute in ("scale_12", "scale_13", "scale_14", "scale_15"):
@@ -691,7 +731,9 @@ class SystemBuilder:
                 )
                 target.key_map[key] = copied
                 target.potentials[copied] = source.potentials[potential_key]
-            if name != "ImproperTorsions":
+            # Parameterization checked a modified protein's coverage site by
+            # site (GLYCAM06j impropers are written as proper torsions).
+            if name != "ImproperTorsions" and self._modified_protein is None:
                 before = {tuple(sorted(key.atom_indices)) for key in removed}
                 after = {tuple(sorted(key.atom_indices)) for key in source.key_map}
                 if before != after:
@@ -785,16 +827,31 @@ class SystemBuilder:
             # after the other: two 100-residue chains become residues 1-100 and
             # 101-200. Adjust your downstream analysis accordingly!!!
 
+            # A modified protein's attachments (glycans, grafted polymers, labels)
+            # are segments of their own (G001, P001, M001, ...): their residues are
+            # numbered from 1 within the segment, so "segid G001 and resid 1" is a
+            # glycan's first residue, and the protein's own residues keep the numbers
+            # an unmodified build gives them.
+            segments = self._protein_segments()
+            segment_numbers: dict[str, int] = {}
+            protein_atom = 0
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
-                residue_map: dict[str, int] = {}
+                residue_map: dict[tuple[str, str], int] = {}
                 for atom_index, atom in enumerate(mol.atoms):
                     residue_token = self._get_original_residue_token(atom, atom_index)
+                    segment = segments[protein_atom] if segments else "PROT"
+                    protein_atom += 1
                     atom.metadata["chain_id"] = PROTEIN_CHAIN
-                    if residue_token not in residue_map:
-                        residue_map[residue_token] = protein_residue_num
-                        protein_residue_num += 1
-                    atom.metadata["residue_number"] = str(residue_map[residue_token])
+                    key = (segment, residue_token)
+                    if key not in residue_map:
+                        if segment == "PROT":
+                            residue_map[key] = protein_residue_num
+                            protein_residue_num += 1
+                        else:
+                            segment_numbers[segment] = segment_numbers.get(segment, 0) + 1
+                            residue_map[key] = segment_numbers[segment]
+                    atom.metadata["residue_number"] = str(residue_map[key])
                 mol_idx += 1
 
         # 2. Substrate always uses chain B and residue 1
@@ -982,7 +1039,11 @@ class SystemBuilder:
         if topology is self._solvated_topology:
             from polyzymd.core.components import atom_segids, write_pdb_segids
 
-            write_pdb_segids(path, atom_segids(self.components(), topology.n_atoms))
+            components = self.components()
+            attachments = {segid for c in components for segid in c.segments}
+            write_pdb_segids(
+                path, atom_segids(components, topology.n_atoms), separate=attachments
+            )
         LOGGER.info(f"Saved topology to {path}")
 
     def build_from_config(
@@ -1037,7 +1098,10 @@ class SystemBuilder:
 
         # 1. Build enzyme
         LOGGER.info(f"Building enzyme: {config.enzyme.name}")
-        self.build_enzyme(config.enzyme.pdb_path, config.enzyme.custom_substructures_path)
+        if getattr(config.enzyme, "is_modified", False):
+            self.build_modified_enzyme(config.enzyme, getattr(config, "_config_dir", None))
+        else:
+            self.build_enzyme(config.enzyme.pdb_path, config.enzyme.custom_substructures_path)
 
         # 2. Build substrate (if configured)
         if config.substrate:
@@ -1203,6 +1267,12 @@ class SystemBuilder:
 
         t0 = time.perf_counter()
         omm_system = self._interchange.to_openmm(combine_nonbonded_forces=True)
+        if self.glycam_sites:
+            from polyzymd.modifying_proteins.glycam import apply_to_openmm
+
+            # The protein is the first molecule: its indices are the system's.
+            changed = apply_to_openmm(omm_system, self.glycam_sites, offset=0)
+            LOGGER.info("  GLYCAM06j 1-4 pairs and masses written: %d pairs", changed)
         t_sys = time.perf_counter() - t0
         LOGGER.info("  to_openmm (system): %.1fs", t_sys)
 
@@ -1220,6 +1290,30 @@ class SystemBuilder:
         )
 
         return omm_topology, omm_system, omm_positions
+
+    def _protein_segments(self) -> List[str]:
+        """The segment of each protein atom (``PROT`` or an attachment's), in atom order;
+        empty for a protein without modifications."""
+        if self._modified_protein is None:
+            return []
+        return list(self._modified_protein.record.segments)
+
+    @property
+    def protein_molecule_ranges(self) -> List[List[int]]:
+        """``[start, stop)`` of each molecule of a modified protein (the system's first)."""
+        if self._modified_protein is None:
+            return []
+        return self._modified_protein.record.molecules or [
+            [0, len(self._modified_protein.record.segments)]
+        ]
+
+    @property
+    def glycam_sites(self) -> List[Any]:
+        """The protein's GLYCAM06j sites, whose 1-4 pairs and masses an Interchange
+        cannot hold; empty without GLYCAM glycans. The protein is the first molecule."""
+        if self._modified_protein is None:
+            return []
+        return self._modified_protein.glycam_sites
 
     def _record_box_provenance(self, deterministic_box: bool) -> None:
         """Record the final cell in the build provenance.
@@ -1349,7 +1443,11 @@ class SystemBuilder:
             model = (self._nagl_model or _default_nagl_model()) if method == "nagl" else None
             return ChargeSource(method=method, model=model, source_file=source_file)
 
-        if self._n_enzyme_molecules:
+        if self._n_enzyme_molecules and self._modified_protein is not None:
+            take(self._n_enzyme_molecules)
+            name, segid = handle("protein")
+            records.append(self._modified_protein.component(name=name, segid=segid, start=0))
+        elif self._n_enzyme_molecules:
             atoms = take(self._n_enzyme_molecules)
             records.append(
                 ComponentRecord(

@@ -64,15 +64,23 @@ def declared(context: AuditContext) -> list[Finding]:
                 f"{solute.type}/{solute.segid}"
             )
         for domain in record.domains:
-            if list(domain.force_field) != list(solute.force_field):
+            expected = _declared_source(solute, domain)
+            if expected is None:
+                problems.append(
+                    f"{solute.name}/{domain.name}: a {_site_type(domain)} site, but the config "
+                    "has no modification_parameters for it"
+                )
+                continue
+            force_field, charges = expected
+            if list(domain.force_field) != list(force_field):
                 problems.append(
                     f"{solute.name}/{domain.name}: force field {list(domain.force_field)}, "
-                    f"config says {solute.force_field}"
+                    f"config says {list(force_field)}"
                 )
-            if (domain.charges.method, domain.charges.model) != _charges(solute):
+            if (domain.charges.method, domain.charges.model) != charges:
                 problems.append(
                     f"{solute.name}/{domain.name}: charges {domain.charges.method} "
-                    f"{domain.charges.model or ''}, config says {_charges(solute)}"
+                    f"{domain.charges.model or ''}, config says {charges}"
                 )
     names = {s.name for s in config.solutes} | {"solvent", "ions"}
     for extra in sorted(set(records) - names):
@@ -546,3 +554,26 @@ def density(context: AuditContext) -> list[Finding]:
             "as a count or concentration are added on top of it)"
         )
     return [Finding("composition.density", "system", "INFO", detail)]
+
+
+def _site_type(domain: Any) -> str | None:
+    """The site type of a modification-site domain, or None for any other domain."""
+    reference = domain.reference or {}
+    return reference.get("site_type") if reference.get("site") else None
+
+
+def _declared_source(solute: Any, domain: Any) -> tuple[list[str], tuple] | None:
+    """The force field and charges the config names for ``domain`` of ``solute``.
+
+    A modification site takes its type's set from ``modification_parameters``;
+    every other domain takes the solute's own force field and charges.
+    """
+    site_type = _site_type(domain)
+    if site_type is None:
+        return list(solute.force_field), _charges(solute)
+    sets = getattr(solute, "modification_parameters", None)
+    chosen = getattr(sets, site_type, None) if sets is not None else None
+    if chosen is None:
+        return None
+    return list(chosen.force_field), (chosen.charges.method, chosen.charges.model)
+

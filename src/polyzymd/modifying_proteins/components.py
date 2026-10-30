@@ -38,6 +38,7 @@ def protein_component(
     parameter_sets: Mapping[str, ParameterSet],
     *,
     name: str = "protein",
+    segid: str = DEFAULT_SEGIDS["protein"],
     start: int = 0,
     base_dir: str | Path = ".",
     constraints_from: str = CONSTRAINTS_FROM,
@@ -55,7 +56,10 @@ def protein_component(
         "sha256": protein.source["sha256"],
         "ccd_paths": [str(path) for path in protein._ccd_paths],
         "download": protein._download,
-        "spec": to_spec(protein),
+        # Paths relative to the config's folder, with each file's SHA-256, so the
+        # protein can be rebuilt (and re-audited) after the folder moves.
+        "spec": to_spec(protein, relative_to=base_dir),
+        "files": _input_files(protein, base_dir),
         "base_dir": str(Path(base_dir).resolve()),
         "parameter_sets": {
             site_type: {
@@ -98,23 +102,48 @@ def protein_component(
             )
         )
     segments: dict[str, list[int]] = {}
-    for index, segid in enumerate(record.segments):
-        if segid != PROTEIN_SEGMENT:
-            segments.setdefault(segid, []).append(index + start)
+    for index, segment in enumerate(record.segments):
+        if segment != PROTEIN_SEGMENT:
+            segments.setdefault(segment, []).append(index + start)
     return ComponentRecord(
         name=name,
         type="protein",
-        segid=DEFAULT_SEGIDS["protein"],
+        segid=segid,
         placement=placement,  # type: ignore[arg-type]
-        molecules=[AtomRange(start, start + n_atoms)],
+        molecules=[
+            AtomRange(start + first, start + stop)
+            for first, stop in (record.molecules or [[0, n_atoms]])
+        ],
         domains=domains,
         provenance={
             "pdb": dict(protein.source),
             "modifications": reference["spec"],
             "parameterization": record.to_dict(),
         },
-        segments={segid: tuple(_ranges(atoms)) for segid, atoms in segments.items()},
+        segments={key: tuple(_ranges(atoms)) for key, atoms in segments.items()},
     )
+
+
+def _input_files(protein: ModifiedProtein, base_dir: str | Path) -> dict[str, str]:
+    """Each input file of the modifications, relative to ``base_dir``, with its SHA-256."""
+    import os
+
+    files: dict[str, str] = {}
+
+    def visit(value) -> None:
+        if isinstance(value, dict):
+            for key in ("pdb_path", "ccd_file"):
+                if key in value and value.get("sha256"):
+                    path = os.path.relpath(Path(value[key]).resolve(), Path(base_dir).resolve())
+                    files[path] = value["sha256"]
+            for item in value.values():
+                visit(item)
+
+    for record in protein.records:
+        visit(record.arguments)
+    pdb = protein.source["pdb_path"]
+    files[os.path.relpath(Path(pdb).resolve(), Path(base_dir).resolve())] = protein.source["sha256"]
+    return files
 
 
 def _ranges(indices: Sequence[int]) -> tuple[AtomRange, ...]:

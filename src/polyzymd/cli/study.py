@@ -167,6 +167,7 @@ def check_command(path: Path, production: bool = False) -> None:
 
     outside = outside_configs(protocol)
     shared = _other_studies_runs(protocol)
+    with_attachments = []
     labels = list(protocol.conditions)
     controls = labels[:1]
     if protocol.comparison is not None:
@@ -190,6 +191,10 @@ def check_command(path: Path, production: bool = False) -> None:
             )
             failed = True
             continue
+        from polyzymd.config.modifications import has_attachments
+
+        if any(has_attachments(solute) for solute in config.solutes):
+            with_attachments.append(label)
         source = "data.local.yaml" if label in protocol.data else "config"
         config = with_data_dir(config, protocol.data.get(label))
         found = sorted(int(i) for i, _ in config.discover_replicate_dirs())
@@ -218,6 +223,19 @@ def check_command(path: Path, production: bool = False) -> None:
             + (f"; missing replicates {missing}" if missing else "")
             + (_production_summary(label, config_path, protocol) if production else "")
         )
+    if with_attachments:
+        from polyzymd.config.modifications import unscoped_residue_selection
+
+        for name, selection in protocol.regions.items():
+            if unscoped_residue_selection(selection):
+                click.echo(
+                    f"warning: region {name} ('{selection}') selects residues by number, and "
+                    f"the proteins of {', '.join(with_attachments)} have attachments (glycans, "
+                    "grafts, labels) numbered from resid 1 in their own segments, so it also "
+                    "matches them.\n"
+                    f"fix: write 'segid PROT and {selection}' ('protein and' would miss "
+                    "non-canonical residues)."
+                )
     from polyzymd.analyses.user_functions import load_function
 
     for run, entry in protocol.analyses.items():

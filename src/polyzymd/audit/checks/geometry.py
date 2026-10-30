@@ -393,3 +393,101 @@ def image_bridging(context: AuditContext) -> list[Finding]:
             f"no chain of {polymers[0].n_molecules} touches the protein through two images",
         )
     ]
+
+
+#: Closest two atoms of a modified protein may come without a bond or angle between
+#: them, by the number of hydrogens in the pair. Each limit is shorter than a bond
+#: between such atoms (heavy-heavy 1.2-1.5 Å, X-H 0.96-1.1 Å, H-H 0.74 Å) and far
+#: inside a van der Waals contact (H...H near 2.4 Å, a hydrogen bond's H...O near
+#: 1.8 Å), so only an atom placed through another is caught. A hydrogen placed
+#: through the protein is no less wrong than a heavy atom: the minimization before
+#: a run must tear it out, and that moves the frozen solute.
+MODIFIED_PROTEIN_CLASH_ANGSTROM = {
+    "heavy-heavy": 1.0,
+    "hydrogen-heavy": 1.0,
+    "hydrogen-hydrogen": 0.8,
+}
+
+
+@register(
+    CheckSpec(
+        "geometry.modified_protein_clash",
+        "component",
+        "FAIL",
+        "atoms of a modified protein without a bond or angle between them closer than "
+        "1.0 Å (heavy-heavy, hydrogen-heavy) or 0.8 Å (hydrogen-hydrogen): a fragment or "
+        "side chain placed through the protein, which minimization can only fix by "
+        "stretching bonds or moving the protein",
+        ("protein",),
+    )
+)
+def modified_protein_clash(context: AuditContext) -> list[Finding]:
+    from polyzymd.audit.modified import is_modified
+
+    findings = []
+    index = context.realized.index
+    elements = context.realized.elements
+    topology_atoms = list(context.realized.topology.atoms())
+    limits = MODIFIED_PROTEIN_CLASH_ANGSTROM
+    kinds = ("heavy-heavy", "hydrogen-heavy", "hydrogen-hydrogen")
+    for component in context.components:
+        if component.type != "protein" or not is_modified(component):
+            continue
+        atoms = np.asarray(component.atom_indices(), dtype=int)
+        pairs, distances = _close_pairs(context, atoms, max(limits.values()))
+        clashes = []
+        for (a, b), distance in zip(pairs, distances):
+            i, j = int(atoms[a]), int(atoms[b])
+            if i >= j:
+                continue
+            kind = kinds[(elements[i] == "H") + (elements[j] == "H")]
+            if distance >= limits[kind]:
+                continue
+            near = index.bonded_to.get(i, set())
+            if j in near or any(j in index.bonded_to.get(k, set()) for k in near):
+                continue  # bonded, or the ends of an angle
+            clashes.append((float(distance), i, j, kind))
+        if clashes:
+            clashes.sort()
+
+            def label(i: int) -> str:
+                atom = topology_atoms[i]
+                return f"{atom.residue.name}{atom.residue.id}:{atom.name}"
+
+            counts = ", ".join(
+                f"{n} {kind} pairs closer than {limits[kind]} Å"
+                for kind in kinds
+                if (n := sum(c[3] == kind for c in clashes))
+            )
+            worst = "; ".join(f"{label(i)}-{label(j)} {d:.2f} Å" for d, i, j, _ in clashes[:5])
+            findings.append(
+                Finding(
+                    "geometry.modified_protein_clash",
+                    component.name,
+                    "FAIL",
+                    f"{counts} without a bond or angle between them (closest: {worst})",
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    "geometry.modified_protein_clash",
+                    component.name,
+                    "PASS",
+                    "no atom pair without a bond or angle between them closer than "
+                    f"{limits['heavy-heavy']} Å ({limits['hydrogen-hydrogen']} Å for two "
+                    "hydrogens)",
+                )
+            )
+    return findings
+
+
+def _close_pairs(context: AuditContext, atoms: np.ndarray, cutoff_angstrom: float):
+    """Pairs of ``atoms`` closer than the cutoff, periodic when the structure has a box."""
+    from MDAnalysis.lib.distances import capped_distance
+
+    if len(atoms) == 0:
+        return np.empty((0, 2), dtype=int), np.empty(0)
+    box = _box(context) if context.realized.box_nm is not None else None
+    positions = _positions_angstrom(context)[atoms]
+    return capped_distance(positions, positions, cutoff_angstrom, box=box, return_distances=True)

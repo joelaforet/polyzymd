@@ -500,7 +500,9 @@ def load_config(path: Union[str, Path]) -> SimulationConfig:
     _place_default_polymer_cache(data, base_path)
     _place_default_glycan_library(data, base_path)
 
-    return SimulationConfig.model_validate(data)
+    config = SimulationConfig.model_validate(data)
+    config._config_dir = base_path
+    return config
 
 
 def _place_default_polymer_cache(data: Dict[str, Any], base_path: Path) -> None:

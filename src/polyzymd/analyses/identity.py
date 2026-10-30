@@ -46,6 +46,14 @@ def _new_charges(cosolvent: Any) -> dict[str, Any]:
     return {"charges": {"method": charges.method, "model": charges.model}}
 
 
+def _modifications(solute: Any) -> dict[str, Any]:
+    """A protein's mutations and modifications (see ``modification_fingerprint``); empty
+    for an unmodified solute, so its identity is unchanged."""
+    from polyzymd.config.modifications import modification_fingerprint
+
+    return modification_fingerprint(solute)
+
+
 def _physics(config: "SimulationConfig") -> dict[str, Any]:
     """The force fields, charges, solvent, ions, box and restraints of a config."""
 
@@ -65,6 +73,7 @@ def _physics(config: "SimulationConfig") -> dict[str, Any]:
                     "type": solute.type,
                     "force_field": list(solute.force_field),
                     "charges": charges(solute),
+                    **_modifications(solute),
                 }
                 for solute in getattr(config, "solutes", None) or []
             ),

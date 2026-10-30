@@ -187,3 +187,119 @@ def test_editing_the_physics_of_a_config_changes_its_hash(tmp_path: Path, change
     assert hashed(data) == before
     change[1](data)
     assert hashed(data) != before
+
+
+# --- Modified proteins ---------------------------------------------------------------------
+
+QUICKSTART_CONFIG = Path(__file__).resolve().parents[2] / "examples" / "quickstart" / "config.yaml"
+SAGE_SET = {
+    "force_field": ["openff-2.3.0.offxml"],
+    "charges": {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"},
+}
+
+
+def _quickstart_with(protein: dict):
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+
+    data = yaml.safe_load(QUICKSTART_CONFIG.read_text())
+    data["solutes"][0]["pdb_path"] = str(QUICKSTART_CONFIG.parent / "trpcage.pdb")
+    data["solutes"][0].update(protein)
+    return SimulationConfig.model_validate(data)
+
+
+def test_an_unmodified_protein_keeps_the_identity_it_had() -> None:
+    from polyzymd.analyses.identity import compute_config_hash
+    from polyzymd.config.loader import load_config
+
+    # The value computed before mutations and modifications existed.
+    assert compute_config_hash(load_config(QUICKSTART_CONFIG)) == "91f16dfc2809e001"
+
+
+def test_a_mutation_is_a_new_analysis_identity() -> None:
+    from polyzymd.analyses.identity import compute_config_hash
+
+    wild_type = compute_config_hash(_quickstart_with({}))
+    k8a = compute_config_hash(_quickstart_with({"mutations": [{"site": "A:K8", "to": "ALA"}]}))
+    assert k8a != wild_type
+
+
+def test_a_glycan_on_glycam_and_on_sage_are_different_identities(tmp_path) -> None:
+    from polyzymd.analyses.identity import compute_config_hash
+
+    glycan = tmp_path / "glycam_G42666HT.pdb"
+    glycan.write_text("REMARK placeholder\n")
+    entry = {
+        "attach": {
+            "type": "glycan",
+            "site": "A:N1",
+            "atom_name": "ND2",
+            "reaction": "N-glycosylation",
+            "fragment": {"pdb_path": str(glycan)},
+        }
+    }
+    glycam = {"force_field": ["GLYCAM_06j-1.xml"], "charges": {"method": "library"}}
+    on_glycam = _quickstart_with(
+        {"modifications": [entry], "modification_parameters": {"glycan": glycam}}
+    )
+    on_sage = _quickstart_with(
+        {"modifications": [entry], "modification_parameters": {"glycan": SAGE_SET}}
+    )
+    assert compute_config_hash(on_glycam) != compute_config_hash(on_sage)
+
+
+def _glycan_entry(glycan: Path, **fields) -> dict:
+    return {
+        "attach": {
+            "type": "glycan",
+            "site": "A:N1",
+            "atom_name": "ND2",
+            "reaction": "N-glycosylation",
+            "fragment": {"pdb_path": str(glycan)},
+            **fields,
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ({"fragment_atom_name": "C1"}, {"fragment_atom_name": "C7"}),
+        ({"bond_order": 1}, {"bond_order": 2}),
+        ({"merge": False}, {"merge": True}),
+        ({"fragment_resnum": 2}, {"fragment_resnum": 3}),
+        ({"leaving_atom_names": "HD22"}, {"leaving_atom_names": "HD21"}),
+    ],
+)
+def test_every_field_that_changes_the_chemistry_changes_the_identity(
+    tmp_path, first, second
+) -> None:
+    from polyzymd.analyses.identity import compute_config_hash
+
+    glycan = tmp_path / "glycam_G42666HT.pdb"
+    glycan.write_text("REMARK placeholder\n")
+    glycam = {"force_field": ["GLYCAM_06j-1.xml"], "charges": {"method": "library"}}
+
+    def identity(fields: dict) -> str:
+        return compute_config_hash(
+            _quickstart_with(
+                {
+                    "modifications": [_glycan_entry(glycan, **fields)],
+                    "modification_parameters": {"glycan": glycam},
+                }
+            )
+        )
+
+    assert identity(first) != identity(second)
+
+
+def test_a_mutation_s_handedness_changes_the_identity() -> None:
+    from polyzymd.analyses.identity import compute_config_hash
+
+    def identity(stereo: str) -> str:
+        return compute_config_hash(
+            _quickstart_with({"mutations": [{"site": "A:L2", "to": "LEU", "stereo": stereo}]})
+        )
+
+    assert identity("L") != identity("D")

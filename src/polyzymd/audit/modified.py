@@ -46,6 +46,7 @@ the whole-protein path. It may change after the OpenFF Rosemary benchmark
 from __future__ import annotations
 
 import collections
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -54,6 +55,9 @@ import numpy as np
 
 from polyzymd.audit.molecules import reference_system
 from polyzymd.audit.terms import TERM_KINDS, SystemIndex, compare
+from polyzymd.utils.mbuild_logs import quiet_mbuild
+
+LOGGER = logging.getLogger(__name__)
 
 #: Atoms that are not a residue's side chain (the side chain runs from CB outward).
 BACKBONE = frozenset({"N", "H", "CA", "HA", "HA2", "HA3", "C", "O", "H1", "H2", "H3", "OXT", "HXT"})
@@ -165,13 +169,32 @@ class ModifiedReference:
         return found
 
 
+#: Capping residues of ff14SB that a GLYCAM06j template also matches.
+_PROTEIN_CAPS = frozenset({"ACE", "NME", "NHE"})
+
+
 def is_modified(component: Any) -> bool:
     """Whether ``component`` is a modified protein (its domains carry a rebuild recipe)."""
     return any("modified_protein" in (domain.reference or {}) for domain in component.domains)
 
 
 def build_reference(realized: Any, component: Any) -> ModifiedReference:
-    """Rebuild ``component``'s modified protein and compute every expected term."""
+    """Rebuild ``component``'s modified protein and compute every expected term.
+
+    The rebuild places the modifications without relaxation, by design (only
+    the chemistry and the parameters are compared); mBuild's warnings about the
+    close contacts that leaves describe the rebuild, not the built structure,
+    so they are muted.
+    """
+    LOGGER.info(
+        "The audit rebuilds the modified protein without relaxation (by design); mBuild's "
+        "placement warnings from that rebuild are muted."
+    )
+    with quiet_mbuild():
+        return _build_reference(realized, component)
+
+
+def _build_reference(realized: Any, component: Any) -> ModifiedReference:
     from polyzymd.modifying_proteins.parameters import reference_protein, to_openff
     from polyzymd.modifying_proteins.topology import modification_sites
 
@@ -519,17 +542,23 @@ def site_rule(
 def declared_differences(reference: ModifiedReference, component: Any, declared: dict) -> list[str]:
     """How the declared modification blocks and parameter sets differ from what was built.
 
-    ``declared`` is ``{"spec": blocks, "parameter_sets": {type: {...}}, "base_dir": path}``
-    from the caller (the config), independent of the build's own records.
+    ``declared`` comes from the caller (the config), independent of the build's
+    own records: ``{"entries": [...], "parameter_sets": {type: {...}}, "base_dir":
+    path}``, where ``entries`` is the config's own expansion, one entry per site
+    (``polyzymd.config.modifications.declared_modifications``). A ``"spec"`` of
+    blocks is still read, expanded here.
     """
-    from polyzymd.modifying_proteins.spec import expand
-
-    mutations, modifications = expand(declared["spec"], declared.get("base_dir", "."))
     base = Path(declared.get("base_dir", "."))
-    wanted = [_declared_mutation(entry, base) for entry in mutations]
-    for entry in modifications:
-        ((verb, arguments),) = entry.items()
-        wanted.append(_declared_change(verb, arguments, base))
+    if "entries" in declared:
+        wanted = [_declared_entry(item, base) for item in declared["entries"]]
+    else:
+        from polyzymd.modifying_proteins.spec import expand
+
+        mutations, modifications = expand(declared["spec"], base)
+        wanted = [_declared_mutation(entry, base) for entry in mutations]
+        for entry in modifications:
+            ((verb, arguments),) = entry.items()
+            wanted.append(_declared_change(verb, arguments, base))
     built = [_built_change(record) for record in reference.records]
     problems = []
     for k in range(max(len(wanted), len(built))):
@@ -557,6 +586,13 @@ def declared_differences(reference: ModifiedReference, component: Any, declared:
     return problems
 
 
+def _declared_entry(item: dict, base: Path) -> tuple:
+    """One expanded declared modification, as :func:`_built_change` describes a record."""
+    if item["kind"] == "mutate":
+        return _declared_mutation(item, base)
+    return _declared_change(item["kind"], item, base)
+
+
 def _declared_mutation(entry: dict, base: Path) -> tuple:
     return ("mutate", _parse(entry["site"]), _target(entry["to"], base), entry.get("stereo"))
 
@@ -571,9 +607,24 @@ def _declared_change(verb: str, arguments: dict, base: Path) -> tuple:
         arguments.get("atom_name"),
         arguments.get("reaction"),
         _fragment(arguments.get("fragment") or {}, base),
+        *_attachment_details(arguments),
+    )
+
+
+def _attachment_details(arguments: dict) -> tuple:
+    """The fields of an attachment that decide which atoms bond and leave."""
+
+    def names(value: Any) -> Any:
+        return tuple([value] if isinstance(value, str) else value) if value else None
+
+    return (
         arguments.get("fragment_atom_name"),
         arguments.get("fragment_resnum"),
+        arguments.get("fragment_resname"),
+        names(arguments.get("leaving_atom_names")),
+        names(arguments.get("fragment_leaving_atom_names")),
         bool(arguments.get("merge", False)),
+        int(arguments.get("bond_order", 1)),
     )
 
 
@@ -591,9 +642,7 @@ def _built_change(record: Any) -> tuple:
         arguments.get("atom_name"),
         arguments.get("reaction"),
         _fragment(arguments.get("fragment") or {}, Path(".")),
-        arguments.get("fragment_atom_name"),
-        arguments.get("fragment_resnum"),
-        bool(arguments.get("merge", False)),
+        *_attachment_details(arguments),
     )
 
 
@@ -610,6 +659,9 @@ def _fragment(fragment: dict, base: Path) -> tuple:
         return ("pdb", fragment.get("sha256") or _sha256(base / fragment["pdb_path"]))
     if "ccd" in fragment:
         return ("ccd", fragment["ccd"], fragment.get("link_atom"))
+    if "ccd_file" in fragment:
+        digest = fragment.get("sha256") or _sha256(base / fragment["ccd_file"])
+        return ("ccd_file", digest, fragment.get("link_atom"))
     return ("smiles", fragment.get("smiles"), fragment.get("resname"))
 
 
@@ -961,6 +1013,9 @@ def _native_glycam(recipe: dict, protein: Any, glycam_sites, keys, real) -> dict
             residue.name = linkages[key]
             templates[residue] = residue.name
         elif residue.name in names:
+            templates[residue] = residue.name
+        elif residue.name in _PROTEIN_CAPS:
+            # ff14SB's ACE/NME also match GLYCAM's ACX/NMX; the protein's caps are ff14SB's.
             templates[residue] = residue.name
     system = app.ForceField(*glycam.OPENMM_FILES).createSystem(
         topology,

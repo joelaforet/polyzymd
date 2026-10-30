@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A protein solute takes `mutations:` (applied first), `modifications:`
+  (`deprotonate`, `protonate`, `attach`, in order) and `modification_parameters:`
+  (one force field and charge set per site type). Sites are written `A:N58` or
+  `A:ASN58`; a group entry (`chains` with `residues` or `glycans`, `sites`,
+  `sites_file`) stands for one modification per site. `polyzymd build` applies
+  them before packing, writes `modified_protein.pdb`, parameterizes each site and
+  audits the result on OpenMM and GROMACS; the build record lists the declared
+  and the applied modifications. `polyzymd validate --plans` (`--format agent`
+  for JSON) checks every change against the PDB and lists one row per site.
+  An unmodified protein builds and hashes as before.
 - `polyzymd.modifying_proteins`: mutate, protonate, deprotonate and covalently
   modify a protein (`attach` with `type: glycan | polymer | generic`) through
   stable PolyzyMD names over the mBuild biopolymers fork. Sites are written

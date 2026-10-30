@@ -98,6 +98,64 @@ solutes:
 | `charges` | object | Yes | `{method: library}`: a protein takes its force field's library charges |
 | `custom_substructures_path` | path | No | JSON file of residue templates for residues that OpenFF does not know, such as an N-terminal cystine. See {doc}`openff_pdb_ingestion` |
 | `description` | string | No | Human-readable description |
+| `mutations` | list | No | Side-chain changes, applied first and in order. See [Mutations and modifications](#mutations-and-modifications) |
+| `modifications` | list | No | `deprotonate`, `protonate` and `attach` entries, applied in order after the mutations |
+| `modification_parameters` | object | With sites | Force field and charges of each site type: `glycan`, `polymer`, `generic`, `noncanonical` |
+| `max_charge_shift` | float | No | Largest uniform shift (e per atom) that brings a site to its integer charge. Default 0.005 |
+| `relax` | string | No | `joint` (default): place every change, then relax them together; `per_modification`; `none` |
+
+(mutations-and-modifications)=
+#### Mutations and modifications
+
+```yaml
+  - type: protein
+    pdb_path: "structures/trimer.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+    mutations:
+      - {site: A:S1381, to: 4II}                  # a CCD code
+      - {site: A:K12, to: {smiles: "*CCCCN=[N+]=[N-]", resname: AZK}}
+      - {chains: [A, C, E], residues: [T301], to: ASN}
+    modifications:
+      - deprotonate: {site: A:K63, atom_name: NZ}
+      - attach:
+          type: glycan
+          reaction: N-glycosylation
+          atom_name: ND2
+          fragment_atom_name: C1
+          fragment_resnum: 2
+          chains: [A, C, E]
+          glycans: {G55220VL: [N58, N107], G42666HT: [N103]}
+    modification_parameters:
+      glycan: {force_field: [GLYCAM_06j-1.xml], charges: {method: library}}
+```
+
+A site is `chain:residue` (`A:N58`, `A:ASN58`, `A:N58A` with an insertion
+code); the build checks the residue against the PDB. Every entry names its
+sites one of four ways: `site`, `sites`, `chains` with `residues`, or
+`sites_file` (a CSV with a `site` column, and a `glycan` column for glycans).
+An `attach` of `type: glycan` can instead list `glycans:`, accession to
+residues, read from `glycan_library` (default `structures/glycans`, files
+`glycam_<accession>.pdb`). Each group stands for one modification per site.
+
+| Entry | Fields |
+|-------|--------|
+| mutation | `to`: a CCD code, `{smiles, resname}` (a side chain, `*` bonds to CA) or `{ccd_file}`; `stereo`: `L` or `D` |
+| `deprotonate`, `protonate` | `atom_name`: the atom that loses or gains H |
+| `attach` | `type` (glycan, polymer, generic), `atom_name`, `fragment` (`{smiles, resname}`, `{pdb_path}` or `{ccd, link_atom}`), `reaction` (mBuild named reaction or SMARTS), `fragment_atom_name`, `fragment_resnum`, `leaving_atom_names`, `fragment_leaving_atom_names`, `merge`, `bond_order`, `name` (4 characters; default `G001`, `P001`, `M001` in order) |
+
+A mutation to one of the 20 canonical residues (or its D form) stays on
+ff14SB. Every other mutation and every attachment makes a site: the side chain
+from CB outward plus the attached group take their type's parameter set, and
+the backbone keeps ff14SB. An OpenFF set takes NAGL charges on a capped model
+of the site; GLYCAM06j (glycans only) takes its own library charges.
+`polyzymd validate --plans` (`--format agent` for JSON) applies every change to
+the PDB and lists one row per site before anything is built.
+Each attachment is a segment of its own (`G001`, `P001`, `M001`) whose residues are
+numbered from 1, so select protein residues by segment: `segid PROT and resid 141-148`.
+Sites in `mutations:` and `modifications:` use the residue numbers of the input PDB; the
+written structures number the protein from 1 (as an unmodified build does), and restraints
+and analysis selections use those written numbers.
 
 ### Small molecule (`type: small_molecule`)
 

@@ -143,7 +143,7 @@ def applied(context: AuditContext) -> list[Finding]:
             for i, expected in zip(sorted(atoms), reference.names)
             if names is not None
             and i not in reference.attached_atoms
-            and names[i] != expected.rsplit(":", 1)[1]
+            and names[i][0] != _as_read(names[i][1], expected.rsplit(":", 1)[1])
         ]
         problems = []
         if missing:
@@ -315,11 +315,24 @@ def protonation_state(context: AuditContext) -> list[Finding]:
     return _each_modified(context, "modifications.protonation_state", run)
 
 
-def _built_names(realized: Any, atoms: list[int]) -> dict[int, str] | None:
+def _built_names(realized: Any, atoms: list[int]) -> dict[int, tuple[str, str]] | None:
+    """The (atom name, residue name) of each of ``atoms`` in the realized topology."""
     if realized.topology is None:
         return None
-    names = {atom.index: atom.name for atom in realized.topology.atoms()}
+    names = {atom.index: (atom.name, atom.residue.name) for atom in realized.topology.atoms()}
     return {i: names[i] for i in atoms}
+
+
+def _as_read(residue_name: str, atom_name: str) -> str:
+    """``atom_name`` as OpenMM's PDB reader names it in a ``residue_name`` residue.
+
+    The reader renames atoms of residues it knows (an NME cap's CCD ``HN2``
+    becomes ``H2``), so a planned name is compared after the same renaming.
+    """
+    from openmm.app import PDBFile
+
+    PDBFile._loadNameReplacementTables()
+    return PDBFile._atomNameReplacements.get(residue_name, {}).get(atom_name, atom_name)
 
 
 def _pair(reference: Any, pair: tuple[int, int]) -> str:

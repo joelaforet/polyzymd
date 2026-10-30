@@ -480,9 +480,21 @@ def _fragment_from_source(protein: ModifiedProtein, source: dict):
         return fragment_from_pdb(source["pdb_path"], charge=source.get("charge", 0))
     if "ccd" in source:
         return fragment_from_ccd(source["ccd"], source["link_atom"], protein)
+    if "ccd_file" in source:
+        # A local CCD definition (a component the bundled library lacks), named
+        # by its file; the protein's library reads the file's folder.
+        path = Path(source["ccd_file"])
+        protein._use_ccd_file(path)
+        fragment = fragment_from_ccd(path.stem.upper(), source["link_atom"], protein)
+        _FRAGMENT_SOURCES[fragment] = {
+            "ccd_file": str(path),
+            "sha256": _sha256(path),
+            "link_atom": source["link_atom"],
+        }
+        return fragment
     raise ValueError(
         f"Cannot build a fragment from {source!r}; give smiles + resname, pdb_path, "
-        "or ccd + link_atom."
+        "ccd + link_atom, or ccd_file + link_atom."
     )
 
 

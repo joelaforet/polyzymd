@@ -235,7 +235,7 @@ def _paths_relative(arguments: dict, relative_to: str | Path | None) -> dict:
     if relative_to is None:
         return arguments
     arguments = dict(arguments)
-    for key, field in (("fragment", "pdb_path"), ("to", "ccd_file")):
+    for key, field in (("fragment", "pdb_path"), ("fragment", "ccd_file"), ("to", "ccd_file")):
         value = arguments.get(key)
         if isinstance(value, dict) and field in value:
             path = os.path.relpath(Path(value[field]).resolve(), Path(relative_to).resolve())

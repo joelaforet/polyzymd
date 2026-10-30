@@ -156,6 +156,9 @@ class ParameterizationRecord:
     segments: list[str]
     sites: list[SiteParameters] = field(default_factory=list)
     glycam: list[glycam.GlycamSite] = field(default_factory=list)
+    #: [start, stop) of each molecule (connected component) of the protein, in
+    #: atom order: chains joined by a disulfide or a modification are one.
+    molecules: list[list[int]] = field(default_factory=list)
 
     @property
     def glycam_pairs(self) -> list[glycam.PairOverride]:
@@ -228,23 +231,14 @@ class ParameterizedProtein:
         self.interchange_without_glycam_pairs.to_gromacs(prefix=prefix, **kwargs)
         if not self.record.glycam:
             return
-        top = Path(f"{prefix}.top")
-        files = [top] + [
-            top.parent / name
-            for name in re.findall(r'^\s*#include\s+"([^"]+)"', top.read_text(), re.MULTILINE)
-        ]
-        for path in files:
-            if not path.is_file():
-                continue
-            names = re.findall(
-                r"^\s*\[\s*moleculetype\s*\]\s*\n(?:\s*;.*\n)*\s*(\S+)",
-                path.read_text(),
-                re.MULTILINE,
-            )
-            if names:
-                glycam.apply_to_gromacs(path, names[0], self.record.glycam)
-                return
-        raise ValueError(f"No [ moleculetype ] for the protein in {top} or its includes.")
+        glycam.apply_to_gromacs_topology(
+            Path(f"{prefix}.top"), self.record.glycam, self.molecule_ranges
+        )
+
+    @property
+    def molecule_ranges(self) -> list[list[int]]:
+        """``[start, stop)`` of each molecule of the protein, in atom order."""
+        return self.record.molecules or [[0, len(self.record.segments)]]
 
 
 def parameterize(
@@ -335,7 +329,11 @@ def parameterize(
     record.total_charge = float(charges.sum())
     molecule.partial_charges = charges * unit.elementary_charge
 
-    topology = Topology.from_molecules([molecule])
+    # One OpenFF Molecule per connected component (chain, or chains joined by
+    # a bond); each is a contiguous range, so topology indices are the protein's.
+    molecules = split_molecules(molecule)
+    record.molecules = [[m.start, m.stop] for m in molecule_ranges(molecule)]
+    topology = Topology.from_molecules(molecules)
     positions = molecule.conformers[0] if molecule.conformers else None
     constraints = ForceField(constraints_from)["Constraints"]
     protein_ff = _with_constraints(ForceField(*protein_force_field), constraints)
@@ -353,7 +351,9 @@ def parameterize(
                 )
                 groups.setdefault(force_field, set()).update(site.atom_indices)
     if not groups:
-        interchange = protein_ff.create_interchange(topology, charge_from_molecules=[molecule])
+        interchange = protein_ff.create_interchange(
+            topology, charge_from_molecules=charge_templates(molecules)
+        )
         interchange.positions = positions
         return ParameterizedProtein(interchange, record)
 
@@ -361,13 +361,15 @@ def parameterize(
         (
             force_field,
             _with_constraints(ForceField(*force_field), constraints).create_interchange(
-                topology, charge_from_molecules=[molecule]
+                topology, charge_from_molecules=charge_templates(molecules)
             ),
             atoms,
         )
         for force_field, atoms in groups.items()
     ]
-    reference_interchange = protein_ff.create_interchange(Topology.from_molecules([reference]))
+    reference_interchange = protein_ff.create_interchange(
+        Topology.from_molecules(split_molecules(reference))
+    )
     position = {keys[index]: index for index in outside}
     mapping = {index: position[key] for index, key in enumerate(reference_keys) if key in position}
     interchange = _splice(site_interchanges, reference_interchange, mapping, set(outside))
@@ -480,6 +482,68 @@ def reference_protein(
     return reference
 
 
+def molecule_ranges(molecule) -> list[range]:
+    """The atom range of each connected component of ``molecule``, in atom order.
+
+    PolyzyMD keeps a protein's chains (with what is bonded to them) in atom
+    order, so every component is a contiguous range; a bond between chains
+    that are not next to each other would break that, and raises.
+    """
+    import networkx as nx
+
+    ranges = []
+    for component in nx.connected_components(molecule.to_networkx()):
+        start, stop = min(component), max(component) + 1
+        if len(component) != stop - start:
+            raise ValueError(
+                f"Atoms {start}-{stop - 1} hold more than one molecule: a bond joins chains "
+                "that are not next to each other in the PDB. Order the chains so that bonded "
+                "chains are adjacent."
+            )
+        ranges.append(range(start, stop))
+    return sorted(ranges, key=lambda r: r.start)
+
+
+def split_molecules(molecule) -> list:
+    """Return one OpenFF Molecule per connected component of ``molecule``, in atom order.
+
+    Names, metadata, charges and the first conformer carry over.
+    """
+    from openff.toolkit import Molecule
+
+    ranges = molecule_ranges(molecule)
+    if len(ranges) == 1:
+        return [molecule]
+    pieces = []
+    for atoms in ranges:
+        piece = Molecule()
+        for index in atoms:
+            atom = molecule.atom(index)
+            piece.add_atom(
+                atom.atomic_number,
+                atom.formal_charge,
+                atom.is_aromatic,
+                stereochemistry=atom.stereochemistry,
+                name=atom.name,
+                metadata=dict(atom.metadata),
+            )
+        for bond in molecule.bonds:
+            if bond.atom1_index in atoms:
+                piece.add_bond(
+                    bond.atom1_index - atoms.start,
+                    bond.atom2_index - atoms.start,
+                    bond.bond_order,
+                    bond.is_aromatic,
+                    stereochemistry=bond.stereochemistry,
+                )
+        if molecule.partial_charges is not None:
+            piece.partial_charges = molecule.partial_charges[atoms.start : atoms.stop]
+        if molecule.conformers:
+            piece.add_conformer(molecule.conformers[0][atoms.start : atoms.stop])
+        pieces.append(piece)
+    return pieces
+
+
 #: Anchor atoms of an attachment that labels each terminus.
 _TERMINAL_ANCHORS = {"N": frozenset({"N"}), "C": frozenset({"C", "O", "OXT"})}
 
@@ -564,6 +628,34 @@ def _cap(reference: ModifiedProtein, residue: tuple[str, int, str], terminus: st
         )
 
 
+def charge_templates(molecules: Sequence) -> list:
+    """One molecule per distinct chemistry, for ``charge_from_molecules``.
+
+    Interchange refuses two isomorphic templates; copies of one chain (the
+    protomers of a homotrimer) are identical in atom order, so the first copy
+    stands for all. Copies whose charges differ raise.
+    """
+    import numpy as np
+
+    templates: dict[tuple, Any] = {}
+    for molecule in molecules:
+        key = (
+            tuple(atom.atomic_number for atom in molecule.atoms),
+            tuple(atom.formal_charge.m for atom in molecule.atoms),
+            tuple(sorted((b.atom1_index, b.atom2_index, b.bond_order) for b in molecule.bonds)),
+        )
+        first = templates.setdefault(key, molecule)
+        if first is not molecule and molecule.partial_charges is not None:
+            if not np.allclose(
+                first.partial_charges.m, molecule.partial_charges.m, atol=1e-6
+            ):
+                raise ValueError(
+                    "Two copies of one chain carry different charges; give them the same "
+                    "modifications or make them differ in chemistry."
+                )
+    return list(templates.values())
+
+
 def library_charges(molecule, force_field: Sequence[str] = PROTEIN_FORCE_FIELD) -> dict:
     """Return the protein force field's library charge of every atom, by key."""
     from openff.toolkit import ForceField, Topology
@@ -573,7 +665,9 @@ def library_charges(molecule, force_field: Sequence[str] = PROTEIN_FORCE_FIELD) 
     for handler in _VALENCE_HANDLERS:
         if handler in charges_only.registered_parameter_handlers:
             charges_only.deregister_parameter_handler(handler)
-    interchange = charges_only.create_interchange(Topology.from_molecules([molecule]))
+    interchange = charges_only.create_interchange(
+        Topology.from_molecules(split_molecules(molecule))
+    )
     values = np.zeros(molecule.n_atoms)
     for key, charge in interchange["Electrostatics"].charges.items():
         values[key.atom_indices[0]] = charge.m_as(unit.elementary_charge)

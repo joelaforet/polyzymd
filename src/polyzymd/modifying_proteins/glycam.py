@@ -613,6 +613,78 @@ def apply_to_gromacs(path: str | Path, moleculetype: str, sites) -> int:
     return changed
 
 
+def apply_to_gromacs_topology(
+    top_path: str | Path, sites, molecule_ranges, first_molecule: int = 0
+) -> int:
+    """Write the GLYCAM06j sites into the molecule types of a GROMACS topology.
+
+    ``molecule_ranges`` are the ``[start, stop)`` protein atom ranges of the
+    protein's molecules, which are entries ``first_molecule``,
+    ``first_molecule + 1``, ... of ``[ molecules ]``. Each site's pairs and
+    masses go to the molecule type of the molecule holding it, in indices
+    local to that molecule. Molecules that share a molecule type must carry
+    the same overrides, written once. Returns the number of pair lines written.
+    """
+    from dataclasses import replace
+
+    top_path = Path(top_path)
+    files = [top_path] + [
+        top_path.parent / name
+        for name in re.findall(r'^\s*#include\s+"([^"]+)"', top_path.read_text(), re.MULTILINE)
+        if (top_path.parent / name).is_file()
+    ]
+    instances: list[str] = []
+    section = None
+    for line in top_path.read_text().splitlines():
+        stripped = line.split(";")[0].strip()
+        header = re.match(r"\[\s*(\w+)\s*\]", stripped)
+        if header:
+            section = header.group(1).lower()
+        elif section == "molecules" and stripped and not stripped.startswith("#"):
+            name, count = stripped.split()[:2]
+            instances += [name] * int(count)
+    per_type: dict[str, list] = {}
+    for number, (start, stop) in enumerate(molecule_ranges):
+        local = []
+        for site in sites:
+            inside = [i for i in site.atom_indices if start <= i < stop]
+            if not inside:
+                continue
+            if len(inside) != len(site.atom_indices):
+                raise ValueError(f"GLYCAM06j site {site.name} spans two molecules.")
+            local.append(
+                replace(
+                    site,
+                    atom_indices=[i - start for i in site.atom_indices],
+                    pairs=[replace(q, i=q.i - start, j=q.j - start) for q in site.pairs],
+                    masses={i - start: m for i, m in site.masses.items()},
+                )
+            )
+        if not local:
+            continue
+        name = instances[first_molecule + number]
+        key = sorted((tuple(s.atom_indices), len(s.pairs)) for s in local)
+        if name in per_type:
+            if per_type[name][0] != key:
+                raise ValueError(
+                    f"Molecules sharing GROMACS molecule type {name} carry different GLYCAM06j "
+                    "sites; give each its own molecule type."
+                )
+            continue
+        per_type[name] = [key, local]
+    written = 0
+    for name, (_, local) in per_type.items():
+        pattern = re.compile(
+            r"^\s*\[\s*moleculetype\s*\]\s*\n(?:\s*;.*\n)*\s*" + re.escape(name) + r"\s",
+            re.MULTILINE,
+        )
+        holder = next((f for f in files if pattern.search(f.read_text())), None)
+        if holder is None:
+            raise ValueError(f"No [ moleculetype ] {name} in {top_path} or its includes.")
+        written += apply_to_gromacs(holder, name, local)
+    return written
+
+
 def _same_terms(kind, before, new_terms, n_atoms, name) -> None:
     after = {tuple(sorted(term[:n_atoms])) for term in new_terms}
     if before != after:
