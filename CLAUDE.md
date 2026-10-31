@@ -10,6 +10,8 @@ that only apply to Claude Code.
 
 Repository skills live in `.claude/skills/`:
 
+- `polyzymd-organize`: lay out a project, its studies and conditions; decide
+  study boundaries (one control each); add conditions; keep runs on scratch.
 - `polyzymd-simulate`: write a config, validate, build, run, submit and check
   status.
 - `polyzymd-analyze`: run analyses on a study and read the reports.

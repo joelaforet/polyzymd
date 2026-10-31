@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Analyze simulations while they run.**  `polyzymd analyze --include-running` (or `include_running: true` in `study.yaml`) reads production segments that `progress.json` records as still running. The report warns that its values are provisional, and the results are stored apart from those of finished segments (the record's identity says `include_running`), so they are measured again as the trajectories grow. `--submit` passes the flag to its array tasks.
+- **A `polyzymd-organize` agent skill.**  `.claude/skills/polyzymd-organize/SKILL.md` tells an agent how to lay out a project: where configs, inputs, runs, job scripts and results go; how to choose studies (one control each, so a polymer comparison at a second temperature is its own study); `project init`, `add-study` and `add-condition` with a check and a commit after each; setting `scratch_directory` on a cluster, because `add-condition` sets it to null for a config without runs; and bringing in runs that already exist, including chains still running.
 
 ### Fixed
 
