@@ -357,6 +357,29 @@ class UniverseProvider:
         """
         return self._provenance_cache.get(replicate)
 
+    def has_frames(self, replicate: int) -> bool:
+        """Return whether ``replicate`` has production frames this provider reads.
+
+        With ``require_complete``, segments that ``progress.json`` records as
+        running or failed are left out, so a replicate still writing its first
+        production segment has none.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
+
+        Returns
+        -------
+        bool
+            False when the loader finds no production trajectory to read.
+        """
+        try:
+            self._get_loader().get_trajectory_info(replicate, **self._segment_kwargs())
+        except FileNotFoundError:
+            return False
+        return True
+
     def _segment_kwargs(self) -> dict[str, Any]:
         """Return the segment-completeness keyword to forward to the loader.
 

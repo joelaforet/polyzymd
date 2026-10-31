@@ -92,6 +92,7 @@ class Replicate:
                     replicate=self.index,
                     equilibration=self.condition.equilibration,
                     n_frames_total=n_frames,
+                    require_complete=self.condition._provider.require_complete,
                 )
             except ValueError as exc:
                 raise ProtocolError(
@@ -222,6 +223,10 @@ class Replicate:
         if self.condition.until_ns is not None:
             # Present only with a common window, so other stored records stay valid.
             identity["until_ns"] = self.condition.until_ns
+        if self.condition.include_running:
+            # Frames of segments still being written: a provisional result, kept apart
+            # from the final one. The trajectory sizes above change as the run goes on.
+            identity["include_running"] = True
         from polyzymd.simulation.own_protocol import protocol_dir
 
         if protocol_dir(provenance.working_directory) is not None:
@@ -365,6 +370,12 @@ class Condition:
         the config's ``scratch_directory``, as ``data.local.yaml`` or
         ``--data`` give it. The config hash is that of the config as written,
         so moving the data does not change it.
+    include_running : bool, optional
+        Read production segments that ``progress.json`` records as still
+        running, so a simulation can be looked at while it runs. By default
+        they are left out, and a replicate with no other segment is left out
+        of the condition (listed in ``only_running``). Stored results made
+        with it are kept apart from the others and are provisional.
     """
 
     def __init__(
@@ -376,6 +387,7 @@ class Condition:
         stride: int = 1,
         data_dir: Path | None = None,
         until: str | None = None,
+        include_running: bool = False,
     ) -> None:
         from polyzymd.analyses.identity import compute_config_hash
         from polyzymd.analyses.universe import UniverseProvider
@@ -393,6 +405,7 @@ class Condition:
         self.data_dir = None if data_dir is None else Path(data_dir).expanduser().resolve()
         self.until = until
         self.until_ns = _parse_until(label, until)
+        self.include_running = bool(include_running)
         try:
             written = SimulationConfig.from_yaml(config_path)
         except (OSError, ValueError) as exc:
@@ -470,7 +483,48 @@ class Condition:
                 hint="Pass replicates that exist on disk, run the simulations first, or say "
                 "where the runs are with data.local.yaml, polyzymd study locate DIR or --data.",
             )
-        self._provider = UniverseProvider.from_config(self.config)
+        self._provider = UniverseProvider.from_config(
+            self.config, require_complete=not self.include_running
+        )
+        #: Replicates left out because every production segment they have is
+        #: still being written (or failed); ``include_running`` reads them.
+        self.only_running: list[int] = []
+        #: Replicates left out because no production frame has been written yet,
+        #: even counting segments still being written (a run that just started).
+        self.no_frames_yet: list[int] = []
+        # Replicates named on purpose are kept, as for never-run folders above.
+        if replicates is None:
+            empty = [i for i in chosen if not self._provider.has_frames(i)]
+            if self.include_running:
+                self.no_frames_yet = empty
+            else:
+                self.only_running = empty
+            if empty and len(empty) == len(chosen):
+                raise ProtocolError(
+                    f"Condition {label!r}: replicate {', '.join(map(str, chosen))} "
+                    + (
+                        f"{'has' if len(chosen) == 1 else 'have'} written no production frame yet."
+                        if self.include_running
+                        else f"{'is' if len(chosen) == 1 else 'are'} still writing the first "
+                        "production segment, so no finished frames can be read."
+                    ),
+                    hint="Wait for a segment to finish, or read the frames written so far with "
+                    "--include-running (include_running: true in study.yaml); the results are "
+                    "then provisional."
+                    if not self.include_running
+                    else "Wait until production has written its first frames.",
+                )
+            if empty:
+                LOGGER.warning(
+                    "Condition %r: replicate %s left out: %s.",
+                    label,
+                    ", ".join(map(str, empty)),
+                    "no production frame written yet"
+                    if self.include_running
+                    else "only production segments still being written; --include-running "
+                    "reads them",
+                )
+                chosen = [i for i in chosen if i not in empty]
         self.replicates = [Replicate(self, index) for index in chosen]
         #: Replicates whose build record names another config than this one.
         self.built_from_other_config: list[int] = []
@@ -590,6 +644,7 @@ class Study:
                     protocol.stride,
                     protocol.data.get(label),
                     protocol.until,
+                    include_running=protocol.include_running,
                 )
                 for label, path in protocol.conditions.items()
             }
@@ -737,6 +792,7 @@ class Study:
         stride: int = 1,
         data: Mapping[str, str | Path] | None = None,
         until: str | None = None,
+        include_running: bool = False,
     ) -> Study:
         """Build a study from simulation config paths.
 
@@ -763,6 +819,10 @@ class Study:
         until : str, optional
             End of a common analysis window for every condition, such as
             ``"38ns"``; see :class:`Condition`.
+        include_running : bool, optional
+            Read production segments still being written. By default they are
+            left out, and a replicate with no other segment is left out of the
+            study with a warning. The results are then provisional.
 
         Returns
         -------
@@ -809,6 +869,7 @@ class Study:
                 stride,
                 (data or {}).get(label, (data or {}).get("*")),
                 until,
+                include_running=include_running,
             )
             for label, path in zip(labels, paths, strict=True)
         ]

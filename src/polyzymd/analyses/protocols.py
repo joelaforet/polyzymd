@@ -336,6 +336,7 @@ def analyze(
     data: dict[str, Path] | None = None,
     until: str | None = None,
     study_file: Path | None = None,
+    include_running: bool = False,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
@@ -413,7 +414,9 @@ def analyze(
                 else f"--set {next(iter(spec.defaults))}=..., one of the settings above."
             ),
         )
-    study = _study(configs, labels, equilibration, replicates, stride, data, until, study_file)
+    study = _study(
+        configs, labels, equilibration, replicates, stride, data, until, study_file, include_running
+    )
     request = Request(name, run, dict(settings or {}), recompute, output_dir, eq_check)
     measured = spec.measure(study, {**spec.defaults, **(settings or {})}, request)
     if measured.skipped is None:
@@ -437,6 +440,15 @@ def analyze(
 
 #: Why a replicate folder found on disk was left out of a report.
 NOT_RUN_REASON = "no production output (never built or never run)"
+#: Why a replicate still writing its first production segment was left out.
+ONLY_RUNNING_REASON = "only production segments still being written; --include-running reads them"
+#: Why a replicate that has written no production frame yet was left out.
+NO_FRAMES_YET_REASON = "no production frame written yet (production just started)"
+#: The warning of a report that read segments still being written.
+PROVISIONAL_WARNING = (
+    "provisional: frames of production segments still being written were read "
+    "(--include-running); the values change as the simulations continue"
+)
 
 
 def _record_not_run(report: ProtocolReport, study: Any) -> None:
@@ -459,9 +471,18 @@ def _record_not_run(report: ProtocolReport, study: Any) -> None:
         not_run = getattr(condition, "not_run", None) or []
         unfinished = getattr(condition, "unfinished", None) or {}
         incomplete = getattr(condition, "incomplete", None) or {}
-        if not_run or unfinished:
+        only_running = getattr(condition, "only_running", None) or []
+        no_frames_yet = getattr(condition, "no_frames_yet", None) or []
+        if (
+            getattr(condition, "include_running", False)
+            and PROVISIONAL_WARNING not in report.warnings
+        ):
+            report.warnings.append(PROVISIONAL_WARNING)
+        if not_run or unfinished or only_running or no_frames_yet:
             report.excluded_replicates[condition.label] = {
                 **{str(index): NOT_RUN_REASON for index in not_run},
+                **{str(index): ONLY_RUNNING_REASON for index in only_running},
+                **{str(index): NO_FRAMES_YET_REASON for index in no_frames_yet},
                 **{
                     str(index): f"production unfinished: {text}"
                     for index, text in unfinished.items()
@@ -470,6 +491,14 @@ def _record_not_run(report: ProtocolReport, study: Any) -> None:
         for index in not_run:
             report.problems.append(
                 f"condition {condition.label}: replicate {index} left out: {NOT_RUN_REASON}"
+            )
+        for index in only_running:
+            report.problems.append(
+                f"condition {condition.label}: replicate {index} left out: {ONLY_RUNNING_REASON}"
+            )
+        for index in no_frames_yet:
+            report.problems.append(
+                f"condition {condition.label}: replicate {index} left out: {NO_FRAMES_YET_REASON}"
             )
         for index, text in unfinished.items():
             report.problems.append(
@@ -483,7 +512,13 @@ def _record_not_run(report: ProtocolReport, study: Any) -> None:
                     f"condition {condition.label}: replicate {index} has run {text}; its "
                     "frames so far are read"
                 )
-        if not_run or unfinished or any(index in used for index in incomplete):
+        if (
+            not_run
+            or unfinished
+            or only_running
+            or no_frames_yet
+            or any(index in used for index in incomplete)
+        ):
             report.status = "partial"
 
 
@@ -1874,6 +1909,7 @@ def _study(
     data: dict[str, Path] | None = None,
     until: str | None = None,
     study_file: Path | None = None,
+    include_running: bool = False,
 ) -> Any:
     """Build the Study of ``configs``, with the package default equilibration window.
 
@@ -1891,6 +1927,7 @@ def _study(
         stride=stride,
         data=data,
         until=until,
+        include_running=include_running,
     )
     if study_file is not None:
         from polyzymd.analyses.study_file import load_study_file

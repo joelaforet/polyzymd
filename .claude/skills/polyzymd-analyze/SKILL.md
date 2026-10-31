@@ -103,6 +103,11 @@ lists the studies and the analyses each runs).
 - If a report warns that conditions were analysed up to different times, run
   again with `--until <shortest>` (or `--until common`) before you compare
   them.
+- To look at simulations that are still running, use `analyze` with
+  `--include-running`; do not write your own loader script. Its report says
+  the values are provisional: say so to the user, and compare conditions with
+  `--until`. Report final numbers only from a run without it. Without the flag,
+  a replicate still in its first production segment is left out and listed.
 - The console shows only reports and warnings. The full log is at the `log:`
   path. Read it only when a run fails.
 - If `freeze` warns that replicates have no recorded trajectory hashes, run

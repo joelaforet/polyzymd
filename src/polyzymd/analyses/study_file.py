@@ -32,6 +32,7 @@ _TOP_KEYS = (
     "equilibration",
     "stride",
     "until",
+    "include_running",
     "replicates",
     "conditions",
     "structures",
@@ -155,6 +156,8 @@ class StudyFile:
     metadata: dict[str, Any] = field(default_factory=dict)
     data: dict[str, Path] = field(default_factory=dict)
     until: str | None = None
+    #: Read production segments still being written (provisional results).
+    include_running: bool = False
     #: What the study simulates, such as the protein and temperature.
     description: str | None = None
     #: Named structure files, used as ``structure <name>``.
@@ -668,6 +671,18 @@ def _equilibration(value: Any, where: Any) -> str:
     return text
 
 
+def _include_running(value: Any, file: Any) -> bool:
+    """Check ``include_running:``, true or false (false when left out)."""
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise ProtocolError(
+            f"{file}: include_running must be true or false, got {value!r}.",
+            hint="Write include_running: true to read production segments still being written.",
+        )
+    return value
+
+
 def _until(value: Any, file: Any) -> str | None:
     """Check ``until:``, the end of a common analysis window, or ``common``."""
     if value is None:
@@ -821,6 +836,7 @@ def load_study_file(path: str | Path) -> StudyFile:
         metadata=dict(metadata) or (dict(project.metadata) if project is not None else {}),
         data=data,
         until=_until(raw.get("until"), file),
+        include_running=_include_running(raw.get("include_running"), file),
         description=None if raw.get("description") is None else str(raw["description"]),
         structures=structures,
         regions=regions,

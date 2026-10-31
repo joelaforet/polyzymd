@@ -59,6 +59,7 @@ analyses:
 | `conditions` | Required. Condition label to `config.yaml`. The first condition is the control. Each label is also a folder name, so two labels that differ only in case or punctuation (`SBMA 50`, `SBMA 50%`) are an error. Analysis reads a config anywhere, but `polyzymd study freeze` refuses one outside the study folder (or its project folder); `polyzymd study add-condition --config` copies one in |
 | `stride`, `replicates` | Optional. The same as `--stride` and `--replicates`. `analyze` deletes the stored results of a replicate that `replicates` does not list and the run did not use |
 | `until` | Optional. The end of a common analysis window, such as `38ns`, the same as `--until`. See {ref}`study-until` |
+| `include_running` | Optional, `true` or `false` (default). Read production segments still being written, the same as `--include-running`. See {ref}`study-include-running` |
 | `analyses` | Run name to settings. Each entry is one {term}`run`. The settings are the keys that `--set` takes. `analysis:` names the shipped analysis when the run name is not its name |
 | `comparison` | Optional. `within:` names the factor, or a list of factors, whose values form each stratum, such as `temperature_K`. Each condition is then compared with the control of its stratum, not with the first condition. `control:` gives the control's factor values, such as `{polymer: none}`; without it, the control of a stratum is the condition whose other factors equal those of the first condition. See {ref}`study-comparison` |
 | `metadata` | Publishing metadata for `polyzymd study freeze`; see {doc}`study_freeze` |
@@ -151,6 +152,7 @@ polyzymd analyze --study my_study                 # every run, in order
 | Option with `--study` | Effect |
 |---|---|
 | `--eq`, `--stride`, `--until`, `--replicates`, `--output-dir` | Override `study.yaml` for this command |
+| `--include-running` | Read production segments still being written, for this command |
 | `--set KEY=VALUE` | Overrides one setting of the run |
 | `--label LABEL` | Analyzes only that condition. Repeatable. The command prints the report but does not save it as the `report.json` of the run |
 | `--run NAME` | Selects the {term}`result` to report, when the analysis reports several |
@@ -196,6 +198,37 @@ warning: the conditions were analysed up to different times (No polymer 456.4 ns
   points, also when segment restarts left them a frame or two apart.
   PolyzyMD finds that time once, over all conditions, and records it in each
   result.
+
+(study-include-running)=
+### Look at simulations while they run
+
+A production segment that `progress.json` records as running is still being
+written. By default `analyze` leaves it out, so a stored result never depends
+on where the last write stopped. A replicate whose only production segment is
+still running then has no frames to read: it is left out of its condition, the
+report lists it under `excluded_replicates`, and the report is `partial`.
+Replicates you name with `replicates:` or `--replicates` are kept, so such a
+replicate is then an error rather than a gap. When
+every replicate of a condition is in that state, `analyze` stops and says so.
+
+To look at the simulations while they run, read the frames written so far:
+
+```bash
+polyzymd analyze --study my_study --include-running
+```
+
+or set `include_running: true` in `study.yaml` while the runs are going, and
+remove it when they finish. Such a report says:
+
+```
+warning: provisional: frames of production segments still being written were read (--include-running); the values change as the simulations continue
+```
+
+Its results are stored apart from those of finished segments, and each record
+says `include_running`. They are measured again when the trajectories have
+grown, so run the same command again to update them. Use
+`--until` to compare conditions that have run for different times, and
+analyze again without `--include-running` for the numbers you report.
 
 ### Give one analysis its own window
 

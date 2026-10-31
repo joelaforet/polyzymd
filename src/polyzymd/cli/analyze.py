@@ -146,6 +146,7 @@ def _common_until(
     replicate_spec: str | None,
     stride: int,
     data: dict | None,
+    include_running: bool = False,
 ) -> str:
     """Return the time ``until: common`` stands for: the earliest last time of any replicate."""
     from polyzymd.analyses.study import Study
@@ -158,6 +159,7 @@ def _common_until(
         stride=stride,
         data=data,
         until="common",
+        include_running=include_running,
     )
     return next(iter(study)).until
 
@@ -168,6 +170,7 @@ def _whole_study(
     replicate_spec: str | None,
     stride: int,
     data: dict | None,
+    include_running: bool = False,
 ) -> Iterator[Any]:
     """Yield each condition of the study file whose runs are on this machine.
 
@@ -182,7 +185,13 @@ def _whole_study(
     for label, config in load_study_file(study_path).conditions.items():
         try:
             yield from _study(
-                [config], [label], equilibration, _replicates(replicate_spec), stride, data
+                [config],
+                [label],
+                equilibration,
+                _replicates(replicate_spec),
+                stride,
+                data,
+                include_running=include_running,
             )
         except ProtocolError:
             continue
@@ -481,6 +490,13 @@ def _one_line(text: str) -> str:
     "so conditions simulated for different lengths are compared over the same time.",
 )
 @click.option(
+    "--include-running",
+    "include_running",
+    is_flag=True,
+    help="Read production segments still being written, to look at simulations while they "
+    "run. The results are provisional and are stored apart from those of finished segments.",
+)
+@click.option(
     "--recompute", is_flag=True, help="Recompute replicates instead of reusing cached results."
 )
 @click.option(
@@ -556,6 +572,7 @@ def analyze_command(
     output_dir: Path | None,
     stride: int | None,
     until: str | None,
+    include_running: bool,
     recompute: bool,
     no_eq_check: bool,
     is_task: bool,
@@ -648,6 +665,7 @@ def analyze_command(
             _error_exit(_one_line(str(exc)), getattr(exc, "hint", None))
         from polyzymd.analyses.study_file import load_study_file as _load_study
 
+        include_running = include_running or _load_study(study_path).include_running
         # A run the study file does not list has no stored settings to protect.
         if command_line_settings and run_name in _load_study(study_path).analyses:
             given = len(setting_overrides) - len(command_line_settings)
@@ -718,7 +736,9 @@ def analyze_command(
             conditions = load_study_file(study_path).conditions
             every = (tuple(conditions.values()), tuple(conditions))
         try:
-            until = _common_until(*every, equilibration, replicate_spec, stride, data)
+            until = _common_until(
+                *every, equilibration, replicate_spec, stride, data, include_running
+            )
         except AnalysisError as exc:
             _error_exit(_one_line(str(exc)), getattr(exc, "hint", None))
     study_record = (
@@ -734,7 +754,7 @@ def analyze_command(
 
         wide = study_wide_settings(
             name,
-            _whole_study(study_path, equilibration, replicate_spec, stride, data),
+            _whole_study(study_path, equilibration, replicate_spec, stride, data, include_running),
             _settings(setting_overrides),
         )
 
@@ -761,6 +781,7 @@ def analyze_command(
                 data=data,
                 data_dir=data_dir,
                 until=until,
+                include_running=include_running,
                 dry_run=dry_run or not submit,
                 preset=preset,
                 overrides={
@@ -796,6 +817,7 @@ def analyze_command(
         "run_name": run_name,
         "data": data,
         "until": until,
+        "include_running": include_running,
     }
     try:
         try:
@@ -1322,6 +1344,7 @@ def _submit(
     data: dict | None = None,
     data_dir: Path | None = None,
     until: str | None = None,
+    include_running: bool = False,
 ) -> None:
     """Write, and unless ``dry_run`` submit, the SLURM jobs of one ``polyzymd analyze`` command.
 
@@ -1357,6 +1380,7 @@ def _submit(
         stride,
         data,
         until,
+        include_running=include_running,
     )
     tasks = [
         (condition.config_path, condition.label, replicate.index)
@@ -1370,6 +1394,8 @@ def _submit(
         common += ["--data", str(Path(data_dir).expanduser().resolve())]
     if until is not None:
         common += ["--until", str(until)]
+    if include_running:
+        common.append("--include-running")
     for setting in setting_overrides:
         common += ["--set", setting]
     if run is not None:
@@ -1455,6 +1481,7 @@ def _run(
     run_name: str | None = None,
     data: dict | None = None,
     until: str | None = None,
+    include_running: bool = False,
 ) -> "ProtocolReport":
     """Resolve the options and run the protocol on the -c configs.
 
@@ -1477,6 +1504,7 @@ def _run(
             stride=stride,
             data=data,
             until=until,
+            include_running=include_running,
         )
         study.factors, study.comparison = protocol.factors, protocol.comparison
         return run_user_analysis(
@@ -1508,4 +1536,5 @@ def _run(
         data=data,
         until=until,
         study_file=study_path,
+        include_running=include_running,
     )

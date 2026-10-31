@@ -1916,7 +1916,9 @@ class TrajectoryLoader:
         for rep in replicates:
             yield rep, self.load_universe(rep)
 
-    def get_timestep(self, replicate: int, unit: str = "ps") -> float:
+    def get_timestep(
+        self, replicate: int, unit: str = "ps", *, require_complete: bool = True
+    ) -> float:
         """Get the trajectory timestep (time between frames).
 
         Parameters
@@ -1931,7 +1933,7 @@ class TrajectoryLoader:
         float
             Time between consecutive frames
         """
-        u = self.load_universe(replicate)
+        u = self.load_universe(replicate, require_complete=require_complete)
         trajectory = u.trajectory
 
         # Get timestep from trajectory
@@ -1958,7 +1960,9 @@ class TrajectoryLoader:
 
         return float(dt)
 
-    def get_first_frame_time(self, replicate: int, unit: str = "ps") -> float | None:
+    def get_first_frame_time(
+        self, replicate: int, unit: str = "ps", *, require_complete: bool = True
+    ) -> float | None:
         """Return the first loaded frame timestamp when available.
 
         MDAnalysis reports trajectory times in picoseconds. This method probes
@@ -1988,7 +1992,7 @@ class TrajectoryLoader:
         if unit not in {"ps", "ns"}:
             raise ValueError(f"Unknown time unit: {unit}")
 
-        u = self.load_universe(replicate)
+        u = self.load_universe(replicate, require_complete=require_complete)
         trajectory = u.trajectory
         previous_frame = _trajectory_frame_index(trajectory)
         try:
