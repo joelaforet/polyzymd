@@ -453,3 +453,23 @@ def test_a_ccd_file_fragment_needs_a_link_atom_and_an_existing_file(tmp_path) ->
         "modification_parameters": {"generic": SAGE},
     }
     assert "fragment CCD file" in _refused(tmp_path, protein)
+
+
+def test_a_glycan_attachment_may_leave_its_bonding_atoms_to_the_defaults() -> None:
+    entry = {
+        "type": "glycan",
+        "reaction": "N-glycosylation",
+        "chains": ["A"],
+        "glycans": {"G1": ["N5"]},
+    }
+    protein = _protein(
+        modifications=[{"attach": entry}], modification_parameters={"glycan": GLYCAM}
+    )
+    attachment = protein.modifications[0].arguments
+    assert attachment.atom_name is None and attachment.fragment_atom_name is None
+
+
+def test_other_attachments_still_name_the_protein_atom() -> None:
+    entry = {"type": "generic", "site": "A:K8", "fragment": {"smiles": "*C(=O)C", "resname": "ACE"}}
+    message = _error(modifications=[{"attach": entry}], modification_parameters={"generic": SAGE})
+    assert "a generic attachment needs atom_name" in message

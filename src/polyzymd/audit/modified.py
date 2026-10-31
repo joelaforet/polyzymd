@@ -753,6 +753,26 @@ def _declared_mutation(entry: dict, base: Path) -> tuple:
 def _declared_change(verb: str, arguments: dict, base: Path) -> tuple:
     if verb != "attach":
         return (verb, _parse(arguments["site"]), arguments["atom_name"])
+    if arguments.get("type") == "glycan":
+        # A glycan's bonding atoms default as documented; the build records them.
+        from polyzymd.modifying_proteins.glycam import glycan_attachment_defaults
+        from polyzymd.modifying_proteins.sites import parse_site
+
+        fragment = arguments.get("fragment") or {}
+        path = base / fragment["pdb_path"] if "pdb_path" in fragment else None
+        atom, fragment_atom, fragment_resnum = glycan_attachment_defaults(
+            parse_site(arguments["site"]).resname,
+            arguments.get("atom_name"),
+            arguments.get("fragment_atom_name"),
+            arguments.get("fragment_resnum"),
+            path,
+        )
+        arguments = {
+            **arguments,
+            "atom_name": atom,
+            "fragment_atom_name": fragment_atom,
+            "fragment_resnum": fragment_resnum,
+        }
     return (
         "attach",
         _parse(arguments["site"]),

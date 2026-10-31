@@ -529,3 +529,42 @@ def test_interchange_gromacs_export_drops_an_improper_out_of_its_own_order(tmp_p
     )
     interchange.to_gromacs(prefix=str(tmp_path / "m"), monolithic=True)
     assert "5.163056" not in (tmp_path / "m.top").read_text()
+
+
+def test_a_glycan_bonds_by_default_at_the_linkage_atom_and_c1() -> None:
+    """Without atom names, a glycan bonds Asn ND2 to C1 of the file's first residue with one.
+
+    The record holds the atoms used, and the audit's declared side, filled
+    with the same defaults, matches it.
+    """
+    from polyzymd.audit.modified import _built_change, _declared_change
+
+    protein = mp.load_protein(TRPCAGE)
+    mp.mutate(protein, "A:Q5", "ASN", relax=False, minimize=False)
+    fragment = {"pdb_path": str(CHITOBIOSE)}
+    record = mp.attach(
+        protein, fragment, type="glycan", site="A:N5", reaction="N-glycosylation", relax=False
+    )
+    used = [record.arguments[k] for k in ("atom_name", "fragment_atom_name", "fragment_resnum")]
+    assert used == ["ND2", "C1", 2]
+    declared = {
+        "site": "A:N5",
+        "type": "glycan",
+        "reaction": "N-glycosylation",
+        "fragment": fragment,
+    }
+    assert _declared_change("attach", declared, Path(".")) == _built_change(record)
+
+
+def test_glycan_link_atoms_default_by_residue() -> None:
+    from polyzymd.modifying_proteins.glycam import glycan_attachment_defaults
+
+    assert glycan_attachment_defaults("THR", None, None, None, CHITOBIOSE) == ("OG1", "C1", 2)
+    assert glycan_attachment_defaults("SER", None, "C2", None, CHITOBIOSE) == ("OG", "C2", None)
+    assert glycan_attachment_defaults("LYS", "NZ", None, 3, None) == ("NZ", "C1", 3)
+
+
+def test_a_non_glycan_attachment_needs_its_protein_atom() -> None:
+    protein = mp.load_protein(TRPCAGE)
+    with pytest.raises(ValueError, match="Give atom_name"):
+        mp.attach(protein, {"smiles": "*C(=O)C", "resname": "ACE"}, type="generic", site="A:K8")

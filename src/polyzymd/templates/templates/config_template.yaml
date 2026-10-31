@@ -91,9 +91,6 @@ solutes:
     #   - attach:                                   # one glycan per listed residue
     #       type: glycan                            # glycan, polymer or generic
     #       reaction: N-glycosylation
-    #       atom_name: ND2
-    #       fragment_atom_name: C1
-    #       fragment_resnum: 2
     #       chains: [A]
     #       glycans: {G42666HT: [N58, N107]}        # structures/glycans/glycam_<ID>.pdb
     #   - attach:

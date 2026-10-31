@@ -36,9 +36,6 @@ as a map from accession to residues:
       - attach:
           type: glycan
           reaction: N-glycosylation
-          atom_name: ND2
-          fragment_atom_name: C1
-          fragment_resnum: 2
           chains: [A]
           glycans:
             G42666HT: [N60]
@@ -49,9 +46,13 @@ as a map from accession to residues:
 
 - `reaction` decides which atoms bond and leave: `N-glycosylation` bonds C1
   to the Asn ND2 (HD22 and the `ROH` group leave); `O-glycosylation` bonds C1
-  to a Ser OG or Thr OG1 (`atom_name: OG` or `OG1`).
-- `fragment_atom_name: C1` and `fragment_resnum: 2` name the anomeric carbon
-  of the first sugar (residue 1 is `ROH`).
+  to a Ser OG or Thr OG1.
+- The bonding atoms default, so you rarely write them: the protein atom is
+  Asn ND2, Ser OG or Thr OG1 (`atom_name`), and the glycan atom is C1
+  (`fragment_atom_name`) of the first residue in the file that has one
+  (`fragment_resnum`; residue 1 of a GLYCAM-Web or GlyGen file is the `ROH`
+  aglycone, so this is the reducing-end sugar). Give any of the three to
+  override it; the build record lists the atoms used.
 - `chains: [A, C, E]` puts the same glycans on every listed chain, for a
   homo-oligomer such as the BG505 SOSIP trimer.
 
@@ -74,9 +75,6 @@ A:N25,G55220VL
       - attach:
           type: glycan
           reaction: N-glycosylation
-          atom_name: ND2
-          fragment_atom_name: C1
-          fragment_resnum: 2
           sites_file: structures/glycan_sites.csv
 ```
 

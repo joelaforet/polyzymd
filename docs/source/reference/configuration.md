@@ -153,9 +153,6 @@ model must match any NAGL-charged ligand or co-solvent.
       - attach:
           type: glycan
           reaction: N-glycosylation
-          atom_name: ND2
-          fragment_atom_name: C1
-          fragment_resnum: 2
           chains: [A, C, E]
           glycans: {G55220VL: [N58, N107], G42666HT: [N103]}
     modification_parameters:
@@ -174,7 +171,7 @@ residues, read from `glycan_library` (default `structures/glycans`, files
 |-------|--------|
 | mutation | `to`: a CCD code, `{smiles, resname}` (a side chain, `*` bonds to CA) or `{ccd_file}`; `stereo`: `L` or `D` |
 | `deprotonate`, `protonate` | `atom_name`: the atom that loses or gains H |
-| `attach` | `type` (glycan, polymer, generic), `atom_name`, `fragment` (`{smiles, resname}`, `{pdb_path}`, `{ccd, link_atom}` or `{polymer}`), `reaction` (mBuild named reaction or SMARTS), `attach_at` (polymer fragments), `fragment_atom_name`, `fragment_resnum`, `leaving_atom_names`, `fragment_leaving_atom_names`, `merge`, `bond_order`, `name` (4 characters; default `G001`, `P001`, `M001` in order) |
+| `attach` | `type` (glycan, polymer, generic), `atom_name` (a glycan defaults to Asn ND2, Ser OG or Thr OG1), `fragment` (`{smiles, resname}`, `{pdb_path}`, `{ccd, link_atom}` or `{polymer}`), `reaction` (mBuild named reaction or SMARTS), `attach_at` (polymer fragments), `fragment_atom_name` and `fragment_resnum` (a glycan defaults to C1 of the first residue with one), `leaving_atom_names`, `fragment_leaving_atom_names`, `merge`, `bond_order`, `name` (4 characters; default `G001`, `P001`, `M001` in order) |
 
 A mutation to one of the 20 canonical residues (or its D form) stays on
 ff14SB. Every other mutation and every attachment makes a site: the side chain
