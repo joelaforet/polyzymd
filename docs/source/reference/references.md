@@ -109,9 +109,15 @@ more method, add an entry there and the reference here.
   screening properties of soft matter. In *Foundations of Molecular Modeling
   and Simulation* (Molecular Modeling and Simulation), 79-92. Springer
   Singapore. doi:10.1007/978-981-10-1128-3_5. Used by dynamic polymers:
-  mBuild builds the coordinates of each chain. PolyzyMD installs mBuild from
-  github.com/joelaforet/mbuild (tag `biopolymers-v0.1.0`); the build record
-  names its commit.
+  mBuild builds the coordinates of each chain, and applies the mutations and
+  modifications of a protein (`mbuild.biopolymers`). PolyzyMD installs mBuild
+  from github.com/joelaforet/mbuild (tag `biopolymers-v0.1.0`); the build
+  record names its commit.
+- openff-pablo, <https://github.com/openforcefield/openff-pablo> (v0.2.2).
+  The audit's independent reading of a modified protein: it reads the built
+  structure into OpenFF with residue definitions for the attached groups and
+  crosslinks. It has no journal article; "Methods to cite" names it with its
+  version, and the build record names its commit.
 
 ## Force fields, water, ions and charge models
 
@@ -126,6 +132,11 @@ For any other file, cite its source.
   and Simmerling, C. (2015). ff14SB: improving the accuracy of protein side
   chain and backbone parameters from ff99SB. *Journal of Chemical Theory and
   Computation*, 11(8), 3696-3713. doi:10.1021/acs.jctc.5b00255
+- Kirschner, K. N., Yongye, A. B., Tschampel, S. M., Gonzalez-Outeirino, J.,
+  Daniels, C. R., Foley, B. L. and Woods, R. J. (2008). GLYCAM06: a
+  generalizable biomolecular force field. Carbohydrates. *Journal of
+  Computational Chemistry*, 29(4), 622-655. doi:10.1002/jcc.20820. For glycans
+  parameterized with `GLYCAM_06j-1.xml` (OpenMM's copy of GLYCAM06j).
 - Boothroyd, S., Behara, P. K., Madin, O. C., Hahn, D. F., Jang, H.,
   Gapsys, V., Wagner, J. R., Horton, J. T., Dotson, D. L., Thompson, M. W.,
   Maat, J., Gokey, T., Wang, L.-P., Cole, D. J., Gilson, M. K., Chodera, J. D.,
@@ -151,7 +162,10 @@ For any other file, cite its source.
 - Jorgensen, W. L., Chandrasekhar, J., Madura, J. D., Impey, R. W. and
   Klein, M. L. (1983). Comparison of simple potential functions for simulating
   liquid water. *Journal of Chemical Physics*, 79(2), 926-935.
-  doi:10.1063/1.445869. TIP3P, the only water model PolyzyMD builds.
+  doi:10.1063/1.445869. For `solvent.water.model: tip3p`.
+- Izadi, S. and Onufriev, A. V. (2016). Accuracy limit of rigid 3-point water
+  models. *Journal of Chemical Physics*, 145(7), 074501.
+  doi:10.1063/1.4960175. For `solvent.water.model: opc3` (`opc3.offxml`).
 - Joung, I. S. and Cheatham, T. E. (2008). Determination of alkali and halide
   monovalent ion parameters for use in explicitly solvated biomolecular
   simulations. *Journal of Physical Chemistry B*, 112(30), 9020-9041.
@@ -159,6 +173,12 @@ For any other file, cite its source.
   `openff-1.*` and `openff-2.*` are the TIP3P set of its Table 5. The
   openff-forcefields package keeps that table as `data/jc.csv`. The build
   cites it when it added Na+ or Cl- with one of these files.
+- Sengupta, A., Li, Z., Song, L. F., Li, P. and Merz, K. M. (2021).
+  Parameterization of monovalent ions for the OPC3, OPC, TIP3P-FB, and
+  TIP4P-FB water models. *Journal of Chemical Information and Modeling*,
+  61(2), 869-880. doi:10.1021/acs.jcim.0c01390. The Na+ and Cl- parameters
+  of `opc3.offxml` (the Li/Merz 12-6 set for OPC3), which an OPC3 build uses
+  instead of the solvent force field's ions.
 - Jakalian, A., Bush, B. L., Jack, D. B. and Bayly, C. I. (2000). Fast,
   efficient generation of high-quality atomic charges. AM1-BCC model: I.
   Method. *Journal of Computational Chemistry*, 21(2), 132-146.

@@ -15,10 +15,12 @@ import numpy as np
 
 from polyzymd.audit.findings import AuditContext, Finding
 from polyzymd.audit.registry import CheckSpec, register
+from polyzymd.core.components import is_attachment_segid
 
 #: Molar concentration of pure water, as the builder sizes salt and ionic strength.
 WATER_MOLARITY = 55.5
-#: Mass of one TIP3P water (Da), the unit of the builder's water-equivalents.
+#: Mass of one water molecule (Da), the unit of the builder's water-equivalents
+#: (the same for every water model it builds: TIP3P and OPC3 have the same atoms).
 WATER_MASS = 15.999 + 2 * 1.008
 
 
@@ -64,15 +66,23 @@ def declared(context: AuditContext) -> list[Finding]:
                 f"{solute.type}/{solute.segid}"
             )
         for domain in record.domains:
-            if list(domain.force_field) != list(solute.force_field):
+            expected = _declared_source(solute, domain)
+            if expected is None:
+                problems.append(
+                    f"{solute.name}/{domain.name}: a {_site_type(domain)} site, but the config "
+                    "has no modification_parameters for it"
+                )
+                continue
+            force_field, charges = expected
+            if list(domain.force_field) != list(force_field):
                 problems.append(
                     f"{solute.name}/{domain.name}: force field {list(domain.force_field)}, "
-                    f"config says {solute.force_field}"
+                    f"config says {list(force_field)}"
                 )
-            if (domain.charges.method, domain.charges.model) != _charges(solute):
+            if (domain.charges.method, domain.charges.model) != charges:
                 problems.append(
                     f"{solute.name}/{domain.name}: charges {domain.charges.method} "
-                    f"{domain.charges.model or ''}, config says {_charges(solute)}"
+                    f"{domain.charges.model or ''}, config says {charges}"
                 )
     names = {s.name for s in config.solutes} | {"solvent", "ions"}
     for extra in sorted(set(records) - names):
@@ -81,15 +91,25 @@ def declared(context: AuditContext) -> list[Finding]:
     if solvent is None:
         problems.append("the build has no solvent component")
     else:
+        from polyzymd.config.schema import water_force_fields
+
+        model = config.solvent.water.model.value
+        # Water and ions take the water model's own file (opc3.offxml) after
+        # the solvent force field; co-solvents take the solvent force field.
+        water_files = water_force_fields(config.solvent.force_field, model)
         for component in [solvent] + _of_type(context, "ions"):
             for domain in component.domains:
-                if list(domain.force_field) != list(config.solvent.force_field):
+                expected = (
+                    list(config.solvent.force_field)
+                    if domain.name.startswith("co_solvent:")
+                    else water_files
+                )
+                if list(domain.force_field) != expected:
                     problems.append(
                         f"{component.name}/{domain.name}: force field {list(domain.force_field)}, "
-                        f"config solvent says {config.solvent.force_field}"
+                        f"config solvent and water model say {expected}"
                     )
         water = _domain(solvent, "water")
-        model = config.solvent.water.model.value
         if water is None or (water.charges.method, water.charges.model) != ("water_model", model):
             problems.append(f"water is not built as {model}")
         for cosolvent in config.solvent.co_solvents:
@@ -165,6 +185,25 @@ def counts(context: AuditContext) -> list[Finding]:
     ]
 
 
+def _grafts(context: AuditContext) -> list[tuple[str, list[int]]]:
+    """Return each polymer chain grafted onto a component: its segment and atoms."""
+    grafts = []
+    for component in context.components:
+        for segid, ranges in sorted(getattr(component, "segments", {}).items()):
+            if is_attachment_segid(segid, kinds="P"):
+                grafts.append((segid, [i for r in ranges for i in r]))
+    return grafts
+
+
+def _graft_sequences(context: AuditContext) -> list[tuple[str, str]]:
+    """Return (segment, drawn sequence) of each grafted chain the build recorded."""
+    return [
+        (chain["segment"], chain["sequence"])
+        for component in context.components
+        for chain in component.provenance.get("grafted_chains", [])
+    ]
+
+
 @register(
     CheckSpec(
         "composition.polymer_sequences",
@@ -176,7 +215,15 @@ def counts(context: AuditContext) -> list[Finding]:
 )
 def polymer_sequences(context: AuditContext) -> list[Finding]:
     polymers = _of_type(context, "polymer")
+    grafted = ""
+    if _grafts(context):
+        grafted = "; grafted " + (
+            ", ".join(f"{name} {sequence}" for name, sequence in _graft_sequences(context))
+            or ", ".join(segid for segid, _ in _grafts(context))
+        )
     if not polymers:
+        if grafted:
+            return [Finding("composition.polymer_sequences", "system", "INFO", grafted[2:])]
         return []
     chains = Counter()
     for domain in polymers[0].domains:
@@ -222,8 +269,9 @@ def polymer_sequences(context: AuditContext) -> list[Finding]:
             for end, counter in ends.items()
         )
     detail = (
-        f"{len(chains)} sequences over {sum(chains.values())} chains; monomer fractions "
-        f"{reached}{configured}{caps}"
+        f"{len(chains)} sequences over {sum(chains.values())} {'soluble ' if grafted else ''}"
+        f"chains; monomer fractions "
+        f"{reached}{configured}{caps}{grafted}"
     )
     return [Finding("composition.polymer_sequences", polymers[0].name, "INFO", detail)]
 
@@ -246,9 +294,12 @@ def _mass(context: AuditContext, atoms: Any) -> float:
 )
 def polymer_mass_fraction(context: AuditContext) -> list[Finding]:
     polymers = _of_type(context, "polymer")
-    if not polymers:
+    grafts = _grafts(context)
+    if not polymers and not grafts:
         return []
-    polymer = _mass(context, polymers[0].atom_indices())
+    soluble = _mass(context, polymers[0].atom_indices()) if polymers else 0.0
+    grafted = sum(_mass(context, atoms) for _, atoms in grafts)
+    polymer = soluble + grafted
     solvent = sum(
         _mass(context, c.atom_indices())
         for c in context.components
@@ -258,9 +309,15 @@ def polymer_mass_fraction(context: AuditContext) -> list[Finding]:
     return [
         Finding(
             "composition.polymer_mass_fraction",
-            polymers[0].name,
+            polymers[0].name if polymers else "system",
             "INFO",
-            f"{100 * fraction:.2f} wt% polymer of polymer + solvent ({polymer / 1000:.1f} kDa)",
+            f"{100 * fraction:.2f} wt% polymer of polymer + solvent ({polymer / 1000:.1f} kDa"
+            + (
+                f"; {soluble / 1000:.1f} kDa soluble, {grafted / 1000:.1f} kDa grafted in "
+                f"{len(grafts)} chain(s))"
+                if grafts
+                else ")"
+            ),
         )
     ]
 
@@ -498,7 +555,11 @@ def nonbonded(context: AuditContext) -> list[Finding]:
     from openff.toolkit import ForceField
     from openff.units import unit
 
-    force_field = ForceField(*config.solvent.force_field)
+    from polyzymd.config.schema import water_force_fields
+
+    force_field = ForceField(
+        *water_force_fields(config.solvent.force_field, config.solvent.water.model)
+    )
     vdw = force_field["vdW"]
     cutoff = vdw.cutoff.m_as(unit.nanometer)
     switch = cutoff - vdw.switch_width.m_as(unit.nanometer) if vdw.switch_width.m else None
@@ -546,3 +607,26 @@ def density(context: AuditContext) -> list[Finding]:
             "as a count or concentration are added on top of it)"
         )
     return [Finding("composition.density", "system", "INFO", detail)]
+
+
+def _site_type(domain: Any) -> str | None:
+    """The site type of a modification-site domain, or None for any other domain."""
+    reference = domain.reference or {}
+    return reference.get("site_type") if reference.get("site") else None
+
+
+def _declared_source(solute: Any, domain: Any) -> tuple[list[str], tuple] | None:
+    """The force field and charges the config names for ``domain`` of ``solute``.
+
+    A modification site takes its type's set from ``modification_parameters``;
+    every other domain takes the solute's own force field and charges.
+    """
+    site_type = _site_type(domain)
+    if site_type is None:
+        return list(solute.force_field), _charges(solute)
+    sets = getattr(solute, "modification_parameters", None)
+    chosen = getattr(sets, site_type, None) if sets is not None else None
+    if chosen is None:
+        return None
+    return list(chosen.force_field), (chosen.charges.method, chosen.charges.model)
+

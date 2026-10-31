@@ -411,6 +411,24 @@ def _emit_protocol_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     return True
 
 
+def _pdb_masses(records: list[str]) -> tuple:
+    """Masses (Da) and atomic numbers of PDB ATOM/HETATM records, from the element column
+    (or the atom name when it is blank)."""
+    import numpy as np
+    from openmm.app.element import Element
+
+    masses, numbers = [], []
+    for line in records:
+        symbol = line[76:78].strip() or line[12:16].strip().lstrip("0123456789")[:1]
+        try:
+            element = Element.getBySymbol(symbol.capitalize())
+        except KeyError:
+            element = Element.getBySymbol("C")
+        masses.append(element.mass._value)
+        numbers.append(element.atomic_number)
+    return np.array(masses), np.array(numbers)
+
+
 def _echo_box_plan(sim_config: "SimulationConfig", *, phase: str) -> None:
     """Print the periodic box the build will make, sized from the enzyme PDB."""
     import numpy as np
@@ -419,22 +437,35 @@ def _echo_box_plan(sim_config: "SimulationConfig", *, phase: str) -> None:
     from polyzymd.utils.boxvectors import describe_box_plan, plan_box
 
     box = sim_config.solvent.box
-    padding = box.padding
+    extra = 0.0
     if sim_config.polymers and sim_config.polymers.enabled:
-        padding += sim_config.polymers.packing.padding
+        extra = sim_config.polymers.packing.padding
     try:
         with open(sim_config.enzyme.pdb_path) as stream:
-            positions = [
-                [float(line[30:38]), float(line[38:46]), float(line[46:54])]
-                for line in stream
-                if line.startswith(("ATOM", "HETATM"))
-            ]
-        plan = plan_box(
-            np.asarray(positions) / 10.0,
-            SolventBuilder._get_box_shape_matrix(box.shape.value),
-            padding_nm=padding,
-            margin_nm=box.tolerance / 10.0,
+            records = [line for line in stream if line.startswith(("ATOM", "HETATM"))]
+        positions_nm = (
+            np.array([[float(line[c : c + 8]) for c in (30, 38, 46)] for line in records]) / 10.0
         )
+        if box.shape.value == "rectangular":
+            from polyzymd.utils.boxvectors import fixed_solute_alignment, plan_rectangular_box
+
+            if box.alignment == "principal_axes":
+                # The build's alignment: mass-weighted heavy atoms (no attachments yet).
+                masses, numbers = _pdb_masses(records)
+                rotation, center = fixed_solute_alignment(positions_nm, masses, numbers)
+                positions_nm = (positions_nm - center) @ rotation.T + center
+            plan = plan_rectangular_box(
+                positions_nm,
+                tuple(p + extra for p in box.padding_xyz),
+                margin_nm=box.tolerance / 10.0,
+            )
+        else:
+            plan = plan_box(
+                positions_nm,
+                SolventBuilder._get_box_shape_matrix(box.shape.value),
+                padding_nm=box.padding + extra,
+                margin_nm=box.tolerance / 10.0,
+            )
     except Exception as exc:  # a diagnostic never stops the dry run
         reason = (
             "needs OpenFF, which only the build environment has"
@@ -667,7 +698,9 @@ def build(
             colored_echo(
                 f"  Chain D+ (Solvent): {sim_config.solvent.water.model.name}", phase="build"
             )
-            colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
+            colored_echo(
+                f"    Box padding: {sim_config.solvent.box.padding_label} nm", phase="build"
+            )
             _echo_box_plan(sim_config, phase="build")
             ions = sim_config.solvent.ions
             if ions.ionic_strength is not None:
@@ -846,6 +879,8 @@ def build(
                     fmt=export_format,
                     component_info=builder.get_component_info(),
                     replicate=rep,
+                    glycam_sites=builder.glycam_sites,
+                    protein_molecules=builder.protein_molecule_ranges,
                 )
                 from polyzymd.core.components import write_index
 
@@ -1518,6 +1553,8 @@ def _run_gromacs_impl(
             config=sim_config,
             component_info=component_info,
             replicate=replicate,
+            glycam_sites=builder.glycam_sites,
+            protein_molecules=builder.protein_molecule_ranges,
         )
         export_result = exporter.export(
             output_dir=gromacs_dir,
@@ -4151,6 +4188,30 @@ def _status_table(config: str) -> None:
     click.echo()
 
 
+def _print_modification_plans(sim_config: "SimulationConfig", base_dir: Path, output_format: str) -> None:
+    """Apply each modified protein's blocks to its PDB and print one row per modification."""
+    import json
+
+    from polyzymd.builders.modified_protein import plan_rows, plan_table
+
+    proteins = [
+        solute
+        for solute in sim_config.solutes
+        if solute.type == "protein" and getattr(solute, "is_modified", False)
+    ]
+    report = {solute.name: plan_rows(solute, base_dir) for solute in proteins}
+    if output_format == "agent":
+        click.echo(json.dumps({"modifications": report}, indent=1))
+        return
+    if not report:
+        colored_echo("Modifications: none")
+        return
+    for name, rows in report.items():
+        colored_echo(f"Modifications of {name} ({len(rows)}, checked against its PDB):")
+        colored_echo(plan_table(rows))
+    colored_echo()
+
+
 # =============================================================================
 # Validate Command
 # =============================================================================
@@ -4164,22 +4225,47 @@ def _status_table(config: str) -> None:
     type=click.Path(exists=True),
     help="Path to YAML configuration file",
 )
-def validate(config: str) -> None:
+@click.option(
+    "--plans",
+    is_flag=True,
+    help="Also apply each protein's mutations and modifications to its PDB (no "
+    "relaxation) and list them, one row per site",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "agent"]),
+    default="text",
+    show_default=True,
+    help="agent: print the plans as JSON (with --plans)",
+)
+def validate(config: str, plans: bool, output_format: str) -> None:
     """Validate a configuration file.
 
     Checks that the configuration is valid and all referenced
-    files exist.
+    files exist. With --plans, also checks every mutation and modification
+    against the protein structure and lists them.
     """
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.config.validation import stage_temperature_warning
 
     warn_if_wrong_pixi_env("validate", "build")
 
-    colored_echo(f"Validating configuration: {config}")
+    if output_format == "agent" and not plans:
+        raise click.UsageError(
+            "--format agent prints the modification plans; use it with --plans."
+        )
+    agent = plans and output_format == "agent"
+    if not agent:
+        colored_echo(f"Validating configuration: {config}")
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
         sim_config.require_buildable()
+        if plans:
+            _print_modification_plans(sim_config, Path(config).resolve().parent, output_format)
+            if output_format == "agent":
+                return
 
         click.echo(click.style("Configuration is valid!", fg="green"))
         colored_echo()

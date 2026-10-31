@@ -35,7 +35,7 @@ def _make_dry_run_config() -> SimpleNamespace:
         polymers=None,
         solvent=SimpleNamespace(
             water=SimpleNamespace(model=WaterModel.TIP3P),
-            box=SimpleNamespace(padding=1.2),
+            box=SimpleNamespace(padding=1.2, padding_label="1.20"),
             ions=SimpleNamespace(nacl_concentration=0.15, neutralize=True, ionic_strength=None),
             co_solvents=[],
         ),

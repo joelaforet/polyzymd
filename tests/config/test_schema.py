@@ -1,7 +1,9 @@
 """Test that all public modules can be imported."""
 
+import copy
 import json
 import logging
+import re
 from pathlib import Path
 
 import pytest
@@ -364,6 +366,57 @@ class TestRunDirectoryNaming:
 
         assert config.format_run_directory_name(4) == "TestEnzyme_apo_none_1ns_300K_run4"
         assert calls == [config._run_directory_template_values(4)]
+
+    def test_a_modified_protein_gets_a_token_from_its_declared_changes(self, minimal_config_data):
+        """Mutations or modifications add -mod<hash>; an unmodified protein keeps its 1.3 name."""
+        import copy
+        import re
+
+        from polyzymd.config.schema import SimulationConfig
+
+        plain = SimulationConfig(**minimal_config_data).format_run_directory_name(1)
+        assert plain == "TestEnzyme_apo_none_1ns_300K_run1"
+
+        def name(to: str) -> str:
+            data = copy.deepcopy(minimal_config_data)
+            data["solutes"][0]["mutations"] = [{"site": "A:G1", "to": to}]
+            return SimulationConfig(**data).format_run_directory_name(1)
+
+        alanine = name("ALA")
+        assert re.fullmatch(r"TestEnzyme-mod[0-9a-f]{6}_apo_none_1ns_300K_run1", alanine)
+        assert alanine == name("ALA") != name("SER")
+
+    def test_a_polymer_sequence_block_gets_a_token(self, minimal_config_data, tmp_path):
+        """Block and statistical chains of one composition get different names."""
+        import copy
+
+        from polyzymd.config.schema import SimulationConfig
+
+        def name(sequence=None) -> str:
+            data = copy.deepcopy(minimal_config_data)
+            polymer = {
+                "type": "polymer",
+                "type_prefix": "TP",
+                "monomers": [
+                    {"label": "A", "probability": 0.5},
+                    {"label": "B", "probability": 0.5},
+                ],
+                "length": 4,
+                "count": 2,
+                "sdf_directory": str(tmp_path),
+                "force_field": [SAGE],
+                "charges": {"method": "preset"},
+            }
+            if sequence is not None:
+                polymer["sequence"] = sequence
+            data["solutes"].append(polymer)
+            return SimulationConfig(**data).format_run_directory_name(1)
+
+        statistical = name()
+        assert statistical == "TestEnzyme_apo_TP_A50_B50_1ns_300K_run1"
+        block = name({"mode": "block", "blocks": [{"A": 2}, {"B": 2}]})
+        assert block.startswith("TestEnzyme_apo_TP_A50_B50-seq") and block != statistical
+        assert name({"mode": "block", "blocks": [{"B": 2}, {"A": 2}]}) != block
 
     def test_solvent_token_formatting(self, minimal_config_data):
         """Solvent placeholders should render safe composition tokens."""
@@ -942,18 +995,19 @@ class TestMinimizationConfig:
         cfg = SimulationConfig(**minimal_config_data)
         m = cfg.simulation_phases.minimization
         assert m.freeze_solute is True
-        assert m.max_iterations == 1000
+        assert m.max_iterations == 0
         assert m.tolerance == pytest.approx(10.0)
 
     def test_explicit_values_are_honoured(self, minimal_config_data):
         minimal_config_data["simulation_phases"]["minimization"] = {
             "freeze_solute": False,
-            "max_iterations": 0,
+            "max_iterations": 500,
             "tolerance": 1.0,
         }
         cfg = SimulationConfig(**minimal_config_data)
         assert cfg.simulation_phases.minimization.freeze_solute is False
-        assert cfg.simulation_phases.minimization.max_iterations == 0
+        assert cfg.simulation_phases.minimization.max_iterations == 500
+        assert cfg.simulation_phases.minimization.tolerance == pytest.approx(1.0)
 
     def test_rejects_unknown_keys(self, minimal_config_data):
         minimal_config_data["simulation_phases"]["minimization"] = {"freeze_protein": True}
@@ -1226,7 +1280,7 @@ def test_box_shape_refuses_truncated_octahedron():
     """Only the box shapes the build can make are accepted."""
     from polyzymd.config.schema import BoxConfig
 
-    with pytest.raises(ValidationError, match="'cube' or 'rhombic_dodecahedron'"):
+    with pytest.raises(ValidationError, match="'cube', 'rhombic_dodecahedron' or 'rectangular'"):
         BoxConfig(shape="truncated_octahedron")
 
 
@@ -1275,6 +1329,32 @@ def test_water_models_the_build_cannot_make_load_but_are_not_built(minimal_confi
     config = SimulationConfig(**minimal_config_data)
     with pytest.raises(ValueError, match="use model: tip3p for new systems"):
         config.require_buildable()
+
+
+def test_opc3_water_is_built_with_its_own_file_after_the_solvent_force_field(
+    minimal_config_data,
+):
+    from polyzymd.config.schema import water_force_fields
+
+    minimal_config_data["solvent"] = {"force_field": [SAGE], "water": {"model": "opc3"}}
+    config = SimulationConfig(**minimal_config_data)
+    config.require_buildable(inputs=False)
+    assert water_force_fields(config.solvent.force_field, config.solvent.water.model) == [
+        SAGE,
+        "opc3.offxml",
+    ]
+    assert water_force_fields([SAGE], "tip3p") == [SAGE]
+
+
+def test_tip3p_configs_keep_their_build_hash() -> None:
+    """Adding OPC3 leaves the identity of every TIP3P config as it was."""
+    from polyzymd.config.loader import load_config
+    from polyzymd.simulation.artifact_integrity import config_hash
+
+    quickstart = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+    assert config_hash(load_config(quickstart / "config.yaml")) == (
+        "c5fb38361e015c2a96f105a976ce01f772d0b7411e14fd31fe88e59bd8248b89"
+    )
 
 
 _DISTANCE_RESTRAINT = {
@@ -1482,3 +1562,137 @@ class TestIonicStrengthConfig:
 
         assert "ionic_strength" not in IonConfig().model_dump(mode="json")
         assert IonConfig(ionic_strength=0.13).model_dump(mode="json")["ionic_strength"] == 0.13
+
+
+class TestPolymerSequence:
+    """The `sequence` block of a polymer: modes, pinned positions and its errors."""
+
+    @staticmethod
+    def _polymer(sequence=None, length=9, **extra):
+        from polyzymd.config.schema import PolymerSolute
+
+        data = {
+            "type": "polymer",
+            "type_prefix": "TP",
+            "generation_mode": "dynamic",
+            "monomers": [
+                {"label": "A", "name": "SBMA", "probability": 0.7, "smiles": "[*]CC([*])C"},
+                {"label": "B", "name": "EGPMA", "probability": 0.3, "smiles": "[*]CC([*])CC"},
+                {"label": "N", "name": "NHS", "probability": 0.0, "smiles": "[*]CC([*])CO"},
+            ],
+            "end_groups": {
+                "head": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+                "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+            },
+            "length": length,
+            "count": 2,
+            "force_field": ["openff-2.3.0.offxml"],
+            "charges": {"method": "nagl", "model": "openff-gnn-am1bcc-1.0.0.pt"},
+            **extra,
+        }
+        if sequence is not None:
+            data["sequence"] = sequence
+        return PolymerSolute(**data)
+
+    def test_without_sequence_nothing_is_pinned_and_the_dump_is_unchanged(self) -> None:
+        polymer = self._polymer()
+        assert polymer.sequence_pattern() is None
+        assert "sequence" not in polymer.model_dump()
+
+    def test_fixed_positions_count_the_whole_chain_and_take_names_or_labels(self) -> None:
+        polymer = self._polymer({"fixed": {5: "NHS", 2: "B"}})
+        assert polymer.sequence_pattern() == [None, "B", None, None, "N", None, None, None, None]
+
+    def test_blocks_lay_out_runs_over_every_position(self) -> None:
+        polymer = self._polymer(
+            {"mode": "block", "blocks": [{"H": 1}, {"SBMA": 3}, {"N": 1}, {"A": 3}, {"H": 1}]}
+        )
+        assert polymer.sequence_pattern() == list("HAAANAAAH")
+
+    def test_explicit_units(self) -> None:
+        polymer = self._polymer({"mode": "explicit", "units": list("HAABNBAAH")})
+        assert polymer.sequence_pattern() == list("HAABNBAAH")
+
+    def test_a_cap_position_takes_a_monomer_only_when_a_cap_carries_its_label(self) -> None:
+        caps = {
+            "head": [{"label": "A", "smiles": "[*]C", "probability": 1.0}],
+            "tail": [{"label": "H", "smiles": "[*][H]", "probability": 1.0}],
+        }
+        polymer = self._polymer({"fixed": {1: "SBMA"}}, end_groups=caps)
+        assert polymer.sequence_pattern()[0] == "A"
+
+    @pytest.mark.parametrize(
+        ("sequence", "message"),
+        [
+            ({"mode": "block", "blocks": [{"A": 3}, {"N": 1}]}, "hold 4 positions but"),
+            ({"mode": "explicit", "units": ["A"] * 8}, "list 8 positions but the chain has 9"),
+            ({"fixed": {10: "N"}}, "position 10 is outside the chain's positions 1..9"),
+            ({"fixed": {2: "PEG"}}, "unknown monomer 'PEG' at position 2"),
+            ({"fixed": {1: "SBMA"}}, "position 1 is the head cap, so it takes one of the"),
+            ({"fixed": {9: "N"}}, "position 9 is the tail cap"),
+            ({"mode": "block"}, "mode block needs `blocks`"),
+            ({"units": ["A"] * 9}, "`units` is for mode explicit"),
+            ({"mode": "block", "blocks": [{"A": 3, "N": 4}]}, "each block is one"),
+        ],
+    )
+    def test_errors_name_the_problem(self, sequence, message) -> None:
+        with pytest.raises(ValidationError, match=re.escape(message)):
+            self._polymer(sequence)
+
+
+def test_the_mod_token_is_the_start_of_the_modification_identity(minimal_config_data) -> None:
+    import copy
+
+    from polyzymd.config.modifications import modification_identity
+    from polyzymd.config.schema import SimulationConfig
+
+    data = copy.deepcopy(minimal_config_data)
+    data["solutes"][0]["mutations"] = [{"site": "A:G1", "to": "ALA"}]
+    config = SimulationConfig(**data)
+    token = modification_identity(config.enzyme)[:6]
+    assert config.format_run_directory_name(1) == f"TestEnzyme-mod{token}_apo_none_1ns_300K_run1"
+
+
+class TestRectangularBox:
+    """A rectangular box with padding per axis, rotated onto the solute's principal axes."""
+
+    def _config(self, data: dict, **box) -> SimulationConfig:
+        data = copy.deepcopy(data)
+        data["solvent"]["box"] = box
+        return SimulationConfig.model_validate(data)
+
+    def test_padding_per_axis_needs_a_rectangular_box(self, minimal_config_data) -> None:
+        config = self._config(
+            minimal_config_data, shape="rectangular", padding={"x": 1.0, "y": 1.1, "z": 2.0}
+        )
+        assert config.solvent.box.padding_xyz == (1.0, 1.1, 2.0)
+        assert config.solvent.box.alignment == "principal_axes"
+        with pytest.raises(ValidationError, match="padding per axis needs shape: rectangular"):
+            self._config(minimal_config_data, padding={"x": 1.0, "y": 1.0, "z": 2.0})
+
+    def test_alignment_is_only_for_a_rectangular_box(self, minimal_config_data) -> None:
+        with pytest.raises(ValidationError, match="align: principal_axes is for shape"):
+            self._config(minimal_config_data, shape="cube", align="principal_axes")
+        config = self._config(minimal_config_data, shape="rectangular", padding=1.2, align="none")
+        assert config.solvent.box.alignment == "none"
+        assert config.solvent.box.padding_xyz == (1.2, 1.2, 1.2)
+
+    def test_existing_boxes_dump_as_before(self, minimal_config_data) -> None:
+        """A cube or a dodecahedron gains no key, so its build hash does not change."""
+        for shape in ("cube", "rhombic_dodecahedron"):
+            dumped = self._config(minimal_config_data, shape=shape, padding=1.2).model_dump(
+                mode="json"
+            )["solvent"]["box"]
+            assert set(dumped) == {"padding", "shape", "target_density", "tolerance"}
+            assert dumped["padding"] == 1.2
+
+    def test_each_axis_needs_the_cutoff_plus_a_margin(self, minimal_config_data) -> None:
+        """Sage and the ff14SB port cut van der Waals off at 0.9 nm, so 1.0 nm is the minimum."""
+        thin = self._config(
+            minimal_config_data, shape="rectangular", padding={"x": 1.0, "y": 0.8, "z": 1.5}
+        )
+        with pytest.raises(ValueError, match=r"y = 0.8 nm is below the 1 nm"):
+            thin.require_buildable(inputs=False)
+        self._config(
+            minimal_config_data, shape="rectangular", padding={"x": 1.0, "y": 1.0, "z": 1.5}
+        ).require_buildable(inputs=False)

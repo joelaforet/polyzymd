@@ -137,6 +137,20 @@ equilibration stages then start from the structure as built.
    constraints of the real System do not change.
 5. It checks that the heavy atoms did not move, and records the result in
    `minimization/phase.json`.
+6. It checks that minimization converged. By default it runs until OpenMM's
+   minimizer reports convergence (`minimization.max_iterations: 0`). PolyzyMD
+   then measures the RMS force the way OpenMM does, `sqrt(sum |F_i|^2 / N)`
+   over all particles, with atoms that cannot move (frozen atoms, virtual
+   sites) counted with zero force. The forces along constrained bonds are left
+   out, because rigid water and X–H constraints carry force that never relaxes.
+   If a run stopped by a `max_iterations` cap is still above the tolerance, or
+   any bond is stretched more than 50% past its equilibrium length, PolyzyMD
+   continues the minimization to convergence once. If a bond is still torn, the
+   run stops with an error that names it. A torn bond between two frozen solute
+   atoms cannot be fixed by minimization, so it stops the run at once. The RMS
+   force, the worst bond and its stretch are recorded in
+   `minimization/phase.json`, also when the run fails (`converged: false`).
+   A signal (SIGUSR1/SIGTERM) stops a running minimization at its next step.
 
 To minimize without frozen atoms, set
 `simulation_phases.minimization.freeze_solute: false`. The setting applies at

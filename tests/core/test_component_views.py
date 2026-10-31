@@ -84,6 +84,25 @@ def test_gromacs_index_has_a_group_per_component(tmp_path) -> None:
     assert "[ polymer ]\n3 4\n" in text
 
 
+def test_attachment_segments_get_their_own_index_groups(tmp_path) -> None:
+    """A protein with a glycan: the component group holds both, each segment its own atoms."""
+    atoms = (AtomRange(0, 4),)
+    record = ComponentRecord(
+        "protein",
+        "protein",
+        "PROT",
+        "fixed",
+        list(atoms),
+        [Domain("protein", atoms, ("ff",), ChargeSource("library"))],
+        segments={"G001": (AtomRange(2, 4),)},
+    )
+    text = write_index(tmp_path / "components.ndx", [record]).read_text()
+    assert "[ protein ]\n1 2 3 4\n" in text
+    assert "[ PROT ]\n1 2\n" in text
+    assert "[ G001 ]\n3 4\n" in text
+    assert atom_segids([record], 4) == ["PROT", "PROT", "G001", "G001"]
+
+
 def test_an_analysis_universe_takes_the_build_segments(tmp_path) -> None:
     """A topology without segment IDs (a prmtop) gets them from the build PDB."""
     mda = pytest.importorskip("MDAnalysis")

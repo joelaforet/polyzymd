@@ -95,9 +95,134 @@ solutes:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `pdb_path` | path | Yes | Prepared, protonated PDB file. `validate` refuses a missing file or one without ATOM/HETATM records |
-| `charges` | object | Yes | `{method: library}`: a protein takes its force field's library charges |
+| `charges` | object | Yes | `{method: library}`: a protein takes its force field's library charges. On a force field that charges with NAGL (OpenFF Rosemary): `{method: nagl, model: ...}` (see [Rosemary alpha](#protein-rosemary-alpha)) |
 | `custom_substructures_path` | path | No | JSON file of residue templates for residues that OpenFF does not know, such as an N-terminal cystine. See {doc}`openff_pdb_ingestion` |
 | `description` | string | No | Human-readable description |
+| `mutations` | list | No | Side-chain changes, applied first and in order. See [Mutations and modifications](#mutations-and-modifications) |
+| `modifications` | list | No | `deprotonate`, `protonate` and `attach` entries, applied in order after the mutations |
+| `modification_parameters` | object | With sites | Force field and charges of each site type: `glycan`, `polymer`, `generic`, `noncanonical` |
+| `max_charge_shift` | float | No | Largest uniform shift (e per atom) that brings a site to its integer charge. Default 0.005 |
+| `relax` | string | No | `joint` (default): place every change, then relax them together; `per_modification`; `none` |
+
+(protein-rosemary-alpha)=
+#### OpenFF Rosemary alpha (opt-in)
+
+```yaml
+  - type: protein
+    pdb_path: "structures/enzyme.pdb"
+    force_field: ["openff_no_water-3.0.0-alpha2b.offxml"]
+    charges: {method: nagl, model: openff-gnn-am1bcc-1.0.0.pt}
+```
+
+Rosemary is OpenFF's protein force field in development; this is an alpha
+release, not for production. The example names the newest candidate the
+pixi environments install (`openff-forcefields` 2026.09.0); earlier
+candidates such as `openff_no_water-3.0.0-alpha0.offxml` are still accepted. It parameterizes the whole protein component,
+mutations and modifications included, and NAGL charges the whole molecule, so
+the protein takes no `modification_parameters` and has no per-site domains.
+It must be the protein's only force field file. The audit warns that it is an
+alpha release (`parameters.rosemary_alpha`). OpenFF pairs Rosemary with OPC3
+water: set `solvent.water.model: opc3`, or the build fails
+`solvent.rosemary_water` (see {doc}`../how_to/rosemary`).
+
+PolyzyMD reads the force field file, not its name, to decide which charges
+apply: a file with protein library charges (ff14SB) takes
+`{method: library}`; a file that charges with NAGL and has no protein library
+charges (Rosemary, under any name or path) takes `{method: nagl, model: ...}`.
+The declared model is the one used, even if the file names another. PolyzyMD
+1.4 charges every NAGL component with one model per build, so the protein's
+model must match any NAGL-charged ligand or co-solvent.
+
+(mutations-and-modifications)=
+#### Mutations and modifications
+
+```yaml
+  - type: protein
+    pdb_path: "structures/trimer.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+    mutations:
+      - {site: A:S1381, to: 4II}                  # a CCD code
+      - {site: A:K12, to: {smiles: "*CCCCN=[N+]=[N-]", resname: AZK}}
+      - {chains: [A, C, E], residues: [T301], to: ASN}
+    modifications:
+      - deprotonate: {site: A:K63, atom_name: NZ}
+      - attach:
+          type: glycan
+          reaction: N-glycosylation
+          atom_name: ND2
+          fragment_atom_name: C1
+          fragment_resnum: 2
+          chains: [A, C, E]
+          glycans: {G55220VL: [N58, N107], G42666HT: [N103]}
+    modification_parameters:
+      glycan: {force_field: [GLYCAM_06j-1.xml], charges: {method: library}}
+```
+
+A site is `chain:residue` (`A:N58`, `A:ASN58`, `A:N58A` with an insertion
+code); the build checks the residue against the PDB. Every entry names its
+sites one of four ways: `site`, `sites`, `chains` with `residues`, or
+`sites_file` (a CSV with a `site` column, and a `glycan` column for glycans).
+An `attach` of `type: glycan` can instead list `glycans:`, accession to
+residues, read from `glycan_library` (default `structures/glycans`, files
+`glycam_<accession>.pdb`). Each group stands for one modification per site.
+
+| Entry | Fields |
+|-------|--------|
+| mutation | `to`: a CCD code, `{smiles, resname}` (a side chain, `*` bonds to CA) or `{ccd_file}`; `stereo`: `L` or `D` |
+| `deprotonate`, `protonate` | `atom_name`: the atom that loses or gains H |
+| `attach` | `type` (glycan, polymer, generic), `atom_name`, `fragment` (`{smiles, resname}`, `{pdb_path}`, `{ccd, link_atom}` or `{polymer}`), `reaction` (mBuild named reaction or SMARTS), `attach_at` (polymer fragments), `fragment_atom_name`, `fragment_resnum`, `leaving_atom_names`, `fragment_leaving_atom_names`, `merge`, `bond_order`, `name` (4 characters; default `G001`, `P001`, `M001` in order) |
+
+A mutation to one of the 20 canonical residues (or its D form) stays on
+ff14SB. Every other mutation and every attachment makes a site: the side chain
+from CB outward plus the attached group take their type's parameter set, and
+the backbone keeps ff14SB. An OpenFF set takes NAGL charges on a capped model
+of the site; GLYCAM06j (glycans only) takes its own library charges.
+`polyzymd validate --plans` (`--format agent` for JSON) applies every change to
+the PDB and lists one row per site before anything is built.
+Each attachment is a segment of its own (`G001`, `P001`, `M001`) whose residues are
+numbered from 1, so select protein residues by segment: `segid PROT and resid 141-148`.
+Sites in `mutations:` and `modifications:` use the residue numbers of the input PDB; the
+written structures number the protein from 1 (as an unmodified build does), and restraints
+and analysis selections use those written numbers.
+
+A grafted chain is an `attach` of `type: polymer` whose fragment is a chain the
+polymer generator builds. Its monomers and caps come from a `type: polymer`
+solute of the same config (`monomers_from: <name>`, which must be dynamic) or
+are listed in the fragment as for a solute. `length` counts the two caps, and
+`sequence` works as for a solute. Each replicate draws its own chain, seeded by
+the replicate number and the site; `random_seed` gives one chain for every
+replicate instead. Each site of an entry with several sites draws its own
+chain. `attach_at` is the position that bonds, counted over the whole chain as
+in `sequence` (a cap position only when that cap is a monomer's end unit), and
+`reaction` decides which atoms bond and leave. The whole chain is one site of
+type `polymer` (segment `P001`, ...), and each replicate's drawn sequence is
+recorded in its build record.
+
+```yaml
+    modifications:
+      - deprotonate: {site: A:K8, atom_name: NZ}
+      - attach:
+          type: polymer
+          site: A:K8
+          atom_name: NZ
+          # NHS ester aminolysis: the amine bonds the ester carbon, NHS leaves
+          reaction: "[N:1]([H:2])[H].[C:3](=[O:4])[O][N]>>[N:1]([H:2])[C:3]=[O:4]"
+          attach_at: 8                  # the middle of the 15 positions
+          fragment:
+            polymer:
+              monomers_from: pSBMA      # a type: polymer solute
+              length: 15                # two caps (1 and 15) and 13 repeat units
+              sequence: {fixed: {8: NHS}}
+    modification_parameters:
+      polymer: {force_field: [openff-2.3.0.offxml], charges: {method: nagl, model: openff-gnn-am1bcc-1.0.0.pt}}
+```
+
+Grafted chains count toward `composition.polymer_mass_fraction`, and
+`composition.polymer_sequences` lists them apart from the soluble chains. The
+`contacts` analysis takes `polymers: soluble | attached | all` (default
+`soluble`, the packed chains), and a null `protein_selection` leaves the
+protein's attachment segments out.
 
 ### Small molecule (`type: small_molecule`)
 
@@ -212,7 +337,29 @@ that kept its C=C double bond:
 | `charges` | object | Yes | - | `preset` in cached mode (the charges in the SDFs); `nagl` (with `model`), `am1bcc` or `espaloma` in dynamic mode |
 | `max_retries` | int | No | 10 | Builds tried before a chain with a pierced ring or overlapping atoms is refused (dynamic mode) |
 | `random_seed` | int | No | null | Seed for polymer sequence draws (default: the replicate number) |
+| `sequence` | object | No | null | How the repeat units are chosen; see below |
 | `packing` | object | No | see below | PACKMOL placement settings |
+
+### Sequence (`sequence`)
+
+Positions count the whole chain, 1 to `length`. With `end_groups`, positions 1
+and `length` are the caps: they take only a cap of that end (by label or name),
+or a monomer whose end unit is one of that end's caps. Monomers are named by
+`label` or `name`. Without `sequence`, every position is drawn, as in 1.3.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `mode` | string | No | "statistical" | `statistical`: draw each open position from the probabilities (seeded, per chain); `block`: runs in order; `explicit`: every unit listed |
+| `blocks` | list | In block mode | - | Runs, each `{monomer: count}` (caps included); the counts sum to `length` |
+| `units` | list | In explicit mode | - | Every position, head cap to tail cap |
+| `fixed` | object | No | {} | Pinned positions `{position: monomer}` in any mode. A monomer used only at pinned positions may have probability 0 |
+
+```yaml
+length: 13
+sequence:
+  mode: statistical
+  fixed: {7: NHS}      # NHS in the middle of the 13 positions; the rest drawn
+```
 
 ### Packing Options (`packing`)
 
@@ -296,13 +443,15 @@ solvent:
   
   box:
     padding: 1.2                         # nm from solute to box edge (see below)
-    shape: "rhombic_dodecahedron"        # Box shape
+    shape: "rhombic_dodecahedron"        # cube, rhombic_dodecahedron or rectangular
     target_density: 1.0                  # g/mL
     tolerance: 2.0                       # PACKMOL tolerance (Angstrom)
 ```
 
 `force_field` names the file that parameterizes water, ions and co-solvents;
-Sage carries the TIP3P water and the ion parameters. `water.model` is
+Sage carries the TIP3P water and the ion parameters. With `water.model: opc3`,
+the water and ions take their parameters from `opc3.offxml` instead (see
+[Water Models](#water-models)). `water.model` is
 required: PolyzyMD assumes no water model. Water and co-solvents carry
 segment ID `SOL` (co-solvents are told apart by residue name) and ions `ION`.
 
@@ -344,13 +493,31 @@ from the solute at solvation time. The number of waters and ions follows from th
 volume and `target_density`, so a deterministic box means deterministic
 solvent counts.
 
+(water-models)=
 ### Water Models
 
-`tip3p` (TIP3P) is the only water model PolyzyMD builds, and
-`solvent.water.model` must name it. The force fields it
-loads carry the TIP3P water parameters, so `validate`, `build`, `run` and
-`submit` refuse any other `model`. A config of an existing run with another
-model still loads for `status` and analysis.
+PolyzyMD builds two water models. Both are rigid three-site models without
+virtual sites; GROMACS runs them with `settles`.
+
+| `model` | Water parameters | Na+ and Cl- parameters | Use with |
+|---------|------------------|------------------------|----------|
+| `tip3p` | `solvent.force_field` (Sage carries TIP3P) | `solvent.force_field` (Sage: Joung and Cheatham, TIP3P set) | ff14SB and Sage |
+| `opc3` | `opc3.offxml` | `opc3.offxml` (Li/Merz 12-6 set for OPC3, Sengupta et al. 2021) | OpenFF Rosemary (required); allowed with ff14SB |
+
+`opc3.offxml` ships with `openff-forcefields`. PolyzyMD loads it after every
+other force field (protein, then `solvent.force_field`, then `opc3.offxml`),
+so its water and ion parameters replace those of `solvent.force_field`; its
+SMIRKS match only water and monatomic ions, so co-solvents, polymers and
+ligands keep `solvent.force_field`. The ions therefore always come from the
+water model's own set: the build record lists `opc3.offxml` as the last force
+field of the water and of the ions, and the audit rebuilds both from the same
+files in the same order. Each water is packed with the model's own rigid
+geometry (OPC3: O-H 0.978882 Å, H-H 1.598507 Å, read from `opc3.offxml`), and
+the water count follows from the box volume and `target_density` as for
+TIP3P.
+
+`validate`, `build`, `run` and `submit` refuse any other `model`. A config of
+an existing run with another model still loads for `status` and analysis.
 
 ### Box Shapes
 
@@ -358,9 +525,25 @@ model still loads for `status` and analysis.
 |-------|-------------|
 | `cube` | Cube: three equal edges at right angles |
 | `rhombic_dodecahedron` | Same edge, 71 % of the cube volume (default) |
+| `rectangular` | Three edges at right angles: the solute's extent along each axis plus `2 * padding` of that axis |
 
-Both shapes use the same edge, so they keep the solute equally far from its
-periodic copies. The rhombic dodecahedron needs fewer waters.
+The cube and the rhombic dodecahedron use the same edge, so they keep the
+solute equally far from its periodic copies in any orientation. The rhombic
+dodecahedron needs fewer waters.
+
+A `rectangular` box is for elongated solutes. It takes one `padding` or one
+per axis, `padding: {x: 1.2, y: 1.2, z: 1.5}`, and is sized for one
+orientation only:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `padding` | float or `{x, y, z}` (nm) | 1.2 | Distance from the solute to the box edge; per axis for a rectangular box only |
+| `align` | `principal_axes` or `none` | `principal_axes` for a rectangular box | Turn the fixed solutes together so that their longest principal axis lies on z (shortest on x) before the box is sized; recorded as `box_alignment` in `build_provenance.json`. Cubes and dodecahedra are never turned |
+
+Every axis of a rectangular box needs at least the nonbonded cutoff plus
+0.1 nm of padding; `validate` and `build` refuse less. The build audit warns
+(`geometry.rectangular_box`) that the solute may come closer to its own image
+if it turns during the run. See {doc}`../how_to/elongated_protein_box`.
 
 ### Co-solvents
 
@@ -570,6 +753,7 @@ All 12 library co-solvents plus water models have pre-computed charges:
 | Solvent | File | Charge Method |
 |---------|------|---------------|
 | TIP3P Water | `tip3p.sdf` | Literature values |
+| OPC3 Water | none (read from `opc3.offxml`) | Library charges of `opc3.offxml` |
 | DMSO | `dmso.sdf` | AM1BCC |
 | DMF | `dmf.sdf` | AM1BCC |
 | Acetonitrile | `acetonitrile.sdf` | AM1BCC |
@@ -776,14 +960,14 @@ runtime-only setting: changing it does not alter the built system or its
 simulation_phases:
   minimization:
     freeze_solute: true      # hold protein + substrate heavy atoms fixed
-    max_iterations: 1000     # 0 = run to convergence
+    max_iterations: 0        # 0 (default) = run to convergence
     tolerance: 10.0          # kJ/mol/nm
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `freeze_solute` | bool | true | Freeze every protein and substrate **heavy** atom (the `solute_heavy` atom group) during minimization; only solvent, polymers, and the solute hydrogens relax. The prepared heavy-atom structure enters equilibration with its coordinates unchanged; PolyzyMD verifies a zero heavy-atom displacement and records it, together with `hydrogen_max_displacement_angstrom`, in `minimization/phase.json`. Solute hydrogens stay mobile on purpose so the minimizer places them on the force field's X–H constraint lengths rather than keeping the input PDB's |
-| `max_iterations` | int | 1000 | Maximum minimizer iterations (0 = until convergence) |
+| `max_iterations` | int | 0 | Maximum minimizer iterations; 0 runs until the RMS force is below `tolerance`. After minimizing, PolyzyMD checks the RMS force and the most stretched bond: a capped run that stopped unconverged, or any state with a bond stretched more than 50 % over its equilibrium length, is minimized again to convergence once, and the run stops with the offending atoms named if that fails. The outcome (`rms_force`, `max_force`, `worst_bond_stretch`, `converged`, `reminimized`) is recorded in `minimization/phase.json` |
 | `tolerance` | float | 10.0 | Energy tolerance in kJ/mol/nm |
 
 See {doc}`../explanation/simulation_safeguards` for why the solute is frozen.
@@ -861,15 +1045,21 @@ template without `{replicate}`, since the replicates would share one folder.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `{enzyme}` | Name of the protein solute | "LipA" |
+| `{enzyme}` | Name of the protein solute; with `mutations` or `modifications`, followed by `-mod` and a six-character (hex) hash of the declared changes | "LipA", "LipA-mod3f9a1c" |
 | `{substrate}` | Name of the small-molecule solute (hyphens removed), or `apo` without one | "ResorufinButyrate" |
-| `{polymer_type}` | Polymer type prefix and composition, or `none` without polymers | "SBMA-EGPMA_A70_B30" |
+| `{polymer_type}` | Polymer type prefix and composition, or `none` without polymers; with a `sequence` block, followed by `-seq` and a six-character (hex) hash of it | "SBMA-EGPMA_A70_B30", "SBMA-EGPMA_A70_B30-seq0b42de" |
 | `{duration}` | Production duration in ns: whole ns from 1 ns up, in full below 1 ns | "100", "0.005" |
 | `{temperature}` | Temperature in K | "300" |
 | `{replicate}` | Replicate number | "1" |
 | `{primary_solvent}` | Primary solvent token | "water_tip3p" |
 | `{cosolvent_composition}` | Co-solvents sorted by normalized name, or `none` | "dmso_30molpct_urea_2p5M" |
 | `{solvent_composition}` | Primary solvent plus co-solvents when present | "water_tip3p_dmso_30molpct" |
+
+The `-mod` and `-seq` tokens appear only when a config uses those blocks, so a
+config without them keeps the folder name it had in 1.3. The `-mod` hash covers
+every change, expanded one per site, with its parameter set, and names input
+files by their SHA-256, so the same changes give the same folder name on any
+machine; a modified and an unmodified protein of one name never share a folder.
 
 Mole-fraction co-solvents use mol-percent naming tokens with the `molpct`
 suffix. Concentration-based co-solvents use molarity tokens such as `2p5M`.
@@ -901,7 +1091,8 @@ A config of 1.3.0rc4 or earlier that named no small-molecule force field was
 built with `openff-2.0.0.offxml`; name that file to build the same physics.
 
 Each component is parameterized by its own files alone. The
-`parameters.bonded`, `parameters.nonbonded` and `charges.source` checks rebuild
+`parameters.bonded`, `parameters.nonbonded`, `parameters.one_four` and
+`charges.source` checks rebuild
 every component from the files its entry names and compare the built system
 with them term by term, so a term taken from another component's force field
 fails the build.

@@ -127,7 +127,8 @@ def stage_temperature_warning(stages: Sequence[Any], index: int, temperature: fl
 
 
 def collect_protocol_warnings(config: Any) -> list[str]:
-    """Return warnings for equilibration temperatures that do not join up.
+    """Return warnings for equilibration temperatures that do not join up, and for
+    restraint selections of a modified protein that pick residues by number.
 
     Production runs at ``thermodynamics.temperature``. An equilibration stage
     at another temperature is allowed, so this is a warning, not an error: a
@@ -145,14 +146,40 @@ def collect_protocol_warnings(config: Any) -> list[str]:
     list[str]
         One warning for each stage whose temperature does not join up.
     """
+    warnings = _modification_selection_warnings(config)
     phases = getattr(config, "simulation_phases", None)
     thermodynamics = getattr(config, "thermodynamics", None)
     if thermodynamics is None or phases is None:
-        return []
+        return warnings
     temperature = float(thermodynamics.temperature)
     stages = list(getattr(phases, "equilibration_stages", None) or [])
     found = (stage_temperature_warning(stages, i, temperature) for i in range(len(stages)))
-    return [warning for warning in found if warning is not None]
+    return [warning for warning in found if warning is not None] + warnings
+
+
+def _modification_selection_warnings(config: Any) -> list[str]:
+    """Restraint atoms on a protein with attachments, selected by residue number.
+
+    The selection is matched among all the protein component's atoms, its
+    attachment segments included, whose residues are numbered from 1.
+    """
+    from polyzymd.config.modifications import has_attachments, unscoped_residue_selection
+
+    modified = {
+        s.name for s in getattr(config, "solutes", None) or [] if has_attachments(s)
+    }
+    warnings = []
+    for restraint in getattr(config, "restraints", None) or []:
+        for which in ("atom1", "atom2"):
+            atom = getattr(restraint, which)
+            if atom.component in modified and unscoped_residue_selection(atom.selection):
+                warnings.append(
+                    f"restraint {restraint.name} {which} selects '{atom.selection}' in "
+                    f"{atom.component}, whose attachments (glycans, grafts, labels) are "
+                    "segments numbered from resid 1, so the selection may also match them; "
+                    "the build's restraint.atom_identity check names the atom it picked."
+                )
+    return warnings
 
 
 def _check_am1bcc(warnings: list[str], config: Any) -> None:
@@ -353,6 +380,10 @@ def require_inputs(config: Any) -> None:
                     "openff-2.3.0.offxml), or give the path of an .offxml file."
                 )
 
+    for solute in config.solutes:
+        if getattr(solute, "is_modified", False):
+            _require_modification_inputs(config, solute, available)
+
     from polyzymd.utils.charging import installed_nagl_model
 
     nagl_model = getattr(config, "nagl_model", None)
@@ -365,6 +396,132 @@ def require_inputs(config: Any) -> None:
             f"fix: in each charges: {{method: nagl, model: ...}}, name one of {installed}, "
             "or give the path of a model file."
         )
+
+
+def _require_modification_inputs(config: Any, solute: Any, available: set) -> None:
+    """Check the files, force fields and NAGL models a protein's modifications name.
+
+    Every file must exist (CCD definitions, fragment PDBs, sites files, the
+    glycan file of each accession), a sites CSV must have a ``site`` column
+    (and ``glycan`` where it names glycans), every force field and NAGL model
+    of ``modification_parameters`` must be installed, and no atom may be
+    modified twice.
+    """
+    from polyzymd.config.modifications import GLYCAM_FORCE_FIELD, glycan_file
+
+    def need(path: Any, what: str, key: str) -> Path:
+        path = Path(path)
+        if not path.is_file():
+            raise ValueError(
+                f"{what} {path} does not exist.\nfix: correct {_key(config, solute, key)}."
+            )
+        return path
+
+    for n, mutation in enumerate(solute.mutations):
+        ccd_file = getattr(mutation.to, "ccd_file", None)
+        if ccd_file is not None:
+            need(ccd_file, "CCD file", f"mutations.{n}.to.ccd_file")
+        if mutation.sites_file is not None:
+            _sites_csv(need(mutation.sites_file, "sites file", f"mutations.{n}.sites_file"), [])
+    for n, entry in enumerate(solute.modifications):
+        verb, arguments = entry.verb, entry.arguments
+        where = f"modifications.{n}.{verb}"
+        fragment = getattr(arguments, "fragment", None)
+        if fragment is not None and fragment.pdb_path is not None:
+            need(fragment.pdb_path, "fragment PDB", f"{where}.fragment.pdb_path")
+        if fragment is not None and fragment.ccd_file is not None:
+            need(fragment.ccd_file, "fragment CCD file", f"{where}.fragment.ccd_file")
+        rows = []
+        if arguments.sites_file is not None:
+            wanted = ["glycan"] if verb == "attach" and fragment is None else []
+            rows = _sites_csv(
+                need(arguments.sites_file, "sites file", f"{where}.sites_file"), wanted
+            )
+        accessions = list(getattr(arguments, "glycans", None) or {}) + [
+            row["glycan"] for row in rows if row.get("glycan")
+        ]
+        for accession in accessions:
+            path = glycan_file(arguments.glycan_library, accession)
+            if not path.is_file():
+                raise ValueError(
+                    f"no file for glycan {accession}: expected {path} (or "
+                    f"{path.with_name(accession + '.pdb')}), with GLYCAM06 residue names and "
+                    "CONECT records.\n"
+                    f"fix: put the file in {path.parent}, or set {_key(config, solute, where)}"
+                    ".glycan_library to the folder that holds it."
+                )
+    if solute.modification_parameters is not None:
+        from polyzymd.utils.charging import installed_nagl_model
+
+        for site_type, chosen in solute.modification_parameters.as_dict().items():
+            key = _key(config, solute, f"modification_parameters.{site_type}")
+            for name in chosen.force_field:
+                if Path(name).name == GLYCAM_FORCE_FIELD or name in available:
+                    continue
+                if not Path(name).is_file():
+                    raise ValueError(
+                        f"{key}: force_field {name!r} is not an installed force field.\n"
+                        "fix: name an installed OpenFF force field (for example "
+                        f"openff-2.3.0.offxml), {GLYCAM_FORCE_FIELD} for glycans, or the path "
+                        "of an .offxml file."
+                    )
+            model = chosen.charges.model
+            if model is not None and installed_nagl_model(model) is None:
+                raise ValueError(
+                    f"{key}: charges model {model!r} is not an installed NAGL model.\n"
+                    "fix: name an installed model (openff-gnn-am1bcc-1.0.0.pt) or the path of "
+                    "a model file."
+                )
+    _require_one_change_per_atom(config, solute)
+
+
+def _sites_csv(path: Path, wanted: list[str]) -> list[dict[str, str]]:
+    """The rows of a sites CSV, refused when it lacks ``site`` or a ``wanted`` column."""
+    import csv
+
+    with open(path, newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        columns = [name.strip() for name in reader.fieldnames or []]
+        rows = [
+            {key.strip(): (value or "").strip() for key, value in row.items() if key}
+            for row in reader
+        ]
+    missing = [name for name in ["site", *wanted] if name not in columns]
+    if missing:
+        raise ValueError(
+            f"sites file {path} has no {', '.join(repr(m) for m in missing)} column "
+            f"(columns: {', '.join(columns) or 'none'}).\n"
+            "fix: give a header row with `site` (A:N58) and, for glycans, `glycan` (an accession)."
+        )
+    if not rows:
+        raise ValueError(f"sites file {path} has a header but no rows.\nfix: list the sites.")
+    return rows
+
+
+def _require_one_change_per_atom(config: Any, solute: Any) -> None:
+    """Refuse two attachments at one atom, two identical protonation changes, or two
+    mutations of one residue; the message names both entries."""
+    from polyzymd.config.modifications import declared_modifications
+
+    seen: dict[tuple, str] = {}
+    for item in declared_modifications(
+        solute.mutations, solute.modifications, solute.modification_parameters
+    ):
+        if item["kind"] == "mutate":
+            key = ("mutate", item["site"])
+        elif item["kind"] == "attach":
+            key = ("attach", item["site"], item["atom_name"])
+        else:
+            key = (item["kind"], item["site"], item["atom_name"])
+        if key in seen:
+            what = " ".join(str(part) for part in key[1:])
+            raise ValueError(
+                f"{_key(config, solute, item['entry'])} and "
+                f"{_key(config, solute, seen[key])} both {key[0]} {what}.\n"
+                "fix: keep one of them; each residue is mutated once and each atom takes one "
+                "attachment."
+            )
+        seen[key] = item["entry"]
 
 
 def _require_cached_chemistry(config: Any, polymers: Any) -> None:

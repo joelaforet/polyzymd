@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import warnings
+from collections.abc import Sequence
 from enum import Enum
 from pathlib import Path
 from string import Formatter
@@ -24,6 +25,7 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    PrivateAttr,
     SerializerFunctionWrapHandler,
     Tag,
     field_validator,
@@ -86,10 +88,9 @@ class ChargeMethod(str, Enum):
 class WaterModel(str, Enum):
     """Water models a config may name.
 
-    Only TIP3P is built: the force fields PolyzyMD loads carry the TIP3P water
-    parameters. The other values stay loadable so configs of existing runs
-    still load for status and analysis; new builds refuse them
-    (:meth:`SimulationConfig.require_buildable`).
+    TIP3P and OPC3 are built (:data:`WATER_FORCE_FIELDS`). The other values
+    stay loadable so configs of existing runs still load for status and
+    analysis; new builds refuse them (:meth:`SimulationConfig.require_buildable`).
     """
 
     TIP3P = "tip3p"
@@ -97,6 +98,35 @@ class WaterModel(str, Enum):
     TIP4P = "tip4p"
     TIP4PEW = "tip4pew"
     OPC = "opc"
+    OPC3 = "opc3"
+
+
+#: The water models PolyzyMD builds, and the force field file that carries
+#: each one's water and ion parameters, loaded after every other force field
+#: (None: the solvent force field carries them, as Sage carries TIP3P water and
+#: its Joung-Cheatham ions). ``opc3.offxml`` of openff-forcefields holds OPC3
+#: water and the Li/Merz 12-6 ion set fitted for OPC3, so it replaces the
+#: solvent force field's ion parameters too.
+WATER_FORCE_FIELDS: dict[str, str | None] = {"tip3p": None, "opc3": "opc3.offxml"}
+
+
+def water_force_fields(solvent_force_field: Sequence[str], model: str) -> list[str]:
+    """The force field files of the water and ions: the solvent's, then the water model's own."""
+    model = getattr(model, "value", model)
+    extra = WATER_FORCE_FIELDS.get(str(model))
+    return list(solvent_force_field) + ([extra] if extra else [])
+
+
+@functools.lru_cache(maxsize=None)
+def _vdw_cutoff_nm(name: str) -> float | None:
+    """The vdW cutoff of an OpenFF force field file, in nm, or None if it cannot be read."""
+    try:
+        from openff.toolkit import ForceField
+
+        handler = ForceField(name, load_plugins=True).get_parameter_handler("vdW")
+        return float(handler.cutoff.m_as("nanometer"))
+    except Exception:
+        return None
 
 
 class BoxShape(str, Enum):
@@ -104,6 +134,7 @@ class BoxShape(str, Enum):
 
     CUBE = "cube"
     RHOMBIC_DODECAHEDRON = "rhombic_dodecahedron"
+    RECTANGULAR = "rectangular"
 
 
 class Ensemble(str, Enum):
@@ -330,10 +361,59 @@ class _Solute(_ConfigModel):
         return self
 
 
+# The modification models build on _ConfigModel and ChargeSpec above, so they are
+# imported here rather than at the top of the module.
+from polyzymd.config.modifications import (  # noqa: E402
+    Modification,
+    ModificationParameters,
+    Mutation,
+    required_site_types,
+)
+
+#: File-name prefixes of OpenFF's Rosemary alpha force fields. Rosemary
+#: parameterizes a whole protein, modifications included, and charges it with
+#: NAGL on the whole molecule; it is an alpha release, not for production.
+ROSEMARY_PREFIXES = (
+    "openff-3.0.0-alpha",
+    "openff_unconstrained-3.0.0-alpha",
+    "openff_no_water-3.0.0-alpha",
+    "openff_no_water_unconstrained-3.0.0-alpha",
+)
+
+
+def is_rosemary(force_field: Sequence[str | Path]) -> bool:
+    """Whether ``force_field`` names an OpenFF Rosemary alpha force field (by file name)."""
+
+    return any(Path(str(name)).name.startswith(ROSEMARY_PREFIXES) for name in force_field)
+
+
+@functools.lru_cache(maxsize=32)
+def protein_charge_handlers(force_field: tuple[str, ...]) -> tuple[str | None, bool]:
+    """Read how ``force_field`` would charge a protein, from the files' content.
+
+    Returns ``(nagl_model, protein_library_charges)``: the ``model_file`` of its
+    NAGLCharges section (None without one), and whether it holds library
+    charges of more than one atom (residue templates, as ff14SB has; monatomic
+    ion charges do not count).
+    """
+    from openff.toolkit import ForceField
+
+    loaded = ForceField(*force_field)
+    nagl_model = None
+    if "NAGLCharges" in loaded.registered_parameter_handlers:
+        nagl_model = loaded["NAGLCharges"].model_file
+    library = False
+    if "LibraryCharges" in loaded.registered_parameter_handlers:
+        library = any(len(p.charge) > 1 for p in loaded["LibraryCharges"].parameters)
+    return nagl_model, library
+
+
 class ProteinSolute(_Solute):
     """A protein (``type: protein``), read from a PDB file through residue templates.
 
-    Its charges are the protein force field's library charges.
+    Its charges are the protein force field's library charges (ff14SB), or NAGL
+    charges on the whole molecule when the protein opts in to OpenFF's Rosemary
+    alpha, which then parameterizes the whole component, modifications included.
 
     Attributes:
         pdb_path: PDB file of the protein, protonated.
@@ -354,7 +434,33 @@ class ProteinSolute(_Solute):
         ),
     )
     charges: ChargeSpec = Field(
-        ..., description="library: the protein force field's library charges"
+        ...,
+        description="library: the protein force field's library charges; nagl (with "
+        "model) only for a protein on OpenFF Rosemary alpha",
+    )
+    mutations: list[Mutation] = Field(
+        default_factory=list,
+        description="Side-chain changes, applied first and in order (see modifications)",
+    )
+    modifications: list[Modification] = Field(
+        default_factory=list,
+        description="deprotonate, protonate and attach entries, applied in order after mutations",
+    )
+    modification_parameters: ModificationParameters | None = Field(
+        None,
+        description="Force field and charges of each site type: glycan, polymer, generic, "
+        "noncanonical",
+    )
+    max_charge_shift: float = Field(
+        0.005,
+        gt=0,
+        description="Largest uniform charge shift (e per atom) that brings a site to its "
+        "integer charge",
+    )
+    relax: Literal["joint", "per_modification", "none"] = Field(
+        "joint",
+        description="joint: place every change, then relax them together; per_modification: "
+        "relax after each; none",
     )
 
     @field_validator("custom_substructures_path")
@@ -375,13 +481,112 @@ class ProteinSolute(_Solute):
         return v
 
     @model_validator(mode="after")
-    def _library_charges(self) -> Self:
-        if self.charges.method != "library":
+    def _protein_charges(self) -> Self:
+        """Match the charges to what the force field files can do, read from their content.
+
+        A force field with protein library charges (ff14SB) takes ``library``;
+        one that charges with NAGL and has no protein library charges (OpenFF
+        Rosemary) takes ``nagl`` with a model, and then parameterizes the whole
+        protein, modifications included. The declared model is the one used,
+        even when the file names another.
+        """
+        try:
+            nagl_model, library = protein_charge_handlers(tuple(str(f) for f in self.force_field))
+        except Exception:  # noqa: BLE001  (an unknown file is reported by require_buildable)
+            nagl_model, library = None, self.charges.method == "library"
+        files = ", ".join(str(f) for f in self.force_field)
+        if self.charges.method == "library":
+            if library:
+                return self
+            if nagl_model is not None:
+                raise ValueError(
+                    f"{files} has no protein library charges; it charges with NAGL "
+                    f"({nagl_model}). Use charges: {{method: nagl, model: {nagl_model}}}; the "
+                    "force field then parameterizes the whole protein, modifications included"
+                )
             raise ValueError(
-                "a protein takes the library charges of its force field; use "
-                "charges: {method: library}"
+                f"{files} has neither protein library charges nor a NAGLCharges section, so "
+                "it cannot charge a protein; use ff14SB (ff14sb_off_impropers_0.0.4.offxml) "
+                "with charges: {method: library}"
+            )
+        if self.charges.method != "nagl":
+            raise ValueError(
+                "a protein takes its force field's library charges (charges: {method: library}) "
+                "or, on a force field that charges with NAGL such as OpenFF Rosemary alpha, "
+                f"charges: {{method: nagl, model: ...}}; not {self.charges.method}"
+            )
+        if nagl_model is None or library:
+            raise ValueError(
+                f"charges: {{method: nagl}} on a protein needs a force field that charges with "
+                f"NAGL and has no protein library charges (OpenFF Rosemary, e.g. "
+                f"openff_no_water-3.0.0-alpha2b.offxml); {files} has "
+                + (
+                    "protein library charges: use charges: {method: library}"
+                    if library
+                    else "no NAGLCharges section"
+                )
+            )
+        if len(self.force_field) != 1:
+            raise ValueError(
+                "a force field that charges the whole protein with NAGL parameterizes it on its "
+                f"own; name it as the protein's only force field file, not with {self.force_field}"
+            )
+        if self.modification_parameters is not None:
+            raise ValueError(
+                f"modification_parameters does not apply to a protein on {files}: it "
+                "parameterizes the whole protein component, modifications included. Remove "
+                "modification_parameters, or put the protein on ff14SB to give each site type "
+                "its own parameter set"
             )
         return self
+
+    @model_validator(mode="after")
+    def _parameter_sets_for_sites(self) -> Self:
+        """Every site type the entries create needs a parameter set (on ff14SB)."""
+        if self.on_rosemary:
+            return self
+        sets = self.modification_parameters.as_dict() if self.modification_parameters else {}
+        missing: dict[str, str] = {}
+        for site_type, reason in required_site_types(self.mutations, self.modifications):
+            if site_type not in sets:
+                missing.setdefault(site_type, reason)
+        if missing:
+            raise ValueError(
+                "no parameter set for "
+                + "; ".join(f"{t} sites ({why})" for t, why in missing.items())
+                + ". Add modification_parameters: {"
+                + ", ".join(f"{t}: {{force_field: [...], charges: {{...}}}}" for t in missing)
+                + "}"
+            )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Omit the modification keys at their defaults, so an unmodified protein keeps
+        the build hash it had before they existed."""
+        data = handler(self)
+        defaults = {
+            "mutations": [],
+            "modifications": [],
+            "modification_parameters": None,
+            "max_charge_shift": 0.005,
+            "relax": "joint",
+        }
+        for key, default in defaults.items():
+            if key in data and data[key] == default:
+                del data[key]
+        return data
+
+    @property
+    def on_rosemary(self) -> bool:
+        """Whether one force field parameterizes the whole protein with NAGL charges
+        (OpenFF Rosemary); validation ties ``charges: nagl`` to such a force field."""
+        return self.charges.method == "nagl"
+
+    @property
+    def is_modified(self) -> bool:
+        """Whether the protein has mutations or modifications to apply."""
+        return bool(self.mutations or self.modifications)
 
 
 class SmallMoleculeSolute(_Solute):
@@ -545,6 +750,122 @@ class MonomerSpec(_ConfigModel):
         return self
 
 
+class PolymerSequence(_ConfigModel):
+    """How the units of each chain are chosen.
+
+    Positions count the whole chain, 1 to ``length``; with ``end_groups`` the
+    caps are positions 1 and ``length`` and take only a cap of that end.
+    ``statistical`` draws every unpinned position (caps from their
+    probabilities, repeat units from the monomers'; seeded, per chain);
+    ``block`` lays out runs (``[{H: 1}, {SBMA: 5}, {NHS: 1}, {SBMA: 5}, {H: 1}]``);
+    ``explicit`` lists every position. ``fixed`` pins positions in any mode
+    (``{7: NHS}`` is the middle of a 13-unit chain). Monomers and caps are
+    named by label or by name.
+    """
+
+    mode: Literal["statistical", "block", "explicit"] = Field(
+        "statistical", description="statistical (default), block or explicit"
+    )
+    blocks: list[dict[str, int]] | None = Field(
+        None, description="block mode: runs in order, each {monomer: count}"
+    )
+    units: list[str] | None = Field(None, description="explicit mode: every repeat unit in order")
+    fixed: dict[int, str] = Field(
+        default_factory=dict, description="Pinned positions {position: monomer}, from 1"
+    )
+
+    @model_validator(mode="after")
+    def _keys_of_mode(self) -> "PolymerSequence":
+        if self.mode == "block" and not self.blocks:
+            raise ValueError("sequence mode block needs `blocks`, e.g. [{SBMA: 6}, {NHS: 1}]")
+        if self.mode != "block" and self.blocks is not None:
+            raise ValueError(f"`blocks` is for mode block, not mode {self.mode}")
+        if self.mode == "explicit" and not self.units:
+            raise ValueError("sequence mode explicit needs `units`, every repeat unit in order")
+        if self.mode != "explicit" and self.units is not None:
+            raise ValueError(f"`units` is for mode explicit, not mode {self.mode}")
+        for block in self.blocks or []:
+            if len(block) != 1:
+                raise ValueError(
+                    f"each block is one {{monomer: count}}; got {block}. Write one entry per run"
+                )
+            (count,) = block.values()
+            if count < 1:
+                raise ValueError(f"block {block}: a run has at least 1 unit")
+        return self
+
+    def pattern(
+        self,
+        length: int,
+        label_of: dict[str, str],
+        caps: dict[str, dict[str, str]] | None = None,
+    ) -> list[str | None]:
+        """Return the label at each position 1..``length``, None where a draw fills it.
+
+        ``label_of`` maps every monomer label and name to its label. ``caps``
+        maps, for ``head`` and ``tail``, every cap label and name to its label;
+        with caps, positions 1 and ``length`` are the caps and take only a cap
+        of that end (a monomer only when a cap of that end carries its label).
+        """
+
+        def label(name: str, position: int, where: str) -> str:
+            end = None
+            if caps is not None and position == 1:
+                end = "head"
+            elif caps is not None and position == length:
+                end = "tail"
+            if end is not None:
+                allowed = dict(caps[end])
+                allowed.update(
+                    {key: value for key, value in label_of.items() if value in caps[end].values()}
+                )
+                if name not in allowed:
+                    choices = ", ".join(sorted(set(caps[end].values())))
+                    raise ValueError(
+                        f"sequence {where}: position {position} is the {end} cap, so it takes "
+                        f"one of the end_groups.{end} labels ({choices}), not {name!r}"
+                    )
+                return allowed[name]
+            if name not in label_of:
+                known = ", ".join(sorted(label_of))
+                raise ValueError(
+                    f"sequence {where}: unknown monomer {name!r} at position {position}; "
+                    f"use one of {known}"
+                )
+            return label_of[name]
+
+        span = "1.." + str(length) + (" (the caps are 1 and " + str(length) + ")" if caps else "")
+        if self.mode == "block":
+            names = []
+            for block in self.blocks:
+                ((name, count),) = block.items()
+                names += [name] * count
+            if len(names) != length:
+                raise ValueError(
+                    f"sequence blocks hold {len(names)} positions but the chain has {length} "
+                    f"({span})"
+                )
+            pattern: list[str | None] = [
+                label(name, i, "blocks") for i, name in enumerate(names, start=1)
+            ]
+        elif self.mode == "explicit":
+            if len(self.units) != length:
+                raise ValueError(
+                    f"sequence units list {len(self.units)} positions but the chain has "
+                    f"{length} ({span})"
+                )
+            pattern = [label(name, i, "units") for i, name in enumerate(self.units, start=1)]
+        else:
+            pattern = [None] * length
+        for position, name in sorted(self.fixed.items()):
+            if not 1 <= position <= length:
+                raise ValueError(
+                    f"sequence fixed position {position} is outside the chain's positions {span}"
+                )
+            pattern[position - 1] = label(name, position, "fixed")
+        return pattern
+
+
 class PolymerGenerationMode(str, Enum):
     """Mode for polymer generation."""
 
@@ -677,6 +998,11 @@ class PolymerSolute(_Solute):
         None,
         description="Random seed for polymer sequence generation. If None, uses replicate number.",
     )
+    sequence: PolymerSequence | None = Field(
+        None,
+        description="How repeat units are chosen: statistical (default), block or explicit, "
+        "with pinned positions",
+    )
 
     @model_validator(mode="after")
     def validate_probabilities_sum_to_one(self) -> "PolymerSolute":
@@ -685,6 +1011,50 @@ class PolymerSolute(_Solute):
         if abs(total - 1.0) > 1e-6:
             raise ValueError(f"Monomer probabilities must sum to 1.0, got {total}")
         return self
+
+    def label_of(self) -> dict[str, str]:
+        """Return each monomer's label, keyed by its label and by its name."""
+        names = {m.label: m.label for m in self.monomers}
+        names.update({m.name: m.label for m in self.monomers if m.name})
+        return names
+
+    def cap_labels(self) -> dict[str, dict[str, str]] | None:
+        """Return, for each end, every cap label and name mapped to its label; None without caps."""
+        if self.end_groups is None:
+            return None
+        return {
+            end: {
+                **{o.label: o.label for o in getattr(self.end_groups, end)},
+                **{o.name: o.label for o in getattr(self.end_groups, end) if o.name},
+            }
+            for end in ("head", "tail")
+        }
+
+    def sequence_pattern(self) -> list[str | None] | None:
+        """Return the label at each position 1..length (None where drawn), or None without
+        `sequence`. With caps, positions 1 and length are the caps."""
+        if self.sequence is None:
+            return None
+        return self.sequence.pattern(self.length, self.label_of(), self.cap_labels())
+
+    @model_validator(mode="after")
+    def _sequence_fits(self) -> "PolymerSolute":
+        """A `sequence` block must fit the chain and name configured monomers."""
+        pattern = self.sequence_pattern()
+        units = pattern[1:-1] if pattern is not None and self.end_groups is not None else pattern
+        if units is not None and None in units:
+            drawn = {m.label for m in self.monomers if m.probability > 0}
+            if not drawn:
+                raise ValueError("statistical positions need a monomer with probability above 0")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Omit `sequence` when unset, so a polymer without it keeps its build hash."""
+        data = handler(self)
+        if data.get("sequence", 0) is None:
+            del data["sequence"]
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -1031,10 +1401,12 @@ class WaterConfig(_ConfigModel):
     """The water of the box.
 
     Attributes:
-        model: Water model; only TIP3P is built.
+        model: Water model; TIP3P and OPC3 are built. OPC3 loads
+            ``opc3.offxml`` (OPC3 water and its ions) after every other force
+            field; OpenFF pairs Rosemary with OPC3.
     """
 
-    model: WaterModel = Field(..., description="Water model (tip3p is the one built)")
+    model: WaterModel = Field(..., description="Water model (tip3p or opc3 are built)")
 
 
 class IonConfig(_ConfigModel):
@@ -1091,21 +1463,98 @@ class IonConfig(_ConfigModel):
         return self
 
 
+class AxisPadding(_ConfigModel):
+    """Solute-to-box-edge padding along each axis of a rectangular box, in nm."""
+
+    x: float = Field(..., gt=0.0, description="Padding along x (nm)")
+    y: float = Field(..., gt=0.0, description="Padding along y (nm)")
+    z: float = Field(..., gt=0.0, description="Padding along z (nm)")
+
+
 class BoxConfig(_ConfigModel):
     """Configuration for the simulation box.
 
     Attributes:
-        padding: Distance from solute to box edge in nm. The cell edge is the
-            solute diameter plus 2 x padding.
-        shape: Box geometry
+        padding: Distance from solute to box edge in nm. For a cube or a rhombic
+            dodecahedron the cell edge is the solute diameter plus 2 x padding.
+            A rectangular box takes one number or one per axis (``{x, y, z}``)
+            and is the solute's bounding box plus 2 x padding along each axis.
+        shape: Box geometry: ``cube``, ``rhombic_dodecahedron`` or ``rectangular``.
+        align: Rotation of the fixed solutes before a rectangular box is sized.
+            ``principal_axes`` (the default for a rectangular box) puts their
+            longest principal axis on z and the shortest on x; ``none`` keeps
+            the input orientation. Cubes and dodecahedra are sized for any
+            orientation and are never rotated.
         target_density: Target density in g/mL
         tolerance: Minimum molecular spacing for PACKMOL in Angstrom
     """
 
-    padding: float = Field(1.2, gt=0.0, description="Box padding (nm)")
+    padding: float | AxisPadding = Field(1.2, description="Box padding (nm)")
     shape: BoxShape = Field(BoxShape.RHOMBIC_DODECAHEDRON, description="Box shape")
+    align: Literal["principal_axes", "none"] | None = Field(
+        None, description="Rotate the fixed solutes before sizing a rectangular box"
+    )
     target_density: float = Field(1.0, gt=0.0, description="Target density (g/mL)")
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
+
+    @field_validator("padding")
+    @classmethod
+    def _positive_padding(cls, value: "float | AxisPadding") -> "float | AxisPadding":
+        if isinstance(value, float) and value <= 0.0:
+            raise ValueError("padding must be greater than 0 nm")
+        return value
+
+    @model_validator(mode="after")
+    def _rectangular_only(self) -> "BoxConfig":
+        """Per-axis padding and alignment describe a rectangular box only."""
+        if self.shape != BoxShape.RECTANGULAR:
+            if isinstance(self.padding, AxisPadding):
+                raise ValueError(
+                    f"padding per axis needs shape: rectangular; a {self.shape.value} is sized "
+                    "for any orientation, so give one number"
+                )
+            if self.align == "principal_axes":
+                raise ValueError(
+                    f"align: principal_axes is for shape: rectangular; a {self.shape.value} "
+                    "is sized for any orientation and is never rotated"
+                )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Omit an unset align, so configs without it keep their build hash."""
+        data = handler(self)
+        if self.align is None:
+            data.pop("align", None)
+        return data
+
+    @property
+    def padding_xyz(self) -> tuple[float, float, float]:
+        """The padding along x, y and z in nm (the same number three times unless per axis)."""
+        if isinstance(self.padding, AxisPadding):
+            return (self.padding.x, self.padding.y, self.padding.z)
+        value = float(self.padding)
+        return (value, value, value)
+
+    @property
+    def padding_label(self) -> str:
+        """The padding as text: one number, or ``x / y / z`` when the axes differ."""
+        values = self.padding_xyz
+        if len(set(values)) == 1:
+            return f"{values[0]:g}"
+        return " / ".join(f"{value:g}" for value in values)
+
+    @property
+    def min_padding(self) -> float:
+        """The smallest padding of any axis, in nm."""
+        return min(self.padding_xyz)
+
+    @property
+    def alignment(self) -> str:
+        """``principal_axes`` or ``none``: what the build does before sizing the box."""
+        if self.shape != BoxShape.RECTANGULAR:
+            return "none"
+        return self.align or "principal_axes"
 
 
 class SolventConfig(_ConfigModel):
@@ -1116,7 +1565,9 @@ class SolventConfig(_ConfigModel):
 
     Attributes:
         force_field: Force field files for water, ions and co-solvents. Sage
-            carries the TIP3P water and the ion parameters.
+            carries the TIP3P water and the ion parameters; with ``water.model:
+            opc3``, ``opc3.offxml`` is loaded after it and gives the water and
+            ions their parameters.
         water: The water model.
         co_solvents: Co-solvents, each with its amount and charges.
         ions: Salt and neutralizing ions.
@@ -1596,7 +2047,10 @@ class MinimizationConfig(_ConfigModel):
             structure therefore enters equilibration with its coordinates
             unchanged (solute RMSD to the input structure is zero), and no
             packing artefact can be "accommodated" by protein deformation.
-        max_iterations: Maximum minimiser iterations (0 = until convergence).
+        max_iterations: Maximum minimiser iterations; 0 (the default) runs
+            until OpenMM's minimiser converges. A capped run that stops above
+            ``tolerance``, or any run that leaves a bond torn, is continued to
+            convergence once, and the run fails if a bond is still torn.
         tolerance: Energy tolerance in kJ/mol/nm.
     """
 
@@ -1605,7 +2059,9 @@ class MinimizationConfig(_ConfigModel):
     freeze_solute: bool = Field(
         True, description="Freeze protein and substrate atoms during minimisation"
     )
-    max_iterations: int = Field(1000, ge=0, description="Maximum minimiser iterations")
+    max_iterations: int = Field(
+        0, ge=0, description="Maximum minimiser iterations (0 = until convergence)"
+    )
     tolerance: float = Field(10.0, gt=0, description="Energy tolerance in kJ/mol/nm")
 
 
@@ -1687,6 +2143,15 @@ def expand_path(path: Path) -> Path:
     expanded = os.path.expandvars(str(path))
     expanded = os.path.expanduser(expanded)
     return Path(expanded)
+
+
+def _short_hash(data: Any) -> str:
+    """Return the first six hex digits of the SHA-256 of ``data`` as sorted JSON."""
+    import hashlib
+    import json
+
+    text = json.dumps(data, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:6]
 
 
 #: Placeholders ``output.naming_template`` may use.
@@ -2186,6 +2651,10 @@ class SimulationConfig(_ConfigModel):
         "force_field": "force_field lists on each solute and on solvent",
     }
 
+    #: Folder of the YAML file the config was loaded from (None when built in
+    #: Python); relative paths a build records are relative to it.
+    _config_dir: Path | None = PrivateAttr(default=None)
+
     name: str = Field(..., description="Simulation identifier")
     description: str | None = Field(None, description="Simulation description")
 
@@ -2264,6 +2733,9 @@ class SimulationConfig(_ConfigModel):
                     f"segid {solute.segid} is used by more than one solute; each solute "
                     "needs its own segment ID"
                 )
+        from polyzymd.config.modifications import resolve_grafts
+
+        resolve_grafts(self.solutes)
         for solute in self.solutes:
             if len(solute.force_field) != 1:
                 raise ValueError(
@@ -2282,9 +2754,18 @@ class SimulationConfig(_ConfigModel):
                 )
         models = {charges.model for charges in self._charge_specs() if charges.method == "nagl"}
         if len(models) > 1:
+            named = [(s.name, s.type, s.charges) for s in self.solutes] + [
+                (c.name, "co-solvent", c.charges) for c in self.solvent.co_solvents
+            ]
+            who = "; ".join(
+                f"{name} ({kind}{', whole protein on its NAGL force field' if kind == 'protein' else ''}): "
+                f"{charges.model}"
+                for name, kind, charges in named
+                if charges.method == "nagl"
+            )
             raise ValueError(
-                f"components name different NAGL models ({', '.join(sorted(models))}); this "
-                "release charges every nagl component with one model"
+                f"components name different NAGL models ({who}); PolyzyMD 1.4 charges every "
+                "nagl component, a NAGL-charged protein included, with one model per build"
             )
         for restraint in self.restraints:
             for atom in (restraint.atom1, restraint.atom2):
@@ -2382,10 +2863,11 @@ class SimulationConfig(_ConfigModel):
         """
         engine = engine or self.engine
         model = self.solvent.water.model
-        if model != WaterModel.TIP3P:
+        if model.value not in WATER_FORCE_FIELDS:
             raise ValueError(
-                f"PolyzyMD cannot build water model '{model.value}' correctly: the force fields "
-                "it loads carry TIP3P water parameters; use model: tip3p for new systems."
+                f"PolyzyMD cannot build water model '{model.value}' correctly: it builds "
+                "tip3p and opc3 water only; use model: tip3p for new systems (or opc3, the "
+                "water OpenFF pairs with Rosemary)."
             )
         ions = self.solvent.ions
         for key in ("kcl_concentration", "mgcl2_concentration"):
@@ -2403,12 +2885,60 @@ class SimulationConfig(_ConfigModel):
                     "molecule's PDB chemical-component code, or leave it out."
                 )
         self._require_buildable_settings(engine)
+        self._require_box_padding()
         self.require_engine_restraints(engine)
         self.require_engine_barostats(engine)
         if inputs:
             from polyzymd.config.validation import require_inputs
 
             require_inputs(self)
+
+    #: Room a rectangular box must keep beyond the nonbonded cutoff on every axis (nm).
+    RECTANGULAR_PADDING_MARGIN_NM: ClassVar[float] = 0.1
+
+    def _nonbonded_cutoff_nm(self) -> float:
+        """The largest vdW cutoff of the force field files the build loads (0.9 nm if unknown).
+
+        Reads the solvent's and every solute's files, and a protein's
+        modification parameter sets (glycans, grafted polymers, small molecules).
+        """
+        names = [str(name) for name in self.solvent.force_field]
+        for solute in getattr(self, "solutes", []) or []:
+            names.extend(str(name) for name in getattr(solute, "force_field", []) or [])
+            sets = getattr(solute, "modification_parameters", None)
+            for parameter_set in (sets.as_dict() if sets is not None else {}).values():
+                names.extend(str(name) for name in getattr(parameter_set, "force_field", []) or [])
+        cutoffs = [
+            cutoff
+            for cutoff in (_vdw_cutoff_nm(name) for name in names if name.endswith(".offxml"))
+            if cutoff is not None
+        ]
+        return max(cutoffs) if cutoffs else 0.9
+
+    def _require_box_padding(self) -> None:
+        """Refuse a rectangular box padded less than the nonbonded cutoff plus a margin.
+
+        A rectangular box is sized for one orientation; each axis keeps the
+        solute at least one cutoff plus a margin from the box edge, so the
+        solute and its image are more than two cutoffs apart before it turns.
+        """
+        box = self.solvent.box
+        if box.shape != BoxShape.RECTANGULAR:
+            return
+        cutoff = self._nonbonded_cutoff_nm()
+        minimum = cutoff + self.RECTANGULAR_PADDING_MARGIN_NM
+        short = [
+            f"{axis} = {value:g} nm"
+            for axis, value in zip("xyz", box.padding_xyz)
+            if value < minimum - 1e-9
+        ]
+        if short:
+            raise ValueError(
+                f"solvent.box.padding: {', '.join(short)} is below the {minimum:g} nm a "
+                f"rectangular box needs (the {cutoff:g} nm nonbonded cutoff + "
+                f"{self.RECTANGULAR_PADDING_MARGIN_NM:g} nm).\nfix: give every axis at least "
+                f"{minimum:g} nm, or use shape: rhombic_dodecahedron."
+            )
 
     def _require_buildable_settings(self, engine: str) -> None:
         """Raise ``ValueError`` for settings a new build would not run as written."""
@@ -2657,6 +3187,27 @@ class SimulationConfig(_ConfigModel):
 
         return "_".join(token for _, token in sorted(tokens, key=lambda item: item[0]))
 
+    def _modification_token(self) -> str:
+        """Six hex digits of the protein's modification identity, for the run-folder name.
+
+        The identity is :func:`~polyzymd.config.modifications.modification_identity`,
+        which the analysis identity uses too. When an input file is missing, the
+        build refuses the config and names the file; the token then comes from
+        the blocks as written.
+        """
+        from polyzymd.config.modifications import modification_identity
+
+        protein = self.enzyme
+        try:
+            return modification_identity(protein)[:6]
+        except (OSError, ValueError):
+            return _short_hash(
+                {
+                    "mutations": [m.model_dump(mode="json") for m in protein.mutations],
+                    "modifications": [m.model_dump(mode="json") for m in protein.modifications],
+                }
+            )
+
     def _run_directory_template_values(self, replicate: int | str = 1) -> dict[str, Any]:
         """Build centralized values for run-directory naming templates.
 
@@ -2676,6 +3227,14 @@ class SimulationConfig(_ConfigModel):
             sorted_labels = sorted(probs.keys())
             composition = "_".join(f"{lbl}{probs[lbl] * 100:.0f}" for lbl in sorted_labels)
             polymer_type = f"{self.polymers.type_prefix}_{composition}"
+            # Only a config that uses a sequence block gets the token, so the
+            # names of configs without one are those of 1.3.
+            if self.polymers.sequence is not None:
+                sequence = self.polymers.sequence.model_dump(mode="json")
+                polymer_type += f"-seq{_short_hash(sequence)}"
+        enzyme = self.enzyme.name
+        if getattr(self.enzyme, "is_modified", False):
+            enzyme += f"-mod{self._modification_token()}"
 
         substrate_name = self.substrate.name if self.substrate else "apo"
         primary_solvent = self._primary_solvent_token()
@@ -2685,7 +3244,7 @@ class SimulationConfig(_ConfigModel):
             solvent_composition = f"{primary_solvent}_{cosolvent_composition}"
 
         return {
-            "enzyme": self.enzyme.name,
+            "enzyme": enzyme,
             "substrate": substrate_name.replace("-", ""),
             "polymer_type": polymer_type,
             "temperature": int(self.thermodynamics.temperature),

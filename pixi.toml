@@ -115,7 +115,7 @@ openff-toolkit        = ">=0.16"
 openff-interchange    = ">=0.5"
 openff-packmol        = ">=0.1"
 openff-units          = ">=0.2"
-openff-forcefields    = ">=2024.0"
+openff-forcefields    = ">=2026.9.0"  # OpenFF Rosemary alpha2b (newest candidate)
 smirnoff99frosst      = ">=1.1"
 openff-amber-ff-ports = ">=2024.0"
 openff-nagl           = ">=0.4"

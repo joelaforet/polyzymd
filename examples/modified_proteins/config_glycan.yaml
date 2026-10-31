@@ -1,0 +1,61 @@
+# Ubiquitin with chitobiose (GlcNAc-b1-4-GlcNAc) N-linked to Asn60, on
+# GLYCAM06j, in TIP3P water with 0.15 M NaCl. The tutorial "From an idea and
+# a PDB to a glycosylated protein" builds this file step by step.
+name: "ubiquitin_glycan"
+engine: "openmm"
+description: "Ubiquitin with chitobiose on Asn60"
+
+solutes:
+  - type: protein
+    name: "ubq_glycan"
+    pdb_path: "structures/ubiquitin.pdb"
+    force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
+    charges: {method: library}
+    modifications:
+      - attach:
+          type: glycan
+          reaction: N-glycosylation      # bonds C1 to ND2; HD22 and the ROH group leave
+          atom_name: ND2
+          fragment_atom_name: C1         # the anomeric carbon of the first sugar
+          fragment_resnum: 2             # residue 1 of a GlyGen file is ROH
+          chains: [A]
+          glycans: {G42666HT: [N60]}     # read from structures/glycans/glycam_G42666HT.pdb
+    modification_parameters:
+      glycan: {force_field: [GLYCAM_06j-1.xml], charges: {method: library}}
+
+solvent:
+  force_field: ["openff-2.3.0.offxml"]
+  water:
+    model: "tip3p"
+  ions:
+    neutralize: true
+    nacl_concentration: 0.15
+  box:
+    padding: 1.0
+    shape: "rhombic_dodecahedron"
+
+thermodynamics:
+  temperature: 300.0
+  pressure: 1.0
+
+simulation_phases:
+  equilibration_stages:
+    - name: "equil"
+      duration: 0.1
+      samples: 10
+      ensemble: "NVT"
+      temperature: 300.0
+  production:
+    ensemble: "NPT"
+    duration: 0.1
+    samples: 10
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    barostat: "MC"
+
+openmm:
+  platform: "CUDA"
+
+output:
+  projects_directory: "."
+  naming_template: "{enzyme}_{temperature}K_run{replicate}"

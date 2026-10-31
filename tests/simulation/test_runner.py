@@ -13,6 +13,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from polyzymd.simulation.runner import CONVERGENCE_SLACK
+
 
 def test_completed_minimization_uses_configured_platform_properties():
     """A recovered minimization must use the shared platform-aware constructor."""
@@ -1012,8 +1014,35 @@ class TestFrozenSoluteMinimization:
         assert frozen_system.getParticleMass(0).value_in_unit(openmm.unit.dalton) == 0.0
         assert frozen_system.getParticleMass(1).value_in_unit(openmm.unit.dalton) == 1.0
 
-    def test_signal_during_minimization_keeps_the_finished_result(self, tmp_path, monkeypatch):
-        """A job stopped by a signal sent during minimization does not redo it in the next job."""
+    def test_signal_after_minimization_keeps_the_finished_result(self, tmp_path, monkeypatch):
+        """A signal that arrives once minimization has finished does not discard the result."""
+        import json
+
+        import openmm.app
+
+        from polyzymd.simulation import signals
+
+        flag = {"set": False}
+        original = openmm.app.Simulation.minimizeEnergy
+
+        def minimize_then_signal(self, **kwargs):
+            original(self, **kwargs)
+            flag["set"] = True
+
+        monkeypatch.setattr(openmm.app.Simulation, "minimizeEnergy", minimize_then_signal)
+        monkeypatch.setattr(signals, "is_interrupted", lambda: flag["set"])
+        top, system, positions = self._system(tmp_path)
+        runner = self._runner(tmp_path, top, system, positions)
+        with pytest.raises(signals.GracefulExit):
+            runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
+
+        record = json.loads((tmp_path / "minimization" / "phase.json").read_text())
+        assert record["status"] == "completed"
+        assert (tmp_path / "minimization" / "minimized_state.xml").exists()
+
+    @pytest.mark.parametrize("freeze_solute", [True, False])
+    def test_signal_during_minimization_stops_it(self, tmp_path, monkeypatch, freeze_solute):
+        """A signal sent while the minimizer runs stops it at the next iteration."""
         import json
 
         from polyzymd.simulation import signals
@@ -1028,11 +1057,40 @@ class TestFrozenSoluteMinimization:
         top, system, positions = self._system(tmp_path)
         runner = self._runner(tmp_path, top, system, positions)
         with pytest.raises(signals.GracefulExit):
-            runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
+            runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=freeze_solute)
 
+        # The minimizer stopped at its first iteration; nothing half-minimized is kept.
         record = json.loads((tmp_path / "minimization" / "phase.json").read_text())
-        assert record["status"] == "completed"
-        assert (tmp_path / "minimization" / "minimized_state.xml").exists()
+        assert record["status"] == "started"
+        assert not (tmp_path / "minimization" / "minimized_state.xml").exists()
+
+    def test_frozen_minimization_records_the_saved_state(self, tmp_path):
+        """The recorded forces are those of the saved state on the real System."""
+        import json
+
+        import openmm
+        from openmm import unit
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        top, system, positions = self._system(tmp_path, hydrogen_offset_nm=0.02)
+        runner = self._runner(tmp_path, top, system, positions)
+        runner.minimize(tolerance=1.0, freeze_solute=True)
+        record = json.loads((tmp_path / "minimization" / "phase.json").read_text())
+
+        context = openmm.Context(
+            system,
+            openmm.VerletIntegrator(1.0 * unit.femtosecond),
+            openmm.Platform.getPlatformByName("Reference"),
+        )
+        context.setState(
+            openmm.XmlSerializer.deserialize(
+                (tmp_path / "minimization" / "minimized_state.xml").read_text()
+            )
+        )
+        saved = SimulationRunner._minimization_quality(context, system, top, fixed=[0])
+        assert record["rms_force"] == pytest.approx(saved["rms_force"], rel=1e-9, abs=1e-12)
+        assert record["max_force"] == pytest.approx(saved["max_force"], rel=1e-9, abs=1e-12)
 
     def test_unfrozen_minimization_moves_solute(self, tmp_path):
         import numpy as np
@@ -1045,6 +1103,233 @@ class TestFrozenSoluteMinimization:
         after = np.asarray(runner._current_positions.value_in_unit(unit.angstrom))
         # Without freezing, the overlap is shared between the protein and the water.
         assert np.linalg.norm(after[0] - before[0]) > 0.1
+
+
+class TestMinimizationConvergenceGuard:
+    """Minimization runs to convergence, and an unconverged or torn state is not handed on."""
+
+    R0_NM = 0.15
+
+    @staticmethod
+    def _stretched_bond(tmp_path, stretch_nm: float = 0.40):
+        """Two carbons joined by a harmonic bond, started far from its equilibrium length."""
+        from openmm import HarmonicBondForce, System, Vec3, unit
+        from openmm.app import Element, Topology
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        top = Topology()
+        chain = top.addChain("P")
+        residue = top.addResidue("MOL", chain)
+        top.addAtom("C1", Element.getBySymbol("C"), residue)
+        top.addAtom("C2", Element.getBySymbol("C"), residue)
+        system = System()
+        system.addParticle(12.0)
+        system.addParticle(12.0)
+        bond = HarmonicBondForce()
+        bond.addBond(0, 1, TestMinimizationConvergenceGuard.R0_NM, 2.5e5)
+        system.addForce(bond)
+        system.setDefaultPeriodicBoxVectors(
+            Vec3(3.0, 0.0, 0.0), Vec3(0.0, 3.0, 0.0), Vec3(0.0, 0.0, 3.0)
+        )
+        positions = [Vec3(1.0, 1.0, 1.0), Vec3(1.0 + stretch_nm, 1.0, 1.0)] * unit.nanometer
+        return SimulationRunner(
+            topology=top,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+
+    @staticmethod
+    def _record(tmp_path):
+        import json
+
+        return json.loads((tmp_path / "minimization" / "phase.json").read_text())
+
+    def test_default_minimizes_to_convergence_and_records_it(self, tmp_path):
+        """With the default (no iteration cap) the recorded RMS force is within tolerance."""
+        runner = self._stretched_bond(tmp_path)
+        runner.minimize(tolerance=1.0, freeze_solute=False)
+        record = self._record(tmp_path)
+        assert record["converged"] is True
+        assert record["reminimized"] is False
+        assert record["rms_force"] <= 1.0 * CONVERGENCE_SLACK
+        assert record["max_force"] is not None
+        assert record["worst_bond_stretch"] < 0.01
+
+    def test_a_capped_run_left_unconverged_is_continued(self, tmp_path):
+        """One iteration cannot relax a 167 % stretched bond; the guard finishes the job."""
+        import numpy as np
+        from openmm import unit
+
+        runner = self._stretched_bond(tmp_path)
+        runner.minimize(max_iterations=1, tolerance=1.0, freeze_solute=False)
+        record = self._record(tmp_path)
+        assert record["reminimized"] is True
+        assert record["converged"] is True
+        assert record["rms_force"] <= 1.0 * CONVERGENCE_SLACK
+        after = np.asarray(runner._current_positions.value_in_unit(unit.nanometer))
+        assert abs(np.linalg.norm(after[1] - after[0]) - self.R0_NM) < 1e-3
+
+    def test_a_state_that_stays_torn_stops_the_run_with_the_bond_named(self, tmp_path, monkeypatch):
+        """If the minimizer cannot fix it, the run fails clearly instead of reaching NaN."""
+        import openmm.app
+
+        runner = self._stretched_bond(tmp_path)
+        monkeypatch.setattr(openmm.app.Simulation, "minimizeEnergy", lambda self, **kwargs: None)
+        with pytest.raises(RuntimeError, match=r"P:MOL.*:C1.*P:MOL.*:C2.*stretched"):
+            runner.minimize(tolerance=1.0, freeze_solute=False)
+        assert not (tmp_path / "minimization" / "minimized_state.xml").exists()
+        # The failed run leaves its measurements on disk.
+        record = self._record(tmp_path)
+        assert record["status"] == "started"
+        assert record["converged"] is False
+        assert record["reminimized"] is True
+        assert record["rms_force"] > 1.0
+        assert record["worst_bond_stretch"] == pytest.approx(0.40 / self.R0_NM - 1.0)
+        assert "C1" in record["worst_bond"] and "C2" in record["worst_bond"]
+
+    def test_every_minimization_call_can_be_interrupted(self, tmp_path, monkeypatch):
+        """The first run and the continued run both get an interrupt-checking reporter."""
+        import openmm
+        import openmm.app
+
+        reporters = []
+        original = openmm.app.Simulation.minimizeEnergy
+
+        def recording(self, **kwargs):
+            reporters.append(kwargs.get("reporter"))
+            original(self, **kwargs)
+
+        monkeypatch.setattr(openmm.app.Simulation, "minimizeEnergy", recording)
+        runner = self._stretched_bond(tmp_path)
+        runner.minimize(max_iterations=1, tolerance=1.0, freeze_solute=False)
+        assert len(reporters) == 2  # capped run, then the continued run
+        assert all(isinstance(r, openmm.MinimizationReporter) for r in reporters)
+
+    def test_torn_bond_between_frozen_atoms_fails_without_minimizing(self, tmp_path, monkeypatch):
+        """Minimization cannot move frozen atoms, so a torn bond between them is an input error."""
+        import openmm.app
+        from openmm import HarmonicBondForce, System, Vec3, unit
+        from openmm.app import Element, Topology
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        calls = []
+        monkeypatch.setattr(
+            openmm.app.Simulation, "minimizeEnergy", lambda self, **kw: calls.append(kw)
+        )
+        top = Topology()
+        residue = top.addResidue("ALA", top.addChain("A"))
+        top.addAtom("CA", Element.getBySymbol("C"), residue)
+        top.addAtom("CB", Element.getBySymbol("C"), residue)
+        system = System()
+        system.addParticle(12.0)
+        system.addParticle(12.0)
+        bond = HarmonicBondForce()
+        bond.addBond(0, 1, self.R0_NM, 2.5e5)
+        system.addForce(bond)
+        system.setDefaultPeriodicBoxVectors(
+            Vec3(3.0, 0.0, 0.0), Vec3(0.0, 3.0, 0.0), Vec3(0.0, 0.0, 3.0)
+        )
+        positions = [Vec3(1.0, 1.0, 1.0), Vec3(1.3, 1.0, 1.0)] * unit.nanometer
+        runner = SimulationRunner(
+            topology=top,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+        with pytest.raises(
+            RuntimeError, match=r"stretched bond between fixed solute atoms.*A:ALA.*:CA.*:CB"
+        ):
+            runner.minimize(tolerance=1.0, freeze_solute=True)
+        assert calls == []
+        record = self._record(tmp_path)
+        assert record["converged"] is False
+        assert record["worst_bond_stretch"] == pytest.approx(1.0)
+        assert "CA" in record["worst_bond"] and "CB" in record["worst_bond"]
+
+    def test_quality_uses_openmms_per_particle_rms_force(self):
+        """sqrt(sum |F_i|^2 / N) over all particles; immobile ones count with zero force."""
+        import openmm
+        from openmm import CustomExternalForce, System, TwoParticleAverageSite, Vec3, unit
+        from openmm.app import Element, Topology
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        top = Topology()
+        residue = top.addResidue("MOL", top.addChain("P"))
+        for name in ("C1", "C2", "C3", "V"):
+            top.addAtom(name, Element.getBySymbol("C"), residue)
+        system = System()
+        for mass in (12.0, 0.0, 12.0, 0.0):  # C2 frozen (massless), V a virtual site
+            system.addParticle(mass)
+        system.setVirtualSite(3, TwoParticleAverageSite(0, 2, 0.5, 0.5))
+        push = CustomExternalForce("-(fx*x + fy*y + fz*z)")
+        for name in ("fx", "fy", "fz"):
+            push.addPerParticleParameter(name)
+        push.addParticle(0, [3.0, 4.0, 0.0])
+        push.addParticle(1, [100.0, 0.0, 0.0])  # on the frozen atom: ignored
+        push.addParticle(2, [0.0, 0.0, 12.0])  # on an atom passed as fixed: ignored
+        push.addParticle(3, [50.0, 0.0, 0.0])  # on the virtual site: ignored
+        system.addForce(push)
+        context = openmm.Context(
+            system,
+            openmm.VerletIntegrator(1.0 * unit.femtosecond),
+            openmm.Platform.getPlatformByName("Reference"),
+        )
+        context.setPositions(
+            [Vec3(0, 0, 0), Vec3(0.2, 0, 0), Vec3(0.4, 0, 0), Vec3(0.2, 0, 0)] * unit.nanometer
+        )
+        context.computeVirtualSites()
+        # Only C1 is free to move.  The virtual site passes its force on to C1
+        # and C3 (25 each along x), so C1 feels (28, 4, 0).
+        quality = SimulationRunner._minimization_quality(context, system, top, fixed=[2])
+        assert quality["max_force"] == pytest.approx((28.0**2 + 4.0**2) ** 0.5)
+        assert quality["rms_force"] == pytest.approx(((28.0**2 + 4.0**2) / 4) ** 0.5)
+
+    def test_rigid_water_converges_without_a_false_alarm(self, tmp_path):
+        """Forces along constrained O-H bonds never relax; the guard must not count them."""
+        import openmm
+        from openmm import app, unit
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        forcefield = app.ForceField("amber14/tip3p.xml")
+        modeller = app.Modeller(app.Topology(), [])
+        modeller.addSolvent(forcefield, boxSize=openmm.Vec3(1.8, 1.8, 1.8) * unit.nanometer)
+        system = forcefield.createSystem(
+            modeller.topology,
+            nonbondedMethod=app.PME,
+            nonbondedCutoff=0.8 * unit.nanometer,
+            constraints=app.HBonds,
+            rigidWater=True,
+        )
+        runner = SimulationRunner(
+            topology=modeller.topology,
+            system=system,
+            positions=modeller.positions,
+            working_dir=tmp_path,
+            platform="CPU",
+        )
+        runner.minimize(tolerance=10.0, freeze_solute=False)
+        record = self._record(tmp_path)
+        assert record["converged"] is True
+        assert record["reminimized"] is False
+        # OpenMM's final stiff-restraint passes can stop above the tolerance with
+        # rigid water (0.9-2.2 x measured); that is OpenMM's converged result.
+        assert record["rms_force"] < 10.0 * 5
+
+    def test_frozen_minimization_reports_forces_on_mobile_atoms_only(self, tmp_path):
+        """Forces on the frozen (massless) atoms are not counted against convergence."""
+        top, system, positions = TestFrozenSoluteMinimization._system(tmp_path)
+        runner = TestFrozenSoluteMinimization._runner(tmp_path, top, system, positions)
+        runner.minimize(tolerance=1.0, freeze_solute=True)
+        record = self._record(tmp_path)
+        assert record["converged"] is True
+        assert record["rms_force"] <= 1.0 * CONVERGENCE_SLACK
 
 
 def test_openmm_integrator_noise_is_seeded() -> None:

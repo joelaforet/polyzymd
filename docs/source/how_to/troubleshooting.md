@@ -255,6 +255,26 @@ check the input structure around the atoms with the largest hydrogen
 displacement in `minimization/phase.json`. See
 {ref}`minimization-constraints`.
 
+### `Energy minimization did not reach a usable state`
+
+Minimization left a bond stretched more than 50% past its equilibrium length,
+and continuing it once did not fix that. A GPU minimization can occasionally
+end in such a strained state. The measurements are in
+`minimization/phase.json`.
+
+1. Run the same command again; a second minimization usually converges.
+2. If it fails again, look at the bond the error names, and at its atoms in
+   the built structure: an overlap the build left behind shows up here.
+3. If you set `minimization.max_iterations`, remove it so that minimization
+   runs to convergence.
+
+### `The input structure has a stretched bond between fixed solute atoms`
+
+A bond between two protein or substrate heavy atoms is stretched more than 50%
+in the built structure. With `minimization.freeze_solute: true` those atoms do
+not move, so minimization cannot repair it. Fix the input structure around the
+named atoms, or rebuild it.
+
 ### `CUDA out of memory`
 
 The GPU has no more memory. Make the system smaller:

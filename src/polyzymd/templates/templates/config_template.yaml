@@ -74,6 +74,38 @@ solutes:
     description: "My enzyme description"
     force_field: ["ff14sb_off_impropers_0.0.4.offxml"]
     charges: {method: library}
+    # OpenFF Rosemary alpha instead (OPTIONAL, alpha, not for production): one
+    # force field for the whole protein, modifications included, with NAGL
+    # charges on the whole molecule; no modification_parameters. OpenFF pairs it
+    # with OPC3 water: set solvent.water.model: "opc3" below.
+    # force_field: ["openff_no_water-3.0.0-alpha2b.offxml"]
+    # charges: {method: nagl, model: openff-gnn-am1bcc-1.0.0.pt}
+    # Mutations, then covalent modifications, applied to the PDB in order
+    # (OPTIONAL). Sites are chain:residue (A:N58 or A:ASN58), checked against the
+    # PDB; `polyzymd validate --plans` lists every change before you build.
+    # mutations:
+    #   - {site: A:S13, to: CYS}                    # a CCD code: ALA, 4II, DLE, ...
+    #   - {chains: [A, C, E], residues: [T301], to: ASN}
+    # modifications:
+    #   - deprotonate: {site: A:K63, atom_name: NZ}
+    #   - attach:                                   # one glycan per listed residue
+    #       type: glycan                            # glycan, polymer or generic
+    #       reaction: N-glycosylation
+    #       atom_name: ND2
+    #       fragment_atom_name: C1
+    #       fragment_resnum: 2
+    #       chains: [A]
+    #       glycans: {G42666HT: [N58, N107]}        # structures/glycans/glycam_<ID>.pdb
+    #   - attach:
+    #       type: generic
+    #       site: A:K63
+    #       atom_name: NZ
+    #       fragment: {smiles: "*C(=O)CCCCCCC", resname: OC8}
+    # modification_parameters:                      # one set per site type used
+    #   glycan: {force_field: [GLYCAM_06j-1.xml], charges: {method: library}}
+    #   generic:
+    #     force_field: [openff-2.3.0.offxml]
+    #     charges: {method: nagl, model: openff-gnn-am1bcc-1.0.0.pt}
 
   # A docked small molecule, placed as given (OPTIONAL).
   # - type: small_molecule
@@ -125,7 +157,10 @@ solutes:
 # the polymers and the solvent share one force field file: list the same file
 # here and on those solutes.
 #
-# water model: tip3p (the only model PolyzyMD builds; Sage carries it)
+# water model: tip3p (Sage carries it) or opc3 (loads opc3.offxml after the
+#   other force fields: OPC3 water and its own Na+/Cl- set). OpenFF pairs
+#   Rosemary with OPC3; a Rosemary protein in other water fails the audit
+#   (solvent.rosemary_water) unless modeling_exceptions accepts it.
 # box shape options: cube, rhombic_dodecahedron
 #
 solvent:
@@ -177,6 +212,10 @@ solvent:
   box:
     padding: 1.2                        # nm from solute to box edge
     shape: "rhombic_dodecahedron"       # Efficient packing
+    # An elongated protein: a rectangular box, padded per axis and sized after
+    # the protein is turned onto its principal axes (longest on z):
+    # shape: "rectangular"
+    # padding: {x: 1.2, y: 1.2, z: 1.5}  # each axis >= cutoff + 0.1 nm
     target_density: 1.0                 # g/mL
     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
 

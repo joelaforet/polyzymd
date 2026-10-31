@@ -24,6 +24,7 @@ from polyzymd.audit.realized import RealizedSystem  # noqa: E402
 PARAMETER_CHECKS = (
     "parameters.bonded",
     "parameters.nonbonded",
+    "parameters.one_four",
     "parameters.constraints",
     "charges.source",
     "masses",
@@ -125,6 +126,7 @@ def test_ff14sb_loaded_last_fails_a_small_molecule(built) -> None:
     assert failed == {
         (substrate, "parameters.bonded"),
         (substrate, "parameters.nonbonded"),
+        (substrate, "parameters.one_four"),
         (substrate, "parameters.constraints"),
     }
 

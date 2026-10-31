@@ -141,7 +141,26 @@ def _compare_whole(
             f"its {len(atoms)} atoms are not the {len(expected)} atoms of {ref['pdb']}, in order"
         )
         return
-    system = reference_system(domain.force_field, topology, constraints_from=constraints_from)
+    if domain.charges.method == "library":
+        from polyzymd.config.schema import protein_charge_handlers
+
+        nagl_model, library = protein_charge_handlers(tuple(domain.force_field))
+        if not library:
+            # The force field would charge the reference itself (with NAGL),
+            # so library charges cannot be what the build carries.
+            result.errors.append(
+                f"declares library charges, but {', '.join(domain.force_field)} has no protein "
+                "library charges" + (f"; it charges with NAGL ({nagl_model})" if nagl_model else "")
+            )
+            return
+    charge_from = []
+    if domain.charges.method == "nagl":
+        # A protein on OpenFF Rosemary alpha: NAGL charges with the declared model.
+        for molecule in topology.unique_molecules:
+            charge_from.append(_charged(molecule, domain.charges, result))
+    system = reference_system(
+        domain.force_field, topology, charge_from, constraints_from=constraints_from
+    )
     expected_terms = _all_terms(system)
     actual = realized.index.extract(atoms, {s: k for k, s in enumerate(atoms)})
     for kind in TERM_KINDS:

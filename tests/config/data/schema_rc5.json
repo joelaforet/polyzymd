@@ -659,7 +659,7 @@
   "bounds": {},
   "default": {
    "freeze_solute": true,
-   "max_iterations": 1000,
+   "max_iterations": 0,
    "tolerance": 10.0
   },
   "required": false,
@@ -679,7 +679,7 @@
   "bounds": {
    "ge": 0
   },
-  "default": 1000,
+  "default": 0,
   "required": false,
   "type": "<class 'int'>",
   "values": null

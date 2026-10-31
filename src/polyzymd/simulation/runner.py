@@ -62,6 +62,28 @@ CONSTRAINT_TOLERANCE_ANGSTROM = 0.01
 # a heavy partner by roughly 1/12 of it; this is the ceiling checked afterwards.
 FROZEN_HEAVY_DISPLACEMENT_TOLERANCE_ANGSTROM = 0.02
 
+# A bond stretched beyond this fraction of its equilibrium length after
+# minimization is torn, not strained: thermal fluctuations of a bond are a few
+# percent of r0, and a 50 % stretch costs hundreds of kJ/mol even for a soft bond.
+TORN_BOND_FRACTION = 0.5
+
+# OpenMM stops when the RMS force reaches ``tolerance``.  The guard measures the
+# same quantity after projecting out the constraint forces, which shifts it a
+# little, so a run capped by ``max_iterations`` counts as converged within 25 %.
+# An uncapped run is not held to this: with constraints, OpenMM finishes with
+# stiff-restraint passes that can end well above the tolerance (rigid TIP3P
+# water measured 0.9-2.2 x at tolerance 10 and 9-15 x at tolerance 1), and that
+# state is what OpenMM itself returns as converged.
+CONVERGENCE_SLACK = 1.25
+
+
+class MinimizationFailed(RuntimeError):
+    """Minimization ended in an unusable state; ``quality`` holds its measurements."""
+
+    def __init__(self, message: str, quality: Dict[str, Any]) -> None:
+        super().__init__(message)
+        self.quality = quality
+
 
 def _ensure_openmm_loaded() -> None:
     """Load OpenMM symbols used by the simulation runner lazily.
@@ -501,9 +523,247 @@ class SimulationRunner:
         actual = np.sqrt(((coordinates[first] - coordinates[second]) ** 2).sum(axis=1))
         return float(np.abs(actual - lengths).max())
 
+    @staticmethod
+    def _bond_stretches(
+        system: Any, positions_nm: Any, fixed: Any
+    ) -> Tuple[Tuple[float, Any], Tuple[float, Any]]:
+        """Most stretched unconstrained HarmonicBondForce bond, split by mobility.
+
+        Returns ``((stretch, (a, b)), (stretch, (a, b)))``: the largest
+        ``(r - r0) / r0`` over bonds with at least one atom free to move, and the
+        largest over bonds whose two atoms are both *fixed*.  Minimization cannot
+        change the second kind.
+        """
+        import numpy as np
+
+        constrained = {
+            frozenset(system.getConstraintParameters(i)[:2])
+            for i in range(system.getNumConstraints())
+        }
+        mobile_worst: Tuple[float, Any] = (0.0, None)
+        fixed_worst: Tuple[float, Any] = (0.0, None)
+        for force in system.getForces():
+            if not isinstance(force, openmm.HarmonicBondForce):
+                continue
+            for index in range(force.getNumBonds()):
+                a, b, r0, _k = force.getBondParameters(index)
+                if frozenset((a, b)) in constrained:
+                    continue
+                r0_nm = r0.value_in_unit(omm_unit.nanometer)
+                if r0_nm <= 0:
+                    continue
+                stretch = float(np.linalg.norm(positions_nm[a] - positions_nm[b]) / r0_nm - 1.0)
+                if a in fixed and b in fixed:
+                    if stretch > fixed_worst[0]:
+                        fixed_worst = (stretch, (a, b))
+                elif stretch > mobile_worst[0]:
+                    mobile_worst = (stretch, (a, b))
+        return mobile_worst, fixed_worst
+
+    @staticmethod
+    def _atom_label(topology: Any, index: int) -> str:
+        """``chain:RESnum:atom`` label of atom *index*."""
+        atom = list(topology.atoms())[index]
+        residue = atom.residue
+        return f"{residue.chain.id}:{residue.name}{residue.id}:{atom.name}"
+
+    @classmethod
+    def _minimization_quality(
+        cls, context: Any, system: Any, topology: Any, fixed: Any = ()
+    ) -> Dict[str, Any]:
+        """Convergence measure and the most stretched bond of a minimized state.
+
+        ``rms_force`` is the quantity OpenMM 8.4's LocalEnergyMinimizer compares
+        with its tolerance: ``sqrt(sum_i |F_i|^2 / N)``, where ``F_i`` is the
+        full force vector on particle ``i`` and ``N`` counts every particle.
+        Particles the minimizer cannot move -- massless ones (frozen atoms,
+        virtual sites) and the indices in ``fixed`` -- contribute zero force but
+        still count in ``N``.  ``max_force`` is the largest ``|F_i|``.
+
+        The forces are first projected onto the constraint manifold: components
+        along constrained bonds (rigid water, X-H constraints) are held by the
+        constraints and never relax, so a converged state with rigid water still
+        has a raw RMS force of hundreds of kJ/mol/nm. The projection uses
+        OpenMM's own velocity constraints on ``F / m`` (massless atoms are left
+        out), and the context's velocities are zeroed afterwards.
+
+        ``worst_bond_stretch`` is the largest ``(r - r0) / r0`` over
+        HarmonicBondForce terms between atoms that are not constrained and not
+        both fixed; ``fixed_bond_stretch`` is the same over bonds whose two atoms
+        are both fixed, which minimization cannot change.
+        """
+        import numpy as np
+
+        state = context.getState(getForces=True, getPositions=True)
+        raw = np.asarray(
+            state.getForces(asNumpy=True).value_in_unit(
+                omm_unit.kilojoule_per_mole / omm_unit.nanometer
+            )
+        )
+        count = system.getNumParticles()
+        masses = np.array(
+            [system.getParticleMass(i).value_in_unit(omm_unit.dalton) for i in range(count)]
+        )
+        massive = masses > 0
+        safe = np.where(massive, masses, 1.0)[:, None]
+        if system.getNumConstraints():
+            context.setVelocities(
+                np.where(massive[:, None], raw / safe, 0.0)
+                * (omm_unit.nanometer / omm_unit.picosecond)
+            )
+            context.applyVelocityConstraints(1e-8)
+            projected = np.asarray(
+                context.getState(getVelocities=True)
+                .getVelocities(asNumpy=True)
+                .value_in_unit(omm_unit.nanometer / omm_unit.picosecond)
+            )
+            forces = projected * np.where(massive, masses, 0.0)[:, None]
+            context.setVelocities(np.zeros_like(raw) * (omm_unit.nanometer / omm_unit.picosecond))
+        else:
+            forces = raw
+        immobile = ~massive
+        fixed_set = {int(i) for i in fixed}
+        if fixed_set:
+            immobile[sorted(fixed_set)] = True
+        forces = np.where(immobile[:, None], 0.0, forces)
+        norms = np.linalg.norm(forces, axis=1)
+        rms_force = float(np.sqrt((norms**2).sum() / count)) if count else 0.0
+        max_force = float(norms.max()) if count else 0.0
+
+        positions = np.asarray(state.getPositions(asNumpy=True).value_in_unit(omm_unit.nanometer))
+        fixed_all = fixed_set | {int(i) for i in np.flatnonzero(~massive)}
+        worst, fixed_worst = cls._bond_stretches(system, positions, fixed_all)
+
+        def _names(pair: Any) -> Any:
+            return None if pair is None else tuple(cls._atom_label(topology, i) for i in pair)
+
+        return {
+            "rms_force": rms_force,
+            "max_force": max_force,
+            "worst_bond_stretch": worst[0],
+            "worst_bond": _names(worst[1]),
+            "fixed_bond_stretch": fixed_worst[0],
+            "fixed_bond": _names(fixed_worst[1]),
+        }
+
+    @staticmethod
+    def _minimize_energy(simulation: Any, tolerance: float, max_iterations: int) -> None:
+        """``simulation.minimizeEnergy`` that stops early when a signal arrives.
+
+        A MinimizationReporter checks the interrupt flag after every L-BFGS
+        iteration; an interrupted minimization raises GracefulExit, leaving the
+        phase record unfinished so the next job minimizes again.
+        """
+        from polyzymd.simulation import signals
+
+        class _InterruptReporter(openmm.MinimizationReporter):
+            def __init__(self) -> None:
+                super().__init__()
+                self.stopped = False
+
+            def report(self, iteration, x, grad, args):  # noqa: ARG002
+                if signals.is_interrupted():
+                    self.stopped = True
+                    return True
+                return False
+
+        reporter = _InterruptReporter()
+        simulation.minimizeEnergy(
+            tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
+            maxIterations=max_iterations,
+            reporter=reporter,
+        )
+        if reporter.stopped:
+            LOGGER.warning("Minimization stopped by a signal before it finished")
+            raise signals.GracefulExit(signals.get_interrupt_signal())
+
+    def _check_minimized(
+        self,
+        simulation: Any,
+        system: Any,
+        tolerance: float,
+        capped: bool,
+        fixed: Any = (),
+    ) -> Dict[str, Any]:
+        """Continue an unconverged or torn minimization once, then fail if it is still torn.
+
+        A minimizer capped by ``max_iterations`` can stop far from a minimum, and
+        a GPU minimization occasionally ends in a strained state with torn bonds;
+        either one sends equilibration to NaN. A torn bond, or a *capped* run
+        whose RMS force is above ``tolerance * CONVERGENCE_SLACK``, is continued
+        to convergence once (uncapped); MinimizationFailed is raised if a bond is
+        still torn. A torn bond between two fixed atoms cannot be repaired by
+        minimizing, so it fails at once.
+        """
+        quality = self._minimization_quality(simulation.context, system, self._topology, fixed)
+        self._refuse_torn_fixed_bond(quality)
+
+        def _torn(q: Dict[str, Any]) -> bool:
+            return q["worst_bond_stretch"] > TORN_BOND_FRACTION
+
+        reminimized = False
+        if _torn(quality) or (capped and quality["rms_force"] > tolerance * CONVERGENCE_SLACK):
+            LOGGER.warning(
+                "Minimization stopped before converging or with a torn bond (RMS force "
+                "%.1f kJ/mol/nm, tolerance %.1f; worst bond %s stretched %.0f%%); "
+                "continuing it to convergence",
+                quality["rms_force"],
+                tolerance,
+                quality["worst_bond"],
+                100 * quality["worst_bond_stretch"],
+            )
+            self._minimize_energy(simulation, tolerance, 0)
+            reminimized = True
+            quality = self._minimization_quality(simulation.context, system, self._topology, fixed)
+            if _torn(quality):
+                quality["reminimized"] = True
+                raise MinimizationFailed(
+                    "Energy minimization did not reach a usable state: RMS force "
+                    f"{quality['rms_force']:.1f} kJ/mol/nm (tolerance {tolerance:.1f}), "
+                    f"largest force {quality['max_force']:.1f} kJ/mol/nm, worst bond "
+                    f"{quality['worst_bond']} stretched {100 * quality['worst_bond_stretch']:.0f}% "
+                    f"over its equilibrium length (limit {100 * TORN_BOND_FRACTION:.0f}%). "
+                    "Equilibration from this state would fail; check the structure "
+                    "around those atoms.",
+                    quality,
+                )
+        LOGGER.info(
+            "Minimized state: RMS force %.2f kJ/mol/nm (tolerance %.1f), largest force "
+            "%.1f kJ/mol/nm, worst bond stretch %.1f%%%s",
+            quality["rms_force"],
+            tolerance,
+            quality["max_force"],
+            100 * quality["worst_bond_stretch"],
+            " after continuing the minimization" if reminimized else "",
+        )
+        if quality["rms_force"] > tolerance * CONVERGENCE_SLACK:
+            LOGGER.info(
+                "OpenMM's minimizer finished above the tolerance; this is usual with "
+                "constraints, whose final stiff-restraint passes stop early"
+            )
+        quality["converged"] = True
+        quality["reminimized"] = reminimized
+        return quality
+
+    @staticmethod
+    def _refuse_torn_fixed_bond(quality: Dict[str, Any]) -> None:
+        """Raise if a bond between two fixed atoms is torn; minimizing cannot fix it."""
+        if quality["fixed_bond_stretch"] > TORN_BOND_FRACTION:
+            failed = dict(quality)
+            failed["worst_bond"] = quality["fixed_bond"]
+            failed["worst_bond_stretch"] = quality["fixed_bond_stretch"]
+            raise MinimizationFailed(
+                "The input structure has a stretched bond between fixed solute atoms: "
+                f"{quality['fixed_bond']} is {100 * quality['fixed_bond_stretch']:.0f}% over "
+                f"its equilibrium length (limit {100 * TORN_BOND_FRACTION:.0f}%). Those "
+                "atoms are held fixed during minimization, so it cannot repair the bond; "
+                "fix the input structure.",
+                failed,
+            )
+
     def minimize(
         self,
-        max_iterations: int = 1000,
+        max_iterations: int = 0,
         tolerance: float = 10.0,
         *,
         freeze_solute: bool = True,
@@ -511,7 +771,10 @@ class SimulationRunner:
         """Run energy minimization.
 
         Args:
-            max_iterations: Maximum iterations (0 = until convergence).
+            max_iterations: Maximum iterations (0 = until convergence). A capped
+                run that ends unconverged, or any run that leaves a torn bond,
+                is continued to convergence once; a bond still torn after that
+                raises MinimizationFailed.
             tolerance: Energy tolerance in kJ/mol/nm.
             freeze_solute: Hold every protein and substrate *heavy* atom fixed so
                 that only solvent, polymers, and the solute hydrogens relax.  The
@@ -526,6 +789,10 @@ class SimulationRunner:
 
         Raises:
             RuntimeError: If ``freeze_solute`` is set and a frozen heavy atom moved.
+            MinimizationFailed: If a bond stays torn after the continued run, or a bond
+                between two frozen atoms is torn. The phase record keeps the
+                measurements with ``converged`` false.
+            GracefulExit: If a signal arrives during minimization.
         """
         from polyzymd.simulation.phase_state import phase_completed, write_phase_record
         from polyzymd.simulation.signals import GracefulExit, get_interrupt_signal, is_interrupted
@@ -556,11 +823,102 @@ class SimulationRunner:
         if freeze_solute:
             frozen_indices = self._solute_heavy_atom_indices()
             hydrogen_indices = sorted(set(self._solute_atom_indices()) - set(frozen_indices))
+        integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
+
+        try:
+            simulation, quality, frozen_rmsd, hydrogen_displacement = self._minimize_phase(
+                starting_positions,
+                frozen_indices,
+                hydrogen_indices,
+                integrator,
+                max_iterations,
+                tolerance,
+            )
+        except MinimizationFailed as failure:
+            q = failure.quality
+            write_phase_record(
+                record_path,
+                phase="minimization",
+                status="started",
+                frozen_atoms=len(frozen_indices) if frozen_indices else None,
+                rms_force=q["rms_force"],
+                max_force=q["max_force"],
+                worst_bond_stretch=q["worst_bond_stretch"],
+                worst_bond=None if q["worst_bond"] is None else " - ".join(q["worst_bond"]),
+                converged=False,
+                reminimized=q.get("reminimized", False),
+            )
+            raise
+
+        # Measure the state that is actually saved: the real System, after any
+        # applyConstraints above, with the frozen heavy atoms counted as fixed.
+        saved = self._minimization_quality(
+            simulation.context, self._system, self._topology, frozen_indices
+        )
+        LOGGER.info(
+            "Saved minimized state: RMS force %.2f kJ/mol/nm on the real System "
+            "(tolerance %.1f), worst bond stretch %.1f%%",
+            saved["rms_force"],
+            tolerance,
+            100 * saved["worst_bond_stretch"],
+        )
+        quality = {
+            **saved,
+            "converged": quality["converged"],
+            "reminimized": quality["reminimized"],
+        }
+
+        # Get final state (including box vectors for proper handoff to equilibration)
+        state = simulation.context.getState(getEnergy=True, getPositions=True)
+        energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        self._current_positions = state.getPositions()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
+
+        temporary_state = state_path.with_name(f".{state_path.name}.tmp")
+        temporary_state.write_text(XmlSerializer.serialize(state))
+        os.replace(temporary_state, state_path)
+        write_phase_record(
+            record_path,
+            phase="minimization",
+            status="completed",
+            state_path=str(state_path.resolve()),
+            frozen_atoms=len(frozen_indices) if frozen_indices else None,
+            frozen_rmsd_angstrom=frozen_rmsd,
+            hydrogen_max_displacement_angstrom=hydrogen_displacement,
+            rms_force=quality["rms_force"],
+            max_force=quality["max_force"],
+            worst_bond_stretch=quality["worst_bond_stretch"],
+            worst_bond=None if quality["worst_bond"] is None else " - ".join(quality["worst_bond"]),
+            converged=quality["converged"],
+            reminimized=quality["reminimized"],
+        )
+
+        LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
+        if is_interrupted():
+            # A signal that arrived after minimization finished is honoured only
+            # now, after the result is saved, so the next job does not redo it.
+            raise GracefulExit(get_interrupt_signal())
+
+        return energy
+
+    def _minimize_phase(
+        self,
+        starting_positions: Any,
+        frozen_indices: List[int],
+        hydrogen_indices: List[int],
+        integrator: Any,
+        max_iterations: int,
+        tolerance: float,
+    ) -> Tuple[Any, Dict[str, Any], float | None, float | None]:
+        """Minimize (on a frozen copy if *frozen_indices*) and enforce constraints.
+
+        Returns the Simulation on the real System holding the minimized
+        coordinates, the convergence measurements, and the frozen and hydrogen
+        displacements (None without freezing).
+        """
         frozen_rmsd: float | None = None
         hydrogen_displacement: float | None = None
-        integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
         selection = self._get_platform()
-
         if frozen_indices:
             # Minimise on a copy in which the solute heavy atoms are massless (hence
             # fixed), then hand the relaxed solvent/polymer/hydrogen coordinates to
@@ -570,9 +928,13 @@ class SimulationRunner:
                 self._topology, frozen_system, integrator, selection.platform, selection.properties
             )
             frozen_simulation.context.setPositions(starting_positions)
-            frozen_simulation.minimizeEnergy(
-                tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
-                maxIterations=max_iterations,
+            # A torn bond between two frozen atoms cannot be minimized away.
+            self._refuse_torn_fixed_bond(
+                self._minimization_quality(frozen_simulation.context, frozen_system, self._topology)
+            )
+            self._minimize_energy(frozen_simulation, tolerance, max_iterations)
+            quality = self._check_minimized(
+                frozen_simulation, frozen_system, tolerance, capped=max_iterations > 0
             )
             minimized_positions = frozen_simulation.context.getState(
                 getPositions=True
@@ -605,9 +967,9 @@ class SimulationRunner:
         else:
             simulation = self._create_simulation(integrator)
             simulation.context.setPositions(starting_positions)
-            simulation.minimizeEnergy(
-                tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
-                maxIterations=max_iterations,
+            self._minimize_energy(simulation, tolerance, max_iterations)
+            quality = self._check_minimized(
+                simulation, self._system, tolerance, capped=max_iterations > 0
             )
 
         # Equilibration starts by setting these coordinates on a constrained
@@ -659,32 +1021,7 @@ class SimulationRunner:
                         "the prepared structure must enter equilibration unchanged."
                     )
 
-        # Get final state (including box vectors for proper handoff to equilibration)
-        state = simulation.context.getState(getEnergy=True, getPositions=True)
-        energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
-        self._current_positions = state.getPositions()
-        self._current_box_vectors = state.getPeriodicBoxVectors()
-
-        temporary_state = state_path.with_name(f".{state_path.name}.tmp")
-        temporary_state.write_text(XmlSerializer.serialize(state))
-        os.replace(temporary_state, state_path)
-        write_phase_record(
-            record_path,
-            phase="minimization",
-            status="completed",
-            state_path=str(state_path.resolve()),
-            frozen_atoms=len(frozen_indices) if frozen_indices else None,
-            frozen_rmsd_angstrom=frozen_rmsd,
-            hydrogen_max_displacement_angstrom=hydrogen_displacement,
-        )
-
-        LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
-        if is_interrupted():
-            # A signal that arrived during minimization is honoured only now,
-            # after the result is saved, so the next job does not redo it.
-            raise GracefulExit(get_interrupt_signal())
-
-        return energy
+        return simulation, quality, frozen_rmsd, hydrogen_displacement
 
     def run_equilibration(
         self,

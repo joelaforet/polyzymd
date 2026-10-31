@@ -155,3 +155,40 @@ def test_mdp_settings_are_read_whatever_their_spelling(tmp_path) -> None:
         "dispcorr": "EnerPres",
         "rvdw-switch": "0.8",
     }
+
+
+@pytest.mark.parametrize("absolute", [False, True], ids=["relative", "absolute"])
+def test_gromacs_pairs_of_function_type_2_are_read_from_included_files(tmp_path, absolute) -> None:
+    """A 1-4 pair with its own Coulomb scale (GLYCAM06j) survives the GROMACS reader."""
+    import openmm
+    from openmm import app
+
+    from polyzymd.audit.realized import read_gromacs_top, set_type2_pairs
+
+    (tmp_path / "molecules").mkdir()
+    atoms = "".join(f"{i} C 1 M C{i} {i} {0.1 * (-1) ** i:.1f} 12.011\n" for i in range(1, 6))
+    (tmp_path / "molecules" / "m.itp").write_text(
+        "[ moleculetype ]\nM 3\n\n[ atoms ]\n" + atoms + "\n[ bonds ]\n"
+        "1 2 1 0.15 1000\n2 3 1 0.15 1000\n3 4 1 0.15 1000\n4 5 1 0.15 1000\n\n"
+        "[ pairs ]\n1 4 2 1.0 0.1 -0.1 0.33 0.4\n2 5 1\n"
+    )
+    top = tmp_path / "system.top"
+    # Interchange writes absolute include paths.
+    include = tmp_path / "molecules" / "m.itp" if absolute else "molecules/m.itp"
+    top.write_text(
+        "[ defaults ]\n1 2 yes 0.5 0.8333333333\n\n[ atomtypes ]\nC 6 12.011 0.0 A 0.34 0.36\n\n"
+        f'#include "{include}"\n\n[ system ]\nx\n\n[ molecules ]\nM 2\n'
+    )
+    topology_file, pairs = read_gromacs_top(top)
+    assert pairs == {"M": [(1, 4, 1.0, 0.1, -0.1, 0.33, 0.4)]}
+    system = topology_file.createSystem(nonbondedMethod=app.NoCutoff)
+    assert set_type2_pairs(system, topology_file, pairs) == 2  # one per copy
+    force = next(f for f in system.getForces() if isinstance(f, openmm.NonbondedForce))
+    exceptions = {}
+    for n in range(force.getNumExceptions()):
+        i, j, product, sigma, epsilon = force.getExceptionParameters(n)
+        exceptions[(min(i, j), max(i, j))] = (product._value, sigma._value, epsilon._value)
+    for first in (0, 5):
+        assert exceptions[(first, first + 3)] == pytest.approx((-0.01, 0.33, 0.4))
+        # The type-1 pair keeps the generated, scaled parameters.
+        assert exceptions[(first + 1, first + 4)] == pytest.approx((-0.01 / 1.2, 0.34, 0.18))

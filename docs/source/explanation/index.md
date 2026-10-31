@@ -60,6 +60,7 @@ analysis_triad_best_practices
 
 simulation_safeguards
 physics_audit
+modified_residues
 residue_assignment
 gromacs_parallelism
 ```

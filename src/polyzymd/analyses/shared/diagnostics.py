@@ -321,8 +321,8 @@ def warn_if_multi_chain_selection(
     >>> warn_if_multi_chain_selection(atoms, "resid 141-148", "for Lid Domain distance")
     True  # Warning logged
 
-    >>> atoms = u.select_atoms("protein and resid 141-148")  # Single chain
-    >>> warn_if_multi_chain_selection(atoms, "protein and resid 141-148")
+    >>> atoms = u.select_atoms("segid PROT and resid 141-148")  # The protein only
+    >>> warn_if_multi_chain_selection(atoms, "segid PROT and resid 141-148")
     False  # No warning
 
     Notes
@@ -333,9 +333,11 @@ def warn_if_multi_chain_selection(
     - Chain C: Polymer
     - Chain D+: Solvent, ions
 
-    When analyzing protein residues, always use ``protein and resid X``
-    or ``chainid A and resid X`` to avoid accidentally including atoms
-    from polymers or water that happen to have the same residue numbers.
+    When analyzing protein residues, use ``segid PROT and resid X`` to avoid
+    including atoms from polymers, water or a modified protein's attachments
+    (glycans, grafts, labels, whose own segments number their residues from 1)
+    that share the residue numbers. ``protein and resid X`` misses a modified
+    protein's non-canonical residues.
     """
     if len(atoms) == 0:
         return False
@@ -347,7 +349,13 @@ def warn_if_multi_chain_selection(
         # Fallback to segment IDs if chainID not available
         chain_ids = set(atoms.segments.segids)
 
-    if len(chain_ids) > 1:
+    # A modified protein's attachments share its chain but have their own segments.
+    try:
+        segment_ids = set(atoms.segids)
+    except AttributeError:
+        segment_ids = set()
+
+    if len(chain_ids) > 1 or len(segment_ids) > 1:
         # Get residue names to help user understand what was selected
         resnames = set(atoms.resnames)
         resnames_str = ", ".join(sorted(resnames)[:5])
@@ -357,11 +365,13 @@ def warn_if_multi_chain_selection(
         context_str = f" {context}" if context else ""
 
         LOGGER.warning(
-            f"Selection '{selection}' matched atoms from multiple chains: {sorted(chain_ids)}.{context_str}\n"
+            f"Selection '{selection}' matched atoms from multiple chains or segments: "
+            f"{sorted(chain_ids)} / {sorted(segment_ids)}.{context_str}\n"
             f"  Residue types selected: {resnames_str}\n"
             f"  This may cause incorrect calculations (e.g., COM includes polymer/water atoms).\n"
-            f"  Consider adding 'protein and' or 'chainid A and' to restrict to a single chain.\n"
-            f"  Example: 'com(protein and resid 141-148)' instead of 'com(resid 141-148)'"
+            f"  Consider adding 'segid PROT and' to restrict it to the protein ('protein and'\n"
+            f"  misses non-canonical residues of a modified protein).\n"
+            f"  Example: 'com(segid PROT and resid 141-148)' instead of 'com(resid 141-148)'"
         )
         return True
 

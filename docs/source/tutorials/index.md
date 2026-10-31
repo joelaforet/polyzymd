@@ -97,6 +97,13 @@ The GROMACS track continues in {doc}`../how_to/run_gromacs` and
    - *Time:* about 15 minutes.
    - *Engines:* none; no simulation.
 
+8. **{doc}`glycosylated_protein`**
+   - *You learn:* how to write a covalent modification, see its plan, and
+     read the audit of a modified protein.
+   - *You run:* ubiquitin with a glycan on Asn60, built and run for 200 ps.
+   - *Time:* about 15 minutes with a GPU.
+   - *Engines:* OpenMM or GROMACS.
+
 Tutorials 2 to 4 continue in the project folder of the quickstart.
 
 For one task at a time, such as {doc}`co-solvents <../how_to/cosolvents>`,
@@ -116,4 +123,5 @@ sasa_analysis
 prepare_pdb_for_openff
 own_system
 star_sited_monomers
+glycosylated_protein
 ```

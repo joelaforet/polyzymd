@@ -575,6 +575,50 @@ def _chosen(analysis: str, run: str | None, runs: list[str]) -> str:
 #: Chain of each role in a PolyzyMD build: the protein in chain A, the ligand
 #: (substrate) in chain B and the polymer in chain C.
 ROLE_CHAINS = {"protein": "A", "ligand": "B", "polymer": "C"}
+#: Which chains a null ``polymer_selection`` means in each ``polymers`` scope.
+POLYMER_SCOPES = ("soluble", "attached", "all")
+
+
+def _attachment_segids(study: Any) -> list[str]:
+    """Return the attachment segments (G001, P001, ...) of the study's topologies.
+
+    They are read from the first readable replicate of each condition, so the
+    selections name exact segment IDs rather than a wildcard.
+    """
+    from polyzymd.core.components import is_attachment_segid
+
+    found: set[str] = set()
+    for condition in study:
+        for replicate in condition.replicates:
+            try:
+                universe = replicate.universe()
+            except Exception:  # noqa: BLE001 - an unreadable replicate is reported elsewhere
+                continue
+            found.update(str(s) for s in universe.segments.segids if is_attachment_segid(str(s)))
+            break
+    return sorted(found)
+
+
+def _scoped_selections(settings: dict[str, Any], attachments: list[str]) -> tuple[str, str]:
+    """Return the protein and polymer selections, with null ones resolved for the scope.
+
+    A protein's attachments (glycans, grafted chains, other groups) sit in its
+    chain under their own segments; a null ``protein_selection`` leaves them
+    out. Without attachment segments the selections are those of 1.3.
+    """
+    protein = _selection(settings["protein_selection"], "protein_selection", "protein")
+    polymer = _selection(settings["polymer_selection"], "polymer_selection", "polymer")
+    if settings["protein_selection"] is None and attachments:
+        protein = f"({protein}) and not (segid {' '.join(attachments)})"
+    if settings["polymer_selection"] is None:
+        grafts = [segid for segid in attachments if segid.startswith("P")]
+        grafted = f"segid {' '.join(grafts)}" if grafts else "not all"
+        scope = settings.get("polymers", "soluble")
+        if scope == "attached":
+            polymer = grafted
+        elif scope == "all" and grafts:
+            polymer = f"({polymer}) or ({grafted})"
+    return protein, polymer
 
 
 def _selection(value: Any, setting: str, role: str) -> str:
@@ -1433,7 +1477,13 @@ def _measure_contacts(study: Any, settings: dict, request: Request) -> Measured:
 
     ``protein_selection`` and ``polymer_selection`` left null select the
     atoms of the protein and polymer roles (:data:`ROLE_CHAINS`), and the
-    resolved selections are recorded in ``provenance.settings``.
+    resolved selections are recorded in ``provenance.settings``. ``polymers``
+    picks which chains a null ``polymer_selection`` means: ``soluble`` (the
+    default, the packed chains), ``attached`` (chains grafted onto the protein,
+    segments ``P001``, ``P002``, ...) or ``all``. When the topology has
+    attachment segments (``G001``, ``P001``, ``M001``), a null
+    ``protein_selection`` leaves them out in every scope; without them the
+    selections are unchanged.
     ``polymer_types`` names the polymer residue names (monomers) reported one
     by one; by default every residue name of ``polymer_selection`` in any
     condition (:func:`study_wide_settings`), so a replicate without one
@@ -1505,8 +1555,13 @@ def _measure_contacts(study: Any, settings: dict, request: Request) -> Measured:
             hint="Pass --set tolerance_ps=0 for events that end at the first absent frame.",
         )
     settings = {**settings, **study_wide_settings("contacts", study, settings)}
-    protein = _selection(settings["protein_selection"], "protein_selection", "protein")
-    polymer = _selection(settings["polymer_selection"], "polymer_selection", "polymer")
+    scope = settings.get("polymers", "soluble")
+    if scope not in POLYMER_SCOPES:
+        raise ProtocolError(
+            f"contacts: polymers must be one of {', '.join(POLYMER_SCOPES)}, got {scope!r}.",
+            hint="soluble: the packed chains; attached: chains grafted onto the protein; all: both.",
+        )
+    protein, polymer = _scoped_selections(settings, _attachment_segids(study))
     names = settings["polymer_types"] or []
     types = sorted({str(name) for name in ([names] if isinstance(names, str) else names)})
     if method == "distance" and settings["heavy_atoms"]:
@@ -1597,6 +1652,8 @@ def _measure_contacts(study: Any, settings: dict, request: Request) -> Measured:
             key: value
             for key, value in settings.items()
             if key not in CONTACT_METHOD_SETTINGS[other]
+            # The default scope is left out, so 1.3 results keep their records.
+            and not (key == "polymers" and value == "soluble")
         },
         "protein_selection": protein,
         "polymer_selection": polymer,
@@ -1998,6 +2055,7 @@ ANALYSES = {
             "method": "occlusion",
             "polymer_selection": None,
             "protein_selection": None,
+            "polymers": "soluble",
             "polymer_types": None,
             "use_pbc": True,
             "regions": {},

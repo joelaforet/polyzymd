@@ -434,3 +434,42 @@ def test_a_run_built_before_rc5_is_read_through_its_old_record(tmp_path) -> None
     assert build_record_path(tmp_path).name == "build_manifest.json"
     (tmp_path / "build_provenance.json").write_text("{}")
     assert build_record_path(tmp_path).name == "build_provenance.json"
+
+
+def test_the_build_record_summarizes_protein_modifications_for_people() -> None:
+    from polyzymd.simulation.artifact_integrity import provenance_markdown
+
+    modifications = {
+        "declared": [
+            {"kind": "mutate", "site": "A:Q5", "to": "ASN"},
+            {
+                "kind": "attach",
+                "site": "A:N5",
+                "type": "glycan",
+                "fragment": {"pdb_path": "/x/glycam_G42666HT.pdb", "sha256": "ab"},
+                "reaction": "N-glycosylation",
+            },
+        ],
+        "parameterization": {
+            "segments": ["PROT"] * 300 + ["G001"] * 55,
+            "sites": [
+                {
+                    "name": "G001",
+                    "type": "glycan",
+                    "atom_indices": list(range(60)),
+                    "force_field": ["GLYCAM_06j-1.xml"],
+                    "charges": {"method": "library"},
+                }
+            ],
+        },
+        "mbuild": {
+            "version": "1.4.0",
+            "requested_revision": "biopolymers-v0.1.0",
+            "commit": "84e0f9b",
+        },
+    }
+    text = provenance_markdown({"provenance": {"protein_modifications": modifications}})
+    assert "## Protein modifications" in text
+    assert "| 2 | attach | A:N5 | glycan | glycam_G42666HT.pdb | N-glycosylation |" in text
+    assert "Segments: PROT 300 atoms, G001 55 atoms" in text
+    assert text.count("PROT") < 5

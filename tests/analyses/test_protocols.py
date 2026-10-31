@@ -490,6 +490,68 @@ def test_null_contact_selections_select_the_protein_and_the_polymer(tmp_path: Pa
     assert report.conditions == default.conditions
 
 
+def _segmented_universe():
+    """Two atoms in each of PROT and P001, G001 (chain A) and POLY (chain C)."""
+    import MDAnalysis as mda
+    import numpy as np
+
+    segids = ["PROT", "P001", "G001", "POLY"]
+    universe = mda.Universe.empty(
+        8,
+        n_residues=4,
+        n_segments=4,
+        atom_resindex=np.repeat(np.arange(4), 2),
+        residue_segindex=np.arange(4),
+        trajectory=True,
+    )
+    universe.add_TopologyAttr("segids", segids)
+    universe.add_TopologyAttr("chainIDs", ["A"] * 6 + ["C"] * 2)
+    return universe
+
+
+@pytest.mark.parametrize(
+    ("scope", "polymer_segments"),
+    [("soluble", {"POLY"}), ("attached", {"P001"}), ("all", {"POLY", "P001"})],
+)
+def test_each_scope_selects_exact_segments(scope, polymer_segments) -> None:
+    """Attachment segments are named exactly: PROT and POLY never match them."""
+    from polyzymd.analyses.protocols import _attachment_segids, _scoped_selections
+
+    universe = _segmented_universe()
+    replicate = SimpleNamespace(universe=lambda: universe)
+    attachments = _attachment_segids([SimpleNamespace(replicates=[replicate])])
+    assert attachments == ["G001", "P001"]
+    settings = {"protein_selection": None, "polymer_selection": None, "polymers": scope}
+    protein, polymer = _scoped_selections(settings, attachments)
+    assert set(universe.select_atoms(protein).segids) == {"PROT"}
+    assert set(universe.select_atoms(polymer).segids) == polymer_segments
+
+
+@pytest.mark.parametrize(("scope", "polymer"), [("attached", "not all"), ("all", "chainid C")])
+def test_without_attachments_the_scopes_change_only_the_polymer(
+    tmp_path: Path, scope, polymer
+) -> None:
+    """The fixture has no attachment segments: the protein stays chain A."""
+    config = _protein_ligand(tmp_path, "C")
+    options = {"equilibration": "0ns", "plots": False, "output_dir": tmp_path / "out"}
+    report = analyze(
+        "contacts", [config], settings={"method": "distance", "polymers": scope}, **options
+    )
+    recorded = report.provenance.settings
+    assert recorded["polymers"] == scope
+    assert recorded["polymer_selection"] == f"({polymer}) and not element H"
+    assert recorded["protein_selection"] == "(chainid A) and not element H"
+
+
+def test_the_default_polymers_scope_is_not_recorded(tmp_path: Path) -> None:
+    config = _protein_ligand(tmp_path, "C")
+    options = {"equilibration": "0ns", "plots": False, "output_dir": tmp_path / "out"}
+    report = analyze("contacts", [config], settings={"method": "distance"}, **options)
+    assert "polymers" not in report.provenance.settings
+    with pytest.raises(ProtocolError, match="polymers must be one of soluble, attached, all"):
+        analyze("contacts", [config], settings={"polymers": "grafted"}, **options)
+
+
 def test_a_null_group_not_named_after_a_role_is_refused(tmp_path: Path) -> None:
     config = _protein_ligand(tmp_path, "B")
     settings = {"groups": {"sds": None}, "summaries": {"s": {"within": "sds"}}}

@@ -51,10 +51,10 @@ AVOGADRO_CONSTANT = 6.02214076e23
 ION_CHARGE_TOLERANCE = 1.0e-5
 
 # Water model type
-WaterModelType = Literal["tip3p"]
+WaterModelType = Literal["tip3p", "opc3"]
 
 # Box shape type
-BoxShapeType = Literal["cube", "rhombic_dodecahedron"]
+BoxShapeType = Literal["cube", "rhombic_dodecahedron", "rectangular"]
 
 
 @dataclass
@@ -196,6 +196,11 @@ class SolventComposition:
         return 1.0 - total_cosolvent
 
 
+def _config_padding(box: "Any") -> "float | tuple[float, float, float]":
+    """The padding a :class:`BoxConfig` gives the builder: per axis for a rectangular box."""
+    return box.padding_xyz if box.shape.value == "rectangular" else box.padding
+
+
 class SolventBuilder:
     """Builder for solvating molecular systems.
 
@@ -266,10 +271,11 @@ class SolventBuilder:
             Topology whose coordinates set the box size.  For a deterministic
             build this is the protein + substrate only, never the packed
             polymers.
-        padding : float
-            Solute-to-box-edge padding in nm (``solvent.box.padding``).
+        padding : float or tuple of three floats
+            Solute-to-box-edge padding in nm (``solvent.box.padding``); a
+            rectangular box takes one value per axis.
         box_shape : str
-            Box geometry (``cube`` or ``rhombic_dodecahedron``).
+            Box geometry (``cube``, ``rhombic_dodecahedron`` or ``rectangular``).
         extra_padding : float
             Additional padding in nm reserved for molecules that will be packed
             later (``polymers.packing.padding``).  ``0.0`` for a build without
@@ -286,12 +292,21 @@ class SolventBuilder:
 
         from polyzymd.utils import boxvectors
 
-        plan = boxvectors.plan_box(
-            boxvectors.get_topology_positions(topology) / 10.0,
-            self._get_box_shape_matrix(box_shape),
-            padding_nm=float(padding) + float(extra_padding),
-            margin_nm=float(tolerance) / 10.0,
-        )
+        positions_nm = boxvectors.get_topology_positions(topology) / 10.0
+        if box_shape == "rectangular":
+            per_axis = (padding,) * 3 if isinstance(padding, (int, float)) else tuple(padding)
+            plan = boxvectors.plan_rectangular_box(
+                positions_nm,
+                tuple(float(p) + float(extra_padding) for p in per_axis),
+                margin_nm=float(tolerance) / 10.0,
+            )
+        else:
+            plan = boxvectors.plan_box(
+                positions_nm,
+                self._get_box_shape_matrix(box_shape),
+                padding_nm=float(padding) + float(extra_padding),
+                margin_nm=float(tolerance) / 10.0,
+            )
         LOGGER.info("Box: %s", boxvectors.describe_box_plan(plan))
         return Quantity(plan["box_vectors"], "nanometer")
 
@@ -309,7 +324,7 @@ class SolventBuilder:
         """
         return self.compute_box_vectors(
             topology,
-            padding=config.box.padding,
+            padding=_config_padding(config.box),
             box_shape=config.box.shape.value,
             extra_padding=extra_padding_nm,
             tolerance=config.box.tolerance,
@@ -679,7 +694,7 @@ class SolventBuilder:
         return self.solvate(
             topology=topology,
             composition=composition,
-            padding=config.box.padding,
+            padding=_config_padding(config.box),
             box_shape=config.box.shape.value,
             target_density=config.box.target_density,
             tolerance=config.box.tolerance,

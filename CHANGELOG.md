@@ -7,16 +7,195 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (behaviour)
+
+- Energy minimization now runs to convergence by default: `simulation_phases.minimization.max_iterations` defaults to `0` (was `1000`). Configs that don't set it now minimize until the RMS force is below `tolerance`; set `max_iterations: 1000` to keep the old cap. This is the one default the 1.3 schema contract allows to change, by maintainer decision.
+- After minimization, `polyzymd run` checks the RMS force on the atoms that were free to move and the most stretched bond. A run stopped by an iteration cap before converging, or a state with a bond stretched more than 50 % over its equilibrium length, is minimized again to convergence once. If a bond is still torn, the run stops with the offending atoms and values named instead of entering equilibration; a torn bond between two frozen solute atoms stops it at once. The RMS force is measured as OpenMM's minimizer measures it. The outcome (`rms_force`, `max_force`, `worst_bond`, `worst_bond_stretch`, `converged`, `reminimized`) is recorded in `minimization/phase.json`, also for a failed run. A signal stops a running minimization at its next iteration.
+### Performance
+
+- Exporting a large solvated system to OpenMM and GROMACS is about 19x faster: the OpenFF
+  toolkit looks a molecule's index up by scanning the topology, and Interchange does that once
+  per molecule, so the export grew with the square of the molecule count. PolyzyMD now makes
+  that lookup constant time while it exports. A glycosylated BG505 protomer in water (330,000
+  atoms) exports in 33 s instead of 625 s; the exported systems are unchanged.
+
 ### Added
 
+- **Rectangular boxes with padding per axis.** `solvent.box.shape: rectangular`
+  takes one `padding` or one per axis (`{x, y, z}`), so an elongated protein
+  no longer needs a box sized by its longest dimension. The fixed solutes are
+  first turned onto their principal axes (longest on z; `align: none` keeps
+  the input orientation). The rotation is deterministic (canonical axis
+  signs; a plane of equal moments keeps its input orientation), ignores a
+  modified protein's attachment segments so replicates share one box, is
+  recorded in `build_provenance.json` and applied to `modified_protein.pdb`.
+  The alignment and per-axis padding enter the analysis identity only for a
+  rectangular box. Each axis needs at least the nonbonded cutoff plus
+  0.1 nm. The audit warns that the box assumes little rotation
+  (`geometry.rectangular_box`), and
+  `polyzymd.analyses.periodic_images` measures the solute's distance to its
+  own image over a run, keeping the solute whole with MDAnalysis' `NoJump`
+  from a whole first frame. Cubes and rhombic dodecahedra are unchanged.
+
+- Documentation for modified proteins: the tutorial "From an idea and a PDB
+  to a glycosylated protein"; how-to guides to mutate, glycosylate with
+  GLYCAM06j, attach groups, graft polymers, use Rosemary and analyze a modified
+  protein; and an explanation of how modified residues are parameterized and
+  audited. References for GLYCAM06, mBuild biopolymers and openff-pablo.
+- `examples/modified_proteins`: ubiquitin with a GLYCAM06j glycan on Asn60, and
+  with an octanoyl amide on Lys63 (Sage 2.3.0 and NAGL).
+- Acceptance builds of mutated, labelled, glycosylated and grafted proteins
+  (fibronectin FN7-10 with AzF and FRET dyes, lipase A with dyes and a grafted
+  chain, the BG505 SOSIP protomer with 20 glycans)
+  (`POLYZYMD_ACCEPTANCE=1`, local only; `POLYZYMD_ACCEPTANCE_RUN=1` also runs
+  each one briefly).
+- Polymer chains grafted onto a protein: an `attach` of `type: polymer` whose
+  `fragment: {polymer: ...}` is built by the star-sited polymer generator, from
+  the monomers of a polymer solute (`monomers_from`) or its own, with `sequence`;
+  each replicate draws its own chain unless `random_seed` fixes one. `attach_at`
+  names the position that bonds; the stated
+  `reaction` bonds it. The whole chain is one site (NAGL on its capped model,
+  Sage), its own segment (`P001`, ...), and its drawn sequence is recorded.
+  Grafted chains count toward `composition.polymer_mass_fraction` and are listed
+  by `composition.polymer_sequences`; the `contacts` analysis takes
+  `polymers: soluble | attached | all` (default `soluble`); a null
+  `protein_selection` leaves a protein's attachment segments out.
+- A polymer solute takes a `sequence:` block: `mode: statistical` (the default),
+  `block` (`blocks: [{H: 1}, {SBMA: 5}, {NHS: 1}, {SBMA: 5}, {H: 1}]`) or
+  `explicit` (`units: [...]`), and `fixed: {7: NHS}` pins positions in any mode.
+  Positions count the whole chain, 1 to `length`, the caps being 1 and `length`;
+  monomers and caps are named by label or name, and a monomer used only at pinned
+  positions may have probability 0. Without `sequence:` chains are drawn and
+  cached exactly as before. A config with `sequence:`, `mutations:` or
+  `modifications:` gets a `-seq`/`-mod` hash token in its run folder name; other
+  configs keep their 1.3 names.
+- A protein solute may opt in to OpenFF Rosemary alpha
+  (`force_field: [openff_no_water-3.0.0-alpha2b.offxml]`,
+  `charges: {method: nagl, model: ...}`): one force field for the whole
+  protein component, mutations and modifications included, charged by NAGL on
+  the whole molecule. It takes no `modification_parameters`. Which charges a
+  protein takes is read from its force field file's content (protein library
+  charges, or a NAGLCharges section), not its name. The audit recomputes the
+  declared NAGL model's charges, fails library charges declared on a force
+  field without protein library charges, and warns
+  (`parameters.rosemary_alpha`, reported only for such proteins) that
+  Rosemary is an alpha release. One NAGL model still charges every NAGL
+  component of a build, the protein included.
+- OPC3 water (`solvent.water.model: opc3`) for any system, on OpenMM and
+  GROMACS (`settles`). PolyzyMD loads `opc3.offxml` (openff-forcefields) after
+  every other force field, so the water and the Na+ and Cl- ions take its
+  parameters: OPC3 and the Li/Merz 12-6 ion set fitted for OPC3 (Sengupta et
+  al. 2021), not Sage's Joung-Cheatham TIP3P ions. Waters are packed at OPC3's
+  rigid geometry. The build record lists `opc3.offxml` on the water and the
+  ions, the audit rebuilds them from the same files in the same order, and
+  "Methods to cite" lists OPC3 and the ion set. TIP3P builds are unchanged
+  byte for byte.
+- Audit check `solvent.rosemary_water` (FAIL): a protein on OpenFF Rosemary in
+  water other than OPC3, which OpenFF pairs with Rosemary. Accept it in
+  `modeling_exceptions` with a reason to keep another water model.
+- Audit INFO lines for a protein on Rosemary: `parameters.rosemary_components`
+  recommends Rosemary for polymers, ligands and co-solvents on another force
+  field (allowed; Rosemary is untested in production), and
+  `parameters.glycan_force_field` reports glycans parameterized by Rosemary
+  (whole-protein mode) instead of a GLYCAM06j finding. How-to:
+  `docs/source/how_to/rosemary.md`.
+- The `build` and `test` environments install `openff-forcefields` 2026.09.0
+  (was 2026.01.0), which adds the Rosemary candidate
+  `openff_no_water-3.0.0-alpha2b.offxml`. The other force field files PolyzyMD
+  uses are unchanged byte for byte.
+- A protein solute takes `mutations:` (applied first), `modifications:`
+  (`deprotonate`, `protonate`, `attach`, in order) and `modification_parameters:`
+  (one force field and charge set per site type). Sites are written `A:N58` or
+  `A:ASN58`; a group entry (`chains` with `residues` or `glycans`, `sites`,
+  `sites_file`) stands for one modification per site. `polyzymd build` applies
+  them before packing, writes `modified_protein.pdb`, parameterizes each site and
+  audits the result on OpenMM and GROMACS; the build record lists the declared
+  and the applied modifications. `polyzymd validate --plans` (`--format agent`
+  for JSON) checks every change against the PDB and lists one row per site.
+  An unmodified protein builds and hashes as before.
 - `polyzymd.modifying_proteins`: mutate, protonate, deprotonate and covalently
   modify a protein (`attach` with `type: glycan | polymer | generic`) through
   stable PolyzyMD names over the mBuild biopolymers fork. Sites are written
   `A:N58` or `A:ASN58` and checked against the structure; each call records
   the atoms it added, removed or renamed and the change in formal charge.
   Mutations must come before every other change.
+- `modification_sites` and `segments`: the atoms each modification owns (the
+  anchor residue's side chain from CB outward plus every attached atom; a
+  non-canonical residue's side chain) and each atom's segment (`PROT`, or the
+  attachment's own). `apply_spec`, `to_spec` and `to_yaml` read and write
+  `mutations:` and `modifications:` blocks; group entries (`chains` with
+  `residues` or `glycans`, `sites`, `sites_file`) expand to one record per site.
+- `parameterize`: force-field parameters and charges for a modified protein.
+  Atoms outside every site keep ff14SB and its library charges; the backbone of
+  a modified residue keeps the ff14SB charges and terms of the residue it was
+  before the change; the side chain from CB outward plus the attached group
+  take the site type's OpenFF force field and NAGL charges from a capped model,
+  shifted uniformly per site to an integer total (the shift is recorded and
+  bounded, by default 0.005 e per atom). A change to a backbone atom (an
+  N-terminal label, a neutral N-terminus, a protonated C-terminus) puts the
+  touched atoms and their hydrogens into the site. Bonds to hydrogen are
+  constrained everywhere at the length of the force field that owns them.
+  Sites may use different OpenFF force fields. The result exports to OpenMM
+  and GROMACS.
+- Glycan sites can take GLYCAM06j (`force_field: [GLYCAM_06j-1.xml]`,
+  `charges: {method: library}`). Each glycan's charges, Lennard-Jones and
+  bonded terms come from OpenMM's own GLYCAM06j force field, on the residue
+  renamed NLN, OLS or OLT, and every 1-4 pair touching the glycan keeps
+  GLYCAM's own scale (GLYCAM leaves many unscaled). `parameterize` returns a
+  `ParameterizedProtein`; its `to_openmm()` writes those pairs as
+  NonbondedForce exceptions and gives the glycan atoms GLYCAM's atom-type
+  masses (hydrogen mass repartitioning is refused with GLYCAM glycans). Its
+  bare Interchange scales every 1-4 pair uniformly, so it is named
+  `interchange_without_glycam_pairs`, and `.interchange` and
+  `interchange, record = parameterize(...)` refuse when the protein has
+  GLYCAM06j glycans. The record lists each glycan's templates and its number
+  of unscaled 1-4 pairs.
+- GLYCAM06j glycans in GROMACS: `ParameterizedProtein.to_gromacs()` (and
+  `glycam.apply_to_gromacs` for a topology written elsewhere) writes each
+  glycan's 1-4 pairs as `[ pairs ]` function type 2 (`i j 2 fudgeQQ qi qj
+  sigma epsilon`), the only form that scales the Coulomb part per pair, and
+  GLYCAM's masses into `[ atoms ]`. The audit's GROMACS reader reads those
+  lines itself (OpenMM's `GromacsTopFile` refuses them) and sets them as
+  exceptions, so GLYCAM builds are checked on both engines.
+- A glycan read from a PDB file is refused, with what to do, when the file has
+  no CONECT records (GlyGen and GLYCAM-Web files often lack them), lacks a
+  CONECT record for a bond its GLYCAM residue template has (the error names
+  each missing bond), or has no ROH reducing end (the bond to the protein
+  replaces the anomeric hydroxyl).
+- The physics audit checks modified proteins. A modified protein is one
+  component, its attachments written under their own segment IDs (`G001`,
+  `P001`, `M001`) and its atoms split into domains (the protein, one per site).
+  Every term, 1-4 pairs included, belongs to the domain all its atoms belong to
+  or else the site it touches; the audit rebuilds the protein from the input
+  PDB and the modification blocks and compares each term with its owner's force
+  field: ff14SB, the site's OpenFF force field with NAGL charges on a capped
+  model, or OpenMM's own GLYCAM06j. New checks: `parameters.one_four` (1-4
+  pairs as the owner scales them, so GLYCAM's unscaled pairs written with one
+  global scale fail), `charges.site_integer`, `charges.site_shift`,
+  `modifications.applied`, `parameters.modified_backbone`, `modifications.sites`
+  (each site holds exactly the atoms its changes define, by a rule the audit
+  reads from the modification records itself, and the atoms the component
+  record lists), `modifications.declared` (the build's changes and parameter
+  sets are the ones the caller declares; INFO when none are given), and the
+  warnings `parameters.glycan_force_field` and `modifications.protonation_state`.
+  `charges.site_integer` also checks each site's formal charge against the
+  input residues plus the recorded changes. A terminus a site touches (an N-terminal label,
+  a C-terminal amide) is expected on ff14SB's main-chain template for the
+  residue's other atoms, read from OpenMM's ff14SB. A terminus changed by
+  protonation alone (a neutral NH2 or COOH, which 1.4 does not model) fails
+  `modifications.sites`. The audit reads a modified protein's chemistry again,
+  independently, from its PDB file with openff-pablo (residues no modification
+  touched from their Chemical Component Dictionary definitions), uses that
+  reading for every expected value, and fails `modifications.chemistry` when the
+  build's elements, bond orders or formal charges differ from it.
 
 ### Changed
+
+- `parameters.nonbonded` checks Lennard-Jones parameters; exclusions and 1-4
+  pairs are checked by `parameters.one_four`. A `modeling_exceptions` entry
+  that accepted a 1-4 problem under `parameters.nonbonded` must now name
+  `parameters.one_four`. A term touching two modification sites fails
+  `parameters.coverage`.
 
 - The `build` and `test` environments install openff-pablo 0.2.2 (from its git
   tag, with gemmi, pyxdg and rustworkx, which it imports but does not declare),

@@ -141,6 +141,7 @@ Settings, passed with `--set`:
 | `method` | `occlusion` | `occlusion` or `distance`, as above |
 | `protein_selection` | null, the protein (`chainid A`) | Protein atoms whose residues are measured |
 | `polymer_selection` | null, the polymer (`chainid C`) | Atoms of the partner group: the polymer, or any other group, such as a co-solvent (`resname SDS`) |
+| `polymers` | `soluble` | Which chains a null `polymer_selection` means: `soluble` (the packed chains), `attached` (chains grafted onto the protein, segments `P001`, ...) or `all`. When the topology has attachment segments (`G001`, `P001`, `M001`), a null `protein_selection` leaves them out in every scope; a mutated residue, canonical or not, stays in the protein |
 | `polymer_types` | every residue name of the polymer in any condition | The monomers to report one by one, such as `[SBM]`. A replicate without a listed monomer reports 0 for it. This setting does not narrow the polymer. To narrow the polymer, use `polymer_selection` |
 | `use_pbc` | `true` | Use the frame's box: the minimum image for `distance`, and for `occlusion` each polymer molecule moved to its image nearest the protein |
 | `regions` | none | Mapping of region names to selections, each reported as `<region>_contact_fraction`; a region cannot be named `coverage`, `mean`, `contact`, `classes`, `occluded`, `occlusion`, a monomer type or an amino-acid class |

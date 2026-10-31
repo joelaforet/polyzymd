@@ -49,10 +49,25 @@ rewrite_config_rc5
 polymers
 dynamic_polymers
 cosolvents
+elongated_protein_box
 ligand
 restraints
 equilibration
 troubleshoot_openff_pdb_ingestion
+```
+
+## Modify a protein
+
+```{toctree}
+:caption: Modify a protein
+:maxdepth: 1
+
+mutate
+glycosylate
+attach_groups
+graft_polymers
+rosemary
+analyze_modified_proteins
 ```
 
 ## Run simulations

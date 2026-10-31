@@ -112,6 +112,8 @@ class TestExportSystemGromacsPath:
             config=sim_config,
             component_info=component_info,
             replicate=None,
+            glycam_sites=None,
+            protein_molecules=None,
         )
         mock_exporter.export.assert_called_once_with(
             output_dir=output_dir,

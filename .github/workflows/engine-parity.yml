@@ -38,4 +38,5 @@ jobs:
           pixi run -e test pytest -v --color=yes \
             tests/audit \
             tests/exporters/test_gromacs_staged_restraints.py \
+            tests/modifying_proteins/test_parameters.py \
             tests/config/test_solutes.py

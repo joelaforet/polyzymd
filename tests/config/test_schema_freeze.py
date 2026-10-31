@@ -129,7 +129,7 @@ def test_every_rc5_key_keeps_its_meaning() -> None:
         if old["values"] is not None and not set(old["values"]) <= set(new["values"] or []):
             dropped = sorted(set(old["values"]) - set(new["values"] or []))
             problems.append(f"{key}: no longer accepts {dropped}")
-        if old["type"] != new["type"] and old["type"] not in new["type"]:
+        if old["type"] != new["type"] and not _widened(old["type"], new["type"]):
             problems.append(f"{key}: type {old['type']} -> {new['type']}")
         if new["alias"] != old["alias"]:
             problems.append(f"{key}: read from {new['alias']!r}, not {old['alias']!r}")
@@ -140,16 +140,59 @@ def test_every_rc5_key_keeps_its_meaning() -> None:
             )
             if tighter:
                 problems.append(f"{key}: bound {name} {before} -> {value}")
-    added = [key for key in now if key not in frozen and now[key]["required"]]
+    # A new required key needs an edit only where its section already existed:
+    # a key required inside a new optional section is asked for only by
+    # configs that use that section.
+    added = [
+        key
+        for key in now
+        if key not in frozen
+        and now[key]["required"]
+        and _section_existed(_parent(key), frozen)
+        and not _new_alternative(_parent(key), frozen, now)
+    ]
     problems += [f"{key}: a new key that is required" for key in added]
     assert not problems, "an rc.5 config would need editing:\n" + "\n".join(problems)
 
 
+def _parent(key: str) -> str:
+    """The section holding ``key`` (``""`` for a top-level key)."""
+    return key.rsplit(".", 1)[0] if "." in key else ""
+
+
+def _plain(type_name: str) -> str:
+    """``<class 'float'>`` as ``float``, so a type compares with a union that names it."""
+    match = re.fullmatch(r"<class '([\w.]+)'>", type_name)
+    return match.group(1) if match else type_name
+
+
+def _widened(old: str, new: str) -> bool:
+    """Whether ``new`` still accepts ``old``: the same type, or a union naming it."""
+    return old in new or _plain(old) in [part.strip() for part in new.split("|")]
+
+
+def _new_alternative(section: str, frozen: dict, now: dict) -> bool:
+    """Whether ``section`` was a plain value in rc.5 that now also takes a mapping.
+
+    Keys required inside that mapping are asked for only by configs that write
+    the new form; an rc.5 config keeps its plain value.
+    """
+    old = frozen.get(section)
+    new = now.get(section)
+    if old is None or new is None or any(k.startswith(section + ".") for k in frozen):
+        return False
+    return _widened(old["type"], new["type"])
+
+
+def _section_existed(section: str, frozen: dict) -> bool:
+    """Whether rc.5 had ``section`` (the top level, a key, or keys inside it)."""
+    return section == "" or section in frozen or any(k.startswith(section + ".") for k in frozen)
+
+
 def _loaded(path: Path) -> Any:
     """The config at ``path`` as loaded, with its own folder written as ``<config>``."""
-    from polyzymd.config.loader import load_config
-
     import polyzymd
+    from polyzymd.config.loader import load_config
 
     text = json.dumps(load_config(path).model_dump(mode="json"), sort_keys=True)
     text = text.replace(str(Path(polyzymd.__file__).parent), "<polyzymd>")
@@ -204,3 +247,9 @@ if __name__ == "__main__" and "--write" in sys.argv:
         json.dumps({p.stem: _loaded(p) for p in CONFIGS}, indent=1, sort_keys=True) + "\n"
     )
     print(f"wrote {CONTRACT} ({len(contract())} keys) and {LOADED} ({len(CONFIGS)} configs)")
+
+
+def test_a_union_that_keeps_the_old_type_is_widening_not_a_change() -> None:
+    assert _widened("<class 'float'>", "float | polyzymd.config.schema.AxisPadding")
+    assert not _widened("<class 'float'>", "<class 'int'>")
+    assert not _widened("<class 'float'>", "int | str")

@@ -50,6 +50,13 @@ PARSLEY = (
     "small-molecule force field. J. Chem. Theory Comput. 17(10), 6262-6280. "
     "doi:10.1021/acs.jctc.1c00571"
 )
+GLYCAM06 = (
+    "Kirschner, K. N., Yongye, A. B., Tschampel, S. M., Gonzalez-Outeirino, J., Daniels, C. R., "
+    "Foley, B. L. and Woods, R. J. (2008). GLYCAM06: a generalizable biomolecular force field. "
+    "Carbohydrates. J. Comput. Chem. 29(4), 622-655. doi:10.1002/jcc.20820"
+)
+#: openff-pablo has no paper; it is cited by its repository and version.
+PABLO_REPOSITORY = "https://github.com/openforcefield/openff-pablo"
 SAGE_2_3 = (
     "Wang, L., Alibay, I., Behara, P. K., Boothroyd, S., Cavender, C. E., Horton, J. T., "
     "McIsaac, A. R., Mitchell, A., Morales, B., Thompson, M. W., Wagner, J. R., Westbrook, B. R., "
@@ -61,6 +68,17 @@ TIP3P = (
     "Jorgensen, W. L., Chandrasekhar, J., Madura, J. D., Impey, R. W. and Klein, M. L. "
     "(1983). Comparison of simple potential functions for simulating liquid water. "
     "J. Chem. Phys. 79(2), 926-935. doi:10.1063/1.445869"
+)
+OPC3 = (
+    "Izadi, S. and Onufriev, A. V. (2016). Accuracy limit of rigid 3-point water models. "
+    "J. Chem. Phys. 145(7), 074501. doi:10.1063/1.4960175"
+)
+#: The monovalent ions of opc3.offxml are the Li/Merz 12-6 set for OPC3
+#: (AmberTools frcmod.ionslm_126_opc3).
+LI_MERZ_OPC3 = (
+    "Sengupta, A., Li, Z., Song, L. F., Li, P. and Merz, K. M. (2021). Parameterization of "
+    "monovalent ions for the OPC3, OPC, TIP3P-FB, and TIP4P-FB water models. J. Chem. Inf. "
+    "Model. 61(2), 869-880. doi:10.1021/acs.jcim.0c01390"
 )
 AM1BCC = (
     "Jakalian, A., Bush, B. L., Jack, D. B. and Bayly, C. I. (2000). Fast, efficient "
@@ -148,9 +166,11 @@ class BuildFacts:
     charge_methods: frozenset[str]  # with "am1bcc" for NAGL and shipped charges, AM1-BCC too
     nagl_models: tuple[str, ...]
     shipped_co_solvents: str  # co-solvents with charges shipped with PolyzyMD, joined
-    ion_files: str  # the OpenFF files that gave the ions their parameters, joined
+    ion_files: str  # the OpenFF Sage or Parsley files that gave the ions their parameters, joined
     ionic_strength: Any
     packmol: bool  # whether the build packed solvent or polymer chains (its seeds say so)
+    modified: bool = False  # whether a protein was mutated or modified (mBuild, openff-pablo)
+    ion_sources: tuple[str, ...] = ()  # name of the file that gave each ion domain its parameters
 
     @classmethod
     def of(cls, config: Any, record: dict[str, Any]) -> BuildFacts:
@@ -161,13 +181,25 @@ class BuildFacts:
         names = [n for s in solutes for n in getattr(s, "force_field", None) or []]
         names += getattr(solvent, "force_field", None) or []
         specs = [s.charges for s in solutes + co_solvents if getattr(s, "charges", None)]
+        # A modified protein's sites take the parameter sets of modification_parameters.
+        modified = [s for s in solutes if getattr(s, "is_modified", False)]
+        site_sets = [
+            chosen
+            for s in modified
+            if s.modification_parameters is not None
+            for chosen in s.modification_parameters.as_dict().values()
+        ]
+        names += [n for chosen in site_sets for n in chosen.force_field]
+        specs += [chosen.charges for chosen in site_sets]
         model = getattr(getattr(solvent, "water", None), "model", None)
+        # The last file of an ion domain gives the ions their parameters (a
+        # water model's own file, such as opc3.offxml, is loaded last).
         ions = [
-            name
+            domain["force_field"][-1]
             for component in record.get("components") or []
             if component.get("type") == "ions"
             for domain in component.get("domains") or []
-            for name in domain.get("force_field") or []
+            if domain.get("force_field")
         ]
         shipped = _joined(
             str(c.name)
@@ -189,6 +221,8 @@ class BuildFacts:
             ion_files=_joined(Path(name).name for name in ions if _release(name)[0] > 0),
             ionic_strength=getattr(getattr(solvent, "ions", None), "ionic_strength", None),
             packmol=bool({"solvent_packmol_seed", "polymer_packmol_seed"} & provenance.keys()),
+            modified=bool(modified) or "protein_modifications" in provenance,
+            ion_sources=tuple(sorted({Path(name).name for name in ions})),
         )
 
     def release(self, package: str, doi: str) -> str:
@@ -232,6 +266,17 @@ def _file(text: str, what: str, when: Callable[[Path], Any]) -> Reference:
     return Reference(text, "{x.name}" + what, lambda f, x: when(x), each="force_fields")
 
 
+def _glycam(name: Any) -> bool:
+    return Path(name).name.lower().startswith("glycam")
+
+
+def _pablo(facts: BuildFacts, _: Any) -> str:
+    version = ((facts.provenance.get("protein_modifications") or {}).get("openff_pablo") or {}).get(
+        "version"
+    )
+    return f"{PABLO_REPOSITORY}" + (f" (version {version})" if version else "")
+
+
 def _ashgc(facts: BuildFacts, model: str) -> bool:
     return Path(model).name.lower().startswith("openff-gnn-am1bcc-1.")
 
@@ -266,8 +311,15 @@ REFERENCES: tuple[Reference, ...] = (
         lambda f, x: _release(x)[0] > 0,
         each="force_fields",
     ),
-    _file(NO_REFERENCE, "", lambda x: _release(x)[0] == 0),
+    _file(GLYCAM06, " (GLYCAM06j, glycans)", _glycam),
+    _file(NO_REFERENCE, "", lambda x: _release(x)[0] == 0 and not _glycam(x)),
     Reference(TIP3P, "TIP3P water", lambda f, _: f.water == "tip3p"),
+    Reference(OPC3, "OPC3 water (opc3.offxml)", lambda f, _: f.water == "opc3"),
+    Reference(
+        LI_MERZ_OPC3,
+        "Na+ and Cl- parameters of opc3.offxml (Li/Merz 12-6 set for OPC3)",
+        lambda f, _: "opc3.offxml" in f.ion_sources,
+    ),
     # The Na+ and Cl- Lennard-Jones parameters of openff-1.* and openff-2.* are
     # the TIP3P set of Joung and Cheatham (2008), Table 5 (data/jc.csv of
     # openff-forcefields).
@@ -304,8 +356,14 @@ REFERENCES: tuple[Reference, ...] = (
     Reference(ESPALOMA_CHARGE, when=lambda f, _: "espaloma" in f.charge_methods),
     Reference(PACKMOL, when=lambda f, _: f.packmol),
     Reference(MACHADO_PANTANO, when=lambda f, _: f.ionic_strength is not None),
-    # mBuild, when the build generated polymer chains with it.
-    Reference(MBUILD, when=lambda f, _: "polymer_builder" in f.provenance),
+    # mBuild, when the build generated polymer chains or mutated or modified the
+    # protein with it; openff-pablo, which the audit reads a modified protein with.
+    Reference(MBUILD, when=lambda f, _: "polymer_builder" in f.provenance or f.modified),
+    Reference(
+        _pablo,
+        "openff-pablo (the audit's independent reading of the modified protein)",
+        lambda f, _: f.modified,
+    ),
 )
 
 

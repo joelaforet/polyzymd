@@ -126,6 +126,7 @@ does before you set up your own system, or as a starting config.
 | [`polymer/`](https://github.com/joelaforet/polyzymd/tree/main/examples/polymer) | Trp-cage with two SBMA chains built from SMILES | OpenMM, GROMACS | about 1.5 min (OpenMM, CPU); under 1 min (GROMACS, CPU) | {doc}`../tutorials/analysis_complete_workflow`, {doc}`../how_to/dynamic_polymers` |
 | [`cosolvent/`](https://github.com/joelaforet/polyzymd/tree/main/examples/cosolvent) | Trp-cage in 2 M urea | OpenMM | about 1.5 min (CPU) | {doc}`../tutorials/own_system`, {doc}`../reference/configuration` |
 | [`ligand_restraint/`](https://github.com/joelaforet/polyzymd/tree/main/examples/ligand_restraint) | T4 lysozyme L99A (PDB 181L) with benzene and a flat-bottom distance restraint | OpenMM | about 3.5 min (CPU); about 1.5 min (GPU) | {doc}`../tutorials/prepare_pdb_for_openff`, {doc}`../how_to/restraints` |
+| [`modified_proteins/`](https://github.com/joelaforet/polyzymd/tree/main/examples/modified_proteins) | Ubiquitin with a GLYCAM06j glycan on Asn60, and with an octanoyl amide on Lys63 | OpenMM | about 2 min (GPU), build about 1 min | {doc}`../tutorials/glycosylated_protein`, {doc}`../how_to/attach_groups` |
 
 The times are for the shipped configs, build included, measured on a laptop
 with a 24-thread CPU and, where given, an RTX 5070 Ti laptop GPU. Each run is

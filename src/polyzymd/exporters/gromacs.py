@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from polyzymd.core.branding import FULL_CREDIT_LINE, SHORT_CREDIT_LINE
+from polyzymd.utils.molecule_index import indexed_molecules
 from polyzymd.utils.templates import render_package_template
 from polyzymd.workflow.slurm import _validate_script_value
 
@@ -1382,7 +1383,7 @@ class PositionRestraintGenerator:
 
             # Skip water/ion ITPs by checking molecule name and atom count
             mol_name = self._get_molecule_name_from_itp(itp_path)
-            if mol_name and mol_name.lower() in ("water", "sol", "tip3p", "tip4p", "spce"):
+            if mol_name and mol_name.lower() in ("water", "sol", "tip3p", "opc3", "tip4p", "spce"):
                 continue
 
             atom_count = self._get_atom_count_from_itp(itp_path)
@@ -1914,6 +1915,8 @@ class GromacsExporter:
         config: "SimulationConfig",
         component_info: Optional["SystemComponentInfo"] = None,
         replicate: int | None = None,
+        glycam_sites: Optional[list] = None,
+        protein_molecules: Optional[list] = None,
     ):
         """Initialize the GROMACS exporter.
 
@@ -1923,11 +1926,18 @@ class GromacsExporter:
             component_info: Optional SystemComponentInfo for position restraints.
                 If not provided, position restraints will be skipped.
             replicate: The replicate number, which seeds the dynamics in the MDP files.
+            glycam_sites: GLYCAM06j sites of the protein (the first molecule): their
+                1-4 pairs are written as ``[ pairs ]`` function type 2 and their atoms
+                take GLYCAM's masses.
+            protein_molecules: ``[start, stop)`` atom ranges of the protein's
+                molecules, which come first in the system.
         """
         self._interchange = interchange
         self._config = config
         self._component_info = component_info
         self._replicate = replicate
+        self._glycam_sites = list(glycam_sites or [])
+        self._protein_molecules = protein_molecules
 
     def export(
         self,
@@ -1967,6 +1977,13 @@ class GromacsExporter:
         # Step 1: Export coordinates and topology via Interchange
         logger.info("Exporting coordinates and topology...")
         gro_path, top_path = self._export_interchange(output_dir, prefix)
+        if self._glycam_sites:
+            from polyzymd.builders.modified_protein import apply_glycam_to_gromacs_export
+
+            written = apply_glycam_to_gromacs_export(
+                top_path, self._glycam_sites, self._protein_molecules
+            )
+            logger.info(f"GLYCAM06j 1-4 pairs written as [ pairs ] type 2: {written}")
         result["gro"] = gro_path
         result["top"] = top_path
 
@@ -2000,7 +2017,8 @@ class GromacsExporter:
         result["posres_defines"] = {}
         if self._component_info is not None:
             logger.info("Adding position restraints to molecule ITP files...")
-            topology = self._interchange.to_openmm_topology()
+            with indexed_molecules():
+                topology = self._interchange.to_openmm_topology()
             posres_generator = PositionRestraintGenerator(topology, self._component_info)
             posres_defines = posres_generator.add_posres_to_itp_files(
                 self._config, output_dir, prefix
@@ -2056,11 +2074,12 @@ class GromacsExporter:
 
         # Export using Interchange
         output_prefix = str(output_dir / prefix)
-        self._interchange.to_gromacs(
-            prefix=output_prefix,
-            monolithic=False,
-            _merge_atom_types=True,
-        )
+        with indexed_molecules():
+            self._interchange.to_gromacs(
+                prefix=output_prefix,
+                monolithic=False,
+                _merge_atom_types=True,
+            )
 
         gro_path = output_dir / f"{prefix}.gro"
         top_path = output_dir / f"{prefix}.top"

@@ -246,6 +246,8 @@ def plan_attach(
     merge: bool = False,
     bond_order: int = 1,
     name: str | None = None,
+    parameters: str | None = None,
+    attach_at: int | None = None,
     relax: bool = True,
     minimize: bool = True,
     platform: str | None = None,
@@ -255,11 +257,29 @@ def plan_attach(
     ``type`` is ``"glycan"``, ``"polymer"`` or ``"generic"``. ``fragment``
     is a fragment built here, or its source written as data
     (``{"smiles": ..., "resname": ...}``, ``{"pdb_path": ...}`` or
-    ``{"ccd": ..., "link_atom": ...}``). The other arguments are mBuild's.
+    ``{"ccd": ..., "link_atom": ...}``). ``parameters`` names the parameter
+    set a config declares for this attachment; it is recorded, not used here.
+    The other arguments are mBuild's.
     """
     if type not in ATTACHMENT_TYPES:
         raise ValueError(f"Attachment type {type!r}; use one of {', '.join(ATTACHMENT_TYPES)}.")
     site, residue = _site(protein, site)
+    if type == "glycan":
+        source = fragment if isinstance(fragment, dict) else fragment_source(fragment)
+        if source and "pdb_path" in source:
+            from polyzymd.modifying_proteins.glycam import check_glycan_pdb
+
+            check_glycan_pdb(source["pdb_path"])
+    if attach_at is not None:
+        polymer = fragment.get("polymer") if isinstance(fragment, dict) else None
+        if polymer is None:
+            raise ValueError("attach_at names a repeat unit of a polymer fragment ({polymer: ...})")
+        if fragment_resnum is not None:
+            raise ValueError("give attach_at or fragment_resnum, not both")
+        from polyzymd.modifying_proteins.polymers import anchor_residue, draw_chain
+
+        fragment = {"polymer": {**polymer, "drawn": draw_chain(polymer, site=str(site))}}
+        fragment_resnum = anchor_residue(fragment["polymer"], attach_at)
     if isinstance(fragment, dict):
         fragment = _fragment_from_source(protein, fragment)
     source = fragment_source(fragment)
@@ -277,6 +297,11 @@ def plan_attach(
         arguments["merge"] = True
     if bond_order != 1:
         arguments["bond_order"] = bond_order
+    if parameters is not None:
+        arguments["parameters"] = parameters
+    if attach_at is not None:
+        arguments["attach_at"] = attach_at
+        arguments.pop("fragment_resnum", None)
     plan = protein.mbuild.plan_attach(
         fragment,
         fragment_atom_name,
@@ -469,9 +494,27 @@ def _fragment_from_source(protein: ModifiedProtein, source: dict):
         return fragment_from_pdb(source["pdb_path"], charge=source.get("charge", 0))
     if "ccd" in source:
         return fragment_from_ccd(source["ccd"], source["link_atom"], protein)
+    if "ccd_file" in source:
+        # A local CCD definition (a component the bundled library lacks), named
+        # by its file; the protein's library reads the file's folder.
+        path = Path(source["ccd_file"])
+        protein._use_ccd_file(path)
+        fragment = fragment_from_ccd(path.stem.upper(), source["link_atom"], protein)
+        _FRAGMENT_SOURCES[fragment] = {
+            "ccd_file": str(path),
+            "sha256": _sha256(path),
+            "link_atom": source["link_atom"],
+        }
+        return fragment
+    if "polymer" in source:
+        from polyzymd.modifying_proteins.polymers import fragment_from_polymer
+
+        fragment, recorded = fragment_from_polymer(source["polymer"])
+        _FRAGMENT_SOURCES[fragment] = recorded
+        return fragment
     raise ValueError(
         f"Cannot build a fragment from {source!r}; give smiles + resname, pdb_path, "
-        "or ccd + link_atom."
+        "ccd + link_atom, ccd_file + link_atom, or polymer."
     )
 
 

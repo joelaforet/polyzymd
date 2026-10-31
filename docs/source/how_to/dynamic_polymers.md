@@ -232,7 +232,8 @@ For each chain, the build does these steps:
 
 1. It draws the chain's head cap, `length - 2` repeat units and its tail cap
    from their probabilities. The replicate number seeds the draw, unless you
-   set `random_seed`. The sequence is the head cap's label, the repeat units'
+   set `random_seed`. A `sequence` block can pin positions or lay out blocks
+   instead (see the configuration reference). The sequence is the head cap's label, the repeat units'
    labels and the tail cap's label, read from head to tail, so `AAB...` and
    `BAA...` are different chains.
 2. It joins the units: each bond between two units replaces the `*` of both.

@@ -75,6 +75,36 @@ written for) and checks that the protein, and only the protein, fails
 A coverage check makes sure that every atom belongs to exactly one component,
 and that no bonded term joins two molecules.
 
+### Covalently modified proteins
+
+A protein with modifications (a glycan, a dye, an attached polymer, a
+non-canonical residue) is one component with several domains: the protein on
+ff14SB, and one domain per modification site on the parameter set its type
+names. Every term belongs to one domain: the one all its atoms belong to, or
+else the site it touches, so the bond from CA to CB and the chi1 torsion of a
+modified residue belong to the site, and its backbone (N, H, CA, HA, C, O)
+stays on ff14SB like its neighbours'. A term touching two sites belongs to
+neither and fails `parameters.coverage`.
+
+The audit rebuilds the protein from the input PDB file and the modification
+blocks, reads its chemistry (bond orders, formal charges) again from the
+structure with openff-pablo rather than taking the build's
+(`modifications.chemistry` fails when they differ), and computes each domain's
+terms on its own: ff14SB for the protein,
+the site's force field for OpenFF sites with NAGL charges on a capped model of
+the site, and OpenMM's own GLYCAM06j for glycans, including the 1-4 pairs
+GLYCAM06j leaves unscaled (`parameters.one_four`). Further checks cover what
+only a modified protein has: each site's charges sum to its integer target
+(`charges.site_integer`) with a small shift (`charges.site_shift`), every
+planned bond and atom is in the built system (`modifications.applied`), each
+site holds exactly the atoms its changes define (`modifications.sites`), the
+build made the changes the config declares (`modifications.declared`), the
+modified residues' backbones are ff14SB's (`parameters.modified_backbone`), a
+glycan on a force field other than GLYCAM06j is reported
+(`parameters.glycan_force_field`), and so is a mutation that leaves an Asp,
+Glu or His side chain in an unusual state at pH 7
+(`modifications.protonation_state`).
+
 ### The system is checked against the config
 
 The audit recomputes from the built system what the config asked for:

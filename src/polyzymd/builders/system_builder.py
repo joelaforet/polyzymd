@@ -16,10 +16,11 @@ if TYPE_CHECKING:
     from openff.interchange import Interchange
     from openff.toolkit import ForceField, Molecule, Topology
 
-    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.config.schema import ProteinSolute, SimulationConfig
     from polyzymd.core.components import ChargeSource, ComponentRecord
 
 from polyzymd.builders.enzyme import EnzymeBuilder
+from polyzymd.builders.modified_protein import ModifiedProteinBuild
 from polyzymd.builders.polymer import PolymerBuilder
 from polyzymd.builders.solvent import SolventBuilder, SolventComposition
 from polyzymd.builders.substrate import SubstrateBuilder
@@ -66,6 +67,22 @@ def _cosolvent_smiles(cosolvent: Any) -> str:
     if cosolvent.smiles:
         return split_counter_ions(cosolvent.smiles, cosolvent.name)[0]
     return cosolvent.molecule.to_smiles()
+
+
+def _rotate_pdb_file(path: Path, rotation: Any, center_angstrom: Any) -> None:
+    """Turn the coordinates of a PDB file in place: ``(x - center) @ rotation.T + center``."""
+    import numpy as np
+
+    lines = path.read_text().splitlines(keepends=True)
+    rows = [i for i, line in enumerate(lines) if line.startswith(("ATOM", "HETATM"))]
+    xyz = np.array([[float(lines[i][c : c + 8]) for c in (30, 38, 46)] for i in rows])
+    if not rows:
+        return
+    turned = (xyz - center_angstrom) @ np.asarray(rotation).T + center_angstrom
+    for i, (x, y, z) in zip(rows, turned):
+        line = lines[i]
+        lines[i] = f"{line[:30]}{x:8.3f}{y:8.3f}{z:8.3f}{line[54:]}"
+    path.write_text("".join(lines))
 
 
 class SystemBuilder:
@@ -125,6 +142,11 @@ class SystemBuilder:
         self._interchange: Optional[Interchange] = None
         self._working_dir: Optional[Path] = None
         self._build_provenance: Dict[str, Any] = {}
+        #: The protein after its mutations and modifications, when it has any.
+        self._modified_protein: Optional[ModifiedProteinBuild] = None
+        # NAGL model of a protein on OpenFF Rosemary alpha (None: library charges).
+        self._protein_nagl_model: Optional[str] = None
+        self._nagl_enzyme: Optional[List[Molecule]] = None
 
         # Molecule count tracking for PDB chain/residue assignment
         # These are set during build and used by _assign_pdb_identifiers()
@@ -158,6 +180,11 @@ class SystemBuilder:
             nagl_model=config.force_field.nagl_model,
         )
         builder._config = config
+        solute = getattr(config, "solute", None)
+        protein = solute("protein") if callable(solute) else None
+        if protein is not None and protein.charges.method == "nagl":
+            # OpenFF Rosemary alpha: NAGL charges on the whole protein, with its own model.
+            builder._protein_nagl_model = protein.charges.model
         return builder
 
     def build_enzyme(
@@ -193,6 +220,34 @@ class SystemBuilder:
                 "Enzyme topology contains %d protein molecules; retaining all on chain A",
                 self._n_enzyme_molecules,
             )
+        return self._enzyme_topology
+
+    def build_modified_enzyme(
+        self,
+        solute: "ProteinSolute",
+        base_dir: Union[str, Path, None] = None,
+        replicate: Optional[int] = None,
+    ) -> Topology:
+        """Build a protein with mutations or modifications, parameterized site by site.
+
+        Every change is applied (and so checked against the structure) before
+        anything is packed. The protein is written to the run folder as
+        ``modified_protein.pdb``. ``replicate`` seeds grafted chains that are
+        drawn per replicate.
+        """
+        from openff.toolkit import Topology
+
+        self._modified_protein = ModifiedProteinBuild.build(
+            solute,
+            constraints_from=self._sm_ff,
+            working_dir=self._working_dir,
+            base_dir=base_dir,
+            replicate=replicate,
+        )
+        molecules = self._modified_protein.molecules()
+        self._enzyme_topology = Topology.from_molecules(molecules)
+        self._n_enzyme_molecules = len(molecules)
+        self._build_provenance["protein_modifications"] = self._modified_protein.provenance()
         return self._enzyme_topology
 
     def build_substrate(
@@ -519,13 +574,14 @@ class SystemBuilder:
         # library charges survive. _apply_protein_force_field restores the
         # protein terms. Loading ff14SB last instead is no fix: its cap and
         # amide SMIRKS then match acetone, acetates and amide polymers.
-        ff = ForceField(self._protein_ff, self._sm_ff)
+        # A water model with its own file (OPC3) is loaded after both, so its
+        # water and ion parameters replace the small-molecule force field's;
+        # its SMIRKS match only water and monatomic ions.
+        water_model = self._water_model()
+        ff = ForceField(*self._force_field_files(water_model))
 
         # Get water molecule with pre-computed charges for charge_from_molecules
         # Use PolyzyMD's cached water instead of Polymerist's for consistency
-        water_model = "tip3p"
-        if self._solvent_builder._composition:
-            water_model = self._solvent_builder._composition.water_model
         water_mol = get_solvent_molecule(water_model)
 
         LOGGER.info("Using single-call Interchange creation")
@@ -535,6 +591,22 @@ class SystemBuilder:
         LOGGER.info("Interchange created successfully")
 
         return self._interchange
+
+    def _water_model(self) -> str:
+        """The water model the solvent was built with (TIP3P when not solvated by config)."""
+        composition = self._solvent_builder._composition
+        return composition.water_model if composition else "tip3p"
+
+    def _water_force_fields(self, water_model: str) -> Tuple[str, ...]:
+        """The force field files of the water and ions: the small-molecule file, then the
+        water model's own file when it has one (``opc3.offxml``)."""
+        from polyzymd.config.schema import water_force_fields
+
+        return tuple(water_force_fields([self._sm_ff], water_model))
+
+    def _force_field_files(self, water_model: str) -> Tuple[str, ...]:
+        """Every force field file of the build, in load order: protein, small molecule, water."""
+        return (self._protein_ff, *self._water_force_fields(water_model))
 
     def _create_interchange_single_call(self, ff: ForceField, water_mol: Molecule) -> Interchange:
         """Create Interchange with a single ``ForceField.create_interchange()`` call.
@@ -557,6 +629,14 @@ class SystemBuilder:
         # Build charge templates: one per unique species
         t0 = time.perf_counter()
         charge_from: List[Molecule] = [water_mol]
+        if self._modified_protein is not None:
+            # A modified protein has no ff14SB library charges for its sites;
+            # its charges are the ones parameterization assigned, site by site.
+            from polyzymd.modifying_proteins.parameters import charge_templates
+
+            charge_from.extend(charge_templates(list(self._enzyme_topology.molecules)))
+        elif self._protein_nagl_model is not None:
+            charge_from.extend(self._nagl_charged_enzyme())
 
         seen_smiles: set = set()
         for mol in self._polymer_molecules:
@@ -620,9 +700,12 @@ class SystemBuilder:
         bonded, Lennard-Jones and constraint term wholly inside them is swapped
         for its counterpart, so the protein no longer depends on load order.
         Terms of other molecules and all charges stay as they are; the
-        protein's charges are already the ff14SB library charges. Constraints
-        follow the small-molecule force field's bonds-to-hydrogen policy, with
-        the protein force field's bond lengths.
+        protein's charges are already its declared ones (ff14SB library
+        charges, or NAGL charges for a protein on OpenFF Rosemary). Constraints
+        come from the protein force field's own Constraints section when it has
+        one (Rosemary); otherwise (the ff14SB port has none) they follow the
+        small-molecule force field's bonds-to-hydrogen policy, with the protein
+        force field's bond lengths.
 
         Impropers are not checked for coverage, because the two force fields
         define them differently; every other handler must cover the same
@@ -638,6 +721,7 @@ class SystemBuilder:
                 settings of the two force fields differ, or the first
                 molecules of the solvated topology are not the enzyme.
         """
+
         from openff.toolkit import ForceField, Topology
 
         if self._n_enzyme_molecules == 0:
@@ -654,15 +738,32 @@ class SystemBuilder:
             )
 
         t0 = time.perf_counter()
-        protein_ff = ForceField(self._protein_ff)
-        small_molecule_ff = ForceField(self._sm_ff)
-        # The Amber port has no Constraints handler.
-        if "Constraints" not in protein_ff.registered_parameter_handlers:
-            protein_ff.register_parameter_handler(small_molecule_ff["Constraints"])
-        protein_topology = Topology.from_molecules(
-            [self._solvated_topology.molecule(index) for index in range(self._n_enzyme_molecules)]
-        )
-        reference = protein_ff.create_interchange(protein_topology)
+        constraints_source = f"{self._sm_ff} policy at {self._protein_ff} bond lengths"
+        if self._modified_protein is not None:
+            # ff14SB outside the sites, each site from its parameter set, as
+            # parameterization made them; atoms are in the same order.
+            reference = self._modified_protein.interchange
+            if self._modified_protein.record.protein_charges:
+                # Parameterized whole (Rosemary), with its own Constraints section.
+                constraints_source = f"{self._protein_ff} Constraints"
+        else:
+            protein_ff = ForceField(self._protein_ff)
+            small_molecule_ff = ForceField(self._sm_ff)
+            # The Amber port has no Constraints handler; Rosemary has its own.
+            if "Constraints" in protein_ff.registered_parameter_handlers:
+                constraints_source = f"{self._protein_ff} Constraints"
+            else:
+                protein_ff.register_parameter_handler(small_molecule_ff["Constraints"])
+            protein_topology = Topology.from_molecules(
+                [
+                    self._solvated_topology.molecule(index)
+                    for index in range(self._n_enzyme_molecules)
+                ]
+            )
+            charged = self._nagl_charged_enzyme() if self._protein_nagl_model is not None else []
+            reference = protein_ff.create_interchange(
+                protein_topology, charge_from_molecules=charged
+            )
 
         for name in ("vdW", "Electrostatics"):
             for attribute in ("scale_12", "scale_13", "scale_14", "scale_15"):
@@ -691,7 +792,9 @@ class SystemBuilder:
                 )
                 target.key_map[key] = copied
                 target.potentials[copied] = source.potentials[potential_key]
-            if name != "ImproperTorsions":
+            # Parameterization checked a modified protein's coverage site by
+            # site (GLYCAM06j impropers are written as proper torsions).
+            if name != "ImproperTorsions" and self._modified_protein is None:
                 before = {tuple(sorted(key.atom_indices)) for key in removed}
                 after = {tuple(sorted(key.atom_indices)) for key in source.key_map}
                 if before != after:
@@ -705,14 +808,32 @@ class SystemBuilder:
             target.potentials = {
                 key: value for key, value in target.potentials.items() if key in used
             }
-            source_name = (
-                f"{self._sm_ff} policy at {self._protein_ff} bond lengths"
-                if name == "Constraints"
-                else self._protein_ff
-            )
+            source_name = constraints_source if name == "Constraints" else self._protein_ff
             LOGGER.info(f"  {name}: {len(source.key_map)} protein terms from {source_name}")
 
         LOGGER.info(f"  Protein force field applied in {time.perf_counter() - t0:.1f}s")
+
+    def _nagl_charged_enzyme(self) -> List[Molecule]:
+        """The distinct enzyme molecules, charged by NAGL with the protein's model.
+
+        Used for a protein on OpenFF Rosemary alpha, whose charges are NAGL
+        charges on the whole molecule rather than library charges.
+        """
+        if self._nagl_enzyme is None:
+            from openff.toolkit import Molecule
+            from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
+
+            charged: List[Molecule] = []
+            for molecule in self._enzyme_topology.molecules:
+                if any(molecule.is_isomorphic_with(other) for other in charged):
+                    continue
+                copy = Molecule(molecule)
+                NAGLToolkitWrapper().assign_partial_charges(
+                    copy, partial_charge_method=self._protein_nagl_model
+                )
+                charged.append(copy)
+            self._nagl_enzyme = charged
+        return self._nagl_enzyme
 
     def _renumber_chains(self, topology: Topology) -> None:
         """Normalize chain IDs before canonical PDB identifier assignment.
@@ -785,16 +906,31 @@ class SystemBuilder:
             # after the other: two 100-residue chains become residues 1-100 and
             # 101-200. Adjust your downstream analysis accordingly!!!
 
+            # A modified protein's attachments (glycans, grafted polymers, labels)
+            # are segments of their own (G001, P001, M001, ...): their residues are
+            # numbered from 1 within the segment, so "segid G001 and resid 1" is a
+            # glycan's first residue, and the protein's own residues keep the numbers
+            # an unmodified build gives them.
+            segments = self._protein_segments()
+            segment_numbers: dict[str, int] = {}
+            protein_atom = 0
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
-                residue_map: dict[str, int] = {}
+                residue_map: dict[tuple[str, str], int] = {}
                 for atom_index, atom in enumerate(mol.atoms):
                     residue_token = self._get_original_residue_token(atom, atom_index)
+                    segment = segments[protein_atom] if segments else "PROT"
+                    protein_atom += 1
                     atom.metadata["chain_id"] = PROTEIN_CHAIN
-                    if residue_token not in residue_map:
-                        residue_map[residue_token] = protein_residue_num
-                        protein_residue_num += 1
-                    atom.metadata["residue_number"] = str(residue_map[residue_token])
+                    key = (segment, residue_token)
+                    if key not in residue_map:
+                        if segment == "PROT":
+                            residue_map[key] = protein_residue_num
+                            protein_residue_num += 1
+                        else:
+                            segment_numbers[segment] = segment_numbers.get(segment, 0) + 1
+                            residue_map[key] = segment_numbers[segment]
+                    atom.metadata["residue_number"] = str(residue_map[key])
                 mol_idx += 1
 
         # 2. Substrate always uses chain B and residue 1
@@ -982,7 +1118,11 @@ class SystemBuilder:
         if topology is self._solvated_topology:
             from polyzymd.core.components import atom_segids, write_pdb_segids
 
-            write_pdb_segids(path, atom_segids(self.components(), topology.n_atoms))
+            components = self.components()
+            attachments = {segid for c in components for segid in c.segments}
+            write_pdb_segids(
+                path, atom_segids(components, topology.n_atoms), separate=attachments
+            )
         LOGGER.info(f"Saved topology to {path}")
 
     def build_from_config(
@@ -1037,7 +1177,12 @@ class SystemBuilder:
 
         # 1. Build enzyme
         LOGGER.info(f"Building enzyme: {config.enzyme.name}")
-        self.build_enzyme(config.enzyme.pdb_path, config.enzyme.custom_substructures_path)
+        if getattr(config.enzyme, "is_modified", False):
+            self.build_modified_enzyme(
+                config.enzyme, getattr(config, "_config_dir", None), replicate=polymer_seed
+            )
+        else:
+            self.build_enzyme(config.enzyme.pdb_path, config.enzyme.custom_substructures_path)
 
         # 2. Build substrate (if configured)
         if config.substrate:
@@ -1050,6 +1195,10 @@ class SystemBuilder:
 
         # 3. Combine enzyme + substrate
         self.combine_solutes()
+
+        # 3a. A rectangular box is sized for one orientation only, so the fixed
+        # solutes are first turned to put their principal axes on x, y and z.
+        self._align_for_box(config.solvent.box)
 
         # 3b. Compute the periodic cell FIRST, from the protein + substrate
         # alone.  The cell must not depend on where Packmol happens to put the
@@ -1066,8 +1215,9 @@ class SystemBuilder:
                 extra_padding_nm=config.polymers.packing.padding,
             )
             LOGGER.info(
-                "Deterministic periodic cell from the protein + substrate diameter "
-                f"+ 2 x ({config.polymers.packing.padding} + {config.solvent.box.padding}) nm: "
+                "Deterministic periodic cell from the protein + substrate size "
+                f"+ 2 x ({config.polymers.packing.padding} + "
+                f"{config.solvent.box.padding_label}) nm: "
                 f"{box_vectors}"
             )
 
@@ -1196,13 +1346,23 @@ class SystemBuilder:
 
         from openff.interchange.interop.openmm._positions import to_openmm_positions
 
+        from polyzymd.utils.molecule_index import indexed_molecules
+
         t0 = time.perf_counter()
-        omm_topology = self._interchange.to_openmm_topology()
+        with indexed_molecules():
+            omm_topology = self._interchange.to_openmm_topology()
         t_topo = time.perf_counter() - t0
         LOGGER.info("  to_openmm_topology: %.1fs", t_topo)
 
         t0 = time.perf_counter()
-        omm_system = self._interchange.to_openmm(combine_nonbonded_forces=True)
+        with indexed_molecules():
+            omm_system = self._interchange.to_openmm(combine_nonbonded_forces=True)
+        if self.glycam_sites:
+            from polyzymd.modifying_proteins.glycam import apply_to_openmm
+
+            # The protein is the first molecule: its indices are the system's.
+            changed = apply_to_openmm(omm_system, self.glycam_sites, offset=0)
+            LOGGER.info("  GLYCAM06j 1-4 pairs and masses written: %d pairs", changed)
         t_sys = time.perf_counter() - t0
         LOGGER.info("  to_openmm (system): %.1fs", t_sys)
 
@@ -1220,6 +1380,75 @@ class SystemBuilder:
         )
 
         return omm_topology, omm_system, omm_positions
+
+    def _protein_segments(self) -> List[str]:
+        """The segment of each protein atom (``PROT`` or an attachment's), in atom order;
+        empty for a protein without modifications."""
+        if self._modified_protein is None:
+            return []
+        return list(self._modified_protein.record.segments)
+
+    @property
+    def protein_molecule_ranges(self) -> List[List[int]]:
+        """``[start, stop)`` of each molecule of a modified protein (the system's first)."""
+        if self._modified_protein is None:
+            return []
+        return self._modified_protein.record.molecules or [
+            [0, len(self._modified_protein.record.segments)]
+        ]
+
+    @property
+    def glycam_sites(self) -> List[Any]:
+        """The protein's GLYCAM06j sites, whose 1-4 pairs and masses an Interchange
+        cannot hold; empty without GLYCAM glycans. The protein is the first molecule."""
+        if self._modified_protein is None:
+            return []
+        return self._modified_protein.glycam_sites
+
+    def _align_for_box(self, box: Any) -> None:
+        """Rotate the fixed solutes onto their principal axes for a rectangular box.
+
+        Every fixed solute (protein, attachments, substrate) turns together
+        about the centre of mass of the atoms that define the rotation, so their
+        relative geometry and every restraint distance are unchanged. The
+        rotation comes from the mass-weighted heavy atoms of the protein
+        segment and the other fixed solutes; a modified protein's attachment
+        segments (``G###``, ``P###``, ``M###``) are left out, because grafted
+        chains may be drawn per replicate and every replicate of a condition
+        must share one box. The longest principal axis ends up on z. The
+        rotation is recorded in the build provenance, and ``modified_protein.pdb``
+        is rewritten in the rotated frame, so it matches the solvated system.
+        """
+        if box.alignment != "principal_axes":
+            return
+        import numpy as np
+        from openff.units import Quantity
+
+        from polyzymd.utils.boxvectors import fixed_solute_alignment
+
+        topology = self._combined_topology
+        positions = np.asarray(topology.get_positions().m_as("nanometer"), dtype=float)
+        atoms = list(topology.atoms)
+        atomic_numbers = np.array([atom.atomic_number for atom in atoms])
+        masses = np.array([atom.mass.m_as("dalton") for atom in atoms], dtype=float)
+        exclude = np.zeros(len(atoms), dtype=bool)
+        if self._modified_protein is not None:
+            from polyzymd.modifying_proteins.topology import PROTEIN_SEGMENT
+
+            segments = list(self._modified_protein.record.segments)
+            exclude[: len(segments)] = [segment != PROTEIN_SEGMENT for segment in segments]
+        rotation, center = fixed_solute_alignment(positions, masses, atomic_numbers, exclude)
+        topology.set_positions(Quantity((positions - center) @ rotation.T + center, "nanometer"))
+        self._build_provenance["box_alignment"] = {
+            "method": "principal_axes",
+            "rotation": [[float(v) for v in row] for row in rotation],
+            "center_nm": [float(v) for v in center],
+            "excluded_attachment_atoms": int(exclude.sum()),
+        }
+        pdb_path = getattr(self._modified_protein, "pdb_path", None)
+        if pdb_path is not None and Path(pdb_path).exists():
+            _rotate_pdb_file(Path(pdb_path), rotation, center * 10.0)
+        LOGGER.info("Rotated the fixed solutes onto their principal axes (longest on z)")
 
     def _record_box_provenance(self, deterministic_box: bool) -> None:
         """Record the final cell in the build provenance.
@@ -1349,7 +1578,11 @@ class SystemBuilder:
             model = (self._nagl_model or _default_nagl_model()) if method == "nagl" else None
             return ChargeSource(method=method, model=model, source_file=source_file)
 
-        if self._n_enzyme_molecules:
+        if self._n_enzyme_molecules and self._modified_protein is not None:
+            take(self._n_enzyme_molecules)
+            name, segid = handle("protein")
+            records.append(self._modified_protein.component(name=name, segid=segid, start=0))
+        elif self._n_enzyme_molecules:
             atoms = take(self._n_enzyme_molecules)
             records.append(
                 ComponentRecord(
@@ -1363,7 +1596,11 @@ class SystemBuilder:
                             "protein",
                             tuple(atoms),
                             (self._protein_ff,),
-                            ChargeSource("library"),
+                            (
+                                ChargeSource("nagl", model=self._protein_nagl_model)
+                                if self._protein_nagl_model is not None
+                                else ChargeSource("library")
+                            ),
                             reference={
                                 "pdb": str(self._enzyme_builder.pdb_path),
                                 "custom_substructures": _optional_str(
@@ -1449,6 +1686,7 @@ class SystemBuilder:
         composition = self._solvent_builder._composition
         if counts is not None:
             water_model = composition.water_model if composition else "tip3p"
+            water_force_fields = self._water_force_fields(water_model)
             water = take(counts.water)
             na, cl = take(counts.na), take(counts.cl)
             solvent_molecules = list(water)
@@ -1456,7 +1694,7 @@ class SystemBuilder:
                 Domain(
                     "water",
                     tuple(water),
-                    (self._sm_ff,),
+                    water_force_fields,
                     ChargeSource("water_model", water_model),
                     reference={"smiles": "O"},
                 )
@@ -1507,7 +1745,7 @@ class SystemBuilder:
                             Domain(
                                 ion,
                                 tuple(atoms),
-                                (self._sm_ff,),
+                                water_force_fields,
                                 ChargeSource("library"),
                                 reference={"smiles": smiles},
                             )
