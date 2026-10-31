@@ -7,10 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0b1] - 2026-10-30
+
+The AIChE beta of 1.4: covalent protein modification (mutations, protonation
+changes, glycans on GLYCAM06j, attached groups and grafted polymers) on the
+mBuild biopolymers fork, with the physics audit extended to modified proteins
+and an opt-in to OpenFF Rosemary alpha. It is a pre-release for trying out
+the conjugation workflow; 1.3.0 stays the stable release.
+
 ### Changed (behaviour)
 
 - Energy minimization now runs to convergence by default: `simulation_phases.minimization.max_iterations` defaults to `0` (was `1000`). Configs that don't set it now minimize until the RMS force is below `tolerance`; set `max_iterations: 1000` to keep the old cap. This is the one default the 1.3 schema contract allows to change, by maintainer decision.
 - After minimization, `polyzymd run` checks the RMS force on the atoms that were free to move and the most stretched bond. A run stopped by an iteration cap before converging, or a state with a bond stretched more than 50 % over its equilibrium length, is minimized again to convergence once. If a bond is still torn, the run stops with the offending atoms and values named instead of entering equilibration; a torn bond between two frozen solute atoms stops it at once. The RMS force is measured as OpenMM's minimizer measures it. The outcome (`rms_force`, `max_force`, `worst_bond`, `worst_bond_stretch`, `converged`, `reminimized`) is recorded in `minimization/phase.json`, also for a failed run. A signal stops a running minimization at its next iteration.
+
 ### Performance
 
 - Exporting a large solvated system to OpenMM and GROMACS is about 19x faster: the OpenFF

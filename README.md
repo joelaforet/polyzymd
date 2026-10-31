@@ -91,7 +91,7 @@ its `build_provenance.md`.
 @software{laforet_polyzymd,
   author = {Laforet, Jr., Joseph R.},
   title = {PolyzyMD: build, run and analyse molecular dynamics of complex biomolecular systems},
-  version = {1.3.0},
+  version = {1.4.0b1},
   year = {2026},
   doi = {10.5281/zenodo.23680214},
   url = {https://github.com/joelaforet/polyzymd}
