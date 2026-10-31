@@ -532,12 +532,20 @@ class ProteinSolute(_Solute):
                 f"own; name it as the protein's only force field file, not with {self.force_field}"
             )
         if self.modification_parameters is not None:
-            raise ValueError(
-                f"modification_parameters does not apply to a protein on {files}: it "
-                "parameterizes the whole protein component, modifications included. Remove "
-                "modification_parameters, or put the protein on ff14SB to give each site type "
-                "its own parameter set"
-            )
+            sets = self.modification_parameters.as_dict()
+            # The one exception: GLYCAM06j glycans on a Rosemary protein, an
+            # expert hybrid for benchmarking (Joe, 2026-10-30).
+            hybrid = set(sets) == {"glycan"} and sets["glycan"].is_glycam
+            if not hybrid:
+                raise ValueError(
+                    f"modification_parameters does not apply to a protein on {files}: it "
+                    "parameterizes the whole protein component, modifications included. Remove "
+                    "modification_parameters, or put the protein on ff14SB to give each site "
+                    "type its own parameter set. The one exception is GLYCAM06j glycans "
+                    "(modification_parameters: {glycan: {force_field: [GLYCAM_06j-1.xml], "
+                    "charges: {method: library}}}), a Rosemary/GLYCAM06j hybrid for "
+                    "benchmarking"
+                )
         return self
 
     @model_validator(mode="after")

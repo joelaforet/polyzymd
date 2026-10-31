@@ -148,8 +148,7 @@ def applied(context: AuditContext) -> list[Finding]:
         problems = []
         if missing:
             problems.append(
-                f"{len(missing)} planned bonds are missing (first: "
-                f"{_pair(reference, missing[0])})"
+                f"{len(missing)} planned bonds are missing (first: {_pair(reference, missing[0])})"
             )
         if extra:
             problems.append(
@@ -203,8 +202,10 @@ def modified_backbone(context: AuditContext) -> list[Finding]:
         atoms = list(reference.domain_of)
         actual = index.extract(
             atoms,
-            owned=lambda term: bool(backbone & set(term))
-            and all(reference.domain_of.get(i) == "protein" for i in term),
+            owned=lambda term: (
+                bool(backbone & set(term))
+                and all(reference.domain_of.get(i) == "protein" for i in term)
+            ),
             terms_of=atoms,
         )
         expected = reference.expected["protein"]
@@ -256,13 +257,25 @@ def modified_backbone(context: AuditContext) -> list[Finding]:
         "WARN",
         "a glycan not parameterized with GLYCAM06j, the recommended glycan force field "
         "(general force fields give stiffer glycosidic angles and other torsion minima); a "
-        "protein on OpenFF Rosemary, glycans included, gets an INFO line instead",
+        "protein on OpenFF Rosemary, glycans included, gets an INFO line instead, and the "
+        "Rosemary/GLYCAM06j benchmarking hybrid a WARN",
         _PROTEIN,
     )
 )
 def glycan_force_field(context: AuditContext) -> list[Finding]:
     def run(component: Any, reference: Any) -> Finding:
         if reference.recipe.get("protein_charges"):
+            if reference.site_types:
+                # The expert hybrid: GLYCAM06j glycans on a Rosemary protein.
+                return Finding(
+                    "parameters.glycan_force_field",
+                    component.name,
+                    "WARN",
+                    f"Rosemary/GLYCAM06j hybrid: {len(reference.site_types)} glycans on "
+                    "GLYCAM06j, the rest of the protein on Rosemary, each linkage residue's "
+                    "backbone shifted to keep the charge. This is a benchmarking option, not "
+                    "the recommended setup (Rosemary for the whole protein, glycans included).",
+                )
             # One force field (Rosemary) parameterizes the whole protein, glycans included.
             glycans = [str(r.site) for r in reference.records if r.type == "glycan"]
             if glycans:

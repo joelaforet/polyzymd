@@ -59,6 +59,11 @@ from polyzymd.utils.mbuild_logs import quiet_mbuild
 
 LOGGER = logging.getLogger(__name__)
 
+#: Backbone atom names (glycine's two alpha hydrogens included): in the
+#: Rosemary/GLYCAM06j hybrid, the backbones of a linkage residue and its two
+#: neighbours take the charge shift.
+_GLYCAM_BACKBONE = frozenset({"N", "H", "CA", "HA", "HA2", "HA3", "C", "O"})
+
 #: Atoms that are not a residue's side chain (the side chain runs from CB outward).
 BACKBONE = frozenset({"N", "H", "CA", "HA", "HA2", "HA3", "C", "O", "H1", "H2", "H3", "OXT", "HXT"})
 
@@ -232,7 +237,7 @@ def _build_reference(realized: Any, component: Any) -> ModifiedReference:
         )
     real = lambda local: local + offset  # noqa: E731
     if recipe.get("protein_charges"):
-        ref = _whole_protein_reference(recipe, component, protein, molecule, keys, real)
+        ref = _whole_protein_reference(realized, recipe, component, protein, molecule, keys, real)
         ref.chemistry = chemistry
         return ref
     from polyzymd.config.schema import protein_charge_handlers
@@ -445,7 +450,7 @@ def _build_reference(realized: Any, component: Any) -> ModifiedReference:
 
 
 def _whole_protein_reference(
-    recipe: dict, component: Any, protein: Any, molecule: Any, keys: list, real
+    realized: Any, recipe: dict, component: Any, protein: Any, molecule: Any, keys: list, real
 ) -> ModifiedReference:
     """The reference of a protein one force field parameterizes whole (Rosemary alpha).
 
@@ -453,11 +458,18 @@ def _whole_protein_reference(
     terms come from the declared force field on ``molecule`` (the chemistry
     read independently with openff-pablo), and its charges from NAGL with the
     declared model on each of its molecules, both computed here.
+
+    In the Rosemary/GLYCAM06j hybrid (a GLYCAM06j glycan parameter set), each
+    glycan site is its own domain with OpenMM's GLYCAM06j terms, charges and
+    1-4 pairs, and the backbones of the linkage residue and the residues
+    before and after it take their NAGL charges shifted uniformly by NAGL's
+    sum over the site minus GLYCAM's.
     """
     from openff.toolkit import Topology
     from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
 
     from polyzymd.modifying_proteins.parameters import charge_templates, split_molecules
+    from polyzymd.modifying_proteins.topology import modification_sites
 
     n_atoms = len(keys)
     # NAGL brings each molecule to its own formal charge: one call per
@@ -477,32 +489,97 @@ def _whole_protein_reference(
     index = SystemIndex.from_system(system)
     to_real = {i: real(i) for i in range(n_atoms)}
     domain_of = {real(i): "protein" for i in range(n_atoms)}
-    expected: dict[str, dict[str, dict]] = {"protein": {kind: {} for kind in TERM_KINDS}}
+    glycan_set = (recipe.get("parameter_sets") or {}).get("glycan")
+    glycam_sites = []
+    if glycan_set and _is_glycam(glycan_set):
+        glycam_sites = [site for site in modification_sites(protein) if site.type == "glycan"]
+    for site in glycam_sites:
+        for local in site.atom_indices:
+            domain_of[real(local)] = site.name
+    domains = ["protein"] + [site.name for site in glycam_sites]
+    expected: dict[str, dict[str, dict]] = {d: {kind: {} for kind in TERM_KINDS} for d in domains}
     _owned_terms(expected, index, to_real, domain_of, "protein")
     per_atom = {real(i): index.particle[i] for i in range(n_atoms)}
     charges = {i: per_atom[i][0] for i in per_atom}
+
+    native = None
+    site_charges: list[SiteCharges] = []
+    backbone: dict[int, float] = {}
+    if glycam_sites:
+        native = _native_glycam(recipe, protein, glycam_sites, keys, real)
+        for site in glycam_sites:
+            atoms = [real(i) for i in site.atom_indices]
+            # The linkage residue and the residues peptide-bonded to it, read
+            # from the independently perceived chemistry.
+            linking = site.residues[0]
+            ends = {keys[i][3]: i for i in range(n_atoms) if keys[i][:3] == linking}
+            residues = {linking}
+            for bond in molecule.bonds:
+                pair = (bond.atom1_index, bond.atom2_index)
+                for a, b in (pair, pair[::-1]):
+                    if (a, keys[b][3]) in ((ends["N"], "C"), (ends["C"], "N")):
+                        residues.add(keys[b][:3])
+            in_site = set(site.atom_indices)
+            linkage = [
+                real(i)
+                for i in range(n_atoms)
+                if keys[i][:3] in residues and keys[i][3] in _GLYCAM_BACKBONE and i not in in_site
+            ]
+            nagl_sum = float(sum(charges[i] for i in atoms))
+            glycam_sum = float(sum(native["particle"][i][0] for i in atoms))
+            shift = (nagl_sum - glycam_sum) / len(linkage)
+            target = nagl_sum + float(sum(charges[i] for i in linkage))
+            for i in atoms:
+                per_atom[i] = native["particle"][i]
+                charges[i] = native["particle"][i][0]
+            for i in linkage:
+                charges[i] += shift
+                backbone[i] = charges[i]
+            _owned_terms(expected, native["index"], native["to_real"], domain_of, site.name)
+            site_charges.append(
+                SiteCharges(
+                    site.name,
+                    site.type,
+                    atoms + linkage,
+                    True,
+                    target,
+                    float(sum(realized.index.particle[i][0] for i in atoms + linkage)),
+                    nagl_sum=nagl_sum,
+                    shift_per_atom=shift,
+                    bound=recipe["max_charge_shift"],
+                )
+            )
     for i, (q, lj, mass) in per_atom.items():
-        expected["protein"]["charge"][i] = q
-        expected["protein"]["lj"][i] = lj
-        expected["protein"]["mass"][i] = mass
+        domain = domain_of[i]
+        expected[domain]["charge"][i] = charges[i]
+        expected[domain]["lj"][i] = lj
+        expected[domain]["mass"][i] = mass
     ref = ModifiedReference(
         component=component.name,
         domain_of=domain_of,
         expected=expected,
-        sites=[],
-        backbone={},
+        sites=site_charges,
+        backbone=backbone,
         bonds={tuple(sorted((real(b.atom1_index), real(b.atom2_index)))) for b in molecule.bonds},
         names=[_label(key) for key in keys],
-        site_types={},
-        site_force_fields={},
+        site_types={site.name: site.type for site in glycam_sites},
+        site_force_fields={site.name: tuple(glycan_set["force_field"]) for site in glycam_sites},
     )
     _expected_pairs(
-        ref, per_atom, charges, {"protein": _scales(recipe["protein_force_field"])}, None
+        ref, per_atom, charges, {"protein": _scales(recipe["protein_force_field"])}, native
     )
-    # One domain by design: no site atoms (rule_atoms stays empty). The records
-    # are compared with the config's blocks by modifications.declared.
     ref.records = list(protein.records)
     ref.recipe = recipe
+    if glycam_sites:
+        # Only the glycan sites are sites; every other modification is Rosemary's.
+        offset = real(0)
+        rule_atoms, designed, attached = site_rule(protein, keys, offset)
+        glycan_atoms = {i for site in glycam_sites for i in (real(k) for k in site.atom_indices)}
+        ref.rule_atoms = rule_atoms & glycan_atoms
+        ref.designed_backbone = designed & glycan_atoms
+        ref.attached_atoms = attached & glycan_atoms
+    # Otherwise one domain by design: no site atoms (rule_atoms stays empty).
+    # The records are compared with the config's blocks by modifications.declared.
     # A neutral terminus (NH2, COOH) is allowed on Rosemary, which needs no
     # residue templates, so ref.neutral_termini stays empty.
     ref.protonation_warnings = protonation_warnings(protein)
@@ -1030,6 +1107,22 @@ def _expected_pairs(ref: ModifiedReference, per_atom, charges, scales, native) -
                 value = native["exceptions"].get(pair)
                 if value is None:
                     continue
+                # GLYCAM06j's pair scales apply to the expected charges and
+                # Lennard-Jones parameters: on a Rosemary protein the protein
+                # atoms of a pair carry Rosemary's, not ff14SB's.
+                product, sigma, epsilon = value
+                (qi, (_, ei), _), (qj, (_, ej), _) = (
+                    native["particle"][start],
+                    native["particle"][j],
+                )
+                if abs(qi * qj) > 1e-12:
+                    product *= charges[start] * charges[j] / (qi * qj)
+                _, (si, ei_expected), _ = per_atom[start]
+                _, (sj, ej_expected), _ = per_atom[j]
+                if ei * ej > 1e-12:
+                    epsilon *= float(np.sqrt(ei_expected * ej_expected / (ei * ej)))
+                    sigma = (si + sj) / 2
+                value = (product, sigma, epsilon)
             else:
                 coulomb, lj = scales[owner]
                 qi, (si, ei), _ = per_atom[start]

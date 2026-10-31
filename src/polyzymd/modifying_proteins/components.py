@@ -5,7 +5,9 @@ atoms are written under several segment IDs (``PROT`` for the protein, one
 per attachment: ``G001``, ``P001``, ``M001``) and split into domains: the
 protein (ff14SB, library charges) and one domain per modification site (its
 parameter set). A protein on OpenFF Rosemary alpha is one domain (Rosemary,
-NAGL charges on the whole molecule), modifications included. Every domain's
+NAGL charges on the whole molecule), modifications included; in the
+Rosemary/GLYCAM06j benchmarking hybrid each glycan site is a domain too.
+Every domain's
 reference names what the audit needs to rebuild the protein from its inputs
 alone: the input PDB file, the modification blocks and the parameter sets.
 """

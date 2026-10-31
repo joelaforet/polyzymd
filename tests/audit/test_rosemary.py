@@ -241,6 +241,7 @@ def test_glycans_on_a_rosemary_protein_are_an_info_line(monkeypatch) -> None:
 
     reference = SimpleNamespace(
         recipe={"protein_charges": {"method": "nagl", "model": MODEL}},
+        site_types={},
         records=[
             SimpleNamespace(type="glycan", site="A:N5"),
             SimpleNamespace(type=None, site="A:K8"),

@@ -114,6 +114,37 @@ def test_a_rosemary_protein_refuses_modification_parameters() -> None:
         )
 
 
+GLYCAM = {"force_field": ["GLYCAM_06j-1.xml"], "charges": {"method": "library"}}
+
+
+def test_a_rosemary_protein_accepts_glycam_glycans_as_the_benchmark_hybrid() -> None:
+    protein = _protein(
+        force_field=[ROSEMARY], charges=NAGL, modification_parameters={"glycan": GLYCAM}
+    )
+    assert protein.on_rosemary and protein.modification_parameters.glycan.is_glycam
+
+
+def test_the_hybrid_takes_glycam_glycans_alone() -> None:
+    with pytest.raises(ValidationError, match="The one exception is GLYCAM06j glycans"):
+        _protein(
+            force_field=[ROSEMARY],
+            charges=NAGL,
+            modifications=ACYL,
+            modification_parameters={
+                "glycan": GLYCAM,
+                "generic": {"force_field": ["openff-2.3.0.offxml"], "charges": NAGL},
+            },
+        )
+    with pytest.raises(ValidationError, match="modification_parameters does not apply"):
+        _protein(
+            force_field=[ROSEMARY],
+            charges=NAGL,
+            modification_parameters={
+                "glycan": {"force_field": ["openff-2.3.0.offxml"], "charges": NAGL}
+            },
+        )
+
+
 def test_rosemary_is_the_protein_force_field_on_its_own() -> None:
     with pytest.raises(ValidationError, match="only force field file"):
         _protein(force_field=[ROSEMARY, "openff-2.3.0.offxml"], charges=NAGL)
