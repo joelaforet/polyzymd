@@ -102,7 +102,7 @@ the replicate holds too few independent samples to judge, not that the window
 is too short.
 
 Pass `--no-eq-check` to `polyzymd analyze`, or `detect_equilibration=False`
-to `Timeseries.reduce`, to skip the diagnostic entirely. Values, intervals and
+to `Timeseries.reduce`, to skip the diagnostic entirely. Values, intervals, and
 tests are identical with it on or off.
 
 ## Limitations

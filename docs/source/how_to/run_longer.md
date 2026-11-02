@@ -5,7 +5,7 @@
 
 Use this page to continue a finished OpenMM replicate for more nanoseconds.
 The longer run is the same simulation: it continues from the saved state of
-the last segment, with the same build, thermostat and frame spacing. Its new
+the last segment, with the same build, thermostat, and frame spacing. Its new
 frames join the old ones as one trajectory.
 
 This works for OpenMM runs only. PolyzyMD cannot run a GROMACS replicate
@@ -86,7 +86,7 @@ segment's portable state file (`production_N_state.xml`, or
 left nothing but a binary checkpoint needs the same OpenMM build.
 
 On a cluster, `submit` does not compare a started replicate with its build.
-Each new segment takes its thermostat, friction and barostat from the
+Each new segment takes its thermostat, friction, and barostat from the
 parameters file of the segment before it, not from the config. So a change to
 another setting is not refused there: it is ignored, or it makes the chain
 inconsistent. Edit only the template, `duration` and `samples`.
@@ -112,7 +112,7 @@ study file.
 
 ## Limits
 
-- Changing the temperature, the ensemble or another setting part-way is not
+- Changing the temperature, the ensemble, or another setting part-way is not
   supported. To study such a change, run it as a new condition.
 - Starting a new condition from the final state of a finished replicate is
   not supported yet. Build and equilibrate the new condition from its own

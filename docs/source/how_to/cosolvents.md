@@ -61,9 +61,9 @@ Each co-solvent needs three things:
 
 | Key | What to write |
 |---|---|
-| `name` | A name from the built-in library, such as `urea`, `dmso`, `ethanol` or `glycerol`, or your own name together with `smiles:` |
-| one amount | `mole_fraction` (0 to 1, replaces water), `concentration` (mol/L, added on top of the water) or `count` (molecules, added on top of the water). Give exactly one |
-| `charges` | `{method: preset}` for a library co-solvent. For your own molecule, `{method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}`, `{method: am1bcc}` or `{method: espaloma}` |
+| `name` | A name from the built-in library, such as `urea`, `dmso`, `ethanol`, or `glycerol`, or your own name together with `smiles:` |
+| one amount | `mole_fraction` (0 to 1, replaces water), `concentration` (mol/L, added on top of the water), or `count` (molecules, added on top of the water). Give exactly one |
+| `charges` | `{method: preset}` for a library co-solvent. For your own molecule, `{method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}`, `{method: am1bcc}`, or `{method: espaloma}` |
 
 For example, 10 mol% DMSO and a molecule PolyzyMD does not ship:
 
@@ -79,7 +79,7 @@ For example, 10 mol% DMSO and a molecule PolyzyMD does not ship:
 ```
 
 The co-solvent is parameterized with the force field file of
-`solvent.force_field`. For the library, the formulas behind each amount and
+`solvent.force_field`. For the library, the formulas behind each amount, and
 the residue names, see [Co-solvents](../reference/configuration.md#co-solvents) in the
 configuration reference.
 
@@ -121,4 +121,4 @@ co-solvent condition with the water control, as for a polymer condition.
   condition, from setup to analysis.
 - {ref}`the shipped examples <shipped-examples>`: the shipped co-solvent example.
 - [Co-solvents](../reference/configuration.md#co-solvents) in the configuration reference: every key,
-  the library and the formulas.
+  the library, and the formulas.

@@ -10,7 +10,7 @@ If you are new to PolyzyMD, do the {doc}`../get_started/quickstart` first.
 :link: howto-set-up
 :link-type: ref
 
-Add polymers, co-solvents, a ligand, restraints and equilibration stages. Fix a
+Add polymers, co-solvents, a ligand, restraints, and equilibration stages. Fix a
 PDB that OpenFF refuses.
 :::
 

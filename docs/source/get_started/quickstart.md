@@ -239,7 +239,7 @@ polyzymd run -c trpcage/conditions/water/config.yaml -r 1
 `-r 1` selects replicate 1. The replicate number seeds the starting structure.
 `polyzymd run` does these steps on this machine:
 
-1. It builds the system: it solvates the protein with PACKMOL, adds the ions
+1. It builds the system: it solvates the protein with PACKMOL, adds the ions,
    and assigns force-field parameters with OpenFF.
 2. It minimizes the energy. The protein heavy atoms stay fixed.
 3. It runs the equilibration stage.
@@ -282,7 +282,7 @@ oxygens; the water in front of the protein is cut away.
 ```
 
 Open `build_provenance.md`. It records what was built and the result of the
-physics audit, which compared every force-field term, charge and
+physics audit, which compared every force-field term, charge, and
 setting of the built system with the config. It starts like this:
 
 ```text
@@ -310,7 +310,7 @@ setting of the built system with the config. It starts like this:
 ...
 ```
 
-Below the audit table, `Methods to cite` lists the software, force fields
+Below the audit table, `Methods to cite` lists the software, force fields,
 and methods of this build, with DOIs, and `Inputs and seeds` lists the box
 and the seeds. For what the audit checks and what it does not, see
 {doc}`../explanation/physics_audit`.
@@ -379,7 +379,7 @@ PolyzyMD stored the result in `trpcage/results/rg/`:
 | `figures/` | The figures of the analysis |
 
 PolyzyMD writes the figures to files and opens no window. So `analyze`
-needs no display: it works over SSH, in a batch job and under WSL.
+needs no display: it works over SSH, in a batch job, and under WSL.
 `--no-plots` skips the figures.
 
 If you run the command again, PolyzyMD reads the stored values and does not
@@ -388,8 +388,8 @@ read the trajectory.
 ## What you did
 
 You made a project, added a condition to its study, validated the config,
-simulated a protein in water and measured one quantity with its provenance.
-The steps for a real simulation are the same. Only the protein, the durations
+simulated a protein in water, and measured one quantity with its provenance.
+The steps for a real simulation are the same. Only the protein, the durations,
 and the hardware change.
 
 ## Next steps
@@ -411,7 +411,7 @@ and the hardware change.
 - **More conditions.** Copy a condition with
   `polyzymd study add-condition NAME --from Water`, and change what differs,
   such as a polymer or a co-solvent. See {doc}`../how_to/study_folder`,
-  {doc}`../how_to/dynamic_polymers` and {doc}`../how_to/cosolvents`. For
+  {doc}`../how_to/dynamic_polymers`, and {doc}`../how_to/cosolvents`. For
   shipped configs of these systems, see {ref}`shipped-examples`.
 - **More studies.** Add a study for another protein with
   `polyzymd project add-study LABEL`. See {doc}`../how_to/project`.

@@ -61,7 +61,7 @@ value:
 | `condition`, `replicate` | Where the value comes from |
 | `frame`, `time_ns` | For a per-frame series: the frame and its time |
 | `label` | For a per-residue (or other labeled) result: the residue |
-| `part` | For a result with several parts, such as RMSF's `rmsf`, `offset` and `rmsd_per_residue` |
+| `part` | For a result with several parts, such as RMSF's `rmsf`, `offset`, and `rmsd_per_residue` |
 | `value`, `unit` | The value and its unit |
 
 `study.labels` gives the conditions in the study's order, control first.
@@ -115,7 +115,7 @@ not across frames.
 ## Step 4: Plot one value per replicate, with the reported statistics
 
 `results.report` is the report that `polyzymd analyze` printed. Each of its
-conditions has the mean, its 95% interval and the replicate values, so a
+conditions has the mean, its 95% interval, and the replicate values, so a
 figure can show exactly the numbers of the report:
 
 ```python

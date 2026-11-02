@@ -37,7 +37,7 @@ of the calculation and the checks, see
 ## From the command line
 
 In a {term}`study`, give the study folder. The study names the conditions,
-the control and the equilibration window. The results go to
+the control, and the equilibration window. The results go to
 `<study>/results/sasa/`:
 
 ```bash

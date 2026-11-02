@@ -61,7 +61,7 @@ and run in a `sim-cuda-*` environment on the same machine, open one shell for
 each environment, or use `--manifest-path`.
 
 The SLURM job scripts for OpenMM need an NVIDIA GPU. For a local NVIDIA GPU,
-a CPU, an AMD GPU, another cluster or a new driver, see
+a CPU, an AMD GPU, another cluster, or a new driver, see
 {doc}`../how_to/hardware_platforms`.
 
 (scope-and-limitations)=
@@ -73,7 +73,7 @@ before you start.
 
 **What it builds.** One protein from a PDB file, with at most one small
 molecule (a ligand), one polymer entry (any number of chains of one or more
-monomers) and any number of co-solvents. The solvent is TIP3P water with NaCl
+monomers), and any number of co-solvents. The solvent is TIP3P water with NaCl
 ions, in a cubic or rhombic dodecahedral box. See
 {doc}`../reference/configuration`.
 
@@ -82,12 +82,12 @@ files), applied through OpenFF Interchange, such as the OpenFF port of Amber
 ff14SB for the protein and Sage for everything else. Each solute names one
 file, and every molecule except the protein uses the file of the solvent.
 Charges come from the force field's library (protein), files PolyzyMD ships
-(`preset`), NAGL, AM1-BCC or Espaloma. PolyzyMD reads no AMBER, CHARMM or
+(`preset`), NAGL, AM1-BCC, or Espaloma. PolyzyMD reads no AMBER, CHARMM, or
 GROMACS topologies as input.
 
 **Dynamics.** NVT and NPT stages with Langevin dynamics on both engines.
 OpenMM uses a Monte Carlo barostat; GROMACS, which has none, runs stochastic
-cell rescaling in its place. Nosé-Hoover, Andersen and anisotropic pressure
+cell rescaling in its place. Nosé-Hoover, Andersen, and anisotropic pressure
 coupling run only on GROMACS. Position restraints work on both engines, with
 fewer groups on GROMACS; distance restraints only on OpenMM. No NVE. Each build is audited against its config
 (see {doc}`../explanation/physics_audit`).
@@ -97,10 +97,10 @@ GROMACS, which you install yourself. The generated OpenMM SLURM jobs need an
 NVIDIA GPU. macOS works for setup and analysis, without CUDA. See
 {doc}`../reference/gromacs_openmm` and {doc}`../how_to/hardware_platforms`.
 
-**Statistics.** One value per replicate, a Student-t interval, Welch's test
+**Statistics.** One value per replicate, a Student-t interval, Welch's test,
 and the Benjamini-Hochberg correction. Every replicate starts from the same
 protein structure, so the spread measures sampling from that start. There is
-no block averaging, bootstrap or jackknife. See
+no block averaging, bootstrap, or jackknife. See
 {doc}`../explanation/analysis_statistics_best_practices`.
 
 **Out of scope.** Enhanced sampling, free-energy calculations, membranes,
@@ -130,13 +130,13 @@ does before you set up your own system, or as a starting config.
 The times are for the shipped configs, build included, measured on a laptop
 with a 24-thread CPU and, where given, an RTX 5070 Ti laptop GPU. Each run is
 a few picoseconds: long enough to check that the system builds, passes the
-physics audit and runs, not long enough for a result.
+physics audit, and runs, not long enough for a result.
 
 ### Run an example
 
 Each folder has a `README.md` with its exact commands. They follow the
 quickstart: make a project, add the example config as a condition, validate,
-run and analyze. For the polymer example, from the `examples/` folder of your
+run, and analyze. For the polymer example, from the `examples/` folder of your
 clone, in the `build` environment:
 
 ```bash
@@ -165,13 +165,13 @@ The GROMACS configs need `gmx` on `PATH`.
 Every build writes `build_provenance.md` into the replicate folder. Read it
 after the run:
 
-- **Components** lists each solute, the solvent and the ions, with the force
+- **Components** lists each solute, the solvent, and the ions, with the force
   field and the charge method of each.
-- **Physics audit** must say `PASSED`. Its rows check the charges, masses and
+- **Physics audit** must say `PASSED`. Its rows check the charges, masses, and
   parameters of every component against their sources, the ion counts, the
-  overlaps and the box. Each example README names the rows that matter for
+  overlaps, and the box. Each example README names the rows that matter for
   that system. See {doc}`../explanation/physics_audit`.
-- **Methods to cite** lists the software, force fields and models the build
+- **Methods to cite** lists the software, force fields, and models the build
   used.
 - **Inputs and seeds** gives the seeds and, for polymers, the mBuild version.
 
@@ -237,7 +237,7 @@ and with a ligand and a restraint.
 :link: ../how_to/index
 :link-type: doc
 
-Find how-to guides for polymers, restraints, GROMACS, SLURM and more.
+Find how-to guides for polymers, restraints, GROMACS, SLURM, and more.
 :::
 
 ::::

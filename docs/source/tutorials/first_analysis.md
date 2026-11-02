@@ -61,7 +61,7 @@ is:
 All 2 replicate(s) completed successfully.
 ```
 
-`runs/trpcage/water/` now holds `trpcage_300K_run1/`, `trpcage_300K_run2/`
+`runs/trpcage/water/` now holds `trpcage_300K_run1/`, `trpcage_300K_run2/`,
 and `trpcage_300K_run3/`.
 
 ## Step 2: List the analysis
@@ -89,7 +89,7 @@ polyzymd analyze rmsf --study trpcage
 ```
 
 `--study` names the study folder. The study gives the conditions, the
-control, the replicates and the equilibration window. The project gives the
+control, the replicates, and the equilibration window. The project gives the
 settings of `rmsf`. The analysis superposes every production frame on a
 reference frame of its replicate. Then it measures how far each C-alpha atom
 moves about its mean position. The output is:
@@ -107,10 +107,10 @@ different order on each run.
 Read the report in this order:
 
 1. The header line starts with `#`. It names the analysis, the result
-   (`core_rmsf`), its unit, the equilibration window (`eq 0ns`) and the
+   (`core_rmsf`), its unit, the equilibration window (`eq 0ns`), and the
    number of replicates.
 2. The `Water` line gives the number of replicates (`n 3`), their mean, the
-   standard error (`sem`), the 95 % confidence interval (`ci95`) and the
+   standard error (`sem`), the 95 % confidence interval (`ci95`), and the
    value of each replicate.
 3. `verdict:` gives the result in one line.
 
@@ -176,7 +176,7 @@ trpcage/results/rmsf/
 
 `record.json` holds the function and the hash of its code, the settings, the
 hash of the config, the size and SHA-256 of the topology and of each
-trajectory file, the frames used and the software versions. For every field
+trajectory file, the frames used, and the software versions. For every field
 of the report, see {doc}`../reference/analysis_protocol_report`.
 
 ## When a quick look with `-c` is enough
@@ -195,11 +195,11 @@ It prints the same report. The results go into the current folder, in
 Use `-c` for a quick look: to check one simulation while it runs, or to try a
 setting before you add it to a study. Use `--study` or `--project` for the
 results that you keep. The study then holds the conditions, the control, the
-window, the settings and the results together, and `polyzymd project freeze`
+window, the settings, and the results together, and `polyzymd project freeze`
 can publish them.
 
 ## What you did
 
 You ran three replicates of one condition, measured their RMSF on the study,
-read the report and found the stored results. Next, compare two conditions in
+read the report, and found the stored results. Next, compare two conditions in
 {doc}`analysis_complete_workflow`.

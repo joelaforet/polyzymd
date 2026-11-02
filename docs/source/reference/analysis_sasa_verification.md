@@ -9,7 +9,7 @@ against independent calculations, and works around one defect in MDTraj.
 frame:
 
 1. Build, once per universe and context, an MDTraj topology with one atom per
-   context atom, in index order, carrying its name, its residue and its element
+   context atom, in index order, carrying its name, its residue, and its element
    from the MDAnalysis universe.
 2. Give the frame's context coordinates, converted from Å to nm, to
    `mdtraj.shrake_rupley(mode="atom")` in a call of their own, with the probe
@@ -79,7 +79,7 @@ others.
   single-frame values exactly, which fails if frames are batched into one
   MDTraj call;
 - a target outside its context and an unknown element are refused;
-- the command line and `analyze` report the documented results, figures and
+- the command line and `analyze` report the documented results, figures, and
   settings.
 
 ## Scope

@@ -28,7 +28,7 @@ Do these steps in this order. The sections below give the details.
 1. Make the project: `polyzymd project init Paper_1 --study lipa363 --study calb343`.
    Add a study later with `polyzymd project add-study rml333 --project Paper_1`.
 2. Add the conditions of each study, control first, with `polyzymd study add-condition`.
-3. Edit each `study.yaml`: add the structures, the regions and the factors.
+3. Edit each `study.yaml`: add the structures, the regions, and the factors.
 4. Check the project: `polyzymd project check Paper_1`. To see how long each
    condition ran, also run `polyzymd study check Paper_1/lipa363 --production`.
 5. Commit the project: `git -C Paper_1 add -A && git -C Paper_1 commit -m "Inputs"`.
@@ -46,7 +46,7 @@ is not committed, and it names the files.
 A study is a set of conditions that you compare with each other. All its
 conditions share one analysis frame:
 
-- the residue numbering, and so the selections of the core, the active site
+- the residue numbering, and so the selections of the core, the active site,
   or the lid;
 - the reference structure;
 - the equilibration window;
@@ -84,8 +84,8 @@ polyzymd project init Paper_1 --study lipa363 --study calb343 --study rml333
 The command writes these files and folders:
 
 - `project.yaml`, which lists the studies;
-- `analyses/`, `stats/` and `figures/`, each with a `README.md`;
-- `LICENSE-code` (MIT), `LICENSE-data` (CC-BY-4.0), `README.md` and
+- `analyses/`, `stats/`, and `figures/`, each with a `README.md`;
+- `LICENSE-code` (MIT), `LICENSE-data` (CC-BY-4.0), `README.md`, and
   `.gitignore`;
 - one study folder for each `--study`, with a `study.yaml` to fill in.
 
@@ -105,7 +105,7 @@ polyzymd project add-study rml333 --project Paper_1
 `add-study` writes the study folder `Paper_1/rml333/` with a `study.yaml` to
 fill in, and adds one line under `studies:` in `project.yaml`. It commits
 nothing. The label is also the folder name, so use lower case letters,
-digits and `_`.
+digits, and `_`.
 
 To bring studies that you already have into a project, see
 {doc}`move_studies_into_project`.
@@ -331,7 +331,7 @@ analysis does: with the `reduce` of the analysis entry, or else with the mean.
 For one study, use `pz.Study("Paper_1/lipa363").replicate_table("lid_opening")`.
 
 `replicate_table` has the columns `study`, `condition`, `replicate`, `name`,
-`part`, `label`, `value` and `unit`, then one column for each factor. `name`
+`part`, `label`, `value`, and `unit`, then one column for each factor. `name`
 is the stored quantity. A run that stores two quantities, such as two
 hydrogen-bond summaries, has one row for each quantity. In that case, group
 by `name` too.
@@ -358,7 +358,7 @@ means against the factor. It then tests whether the slope is zero. For the
 reasons behind this test, see {ref}`project-statistics`.
 
 This study has a control without polymer and four SBMA fractions (0.25, 0.5,
-0.75 and 1.0), with five replicates each. The control has no
+0.75, and 1.0), with five replicates each. The control has no
 `sbma_fraction`, so the line uses four condition means:
 
 ```

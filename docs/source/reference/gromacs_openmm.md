@@ -11,7 +11,7 @@ the same way on both engines, and PolyzyMD writes a warning.
 
 The rows hold for every equilibration stage and for production, including
 the later production segments of a chain, which continue with the
-thermostat, friction and barostat of the first segment.
+thermostat, friction, and barostat of the first segment.
 
 | Setting | OpenMM | GROMACS (`.mdp`) | Match |
 |---|---|---|---|
@@ -37,7 +37,7 @@ thermostat, friction and barostat of the first segment.
 | Barostat moves | `MonteCarloBarostat.setRandomNumberSeed(seed)`, one seed for each NPT stage and segment | the c-rescale noise uses `ld_seed`, which every stage's `.mdp` sets | 1:1 |
 
 The replicate number seeds the starting structure, the initial velocities,
-the thermostat noise and the barostat moves. Each equilibration stage and production segment
+the thermostat noise, and the barostat moves. Each equilibration stage and production segment
 gets its own seed, derived from the replicate number and the stage name
 (`polyzymd.simulation.seeds.dynamics_seed`). A single `ld_seed` for all
 stages would repeat the same noise in every stage, because GROMACS starts
@@ -45,8 +45,8 @@ the step count again at each stage.
 
 The two engines use different random number generators, so one seed does
 not give the same trajectory on OpenMM and on GROMACS. On OpenMM's CPU,
-OpenCL and CUDA platforms, a replicate run again does not give the same
-trajectory either, even on one machine: CPU threads, PME and GPUs add up
+OpenCL, and CUDA platforms, a replicate run again does not give the same
+trajectory either, even on one machine: CPU threads, PME, and GPUs add up
 forces in a different order on each run, so two runs of a replicate differ
 from the first minimization on. (The slow Reference platform is
 deterministic.) They agree statistically, not frame by frame. OpenMM has a
@@ -66,7 +66,7 @@ measured single-point energy of one build on both engines, see
 | Van der Waals | cutoff 0.9 nm, switch from 0.8 nm, dispersion correction | `rvdw = 0.9`, `vdw-modifier = Potential-switch`, `rvdw-switch = 0.8`, `DispCorr = EnerPres` |
 | Constraints | bonds to hydrogen; rigid water | `constraints = h-bonds`, LINCS; rigid water |
 
-The cutoff, switch, PME and dispersion correction are the same on both
+The cutoff, switch, PME, and dispersion correction are the same on both
 engines; the physics audit checks them against the force field file
 (`nonbonded.settings`). The PME accuracy differs: the GROMACS run files ask
 for a tighter reciprocal-space error than OpenMM uses.
@@ -76,7 +76,7 @@ for a tighter reciprocal-space error than OpenMM uses.
 | What | OpenMM | GROMACS | Match |
 |---|---|---|---|
 | Minimization with `freeze_solute: true` (the default) | protein and substrate heavy atoms held fixed | `em.mdp` sets `define = -DPOSRES_EM`: position restraints of 1e5 kJ/mol/nm² on the protein and ligand heavy atoms, whatever the equilibration stages restrain | approximate. The same atoms are held; in GROMACS they can move by about 0.01 nm. |
-| Position restraints | a harmonic force on the selected atoms | `define = -DPOSRES_...` with restraint `.itp` files | 1:1 for the protein, ligand and polymer groups, with one force constant per group and one protein group; `validate` refuses other position restraints on GROMACS |
+| Position restraints | a harmonic force on the selected atoms | `define = -DPOSRES_...` with restraint `.itp` files | 1:1 for the protein, ligand, and polymer groups, with one force constant per group and one protein group; `validate` refuses other position restraints on GROMACS |
 | Distance restraints (`restraints:`) | applied in every phase | not applied | `validate` refuses enabled distance restraints with `engine: gromacs` |
 | Temperature ramp | the target changes every `temperature_interval_steps` steps | `annealing`, a piecewise-linear schedule that changes the target over one step at each boundary | 1:1: the same target at every step |
 
@@ -115,12 +115,12 @@ The workflow
 [`.github/workflows/engine-parity.yml`](https://github.com/joelaforet/polyzymd/actions/workflows/engine-parity.yml)
 installs GROMACS from Ubuntu and runs the tests below. The audit tests build a small
 system that holds every component type: Trp-cage, a substrate, polymer chains
-of two monomers, DMSO, water and NaCl (`tests/_support/small_system.py`).
+of two monomers, DMSO, water, and NaCl (`tests/_support/small_system.py`).
 
 | Test | What it compares |
 |---|---|
-| `test_both_engines_read_back_the_same_system` in `tests/audit/test_components_and_engines.py` | The OpenMM `System` and the GROMACS `.top`/`.itp` files of one build, atom for atom: every bond, angle, torsion, Lennard-Jones parameter, 1-4 exception, constraint, mass and charge. A single parameter that differs fails the test. |
-| `test_both_engines_run_with_the_same_settings`, same file | Constraints (`h-bonds`), nonbonded method (PME), dispersion correction, cutoff and switching distance, read from the OpenMM `System` and from the GROMACS `.mdp`. |
+| `test_both_engines_read_back_the_same_system` in `tests/audit/test_components_and_engines.py` | The OpenMM `System` and the GROMACS `.top`/`.itp` files of one build, atom for atom: every bond, angle, torsion, Lennard-Jones parameter, 1-4 exception, constraint, mass, and charge. A single parameter that differs fails the test. |
+| `test_both_engines_run_with_the_same_settings`, same file | Constraints (`h-bonds`), nonbonded method (PME), dispersion correction, cutoff, and switching distance, read from the OpenMM `System` and from the GROMACS `.mdp`. |
 | `tests/audit/test_engine_parity.py` | The whole physics audit passes on the exported GROMACS files. Then each file is edited the way a person might (a bond constant in an `.itp`; the time step, length, temperature, barostat, constraints, integrator, thermostat time constant, annealing or restraint switches of an `.mdp`; a missing stage file), and the right check fails. |
 | `tests/exporters/test_gromacs_staged_restraints.py` | Each equilibration stage's `.mdp` is compiled with `gmx grompp` and read back with `gmx dump`, so the test sees the position restraints GROMACS will apply, not the files PolyzyMD meant to write. |
 | `tests/config/test_solutes.py` | The config's solutes and solvent, each with its own force field and charges, which both exports start from. |
@@ -144,7 +144,7 @@ file.
 - PolyzyMD 1.3.0, OpenFF Toolkit 0.18.1. Measured on 2026-10-25.
 
 Energies in kJ/mol. GROMACS reports its own nonbonded parts separately
-(LJ-14, Coulomb-14, LJ (SR), dispersion correction, Coulomb (SR) and PME
+(LJ-14, Coulomb-14, LJ (SR), dispersion correction, Coulomb (SR), and PME
 reciprocal); the table adds them, because OpenMM holds them in one
 `NonbondedForce`.
 
@@ -185,7 +185,7 @@ How to read these numbers:
   the run `.mdp` files use 1e-5 (see the tables above).
 
 This comparison is not part of CI. It checks one system with no polymer,
-ligand or co-solvent; CI checks the parameters of all of those, term by
+ligand, or co-solvent; CI checks the parameters of all of those, term by
 term, as the table above says.
 
 #### Repeat the comparison
@@ -322,4 +322,4 @@ evaluate("minimized.gro", "after OpenMM minimization")
   and different random number generators, so their trajectories differ frame
   by frame and agree only in distribution. No such comparison is published
   here yet.
-- Energies of a system with polymers, a ligand or co-solvents.
+- Energies of a system with polymers, a ligand, or co-solvents.

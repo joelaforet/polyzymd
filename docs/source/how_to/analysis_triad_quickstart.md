@@ -32,8 +32,8 @@ works too. The quickstart uses it.
 
 In a serine hydrolase the serine hydroxyl donates to the histidine NE2, and
 the histidine ND1-H donates to the aspartate carboxylate. The numbering below
-is that of *B. subtilis* lipase A in a PolyzyMD topology: Ser76, His155 and
-Asp132. In the crystal structure 1ISP, they are Ser77, His156 and Asp133.
+is that of *B. subtilis* lipase A in a PolyzyMD topology: Ser76, His155, and
+Asp132. In the crystal structure 1ISP, they are Ser77, His156, and Asp133.
 Use the residue numbers of your built system, as
 {doc}`../explanation/residue_assignment` explains.
 

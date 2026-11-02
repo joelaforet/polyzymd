@@ -34,7 +34,7 @@ The differences are at the precision of single-precision coordinates.
 `tests/analyses/test_native_contacts.py` checks, on small synthetic systems,
 the native pairs at the radius and separation boundaries, Q against values
 computed by hand, the region, the minimum image, and the results, settings,
-figures and refusals of `polyzymd analyze native_contacts`.
+figures, and refusals of `polyzymd analyze native_contacts`.
 
 ## Scope
 

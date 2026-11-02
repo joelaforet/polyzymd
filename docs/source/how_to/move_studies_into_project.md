@@ -18,7 +18,7 @@ old/
 In this paper, each study is one enzyme at one temperature: `lipa363` is
 lipase A at 363 K. That is one layout, not a rule. A study holds every
 condition that shares one analysis frame (residue numbering, reference
-structures, regions, equilibration window and control). So one study can
+structures, regions, equilibration window, and control). So one study can
 vary the temperature and the polymer composition together, with factors such
 as `temperature_K` and `sbma_fraction`. See {doc}`../explanation/projects`.
 
@@ -46,7 +46,7 @@ works too. The quickstart uses it.
 ## 1. Create the project
 
 One study for each old study folder. A study label is also its folder name,
-so use lower case, digits and `_`:
+so use lower case, digits, and `_`:
 
 ```bash
 polyzymd project init Paper_1 --study lipa363 --study calb343 --study rml333
@@ -131,7 +131,7 @@ description: Bacillus subtilis lipase A (1ISP) at 363 K
 equilibration: 200ns
 ```
 
-Copy `stride:`, `until:` and `replicates:` too if the old file has them.
+Copy `stride:`, `until:`, and `replicates:` too if the old file has them.
 
 ## 4. Name the structures
 
@@ -243,7 +243,7 @@ polyzymd project check Paper_1
 
 **Success looks like:** one `analysis <run>: studies ...` line per project
 analysis, naming the studies that run it, then each study's check with its
-structures, regions and conditions, and no `error:` line. A name a study does
+structures, regions, and conditions, and no `error:` line. A name a study does
 not define is an error naming the study and the analysis: define it in that
 study, or limit the analysis with `studies:`.
 
@@ -260,7 +260,7 @@ are measured once more.
 ## 10. Finish
 
 - Fill `metadata:` in `project.yaml` (title, authors with `family-names`,
-  `given-names` and ORCID, licenses).
+  `given-names`, and ORCID, licenses).
 - Move any standalone statistics script into `stats/`, reading results with
   `pz.Project(".").replicate_table(run)` ({doc}`project`).
 - Commit: `git -C Paper_1 add -A && git -C Paper_1 commit -m "Move the studies into a project"`.
@@ -275,5 +275,5 @@ pz.Project("Paper_1").results("rmsf").table
 
 ## Next steps
 
-- {doc}`project`: analyze, run statistics and publish a project.
+- {doc}`project`: analyze, run statistics, and publish a project.
 - {doc}`../explanation/projects`: why the conditions of a study share one analysis frame.

@@ -4,14 +4,14 @@ An analysis in PolyzyMD is a Python function of an MDAnalysis `AtomGroup` or
 `Universe`. The study API runs it on every replicate of every condition:
 `Study.timeseries` calls it on each production frame, and
 `Study.per_replicate` calls it once per replicate. PolyzyMD stores each
-replicate's result with a record of the code, arguments and input files that
+replicate's result with a record of the code, arguments, and input files that
 produced it, and computes the intervals and tests between conditions with the
 replicate as the sampling unit. There is no base class to subclass and no
 registry to edit.
 
 {doc}`../how_to/study_api` shows how to load a study, measure on every frame,
 compare with a reference structure, turn a replicate into one value, compare
-conditions and draw figures. {doc}`../reference/study_api` gives every
+conditions, and draw figures. {doc}`../reference/study_api` gives every
 signature.
 
 :::{admonition} Environment setup
@@ -73,9 +73,9 @@ To make it a `polyzymd analyze NAME` analysis as well, add one entry to
 a one-line summary, the settings and their defaults, and a
 `_measure_<name>(study, settings, request)` function. That function runs the
 measurement through the study and returns a `Measured`: the replicate values
-to report, the chosen result and every result, the settings to record and a
+to report, the chosen result and every result, the settings to record, and a
 function that draws the figures. `analyze` then summarizes or compares the
-values, draws the figures and records the settings, the same way for every
+values, draws the figures, and records the settings, the same way for every
 analysis. `polyzymd analyze --list` reads `ANALYSES`, `polyzymd analyze`
 refuses any name that is not in it, and `--submit` runs any name that is.
 

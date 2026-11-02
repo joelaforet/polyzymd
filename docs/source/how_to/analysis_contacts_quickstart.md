@@ -3,7 +3,7 @@
 Measure how often the polymer covers or touches each protein residue in each
 replicate. Then compare the conditions, with one value per replicate. You can
 compare the whole protein, each monomer type, each amino-acid class, each
-region or each residue.
+region, or each residue.
 
 :::{admonition} Environment setup
 :class: tip
@@ -71,7 +71,7 @@ Before you run the analysis, check these points:
 ## From the command line
 
 In a {term}`study`, give the study folder. The study names the conditions,
-the control and the equilibration window. The results go to
+the control, and the equilibration window. The results go to
 `<study>/results/contacts/`:
 
 ```bash
@@ -117,7 +117,7 @@ To report a different result, use `--run`:
 | `coverage` (default) | Fraction of measured residues in contact on at least one frame |
 | `mean_contact_fraction` | Mean over residues of each residue's contact fraction |
 | `<type>_contact_fraction` | The same for one polymer residue name `<type>`, for each type in the polymer, such as `SBM` or `EGM` |
-| `<class>_contact_fraction` | Mean contact fraction of the residues of one amino-acid class: `aromatic`, `charged_positive`, `charged_negative`, `polar` or `nonpolar`, for the classes present. With `method: distance`, a residue name outside the 20 standard amino acids and their protonation variants, such as `SEP`, is in class `unknown`, so it gives `unknown_contact_fraction`. The SASA and occlusion methods leave out residues without a maximum ASA, such as `SEP`, so they give no `unknown` class |
+| `<class>_contact_fraction` | Mean contact fraction of the residues of one amino-acid class: `aromatic`, `charged_positive`, `charged_negative`, `polar`, or `nonpolar`, for the classes present. With `method: distance`, a residue name outside the 20 standard amino acids and their protonation variants, such as `SEP`, is in class `unknown`, so it gives `unknown_contact_fraction`. The SASA and occlusion methods leave out residues without a maximum ASA, such as `SEP`, so they give no `unknown` class |
 | `<region>_contact_fraction` | Mean contact fraction of the residues of one region of `regions` |
 | `occluded_area` | Occlusion only: SASA the polymer removes from the measured residues, in Å² per frame |
 | `occlusion_fraction` | Occlusion only: that area over the residues' SASA with the protein alone, summed over frames |
@@ -143,7 +143,7 @@ Settings, passed with `--set`:
 | `polymer_selection` | null, the polymer (`chainid C`) | Atoms of the partner group: the polymer, or any other group, such as a co-solvent (`resname SDS`) |
 | `polymer_types` | every residue name of the polymer in any condition | The monomers to report one by one, such as `[SBM]`. A replicate without a listed monomer reports 0 for it. This setting does not narrow the polymer. To narrow the polymer, use `polymer_selection` |
 | `use_pbc` | `true` | Use the frame's box: the minimum image for `distance`, and for `occlusion` each polymer molecule moved to its image nearest the protein |
-| `regions` | none | Mapping of region names to selections, each reported as `<region>_contact_fraction`; a region cannot be named `coverage`, `mean`, `contact`, `classes`, `occluded`, `occlusion`, a monomer type or an amino-acid class |
+| `regions` | none | Mapping of region names to selections, each reported as `<region>_contact_fraction`; a region cannot be named `coverage`, `mean`, `contact`, `classes`, `occluded`, `occlusion`, a monomer type, or an amino-acid class |
 | `exposed_threshold` | `0.2` | Occlusion only: relative SASA with the protein alone at or above which a residue is exposed; 0 counts every residue as exposed |
 | `buried_threshold` | `0.2` | Occlusion only: relative SASA with the polymer below which an exposed residue is buried, and so in contact; above 0 |
 | `max_asa` | `theoretical` | Occlusion only: the column of Tien et al. (2013) Table 1, `theoretical` (which the authors recommend) or `empirical` |
@@ -253,7 +253,7 @@ print(profile.compare(control="SBMA 50%").to_agent_text())  # residue by residue
 ```
 
 For the arguments and return values of `residue_occlusion`,
-`residue_contacts` and `contact_lifetimes`, see
+`residue_contacts`, and `contact_lifetimes`, see
 {doc}`../reference/analysis_functions`. To measure your own quantity, see
 {doc}`study_api`.
 

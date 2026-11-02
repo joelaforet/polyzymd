@@ -68,7 +68,7 @@ residues to plot.
 ## Extract a tidy DataFrame
 
 `occupancy.summary()` gives one row per condition and residue, with the mean,
-its Student t 95% interval and every replicate value. Keep the residues to
+its Student t 95% interval, and every replicate value. Keep the residues to
 plot:
 
 ```python

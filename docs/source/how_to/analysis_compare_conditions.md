@@ -34,7 +34,7 @@ works too. The quickstart uses it.
 :::{admonition} Resource requirements
 :class: important
 
-`polyzymd analyze` loads trajectories. It can use much memory, CPU time and
+`polyzymd analyze` loads trajectories. It can use much memory, CPU time, and
 disk I/O. On a shared cluster, run it in a batch job or an interactive job,
 not on a login node. For a batch script, see {doc}`hpc_execution`.
 :::
@@ -48,7 +48,7 @@ instead:
 polyzymd analyze hydrogen_bonds --study my_study
 ```
 
-The study names the conditions, the control, the replicates and the
+The study names the conditions, the control, the replicates, and the
 equilibration window. The results go to `<study>/results/<name>/`, and
 `polyzymd project freeze` can publish them. Use `--study` or `--project` for
 the results that you keep.
@@ -67,7 +67,7 @@ Make sure that each condition has:
 
 `polyzymd analyze` stores the result of each replicate under
 `polyzymd_results/`. A later command reuses it if the function, the settings,
-the config, the input files, the equilibration window and the frames are
+the config, the input files, the equilibration window, and the frames are
 unchanged. If the trajectory of a replicate grew, PolyzyMD measures the
 replicate again. To measure every replicate again, add `--recompute`.
 
@@ -158,7 +158,7 @@ polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --eq 10ns \
 
 ## Step 4: Run the other analyses
 
-Every analysis takes the same `-c`, `--label`, `--replicates` and `--eq`
+Every analysis takes the same `-c`, `--label`, `--replicates`, and `--eq`
 options. Without `--eq`, a command given configs with `-c` discards the first 10 ns of
 every replicate. A study replaces this default with its own `equilibration:`.
 For runs shorter than 10 ns, such as a test run, give `--eq 0ns` or the window
@@ -199,7 +199,7 @@ polymer_stability_study/
 ```
 
 Each folder name is the result or condition label. PolyzyMD replaces each
-series of characters other than letters, digits, `_`, `.`, `+` and `-` with
+series of characters other than letters, digits, `_`, `.`, `+`, and `-` with
 `_`, and drops `_` at the start and end. For example, `SBMA 50%` becomes
 `SBMA_50`.
 

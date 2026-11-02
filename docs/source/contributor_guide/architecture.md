@@ -107,7 +107,7 @@ src/polyzymd/analyses/
 ```
 
 The public surface for analysis code is `polyzymd.Study` (also
-`polyzymd.analyses.study.Study`), `polyzymd.analyses.functions` and
+`polyzymd.analyses.study.Study`), `polyzymd.analyses.functions`, and
 `polyzymd.analyses.analyze`. Modules and functions whose names start with `_`
 are private.
 
@@ -151,7 +151,7 @@ For code examples, see {doc}`../how_to/study_api`.
 
 - `analyses/timeseries.py` holds the per-replicate values and their
   `summary()` and `compare()`, which give Student t intervals, Welch's or
-  Student's t tests, Benjamini-Hochberg correction and effect sizes.
+  Student's t tests, Benjamini-Hochberg correction, and effect sizes.
 - `analyses/shared/inferential_statistics.py` provides the statistical
   primitives such as t-tests and effect sizes.
 - `analyses/protocols.py` defines the `ProtocolReport` that both

@@ -23,7 +23,7 @@ Nothing after the build detected the error. Energy minimization pushed
 protein atoms away from the trapped waters. The protein inflated before
 heating started: a lipase's Cα radius of gyration grew from 18.0 to 20.4 Å.
 The heavy-atom restraints of the heating stage then held the inflated
-structure in place. Density, volume and potential energy all looked normal.
+structure in place. Density, volume, and potential energy all looked normal.
 Only a measurement of water-protein distances in the built PDB found the
 defect, months later.
 
@@ -101,11 +101,11 @@ Packing inside the shrunk brick is enough to prevent image overlaps. Take two
 atoms inside the brick shrunk by `tolerance`. Along the axis of a lattice
 vector, a translation by `±L` leaves them at least
 `L - (L - tolerance) = tolerance` apart. Each lattice vector of a
-reduced-form cell has one component along `x`, `y` or `z` equal to a full
+reduced-form cell has one component along `x`, `y`, or `z` equal to a full
 brick edge. Therefore no image pair is closer than the tolerance.
 
 The cell depends only on the enzyme and the substrate. The replicates of a
-condition therefore have the same box volume, water count and ion count. A
+condition therefore have the same box volume, water count, and ion count. A
 system without polymer gets its box from the solute at solvation time.
 
 ### The check: `PeriodicImageClashError`
@@ -115,7 +115,7 @@ solvation, it translates every atom by each of the 26 non-zero lattice
 vectors. It compares the translated atoms with a KD-tree of the original
 coordinates. An atom closer than half the tolerance to an image stops the
 build with `PeriodicImageClashError`. The message gives the count, the
-smallest image distance, the worst pair and the lattice vector. A contact
+smallest image distance, the worst pair, and the lattice vector. A contact
 between half the tolerance and the full tolerance gives a warning only.
 
 ## Minimization with frozen solute heavy atoms
@@ -131,7 +131,7 @@ equilibration stages then start from the structure as built.
 2. In the copy, it sets the mass of every protein and substrate heavy atom
    (the `solute_heavy` atom group) to zero. OpenMM never moves a massless
    particle.
-3. It minimizes. Solvent, polymer and solute hydrogens relax against the
+3. It minimizes. Solvent, polymer, and solute hydrogens relax against the
    fixed heavy atoms.
 4. It copies the coordinates back into the real System. The masses and
    constraints of the real System do not change.
@@ -210,7 +210,7 @@ The loader names each repair in the analysis warnings. Any other overlap or
 gap, or a change of frame interval, stops the analysis with
 `TrajectoryLineageError`.
 
-Each segment record also stores the PolyzyMD version, the OpenMM version and
+Each segment record also stores the PolyzyMD version, the OpenMM version, and
 the pixi environment of the job that wrote it. A chain that changed software
 partway is therefore visible.
 
@@ -259,7 +259,7 @@ budget runs out, the job names every node it tried. You need this list to
 submit again by hand.
 
 **A runtime that does not match is a routing problem.** PolyzyMD pins a
-replicate to one pixi environment, OpenMM build, platform and precision,
+replicate to one pixi environment, OpenMM build, platform, and precision,
 because a trajectory that mixes them is not defensible. A mismatch is a
 property of the node. The job therefore moves to another node, as it does for
 an old driver. The chain does not stop.

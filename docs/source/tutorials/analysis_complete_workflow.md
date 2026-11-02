@@ -33,7 +33,7 @@ folder, `~/pz_quickstart`, where the `Water` condition has three replicates.
 :class: tip
 
 Run every command of this tutorial in the `build` environment. It holds
-PACKMOL, the polymer builder and the analysis tools. From the repository
+PACKMOL, the polymer builder, and the analysis tools. From the repository
 root, activate it once:
 
 ```bash
@@ -117,7 +117,7 @@ The entry asks for two chains of five SBMA monomers. `dynamic` builds each
 chain with mBuild from the repeat unit of the monomer: its SMILES has `*` on
 the two carbons that bond to the neighboring units. `end_groups` puts an
 SBMA unit that kept its C=C double bond at each end, as in the chains PolyzyMD built before 1.3.0,
-so a 5-mer is an end, three repeat units and an end. `residue_name: SBM` names the
+so a 5-mer is an end, three repeat units, and an end. `residue_name: SBM` names the
 monomers in the topology.
 `force_field` is the same file as `solvent.force_field`. `charges` charges
 each new chain with {term}`NAGL` and the model you name.
@@ -215,7 +215,7 @@ condition SBMA: replicates [1, 2, 3] under /home/me/pz_quickstart/trpcage/condit
 Open `project.yaml` and list two more analyses: the polymer contacts and the
 protein-polymer hydrogen bonds. Both find the polymer with the selection
 `chainid C`, because the build puts the protein in chain A, a small molecule
-in chain B, every polymer chain in chain C and the solvent in chains D and
+in chain B, every polymer chain in chain C, and the solvent in chains D and
 later.
 
 ```yaml
@@ -297,7 +297,7 @@ result about SBMA.
 Each analysis prints one line per condition, then one comparison line,
 `Water vs SBMA`. The comparison gives the difference of the means (`delta`)
 with its 95 % interval, the p value of Welch's t test, the p value after the
-{term}`Benjamini-Hochberg` correction (`p_adj`) and the effect size `d`. The
+{term}`Benjamini-Hochberg` correction (`p_adj`), and the effect size `d`. The
 last word says whether the difference is significant, or `not_testable` when
 no test can be made.
 

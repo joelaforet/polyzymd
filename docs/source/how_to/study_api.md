@@ -134,7 +134,7 @@ Reduce each time series to one value per replicate:
 mean_rg = rg.reduce("mean")
 ```
 
-`reduce` takes `"mean"`, `"fraction"` (for a series of 0 and 1) or `"std"`.
+`reduce` takes `"mean"`, `"fraction"` (for a series of 0 and 1), or `"std"`.
 It also takes a function of the values and times (in ns) of one replicate
 that returns one number:
 
@@ -216,7 +216,7 @@ print(mean_rg.compare(control="No polymer").to_agent_text())  # each condition a
 ```
 
 - `summary()` gives, for each condition, n, the mean, the standard error, the
-  95 % confidence interval and every replicate value.
+  95 % confidence interval, and every replicate value.
 - `compare()` gives, for each condition against the control, the difference
   of the means with its 95 % interval, the p value, the
   {term}`Benjamini-Hochberg` adjusted p value, and Cohen's d and Hedges' g.
@@ -253,7 +253,7 @@ Results with different units are refused.
 PolyzyMD stores each replicate in
 `polyzymd_results/<name>/<condition>/replicate_<n>/`, in the current folder
 or in `output_dir=`. The name is the name of the function, unless you give
-`name=`. The next call with the same function, arguments and input files
+`name=`. The next call with the same function, arguments, and input files
 reads the stored values and does not read the trajectory. `recompute=True`
 measures every replicate again.
 

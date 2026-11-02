@@ -25,14 +25,14 @@ ml slurm/blanca   # condo nodes owned by research groups
 ```
 
 :::{important}
-Run `ml slurm/blanca` before `sbatch`, `polyzymd submit` or
+Run `ml slurm/blanca` before `sbatch`, `polyzymd submit`, or
 `polyzymd analyze --submit` to use Blanca. A GROMACS `module_load` runs only
 in the job, so it cannot load the scheduler module for `submit`. If you do not, SLURM does not show
 the Blanca partitions. `polyzymd status` and `polyzymd cancel` also need the
 module of the cluster that runs the jobs.
 :::
 
-## Give a partition, an account and a QoS
+## Give a partition, an account, and a QoS
 
 Both clusters refuse a job without all three. The presets of
 `polyzymd submit` (see {doc}`hpc_slurm`) and of `polyzymd analyze --submit`
@@ -41,7 +41,7 @@ yourself, use these values:
 
 | Flag | Alpine | Blanca |
 |------|--------|--------|
-| `--partition` | `acpu` (CPU); `aa100`, `al40` or `ami100` (GPU); `acompile` (installs and builds) | `blanca-<group>`, for example `blanca-shirts` |
+| `--partition` | `acpu` (CPU); `aa100`, `al40`, or `ami100` (GPU); `acompile` (installs and builds) | `blanca-<group>`, for example `blanca-shirts` |
 | `--account` | Your allocation; `ucb-general` is open to every CU Boulder user | The same as the partition |
 | `--qos` | `cpu-normal` (CPU), `gpu-normal` (GPU), `compile` (`acompile`) | The same as the partition, or `preemptable` |
 
@@ -55,7 +55,7 @@ Alpine GPU partitions are often full. `sbatch --test-only` with your flags
 and `--wrap true` prints an estimated start time without submitting; `al40`
 is an alternative when `aa100` is busy. For a short GPU test, Alpine has a
 test reservation with A100 slices: QoS `gpu-testing`, GPU type
-`a100_3g.20gb` and `--reservation=a100_test` (the `testing` preset sets them).
+`a100_3g.20gb`, and `--reservation=a100_test` (the `testing` preset sets them).
 
 The simulation presets `blanca-shirts` and `blanca-chbe-rdi` use the
 `preemptable` QoS. The owner's jobs can then preempt a job at any moment.
@@ -80,7 +80,7 @@ If you omit `--partition` on Blanca, `sbatch` fails with
 *"A partition has not been provided"*. The message refers to Alpine
 documentation. Add `--partition=blanca-<group>` and submit again.
 
-To list the accounts, partitions and QoS values that you can use:
+To list the accounts, partitions, and QoS values that you can use:
 
 ```bash
 sacctmgr show association user=$USER format=account,partition,qos
@@ -122,7 +122,7 @@ GROMACS inputs. To submit an OpenMM config with `--engine gromacs`, add
 none, it stops before it writes any job script and prints the `polyzymd build`
 command to run.
 
-The Alpine presets (`aa100`, `al40` and `testing`) set a lab allocation as the
+The Alpine presets (`aa100`, `al40`, and `testing`) set a lab allocation as the
 account. Give your own allocation with `--account`:
 
 ```bash
@@ -136,7 +136,7 @@ pixi run -e build polyzymd submit \
 
 Try a new system with a short job first. The `testing` preset asks for an
 A100 slice in Alpine's test reservation: partition `aa100`, QoS
-`gpu-testing`, GPU type `a100_3g.20gb`, `--reservation=a100_test` and a 5:59
+`gpu-testing`, GPU type `a100_3g.20gb`, `--reservation=a100_test`, and a 5:59
 time limit:
 
 ```bash
@@ -162,7 +162,7 @@ pixi run -e build polyzymd submit \
     --replicates 1-5
 ```
 
-On Blanca, the preset sets the partition, the account and the QoS. This
+On Blanca, the preset sets the partition, the account, and the QoS. This
 OpenMM submission ran on Blanca on 7 October 2026:
 
 ```bash
@@ -180,7 +180,7 @@ environment has no OpenFF, so the job loads the build and cannot make one.
 ### Blanca GPU features
 
 `--constraint` takes the feature names of the Blanca GPU nodes: `A40`,
-`A100`, `L40`, `h100` (lower case), `V100` and `rtx6000`. `L40` also selects
+`A100`, `L40`, `h100` (lower case), `V100`, and `rtx6000`. `L40` also selects
 some nodes whose GPUs are L40S. There is no `L40S` feature: an L40S node
 without the `L40` feature cannot be selected by name, and
 `--constraint L40S` fails with *"Invalid feature specification"*. For
@@ -240,7 +240,7 @@ tested module and nodes. Run the short test again after a module or driver
 update.
 
 On 7 October 2026, the quickstart GROMACS config ran minimization,
-equilibration and production on a Blanca GPU through `polyzymd submit`. That
+equilibration, and production on a Blanca GPU through `polyzymd submit`. That
 test gave `gmx_binary` a wrapper script that loads the module.
 
 On the Blanca compute nodes, `gromacs/2024.2` provides `gmx`, a thread-MPI
@@ -258,7 +258,7 @@ Blanca has mixed GPU types, so give `--constraint` for GPU jobs. See
 **Blanca, 1 GPU, site module.** The equivalent of the 7 October test, with
 `module_load` in place of the wrapper. The job loads the module. This exact
 block and command ran the GROMACS quickstart on Blanca on 19 October 2026:
-six replicates on A100 and L40S nodes, with nonbonded, PME and bonded work
+six replicates on A100 and L40S nodes, with nonbonded, PME, and bonded work
 on the GPU.
 
 ```yaml

@@ -55,7 +55,7 @@ exactly, so the two implementations compute the same quantity, and
 the contact fractions against counts made by hand for both methods, the exact
 cutoff, the minimum image, the nearest-image move of whole polymer molecules,
 the exposure condition of occlusion, residues without a maximum ASA, the
-per-type rows, and the results, figures, settings and refusals of
+per-type rows, and the results, figures, settings, and refusals of
 `polyzymd analyze contacts`.
 
 ## Scope

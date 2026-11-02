@@ -125,7 +125,7 @@ PolyzyMD v1.3 uses a split environment workflow on clusters:
   selects the site's fixed `sim-cuda-12-*` runtime when it generates the job.
 - Use `analysis` after trajectories are produced to run comparisons and plots.
 
-In short: `build` for `validate`, `build`, `submit`, `status` and `cancel`;
+In short: `build` for `validate`, `build`, `submit`, `status`, and `cancel`;
 a `sim-cuda-*` environment only inside the jobs (or for `polyzymd run` on a
 local GPU); `analysis` or `build` for `analyze`.
 
@@ -237,7 +237,7 @@ Use the environment assigned to the site, or pick one from the driver:
 | PSC Bridges-2 | `sim-cuda-12-6` |
 | CU Boulder Blanca | `sim-cuda-12-4` |
 | Validated older CUDA site | `sim-cuda-12-0` |
-| Your own machine, or another cluster | The newest of `sim-cuda-12-6`, `sim-cuda-12-4` and `sim-cuda-12-0` whose CUDA version does not exceed the `CUDA Version` that `nvidia-smi` prints |
+| Your own machine, or another cluster | The newest of `sim-cuda-12-6`, `sim-cuda-12-4`, and `sim-cuda-12-0` whose CUDA version does not exceed the `CUDA Version` that `nvidia-smi` prints |
 
 For example, a driver that prints `CUDA Version: 12.2` takes `sim-cuda-12-0`,
 and one that prints `13.1` takes `sim-cuda-12-6`.

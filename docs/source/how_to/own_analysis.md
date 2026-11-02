@@ -1,8 +1,8 @@
 # Analyze the trajectories with your own tools
 
 PolyzyMD writes standard files: an Amber topology and DCD trajectories for
-OpenMM, and a GROMACS topology, run input and XTC trajectories for GROMACS.
-MDAnalysis, MDTraj, VMD and the `gmx` tools read them directly. This page
+OpenMM, and a GROMACS topology, run input, and XTC trajectories for GROMACS.
+MDAnalysis, MDTraj, VMD, and the `gmx` tools read them directly. This page
 says which files to read, which names the built system uses, how the frame
 times are laid out, and how to bring your results back into a project.
 
@@ -15,10 +15,10 @@ examples run from the project folder.
 {download}`load_replicates.ipynb <../../../src/polyzymd/templates/notebooks/load_replicates.ipynb>`
 is a sandbox for the code on this page. `polyzymd project init` puts a copy
 in your project's `notebooks/` folder. By default it takes the first study in
-`project.yaml`, its control condition and its first replicate with production
+`project.yaml`, its control condition, and its first replicate with production
 frames. It:
 
-1. lists the conditions of the study, their configs and their replicates;
+1. lists the conditions of the study, their configs, and their replicates;
 2. loads the replicate with PolyzyMD's loader (`replicate.universe()`) and
    prints its frames, times, segments, and the residue and atom names of the
    built system;
@@ -30,7 +30,7 @@ frames. It:
    [Load a replicate in MDAnalysis](#load-a-replicate-in-mdanalysis), and
    checks that both universes hold the same atoms and the same first frame.
 
-Set a study, condition or replicate in its first cell to load another, or
+Set a study, condition, or replicate in its first cell to load another, or
 `config_path` to load a config outside a project. It writes nothing into the
 project. Open it in the PolyzyMD `build` environment, which has JupyterLab
 (change `~/polyzymd` to the folder of your PolyzyMD clone):
@@ -64,10 +64,10 @@ runs/trpcage/gromacs_water/trpcage_300K_run1/    # GROMACS, with a gromacs/ fold
 
 | File | Holds | Use it for |
 |---|---|---|
-| `system.prmtop` | Every atom, residue, element, mass, charge and bond. One segment `SYSTEM`, no chain IDs | The topology of your analysis |
+| `system.prmtop` | Every atom, residue, element, mass, charge, and bond. One segment `SYSTEM`, no chain IDs | The topology of your analysis |
 | `production_N/production_N_trajectory.dcd` | The production frames of segment `N` | The coordinates. Join the segments in the order of `N` |
 | `solvated_system.pdb` | The built coordinates, with segment IDs (`PROT`, `SOL`, `ION`, ...) and chain IDs (`A`, `D`, ...). No bonds and no charges | Chain IDs and segment IDs for your topology, and viewers such as PyMOL and VMD |
-| `production_N/production_N_state_data.csv` | Step, time in ps, energies, temperature, volume and density of each frame | Frame times and thermodynamic quantities |
+| `production_N/production_N_state_data.csv` | Step, time in ps, energies, temperature, volume, and density of each frame | Frame times and thermodynamic quantities |
 | `progress.json` | One record per equilibration stage and production segment | Which segments are complete, and how they join |
 
 Do not use `production_N/production_N_topology.pdb` or the files of
@@ -97,25 +97,25 @@ GROMACS 2026. The example below reads the `.top` file instead.
 
 ## Names in the built system
 
-The same names are used in `system.prmtop`, `solvated_system.pdb` and the
+The same names are used in `system.prmtop`, `solvated_system.pdb`, and the
 GROMACS topology.
 
 | Component | Residue names | Atom names | Segment ID | Chain ID |
 |---|---|---|---|---|
 | Protein | Standard residue names, numbered from 1 | PDB names (`N`, `CA`, `C`, `O`, `CB`, ...) | `PROT` | `A` |
-| Small molecule (ligand) | `residue_name` of the solute, `LIG` by default | The SDF's atom names; without them, element, count and `x`: `C1x`, `C2x`, `O1x`, `H1x` | `LIG` | `B` |
+| Small molecule (ligand) | `residue_name` of the solute, `LIG` by default | The SDF's atom names; without them, element, count, and `x`: `C1x`, `C2x`, `O1x`, `H1x` | `LIG` | `B` |
 | Polymer | `residue_name` of each monomer, by default the first three letters of its `name`, upper case | Set by the polymer's SDF; list them as shown below | `POLY` | `C` |
 | Water | `HOH` | `O1x`, `H1x`, `H2x` | `SOL` | `D`, then `E`, ... |
 | Ions | `Na+`, `Cl-` | `NA`, `CL` | `ION` | `D`, then `E`, ... |
-| Co-solvents | Their residue name (urea `URE`, DMSO `DMS`; see the co-solvent library in {doc}`../reference/configuration`) | Element, count and `x`: urea has `C1x`, `O1x`, `N1x`, `N2x`, `H1x` to `H4x` | `SOL` | `D`, then `E`, ... |
+| Co-solvents | Their residue name (urea `URE`, DMSO `DMS`; see the co-solvent library in {doc}`../reference/configuration`) | Element, count, and `x`: urea has `C1x`, `O1x`, `N1x`, `N2x`, `H1x` to `H4x` | `SOL` | `D`, then `E`, ... |
 
 A solute's segment ID is the `segid` you set in its config, if you set one.
-Water, ions and co-solvents fill chain `D`. Their residues are numbered from 1
+Water, ions, and co-solvents fill chain `D`. Their residues are numbered from 1
 and continue on chain `E` after residue 9999. In `system.prmtop` the same
 residues are numbered on from the solutes instead. Select solvent by residue
 name or segment ID, not by residue number.
 
-Usual selections such as `name OW`, `resname SOL`, `resname NA CL` or
+Usual selections such as `name OW`, `resname SOL`, `resname NA CL`, or
 `resname HOH and name O` match no atoms in these systems. These MDAnalysis
 selections work:
 
@@ -248,7 +248,7 @@ def add_build_ids(u, pdb_file):
 ```
 
 You can also load `solvated_system.pdb` as the topology. It has segment IDs,
-chain IDs and elements, but no bonds and no charges, and its solvent residue
+chain IDs, and elements, but no bonds and no charges, and its solvent residue
 numbers differ from those of `system.prmtop`.
 
 ### OpenMM: radius of gyration and contacts
@@ -339,8 +339,8 @@ printf 'r HOH & a O1x\nr Na+ | r Cl-\nq\n' | gmx make_ndx -f prod.tpr -n compone
 Write the measurement as a Python function of AtomGroups and list it under
 `analyses:` in `project.yaml` (or `study.yaml`). PolyzyMD then runs it on every
 replicate of every study, over the study's equilibration window, and stores,
-compares and reports it like a shipped analysis. Its loader joins the segments,
-adds the chain IDs, segment IDs and elements, and reads GROMACS 2026 runs.
+compares, and reports it like a shipped analysis. Its loader joins the segments,
+adds the chain IDs, segment IDs, and elements, and reads GROMACS 2026 runs.
 `polyzymd study freeze` and `polyzymd project freeze` warn when the function's
 code changed after its results were stored.
 
