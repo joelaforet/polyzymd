@@ -28,7 +28,8 @@ env:
 # Every test still runs on both operating systems. The suite is split into
 # jobs that run side by side:
 #
-#   test        everything except tests/audit, on Ubuntu and macOS
+#   test        everything except tests/audit, on Ubuntu and macOS, in two
+#               halves: tests/analyses, and everything else
 #   audit-macos tests/audit on macOS, in two halves
 #
 # tests/audit on Ubuntu runs in the "Engine parity and physics audit"
@@ -36,12 +37,20 @@ env:
 # workflow uploads its coverage as well.
 jobs:
   test:
-    name: Test on ${{ matrix.os }}, Python ${{ matrix.python-version }}
+    name: Test on ${{ matrix.os }}, Python ${{ matrix.python-version }} (${{ matrix.part }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macOS-latest]
         python-version: ["3.12"]
+        # The two halves take about the same time. "rest" leaves out what
+        # the other half and the audit jobs run, so no test falls between.
+        part: [analyses, rest]
+        include:
+          - part: analyses
+            tests: tests/analyses
+          - part: rest
+            tests: --ignore=tests/analyses --ignore=tests/audit tests/
       fail-fast: false
 
     steps:
@@ -65,7 +74,7 @@ jobs:
       - name: Run tests
         run: |
           pixi run -e test pytest -v --durations=25 --cov=polyzymd --cov-report=xml --color=yes \
-            --ignore=tests/audit tests/
+            ${{ matrix.tests }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -73,7 +82,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: unittests
-          name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}
+          name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}-${{ matrix.part }}
           fail_ci_if_error: false  # Don't fail if codecov upload fails
 
   audit-macos:
