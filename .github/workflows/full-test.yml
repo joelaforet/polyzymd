@@ -10,10 +10,30 @@ on:
     - cron: "0 0 * * 0"
   workflow_dispatch:
 
+# A newer push to the same PR or branch cancels the run it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash -l {0}
 
+env:
+  # coverage.py's sys.monitoring tracer (Python 3.12+) costs far less than
+  # the default C tracer, which made the build-heavy audit tests run about
+  # three times slower than without coverage.
+  COVERAGE_CORE: sysmon
+
+# Every test still runs on both operating systems. The suite is split into
+# jobs that run side by side:
+#
+#   test        everything except tests/audit, on Ubuntu and macOS
+#   audit-macos tests/audit on macOS, in two halves
+#
+# tests/audit on Ubuntu runs in the "Engine parity and physics audit"
+# workflow, with GROMACS installed so its GROMACS tests run too, and that
+# workflow uploads its coverage as well.
 jobs:
   test:
     name: Test on ${{ matrix.os }}, Python ${{ matrix.python-version }}
@@ -44,7 +64,8 @@ jobs:
 
       - name: Run tests
         run: |
-          pixi run -e test pytest -v --cov=polyzymd --cov-report=xml --color=yes tests/
+          pixi run -e test pytest -v --durations=25 --cov=polyzymd --cov-report=xml --color=yes \
+            --ignore=tests/audit tests/
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -54,3 +75,61 @@ jobs:
           flags: unittests
           name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}
           fail_ci_if_error: false  # Don't fail if codecov upload fails
+
+  audit-macos:
+    name: Physics audit on macOS-latest (${{ matrix.part }})
+    # Pull requests into dev skip it; pull requests into main, pushes to
+    # main/dev, the weekly run and manual runs all run it.
+    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    runs-on: macOS-latest
+    strategy:
+      matrix:
+        include:
+          - part: engines
+            tests: >-
+              tests/audit/test_engine_parity.py
+              tests/audit/test_components_and_engines.py
+          - part: checks
+            tests: >-
+              tests/audit/test_parameter_checks.py
+              tests/audit/test_system_checks.py
+              tests/audit/test_gates.py
+              tests/audit/test_registry.py
+              tests/audit/test_report_and_provenance.py
+              tests/audit/test_terms_and_settings.py
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0
+        with:
+          environments: test
+
+      - name: Every audit test file is in one part
+        shell: bash
+        run: |
+          listed="$(printf '%s\n' tests/audit/test_engine_parity.py tests/audit/test_components_and_engines.py \
+            tests/audit/test_parameter_checks.py tests/audit/test_system_checks.py tests/audit/test_gates.py \
+            tests/audit/test_registry.py tests/audit/test_report_and_provenance.py \
+            tests/audit/test_terms_and_settings.py | sort)"
+          present="$(ls tests/audit/test_*.py | sort)"
+          if [ "$listed" != "$present" ]; then
+            echo "::error::tests/audit changed; update the parts of the audit-macos job in full-test.yml"
+            diff <(echo "$listed") <(echo "$present")
+            exit 1
+          fi
+
+      - name: Run audit tests
+        run: |
+          pixi run -e test pytest -v --durations=25 --cov=polyzymd --cov-report=xml --color=yes \
+            ${{ matrix.tests }}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-macOS-latest-audit-${{ matrix.part }}
+          fail_ci_if_error: false
