@@ -223,7 +223,7 @@ print(mean_rg.compare(control="No polymer").to_agent_text())  # each condition a
 - `compare(test="student")` uses Student's t test instead of Welch's t test.
 - `conditions=["SBMA 50%", "EGMA 50%"]` limits a summary or a comparison to
   some conditions.
-- For a labelled result, each label is one test. `untested=["coil"]` leaves a
+- For a labeled result, each label is one test. `untested=["coil"]` leaves a
   label out of the tests, for example the last of a set of fractions that sum
   to 1.
 

@@ -180,7 +180,7 @@ def _without_polymer(folder: Path, schedules: dict) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Normalising outputs
+# Normalizing outputs
 # ---------------------------------------------------------------------------
 
 
@@ -225,7 +225,7 @@ def _records(folder: Path, root: Path) -> dict[str, Any]:
     Each JSON field is a key ``file:field``, and ``files`` names every file of
     the replicate folder. Keys the same in every replicate of a record are
     stored once under ``shared``. The values in ``.npz`` files are left out,
-    since the reports summarise them, and so are the input files a record
+    since the reports summarize them, and so are the input files a record
     lists, which the study tests check. The condition and replicate of a
     record are left out when they are those of the folder it is in.
     """

@@ -702,7 +702,7 @@ def analyze_command(
             _error_exit(
                 f"no runs of study {folder.name} are on this machine.",
                 f"The stored report is {shown}, readable with "
-                f"pz.Study(...).results({run_name!r}); to analyse again, give the runs with "
+                f"pz.Study(...).results({run_name!r}); to analyze again, give the runs with "
                 "polyzymd study locate DIR --verify or --data.",
             )
     stride = stride or 1
@@ -1257,7 +1257,7 @@ def _from_study(
                     f"--label leaves out the stratum control {', '.join(needed)} that the "
                     "conditions given are compared with.",
                     hint=f"Add {' '.join(f'--label {shlex.quote(label)}' for label in needed)}, "
-                    "or give one --label to summarise one condition.",
+                    "or give one --label to summarize one condition.",
                 )
     entry = protocol.analyses.get(run_name)
     if entry is None:

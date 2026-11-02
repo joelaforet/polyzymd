@@ -1,6 +1,6 @@
 """Known-answer tests for periodic boundary handling and bond requirements.
 
-These tests pin three behaviours. The shared fragment lookup
+These tests pin three behaviors. The shared fragment lookup
 ``require_topology_bonds`` must fail loudly when the topology carries no bonds
 instead of collapsing the selection into a single fragment. ``functions.pair_distance`` must use the minimum image
 convention against the box of the frame it measures, which is why no

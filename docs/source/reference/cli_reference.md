@@ -549,7 +549,7 @@ and in `<working_dir>`. For a GROMACS config, `cancel` also writes
 `<working_dir>/gromacs/STOP` when that folder exists, so that a job script
 written before this check stops too. `--resume` removes both files.
 
-The job wrapper also honours `POLYZYMD_STOP_CHAIN=1` in the job environment
+The job wrapper also honors `POLYZYMD_STOP_CHAIN=1` in the job environment
 and `POLYZYMD_STOP_FILE=<path>` to relocate the marker.
 
 ### Notes
@@ -729,7 +729,7 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
 | `CORRUPT` | `progress.json` exists but cannot be read (empty, truncated or of the wrong shape). The `last:` field says why. `status` leaves the file as it is; fix or remove it by hand. |
 
-Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package and anything unrecognised. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A local run that a signal stopped after it saved its state is `INTERRUPTED`, not `DEAD`. A local run that failed records its error in `polyzymd_run_error.txt`, which the `last:` field shows. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list (`<preset nodes>` in the example above stands for that list).
+Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package and anything unrecognized. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A local run that a signal stopped after it saved its state is `INTERRUPTED`, not `DEAD`. A local run that failed records its error in `polyzymd_run_error.txt`, which the `last:` field shows. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list (`<preset nodes>` in the example above stands for that list).
 
 Throughput (`ns/d`) of OpenMM runs comes from segment file timestamps: the parameters JSON written at segment start and the state-data CSV written on every report. A running segment that has run for at least an hour sets the rate, since it reflects the GPU the chain is on now; otherwise the newest stopped segment does. GROMACS runs, and OpenMM runs without those files, use the times in `progress.json`. The ETA is remaining nanoseconds divided by that rate and is only printed for `RUNNING` and `QUEUED` replicates.
 
@@ -979,7 +979,7 @@ as `gmx rmsf -od` reports. An unknown name is refused with the list of all of th
 | `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. |
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
 | `--output-dir PATH` | No | Directory for `polyzymd_results/`, where the measured values are stored, and `figures/`. Default: the current directory. |
-| `--until TIME` | No | End of a common analysis window, for example `38ns`: production frames after it are left out for every condition, so conditions simulated for different lengths are compared over the same time. It is recorded with each stored result. A report comparing conditions whose analysed production ends more than 10% apart warns and suggests it. |
+| `--until TIME` | No | End of a common analysis window, for example `38ns`: production frames after it are left out for every condition, so conditions simulated for different lengths are compared over the same time. It is recorded with each stored result. A report comparing conditions whose analyzed production ends more than 10% apart warns and suggests it. |
 | `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. The report header then shows `stride N`. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
 | `--no-plots` | No | Do not draw figures. By default rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
@@ -1025,7 +1025,7 @@ and prints the two `sbatch` commands without submitting. Every name
 
 `--format agent` is the default and is designed for scripts and LLM agents. It
 prints a header, one line per condition, one line per comparison, any warnings
-and one `verdict:` line per comparison, with no borders and no colour.
+and one `verdict:` line per comparison, with no borders and no color.
 
 ```bash
 polyzymd analyze rg -c noPoly/config.yaml -c SBMA50/config.yaml --eq 10ns
@@ -1046,7 +1046,7 @@ Line shapes:
 | header | `# polyzymd analyze <analysis>  metric <key>  unit <unit or none>[  run <label>]  eq <window>  conditions <count>  replicates <n,n,...>  protocol <analysis>/<protocol_version>` |
 | condition | `<label>  n <count>  mean <value>  sem <value>  ci95 <low> to <high>  values <per-replicate values>[  replicates <numbers>  g <value>  n_eff <value>  eq_detected <ns>]`; the bracketed fields appear when the per-frame series is stored; `g` and `n_eff` are the statistical inefficiency and effective sample size of each replicate's series, and `eq_detected` is the latest start of an equilibrated region that pymbar detects among the replicates (see {doc}`../explanation/convergence_detection`) |
 | comparison | `<a> vs <b>  delta <signed>  ci95 <low> to <high>  p <value>  p_adj <value>  test <name>  correction <name>[  family <m>]  d <value>  significant\|not_significant\|no_test\|not_testable` |
-| per-label comparison | For a labelled result such as a per-residue profile, one line per compared condition in place of one line per label: `<a> vs <b>  labels <count>  tested <count>  family <m>  test <name>  correction <name>  lower <count>  higher <count>`, where `family` counts every tested label of every compared condition |
+| per-label comparison | For a labeled result such as a per-residue profile, one line per compared condition in place of one line per label: `<a> vs <b>  labels <count>  tested <count>  family <m>  test <name>  correction <name>  lower <count>  higher <count>`, where `family` counts every tested label of every compared condition |
 | per-label hits | `<a> vs <b>  lower: <label> delta <signed> p_adj <value>, ...` and the same with `higher:`, listing every label that differs significantly; printed only when there is one |
 | note | `note: the <n> per-label condition rows and <m> per-label comparison rows are in the JSON report` |
 | warning | `warning: <text>` |
@@ -1153,7 +1153,7 @@ polyzymd project init PATH --study LABEL [--study ...] [--holder NAME] [--no-git
 ```
 
 Writes a project folder at `PATH`: `project.yaml` listing the studies,
-`analyses/`, `stats/` and `figures/`, licences, a README, and one study folder
+`analyses/`, `stats/` and `figures/`, licenses, a README, and one study folder
 per `--study` with a `study.yaml` to fill in. Labels are also folder names
 (lower case, digits, `_`). Without `--no-git` the project becomes a git
 repository with one commit. To move existing studies in, see

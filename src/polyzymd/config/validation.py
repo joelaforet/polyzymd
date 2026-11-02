@@ -632,7 +632,7 @@ def _require_restraint_atom_names(config: Any, solute: Any, molecule: Any) -> No
     The built system names the atoms of a small molecule from an SDF without
     atom names ``C1x``, ``C2x``, ... (:func:`small_molecule_atom_names`), so
     ``name C1`` matches nothing and the build would fail only after solvation
-    and parameterisation. Only selections whose every ``name`` value is
+    and parameterization. Only selections whose every ``name`` value is
     missing are refused; any other selection is left to the build.
     """
     available = small_molecule_atom_names(molecule)

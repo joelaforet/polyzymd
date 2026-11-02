@@ -16,7 +16,7 @@ A build can differ from its config while every step succeeds. For example:
 - two force fields are loaded together, and the generic parameters of one
   replace the specific parameters of the other on some of the molecules;
 - a run computes charges again instead of reading the built system;
-- a restraint selects a neighbouring atom, because its selection counts atoms
+- a restraint selects a neighboring atom, because its selection counts atoms
   in a different way than its author expected;
 - a setting, such as a salt concentration, changes meaning between versions,
   and nothing records which meaning a build used.

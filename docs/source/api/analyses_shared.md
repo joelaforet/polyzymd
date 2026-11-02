@@ -87,7 +87,7 @@ grouped bars, and matrix annotations.
 
 ## Selections and residue grouping
 
-Selection helpers extend MDAnalysis selections with midpoints and centres of
+Selection helpers extend MDAnalysis selections with midpoints and centers of
 mass. The grouping and amino-acid classification modules classify protein
 residues (for example aromatic, polar, charged) and give the maximum solvent
 accessible surface area of each residue type.

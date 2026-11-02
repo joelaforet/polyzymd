@@ -41,7 +41,7 @@ def configs(tmp_path: Path) -> dict[str, Path]:
 
 
 def test_radius_of_gyration_is_mass_weighted() -> None:
-    """Masses 3 and 1 at x = 1 and x = -3 put the centre at 0 and give Rg sqrt(3)."""
+    """Masses 3 and 1 at x = 1 and x = -3 put the center at 0 and give Rg sqrt(3)."""
     import MDAnalysis as mda
 
     universe = mda.Universe.empty(2, trajectory=True)

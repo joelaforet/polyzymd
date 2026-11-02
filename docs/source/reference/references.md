@@ -203,7 +203,7 @@ For any other file, cite its source.
 
 ## Libraries we build on
 
-PolyzyMD does not reimplement trajectory input and output, neighbour searching,
+PolyzyMD does not reimplement trajectory input and output, neighbor searching,
 secondary structure assignment or the standard statistical tests, so the
 packages that provide them are cited as methods rather than as dependencies.
 

@@ -22,8 +22,8 @@ reads back exactly what `model_dump_json()` wrote.
 | `equilibration` | `str` | Equilibration window discarded from the start of every replicate, for example `10ns`. Applied uniformly to every replicate of every condition; a study's analysis entry may set its own. |
 | `stride` | `int` | Every `stride`-th production frame was measured, 1 by default. |
 | `frames_per_replicate` | `dict[str, int \| list[int] \| None]` | Production frames each replicate of a condition contributed after the equilibration window and stride, keyed by condition label, one number per replicate in replicate order. |
-| `conditions` | `list[ConditionReport]` | One entry per condition, in the order the configs were given; for a labelled result such as a per-residue profile, one entry per condition and label. |
-| `pairwise` | `list[PairwiseReport]` | One entry per comparison of the primary metric, or per comparison and label for a labelled result. Empty for a single condition. |
+| `conditions` | `list[ConditionReport]` | One entry per condition, in the order the configs were given; for a labeled result such as a per-residue profile, one entry per condition and label. |
+| `pairwise` | `list[PairwiseReport]` | One entry per comparison of the primary metric, or per comparison and label for a labeled result. Empty for a single condition. |
 | `warnings` | `list[str]` | Sampling and interval warnings: conditions with one replicate or the same value in every replicate, intervals that cross the bounds of a bounded quantity, untestable comparisons, and pymbar equilibration diagnostics. |
 | `provenance` | `ProtocolProvenance` | Versions, config hashes and output paths. |
 | `verdict` | `list[str]` | One sentence per pairwise comparison, or one sentence describing the single condition. |
@@ -31,7 +31,7 @@ reads back exactly what `model_dump_json()` wrote.
 `ProtocolReport.to_agent_text()` renders the report as plain text with no
 borders and no blank lines, one line for each condition, comparison, warning
 and verdict. No line is dropped, however many conditions the report holds.
-For a labelled result the comparisons are summarised instead: one line per
+For a labeled result the comparisons are summarized instead: one line per
 compared condition gives the number of labels, the number tested, the family
 size and how many labels are significantly lower and higher, followed by lines
 listing each significant label. A final `note:` line says how many per-label
@@ -42,7 +42,7 @@ rows the JSON form holds; every one of them is kept there.
 | Field | Type | Meaning |
 |---|---|---|
 | `label` | `str` | Condition label, from `--label` or the config's parent directory name. |
-| `entry` | `str \| None` | Label of this row in a labelled result, such as a residue ID. `None` for a result with one value per replicate. |
+| `entry` | `str \| None` | Label of this row in a labeled result, such as a residue ID. `None` for a result with one value per replicate. |
 | `n_replicates` | `int` | Number of replicates behind `mean`. This is the sample size for every test. |
 | `mean` | `float` | Mean of the primary metric across replicates. |
 | `sem` | `float \| None` | Standard error of that mean across replicates, `s / sqrt(n)` with `ddof = 1`. `None` for one replicate, where it does not exist. |
@@ -63,15 +63,15 @@ rows the JSON form holds; every one of them is kept there.
 | `a` | `str` | Control condition label. |
 | `stratum` | `dict \| None` | With a `comparison:` block or `within=`, each `within` factor and its value in this row's stratum, printed after the condition labels on the comparison line. Left out of the JSON otherwise. |
 | `b` | `str` | Compared condition label. |
-| `entry` | `str \| None` | Label compared in a labelled result, such as a residue ID. `None` for a result with one value per replicate. |
+| `entry` | `str \| None` | Label compared in a labeled result, such as a residue ID. `None` for a result with one value per replicate. |
 | `delta` | `float` | `mean(b) - mean(a)`, in the metric's unit. |
 | `delta_ci95` | `tuple[float, float] \| None` | 95 percent Student t interval on `delta`, uncorrected for multiplicity. Pooled variance with `n_a + n_b - 2` degrees of freedom for `student_t`, separate variances with Welch-Satterthwaite degrees of freedom (passed to the quantile unrounded) for `welch_t`. `None` when a condition has fewer than three replicate values, or when both conditions have zero variance. |
 | `p` | `float \| None` | Unadjusted p value of the two-sample test. |
 | `p_adjusted` | `float \| None` | Benjamini-Hochberg adjusted p value. `None` for a row that was not tested. |
 | `test` | `str` | `welch_t` (the default of `polyzymd analyze` and `compare()`) or `student_t`. |
 | `correction` | `str` | `BH` (Benjamini-Hochberg). |
-| `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with their control for this one outcome, over every stratum, or for a labelled result every tested label of every compared condition. `None` for a row that was not tested. Printed as `family <m>` on the comparison line. |
-| `cohens_d` | `float \| None` | Standardised mean difference, the difference of the means over the pooled standard deviation, oriented like `delta`: positive means `b` is larger. `None` when a condition has fewer than three replicate values. |
+| `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with their control for this one outcome, over every stratum, or for a labeled result every tested label of every compared condition. `None` for a row that was not tested. Printed as `family <m>` on the comparison line. |
+| `cohens_d` | `float \| None` | Standardized mean difference, the difference of the means over the pooled standard deviation, oriented like `delta`: positive means `b` is larger. `None` when a condition has fewer than three replicate values. |
 | `hedges_g` | `float \| None` | `cohens_d` with the Hedges small-sample correction, oriented like `cohens_d`. `None` when a condition has fewer than three replicate values. |
 | `direction` | `str` | `increased` or `decreased` for a significant row, `not testable` for a row that was not tested, otherwise `no significant change`. |
 | `significant` | `bool \| None` | Whether `p_adjusted` is at most 0.05. `None` (`null` in JSON) when `testable` is `False`: no test decided it either way. |

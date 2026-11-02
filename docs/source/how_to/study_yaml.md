@@ -89,7 +89,7 @@ comparison:
   A different first condition can change the control, and then makes the
   stored reports stale for `polyzymd study freeze`.
 - When the control of a stratum has no values, for example no polymer atoms
-  for a polymer analysis, the conditions of that stratum are summarised and
+  for a polymer analysis, the conditions of that stratum are summarized and
   not compared, with a warning. The other strata are compared.
 - `--label` with conditions of several strata must include the control of
   each; PolyzyMD names the controls to add.
@@ -186,7 +186,7 @@ simulated time, not from the condition. For example, a structure that drifts
 late shows only in the longer simulations. The report then warns:
 
 ```
-warning: the conditions were analysed up to different times (No polymer 456.4 ns; SBMA 50% 38.4 ns); a difference may come from simulated time rather than the condition. Compare over a common window with until 38.4ns (--until, or until: in study.yaml)
+warning: the conditions were analyzed up to different times (No polymer 456.4 ns; SBMA 50% 38.4 ns); a difference may come from simulated time rather than the condition. Compare over a common window with until 38.4ns (--until, or until: in study.yaml)
 ```
 
 - `until: 38ns` in `study.yaml`, or `--until 38ns`, removes the production

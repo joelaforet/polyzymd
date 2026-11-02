@@ -166,7 +166,7 @@ template config (`--new`; `polyzymd init` is retired), a copy of a sibling
 the git-ignored `runs/` of the project (`runs/<study>/<condition>`), or of
 a lone study, unless it sets `scratch_directory` (`runs_folder`); freeze and
 code hashes skip `runs/`. Reports
-warn when conditions were analysed up to different times (`until`/`--until`
+warn when conditions were analyzed up to different times (`until`/`--until`
 gives a common window) and name segments `progress.json` records but the disk
 lacks; `analyze` and the `study` commands print only reports and warnings and
 write the full log to `logs/` (`polyzymd -v` for more). A study's own function

@@ -12,6 +12,10 @@ on:
     branches: [main, dev, "feature/**", "feat/**"]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash -l {0}
@@ -35,8 +39,23 @@ jobs:
 
       - name: Physics audit, engine parity and GROMACS restraints
         run: |
-          pixi run -e test pytest -v --color=yes \
+          pixi run -e test pytest -v --durations=25 --color=yes \
+            --cov=polyzymd --cov-report=xml \
             tests/audit \
             tests/exporters/test_gromacs_staged_restraints.py \
             tests/modifying_proteins/test_parameters.py \
             tests/config/test_solutes.py
+        env:
+          # The Full Test Suite leaves tests/audit to this job on Ubuntu, so
+          # this job reports its coverage. The sys.monitoring tracer keeps the
+          # cost low on Python 3.12+.
+          COVERAGE_CORE: sysmon
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-ubuntu-latest-engine-parity
+          fail_ci_if_error: false

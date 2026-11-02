@@ -157,7 +157,7 @@ polyzymd status -c $C
 
 Check `--preset` and its SLURM account before submitting.
 
-## 5. Analyse
+## 5. Analyze
 
 List the analyses under `analyses:` in `project.yaml` (such as `rg: {}`),
 commit, and use the `polyzymd-analyze` skill:

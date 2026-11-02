@@ -74,7 +74,7 @@ a one-line summary, the settings and their defaults, and a
 `_measure_<name>(study, settings, request)` function. That function runs the
 measurement through the study and returns a `Measured`: the replicate values
 to report, the chosen result and every result, the settings to record and a
-function that draws the figures. `analyze` then summarises or compares the
+function that draws the figures. `analyze` then summarizes or compares the
 values, draws the figures and records the settings, the same way for every
 analysis. `polyzymd analyze --list` reads `ANALYSES`, `polyzymd analyze`
 refuses any name that is not in it, and `--submit` runs any name that is.

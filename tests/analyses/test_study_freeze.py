@@ -76,7 +76,7 @@ def _git(root: Path, *arguments: str) -> str:
 
 @pytest.fixture()
 def study(tmp_path: Path) -> Path:
-    """An analysed study folder with metadata, all committed."""
+    """An analyzed study folder with metadata, all committed."""
     configs = {}
     for label, offset in (("No polymer", 1.0), ("Polymer", 2.0)):
         folder = tmp_path / "runs" / condition_folder(label)
@@ -507,7 +507,7 @@ def test_a_study_of_a_project_is_frozen_with_the_project(tmp_path: Path) -> None
 
 
 def test_freeze_names_cosolvents_and_missing_build_files(tmp_path: Path) -> None:
-    """Freeze recognises co-solvents in the composition check and names a listed build file that is missing."""
+    """Freeze recognizes co-solvents in the composition check and names a listed build file that is missing."""
     from types import SimpleNamespace
 
     from polyzymd.analyses.study_freeze import _missing_build_files, composition_warnings
@@ -724,7 +724,7 @@ TPR_FALLBACK = Path(__file__).resolve().parents[1] / "data" / "gromacs" / "tpr_f
 
 @pytest.fixture()
 def unreadable_tpr_study(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A committed, analysed GROMACS study whose prod.tpr this MDAnalysis cannot read.
+    """A committed, analyzed GROMACS study whose prod.tpr this MDAnalysis cannot read.
 
     Each replicate is the two methanols, sodium and five waters of
     ``tests/data/gromacs/tpr_fallback``: the topology comes from its ``.top``,

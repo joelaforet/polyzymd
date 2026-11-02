@@ -484,7 +484,7 @@ def deposit_readme(
         "",
         "| File | Holds |",
         "|---|---|",
-        "| `manifest.json` | Every file by size and SHA-256, software versions, each condition's resolved config, and the production analysed |",
+        "| `manifest.json` | Every file by size and SHA-256, software versions, each condition's resolved config, and the production analyzed |",
         "| `CITATION.cff` | How to cite the paper, this dataset and PolyzyMD |",
         "| `manifest-1.schema.json` | The JSON Schema `manifest.json` follows |",
         (
@@ -536,7 +536,7 @@ def deposit_readme(
         # The project's results are each study's; the Studies section that
         # follows gives them.
         lines += [
-            f"Licences: {meta.get('license', {}).get('data', 'CC-BY-4.0')} for data, results "
+            f"Licenses: {meta.get('license', {}).get('data', 'CC-BY-4.0')} for data, results "
             f"and figures; {meta.get('license', {}).get('code', 'MIT')} for code.",
             "",
         ]
@@ -546,7 +546,7 @@ def deposit_readme(
         lines.append(f"- **{run}:** " + report_summary(root / "results" / run / "report.json"))
     lines += [
         "",
-        f"Licences: {meta.get('license', {}).get('data', 'CC-BY-4.0')} for data, results and figures; "
+        f"Licenses: {meta.get('license', {}).get('data', 'CC-BY-4.0')} for data, results and figures; "
         f"{meta.get('license', {}).get('code', 'MIT')} for code.",
         "",
     ]

@@ -41,7 +41,7 @@ def rmsd(atoms: Any, reference: Any) -> float:
 
     This calls ``MDAnalysis.analysis.rms.rmsd`` with ``center=True`` and
     ``superposition=True``, which moves both sets of coordinates to their
-    centres of geometry, rotates ``atoms`` onto ``reference`` and returns the
+    centers of geometry, rotates ``atoms`` onto ``reference`` and returns the
     square root of the mean squared distance per atom, in Å, with every atom
     weighted equally. This is what ``MDAnalysis.analysis.rms.RMSD`` computes
     for one selection.
@@ -872,7 +872,7 @@ def residue_occlusion(
     name in ``types``: the fraction of frames in contact when only the
     occluder atoms of that residue name are present. Columns follow the
     residues of ``protein`` that have a maximum ASA; residues without one,
-    such as terminal caps, still cover their neighbours but are not measured.
+    such as terminal caps, still cover their neighbors but are not measured.
     With no ``occluder`` atoms, as in a control without polymer, nothing is
     in contact or occluded: those rows are 0, and the exposed fraction and
     area are measured as usual.
@@ -1554,7 +1554,7 @@ def residue_hbond_occupancy(
 def _residue_names(residues: Any) -> dict[int, str]:
     """Return each residue's label in :func:`residue_pair_hbond_occupancy`.
 
-    A standard amino acid, one with a maximum ASA, is labelled by its residue
+    A standard amino acid, one with a maximum ASA, is labeled by its residue
     ID, or ``chain:resid`` when IDs repeat among them; any other residue, such
     as a monomer or a ligand, by its residue name.
     """

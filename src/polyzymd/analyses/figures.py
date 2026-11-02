@@ -3,7 +3,7 @@
 :func:`plot_timeseries`, :func:`plot_distribution` and
 :func:`plot_condition_values` are reached as ``Timeseries.plot``,
 ``Timeseries.plot_distribution`` and ``ReplicateValues.plot``, and
-:func:`plot_profile` as ``ReplicateValues.plot`` of labelled values.
+:func:`plot_profile` as ``ReplicateValues.plot`` of labeled values.
 :func:`plot_values` and :func:`plot_distributions`, reached as
 ``pz.plot_values`` and ``pz.plot_distributions``, draw several results in
 one figure. They read the values already held by those objects,
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 
 def _setup(source: Timeseries, plot_settings: PlotSettings | None) -> tuple[Any, list, dict]:
-    """Return the plot settings, the condition labels in plot order and their colours."""
+    """Return the plot settings, the condition labels in plot order and their colors."""
     from polyzymd.analyses.shared.plotting import get_condition_color_map, order_condition_labels
     from polyzymd.config.analysis_settings import PlotSettings
 
@@ -195,7 +195,7 @@ def plot_timeseries(
         drawn="Band",
         of="the condition mean at each time",
         counts="n per condition in the legend",
-        points="Thin lines: per-replicate series; thick lines: condition means; grey: the "
+        points="Thin lines: per-replicate series; thick lines: condition means; gray: the "
         "equilibration window, whose frames are not in the series",
     )
     return _save(fig, output_dir, name, settings)
@@ -258,7 +258,7 @@ def plot_distribution(
     """Draw the distribution of the per-frame values of each condition.
 
     For each condition, a thick line is the Gaussian KDE of every production
-    frame of every replicate pooled, and a thin line of the same colour is the KDE of
+    frame of every replicate pooled, and a thin line of the same color is the KDE of
     each replicate alone, so the spread between replicates shows. A
     ``threshold`` is drawn as a red dashed vertical line. ``title``, by
     default the series name, also names the quantity on the x axis.
@@ -330,7 +330,7 @@ def plot_distributions(
     of every replicate pooled as a thick line and the KDE of each replicate
     as a thin line, with the series' threshold from ``thresholds`` as a red
     dashed line.
-    The panels share the x axis, labelled ``quantity`` and the unit of the
+    The panels share the x axis, labeled ``quantity`` and the unit of the
     series. ``titles`` default to the series names, and ``output_dir`` to
     the ``figures`` folder next to ``polyzymd_results``.
 
@@ -472,7 +472,7 @@ def plot_profile(
     highlight: Sequence = (),
     xlabel: str = "label",
 ) -> Path:
-    """Draw a labelled result along its labels, one line per replicate and per condition.
+    """Draw a labeled result along its labels, one line per replicate and per condition.
 
     Each replicate's value at every label is a thin line. A thick line gives
     each condition's mean at every label, with a band of the 95 percent
@@ -556,7 +556,7 @@ def plot_decomposition(
     plot_settings: PlotSettings | None = None,
     xlabel: str = "label",
 ) -> Path:
-    """Draw several labelled results of one study together, one panel per condition.
+    """Draw several labeled results of one study together, one panel per condition.
 
     Each panel holds one line per result, its mean over the condition's
     replicates at every label, with the band of its 95 percent Student t
@@ -633,7 +633,7 @@ def plot_differences(
 ) -> Path:
     """Draw each condition's per-label difference from the control, one panel per condition.
 
-    ``report`` is the ``compare()`` report of the labelled ``values``. Each
+    ``report`` is the ``compare()`` report of the labeled ``values``. Each
     panel draws, along the labels, ``delta`` of every comparison row, the
     mean of the condition minus the mean of the control, with a band of its
     95 percent interval from the report's test, Welch's by default, and a

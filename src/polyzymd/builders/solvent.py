@@ -356,7 +356,7 @@ class SolventBuilder:
                 inputs); pass the replicate index for independent replicates.
             box_vectors: Precomputed periodic box vectors.  When given, the box
                 is *not* derived from this topology and the topology is *not*
-                re-centred: it is assumed to be already framed in the brick of
+                re-centered: it is assumed to be already framed in the brick of
                 this cell (the output of polymer packing is).  This is what
                 makes the cell identical across replicates of one condition.
 
@@ -386,7 +386,7 @@ class SolventBuilder:
 
         # Use the precomputed cell when the caller has one (the deterministic
         # box computed before polymer packing); otherwise derive it here from
-        # this topology, which is the behaviour for solute-only builds.
+        # this topology, which is the behavior for solute-only builds.
         center_solute = box_vectors is None
         if box_vectors is None:
             box_vecs = self.compute_box_vectors(

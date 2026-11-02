@@ -83,7 +83,7 @@ The run files are in `gromacs/`, named after the config's prefix (here
 |---|---|---|
 | `gromacs/prod.tpr` | The compiled production input: atoms, bonds, masses, charges | The topology for `gmx` tools, and for MDAnalysis when it can read the file version |
 | `gromacs/trpcage.top` and its `.itp` files | The same, as text | The topology for MDAnalysis when it cannot read `prod.tpr` |
-| `gromacs/prod_centered.xtc` | Production frames with whole molecules and the protein centred | Most analyses. PolyzyMD's own analyses read it first |
+| `gromacs/prod_centered.xtc` | Production frames with whole molecules and the protein centered | Most analyses. PolyzyMD's own analyses read it first |
 | `gromacs/prod_nojump.xtc` | Production frames where no atom jumps across the box between frames | Displacements over time. Molecules split by the box in the first frame stay split |
 | `gromacs/prod.xtc` | Production frames as `mdrun` wrote them, each atom in the box | The raw record. Molecules can be split across the box |
 | `gromacs/components.ndx` | One index group per component, under its name and its segment ID | Selections for `gmx` tools |
