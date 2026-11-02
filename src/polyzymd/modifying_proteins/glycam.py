@@ -8,7 +8,7 @@ force-field file in Interchange. They are built natively and copied in:
 
 1. For each glycan site, a small OpenMM topology is cut out of the protein:
    the linking residue renamed to its GLYCAM linkage template (ASN -> NLN,
-   SER -> OLS, THR -> OLT), the glycan residues, and the neighbouring peptide
+   SER -> OLS, THR -> OLT), the glycan residues, and the neighboring peptide
    groups as ACE and NME caps. ``ForceField(protein.ff14SB.xml,
    GLYCAM_06j-1.xml)`` parameterizes it with an explicit template for every
    residue (mannose and glucose epimers share a bonding graph).
@@ -240,10 +240,10 @@ def glycam_site_terms(
     by_residue: dict[tuple, list[int]] = {}
     for index, key in enumerate(keys):
         by_residue.setdefault((key.chain_id, key.resnum, key.icode), []).append(index)
-    neighbours = [set() for _ in range(molecule.n_atoms)]
+    neighbors = [set() for _ in range(molecule.n_atoms)]
     for bond in molecule.bonds:
-        neighbours[bond.atom1_index].add(bond.atom2_index)
-        neighbours[bond.atom2_index].add(bond.atom1_index)
+        neighbors[bond.atom1_index].add(bond.atom2_index)
+        neighbors[bond.atom2_index].add(bond.atom1_index)
 
     linking_atoms = by_residue[linking]
     name_of = {index: keys[index].atom_name for index in range(molecule.n_atoms)}
@@ -254,13 +254,13 @@ def glycam_site_terms(
             f"GLYCAM06j links glycans to ASN, SER or THR; site {site.name} is on {label}."
         )
     atom_by_name = {name_of[index]: index for index in linking_atoms}
-    previous_c = [j for j in neighbours[atom_by_name["N"]] if name_of[j] == "C"]
-    next_n = [j for j in neighbours[atom_by_name["C"]] if name_of[j] == "N"]
+    previous_c = [j for j in neighbors[atom_by_name["N"]] if name_of[j] == "C"]
+    next_n = [j for j in neighbors[atom_by_name["C"]] if name_of[j] == "N"]
     if not previous_c or not next_n:
         raise ValueError(
             f"Refused: glycan {site.name} on {label}, the first or last residue of its "
             f"chain. GLYCAM06j's linkage residue ({LINKAGE_TEMPLATES[parent]}) is "
-            "parameterized with a neighbouring residue on each side, and a chain-terminal "
+            "parameterized with a neighboring residue on each side, and a chain-terminal "
             "residue lacks one. File an issue at "
             "https://github.com/joelaforet/polyzymd/issues if you meant to do this and "
             "want this capability."
@@ -337,16 +337,16 @@ def glycam_site_terms(
         removeCMMotion=False,
         residueTemplates=templates,
     )
-    # Cap methyls stand in for the neighbours' CA; no term touching the site
+    # Cap methyls stand in for the neighbors' CA; no term touching the site
     # may reach them, so they map to nothing.
     global_of = {
         local.index: index for index, local in to_local.items() if index not in cap_methyls
     }
     site_local = {to_local[index].index for index in site_atoms}
-    local_neighbours: dict[int, set[int]] = {}
+    local_neighbors: dict[int, set[int]] = {}
     for a, b in top.bonds():
-        local_neighbours.setdefault(a.index, set()).add(b.index)
-        local_neighbours.setdefault(b.index, set()).add(a.index)
+        local_neighbors.setdefault(a.index, set()).add(b.index)
+        local_neighbors.setdefault(b.index, set()).add(a.index)
 
     def touching(atoms) -> bool:
         return any(atom in site_local for atom in atoms)
@@ -392,7 +392,7 @@ def glycam_site_terms(
                     terms.backbone_charges[index] = charge._value
             for n in range(force.getNumExceptions()):
                 i, j, product, sigma, epsilon = force.getExceptionParameters(n)
-                if not touching((i, j)) or not _is_one_four(i, j, local_neighbours):
+                if not touching((i, j)) or not _is_one_four(i, j, local_neighbors):
                     continue
                 qi, _, ei = force.getParticleParameters(i)
                 qj, _, ej = force.getParticleParameters(j)
@@ -733,8 +733,8 @@ def _same_terms(kind, before, new_terms, n_atoms, name) -> None:
         )
 
 
-def _is_one_four(i: int, j: int, neighbours: dict[int, set[int]]) -> bool:
-    first = neighbours.get(i, set())
-    second = {k for n in first for k in neighbours.get(n, set())}
-    third = {k for n in second for k in neighbours.get(n, set())}
+def _is_one_four(i: int, j: int, neighbors: dict[int, set[int]]) -> bool:
+    first = neighbors.get(i, set())
+    second = {k for n in first for k in neighbors.get(n, set())}
+    third = {k for n in second for k in neighbors.get(n, set())}
     return j in third and j not in second and j not in first and j != i

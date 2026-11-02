@@ -9,7 +9,7 @@ set of its type (glycan, polymer, generic, noncanonical):
 - The backbone of a modified residue (N, H, CA, HA, C, O) keeps the protein's
   parameters and the library charges of the residue as it was before any
   site-creating change (the input residue, or the canonical residue a
-  mutation made), so it matches its neighbours. These charges come from the
+  mutation made), so it matches its neighbors. These charges come from the
   declared protein force field run on that residue, never from another
   copy of the force field (Joe, 2026-10-30). A force field that charges
   proteins with NAGL (OpenFF Rosemary) has no library charges and
@@ -516,23 +516,23 @@ _MAIN_CHAIN = frozenset({"N", "H", "CA", "HA", "HA2", "HA3", "C", "O"})
 def _linkage_backbone(molecule, keys, site) -> list[int]:
     """Backbone atoms of a glycan's linkage residue and of the residues bonded before and after it.
 
-    The neighbours are found through the peptide bonds (linkage N to the
+    The neighbors are found through the peptide bonds (linkage N to the
     previous C, linkage C to the next N); GLYCAM06j refuses a glycan on a
     chain's first or last residue, so both exist.
     """
     linking = site.residues[0]
     residue = {i: (key.chain_id, key.resnum, key.icode) for i, key in enumerate(keys)}
     anchor = {keys[i].atom_name: i for i in residue if residue[i] == linking}
-    neighbours = {linking}
+    neighbors = {linking}
     for bond in molecule.bonds:
         for a, b in ((bond.atom1_index, bond.atom2_index), (bond.atom2_index, bond.atom1_index)):
             if (a, keys[b].atom_name) in ((anchor["N"], "C"), (anchor["C"], "N")):
-                neighbours.add(residue[b])
+                neighbors.add(residue[b])
     in_site = set(site.atom_indices)
     return [
         i
         for i in residue
-        if residue[i] in neighbours and keys[i].atom_name in _MAIN_CHAIN and i not in in_site
+        if residue[i] in neighbors and keys[i].atom_name in _MAIN_CHAIN and i not in in_site
     ]
 
 
@@ -716,13 +716,13 @@ def _refuse_neutral_termini(
 ) -> None:
     """Raise when a terminus is changed by protonation alone (Joe, 2026-10-28)."""
     for residue, terminus in termini.items():
-        labelled = any(
+        labeled = any(
             record.kind == "attach"
             and (record.site.chain_id, record.site.resnum, record.site.icode) == residue
             and record.arguments["atom_name"] in _TERMINAL_ANCHORS[terminus]
             for record in protein.records
         )
-        if not labelled:
+        if not labeled:
             chain_id, resnum, icode = residue
             raise ValueError(
                 f"{message} (chain {chain_id} residue {resnum}{icode}, {terminus}-terminus)"
@@ -856,7 +856,7 @@ def library_charges(molecule, force_field: Sequence[str] = PROTEIN_FORCE_FIELD) 
 
 
 def capped_model(molecule, core: set[int]):
-    """Cut ``core`` and two bonds of neighbours out of ``molecule``, capped with H.
+    """Cut ``core`` and two bonds of neighbors out of ``molecule``, capped with H.
 
     Returns the capped Molecule and, in its atom order, the index in
     ``molecule`` of every atom cut out (the caps follow). The core may span
@@ -865,13 +865,13 @@ def capped_model(molecule, core: set[int]):
     from openff.toolkit import Molecule
     from openff.units import unit
 
-    neighbours = [set() for _ in range(molecule.n_atoms)]
+    neighbors = [set() for _ in range(molecule.n_atoms)]
     for bond in molecule.bonds:
-        neighbours[bond.atom1_index].add(bond.atom2_index)
-        neighbours[bond.atom2_index].add(bond.atom1_index)
+        neighbors[bond.atom1_index].add(bond.atom2_index)
+        neighbors[bond.atom2_index].add(bond.atom1_index)
     kept = set(core)
     for _ in range(2):
-        kept |= {other for index in kept for other in neighbours[index]}
+        kept |= {other for index in kept for other in neighbors[index]}
     kept_indices = sorted(kept)
     local_index = {index: order for order, index in enumerate(kept_indices)}
 

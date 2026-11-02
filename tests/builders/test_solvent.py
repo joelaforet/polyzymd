@@ -317,7 +317,7 @@ def _real_solute_topology():
     return Topology.from_molecules([molecule])
 
 
-def test_solvate_with_precomputed_box_skips_centring(monkeypatch) -> None:
+def test_solvate_with_precomputed_box_skips_centering(monkeypatch) -> None:
     """A topology already framed in the brick must not be moved again."""
     import numpy as np
 

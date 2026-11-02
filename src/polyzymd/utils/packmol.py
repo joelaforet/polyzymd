@@ -1115,7 +1115,7 @@ def solvate_with_packmol(
 def center_in_brick(topology, brick_angstrom: "NDArray"):
     """Return a copy of *topology* with its bounding box centered in the brick.
 
-    Centring the bounding box, not the center of geometry, gives the solute
+    Centering the bounding box, not the center of geometry, gives the solute
     the same clearance to opposite brick faces. The box is sized for that
     clearance (see :func:`polyzymd.utils.boxvectors.plan_box`).
     """

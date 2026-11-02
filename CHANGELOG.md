@@ -15,7 +15,7 @@ mBuild biopolymers fork, with the physics audit extended to modified proteins
 and an opt-in to OpenFF Rosemary alpha. It is a pre-release for trying out
 the conjugation workflow; 1.3.0 stays the stable release.
 
-### Changed (behaviour)
+### Changed (behavior)
 
 - Energy minimization now runs to convergence by default: `simulation_phases.minimization.max_iterations` defaults to `0` (was `1000`). Configs that don't set it now minimize until the RMS force is below `tolerance`; set `max_iterations: 1000` to keep the old cap. This is the one default the 1.3 schema contract allows to change, by maintainer decision.
 - After minimization, `polyzymd run` checks the RMS force on the atoms that were free to move and the most stretched bond. A run stopped by an iteration cap before converging, or a state with a bond stretched more than 50 % over its equilibrium length, is minimized again to convergence once. If a bond is still torn, the run stops with the offending atoms and values named instead of entering equilibration; a torn bond between two frozen solute atoms stops it at once. The RMS force is measured as OpenMM's minimizer measures it. The outcome (`rms_force`, `max_force`, `worst_bond`, `worst_bond_stretch`, `converged`, `reminimized`) is recorded in `minimization/phase.json`, also for a failed run. A signal stops a running minimization at its next iteration.
@@ -53,7 +53,7 @@ the conjugation workflow; 1.3.0 stays the stable release.
   audited. References for GLYCAM06, mBuild biopolymers and openff-pablo.
 - `examples/modified_proteins`: ubiquitin with a GLYCAM06j glycan on Asn60, and
   with an octanoyl amide on Lys63 (Sage 2.3.0 and NAGL).
-- Acceptance builds of mutated, labelled, glycosylated and grafted proteins
+- Acceptance builds of mutated, labeled, glycosylated and grafted proteins
   (fibronectin FN7-10 with AzF and FRET dyes, lipase A with dyes and a grafted
   chain, the BG505 SOSIP protomer with 20 glycans)
   (`POLYZYMD_ACCEPTANCE=1`, local only; `POLYZYMD_ACCEPTANCE_RUN=1` also runs
@@ -118,7 +118,7 @@ the conjugation workflow; 1.3.0 stays the stable release.
   charges: {method: library}}}`, glycans only). Each glycan site takes
   GLYCAM06j's charges, terms and 1-4 pairs; the charge difference from
   Rosemary's NAGL charges is spread over the backbones of the linkage residue
-  and its two neighbours (bounded by `max_charge_shift`, recorded per site). The audit checks the
+  and its two neighbors (bounded by `max_charge_shift`, recorded per site). The audit checks the
   hybrid and marks it with a `parameters.glycan_force_field` WARN.
 - The `build` and `test` environments install `openff-forcefields` 2026.09.0
   (was 2026.01.0), which adds the Rosemary candidate

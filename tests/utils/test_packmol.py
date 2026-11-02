@@ -1030,14 +1030,14 @@ class TestSolvateCenterSolute:
         )
         return result, mocks, original_solute
 
-    def test_centring_is_skipped(self, monkeypatch, tmp_path):
+    def test_centering_is_skipped(self, monkeypatch, tmp_path):
         result, mocks, original_solute = self._run(monkeypatch, tmp_path, center_solute=False)
         mocks["center"].assert_not_called()
         np.testing.assert_allclose(
             result.positions[: original_solute.n_atoms], original_solute.positions
         )
 
-    def test_centring_is_the_default(self, monkeypatch, tmp_path):
+    def test_centering_is_the_default(self, monkeypatch, tmp_path):
         _, mocks, _ = self._run(monkeypatch, tmp_path)
         mocks["center"].assert_called_once()
 
