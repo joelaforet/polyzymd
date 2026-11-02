@@ -2461,7 +2461,7 @@ def postprocessing_needed(working_dir: Path) -> bool:
 class GromacsInterrupted(Exception):
     """Raised when a signal stopped a local GROMACS step after mdrun shut down cleanly.
 
-    mdrun received one ``SIGTERM``, stopped at the next neighbour-search step
+    mdrun received one ``SIGTERM``, stopped at the next neighbor-search step
     and wrote its checkpoint, so the step can be continued with ``-cpi``.
     """
 

@@ -69,6 +69,6 @@
 
     <!-- Legend -->
     <rect x="24" y="500" width="24" height="16" rx="3" fill="#f0f2f4" stroke="#9aa5b1" stroke-width="1.5"/>
-    <text x="56" y="513" font-size="12" fill="#52606d">grey: outside git (machine-specific, not committed)</text>
+    <text x="56" y="513" font-size="12" fill="#52606d">gray: outside git (machine-specific, not committed)</text>
   </g>
 </svg>

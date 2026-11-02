@@ -1,6 +1,6 @@
 """Plotting helpers that the figures of :mod:`polyzymd.analyses.figures` are drawn with.
 
-They style axes and legends, pick and order condition colours, draw grouped
+They style axes and legends, pick and order condition colors, draw grouped
 bars with every replicate value, work out error bar and band half-widths,
 add the uncertainty footnote, and save figures with the PolyzyMD watermark.
 
@@ -611,7 +611,7 @@ def finite_numeric_values(values: Any) -> "np.ndarray":
 def replicate_jitter_offsets(n_values: int, bar_width: float) -> "np.ndarray":
     """Return deterministic offsets for replicate dot overlays.
 
-    Offsets are centred on the corresponding bar position so overlays are
+    Offsets are centered on the corresponding bar position so overlays are
     reproducible across runs and independent of random-number state.
 
     Parameters
@@ -624,7 +624,7 @@ def replicate_jitter_offsets(n_values: int, bar_width: float) -> "np.ndarray":
     Returns
     -------
     numpy.ndarray
-        Jitter offsets centred around zero.
+        Jitter offsets centered around zero.
     """
     import numpy as np
 
@@ -662,7 +662,7 @@ def scatter_replicate_values(
     ax : matplotlib.axes.Axes
         Axes containing the bar chart.
     bar_positions : sequence of float or numpy.ndarray
-        Bar centre positions aligned to ``replicate_values``.
+        Bar center positions aligned to ``replicate_values``.
     replicate_values : sequence of Any
         Per-bar replicate values. Each item may be a scalar or sequence; only
         finite numeric values are plotted.
@@ -673,7 +673,7 @@ def scatter_replicate_values(
     bar_width : float, optional
         Width or height of the bars, by default ``0.8``.
     dot_color : Any, optional
-        Override for theme dot colour.
+        Override for theme dot color.
     dot_size : float, optional
         Override for theme dot size. Dots are skipped when non-positive.
     dot_alpha : float, optional
@@ -773,12 +773,12 @@ def grouped_bars(
     ax : matplotlib Axes
         Target axes.
     x : np.ndarray
-        1-D array of group centre positions (e.g. ``np.arange(n_groups)``).
+        1-D array of group center positions (e.g. ``np.arange(n_groups)``).
     series : sequence of (label, means, errors)
         One tuple per condition.  *means* and *errors* must have the same
         length as *x*.
     colors : sequence
-        One colour per condition (same length as *series*).
+        One color per condition (same length as *series*).
     plot_settings : PlotSettings
         Global plot settings.
     bar_width : float | None, optional
@@ -961,7 +961,7 @@ def band_half_widths(
 ) -> "np.ndarray | None":
     """Return the half width of a shaded band over per-replicate traces.
 
-    ``matrix`` is shaped ``(n_replicates, n_points)``. The band is centred on
+    ``matrix`` is shaped ``(n_replicates, n_points)``. The band is centered on
     the mean across replicates and is ``None`` with fewer than three
     replicates, whose interval is too wide to read.
     """
@@ -991,7 +991,7 @@ def add_figure_note(fig: "Figure", text: str) -> Any:
     """Write ``text`` as a footnote under the axes of ``fig`` and return the Text.
 
     The note hangs from the bottom edge of the figure, left aligned, in 7 pt
-    grey type, wrapped to about the figure width, so it never overlaps an
+    gray type, wrapped to about the figure width, so it never overlaps an
     axes, a legend or the watermark. :func:`save_figure` saves with a tight
     bounding box, which takes the note into the saved image. The text gets
     the ``gid`` :data:`FIGURE_NOTE_GID`.

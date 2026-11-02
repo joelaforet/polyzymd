@@ -92,7 +92,7 @@ class ConditionReport(BaseModel):
     the equilibrated region that pymbar ``detect_equilibration`` finds in the
     production series, as a production frame index from 0 and as simulation
     time. They are diagnostics and change no value. ``entry`` is the label of this row in a
-    labelled result, such as a residue ID, and ``None`` otherwise. ``no_partner``
+    labeled result, such as a residue ID, and ``None`` otherwise. ``no_partner``
     names the partner selection that matched no atoms in this condition, such
     as the polymer of a control without polymer: its values are 0 by
     construction, so no comparison with it is tested. It is ``None``, and
@@ -135,7 +135,7 @@ class PairwiseReport(BaseModel):
     partner (see ``ConditionReport.no_partner``). ``family_size``
     is the number of tests in the Benjamini-Hochberg family this row was
     corrected in, one family per outcome, and ``None`` when that is not known
-    or the row was not tested. ``entry`` is the label compared in a labelled
+    or the row was not tested. ``entry`` is the label compared in a labeled
     result, such as a residue ID, and ``None`` otherwise. ``a`` is the control.
     ``stratum`` maps each ``within`` factor to its value when the conditions
     are compared with the control of their stratum; without ``within`` it is
@@ -275,12 +275,12 @@ class ProtocolReport(BaseModel):
         """Render the report as fixed-vocabulary text, one line per item.
 
         Every condition, comparison, warning and verdict gets its own line. A
-        comparison of labelled values, such as residues, gets instead, per
+        comparison of labeled values, such as residues, gets instead, per
         compared condition, one line with the number of labels tested, the
         family size and the number significantly lower and higher than the
         control, and one line each listing those labels with their difference
         and adjusted p value; every per-label row stays in the JSON form of
-        the report. The output has no table borders, no colour and no blank
+        the report. The output has no table borders, no color and no blank
         lines.
         """
         run = f"  run {self.run}" if self.run else ""
@@ -296,7 +296,7 @@ class ProtocolReport(BaseModel):
         )
         if any(pair.entry is not None for pair in self.pairwise):
             body = [
-                *_labelled_pairwise_lines(self.pairwise),
+                *_labeled_pairwise_lines(self.pairwise),
                 f"note: the {len(self.conditions)} per-label condition rows and "
                 f"{len(self.pairwise)} per-label comparison rows are in the JSON report",
             ]
@@ -454,7 +454,7 @@ def _record_not_run(report: ProtocolReport, study: Any) -> None:
                 f"{'was' if len(other) == 1 else 'were'} built from another config than "
                 f"{Path(condition.config_path).name} (the build record's config hash differs): a "
                 "setting such as the salt concentration may differ from what the trajectories "
-                "hold. They are analysed as they are; check the config or rebuild."
+                "hold. They are analyzed as they are; check the config or rebuild."
             )
         not_run = getattr(condition, "not_run", None) or []
         unfinished = getattr(condition, "unfinished", None) or {}
@@ -526,7 +526,7 @@ class Request:
 class Measured:
     """What a shipped analysis measured, for :func:`analyze` to report.
 
-    ``values`` are the replicate values the report summarises (one
+    ``values`` are the replicate values the report summarizes (one
     condition) or compares with the first condition (several). ``run`` is the
     chosen result and ``runs`` every result; both stay empty for ``rg`` and
     ``rmsd``. ``settings``, when given, becomes ``provenance.settings``.
@@ -689,12 +689,12 @@ def study_wide_settings(analysis: str, study: Any, settings: Mapping[str, Any]) 
 def _report_skipping(
     values: Any, study: Any, empty: dict[tuple[str, int], list[str]], analysis: str
 ) -> ProtocolReport:
-    """Summarise or compare ``values`` without the replicates where a selection matched no atoms.
+    """Summarize or compare ``values`` without the replicates where a selection matched no atoms.
 
     Those replicates are left out of every statistic, and a condition left
     without replicates is left out of the report, each with a warning. A
     condition whose control is left out, the first condition or with
-    ``within`` the control of its stratum, is summarised and not compared;
+    ``within`` the control of its stratum, is summarized and not compared;
     the others are compared.
     """
     if empty:
@@ -705,7 +705,7 @@ def _report_skipping(
     labels = [condition.label for condition in study]
     kept = [label for label in labels if values.rows.get(label)]
     pairs = values._pairs(kept) if len(labels) > 1 and kept else []
-    # A condition whose control matched no atoms is summarised, not compared.
+    # A condition whose control matched no atoms is summarized, not compared.
     lost = [pair for pair in pairs if pair[0] in values.rows and not values.rows[pair[0]]]
     if len(lost) < len(pairs):
         report = values._compare(kept, [pair for pair in pairs if pair not in lost])
@@ -724,13 +724,13 @@ def _report_skipping(
     if lost and lost[0][2] is None:
         report.warnings.append(
             f"{analysis}: the control {lost[0][0]} has no replicate where every selection "
-            "matches atoms, so the other conditions are summarised and not compared. Give a "
+            "matches atoms, so the other conditions are summarized and not compared. Give a "
             "condition with those atoms first to compare against it."
         )
     elif lost:
         report.warnings.append(
             f"{analysis}: the control of their stratum has no replicate where every selection "
-            "matches atoms, so these conditions are summarised and not compared: "
+            "matches atoms, so these conditions are summarized and not compared: "
             + ", ".join(f"{label} (control {control})" for control, label, _ in lost)
             + "."
         )
@@ -858,7 +858,7 @@ def _measure_rmsf(study: Any, settings: dict, request: Request) -> Measured:
     :func:`~polyzymd.analyses.reference.reference` for both selections
     together, and gives for each residue of ``selection`` its RMS deviation
     from the reference, its RMSF about the mean position and the offset of
-    the mean position from the reference, labelled by residue ID, with
+    the mean position from the reference, labeled by residue ID, with
     their mean squares. A missing ``reference_mode`` is ``"external"`` when a
     ``reference_file`` is given and ``"centroid"`` otherwise.
 
@@ -1710,7 +1710,7 @@ def _measure_contacts(study: Any, settings: dict, request: Request) -> Measured:
         warnings.append(
             f"contacts: {len(unmeasured)} residues of the protein selection have no maximum "
             f"ASA and are not measured by method=occlusion: {', '.join(unmeasured)}. They "
-            "still cover their neighbours."
+            "still cover their neighbors."
         )
 
     def figures(folder: Path, report: ProtocolReport) -> None:
@@ -2051,7 +2051,7 @@ def _labels(configs: Sequence[Path], labels: Sequence[str] | None) -> list[str]:
 
 
 def _condition(label: str, values: Sequence[float]) -> ConditionReport:
-    """Summarise one condition's replicate values as n, mean, sem and 95 percent interval.
+    """Summarize one condition's replicate values as n, mean, sem and 95 percent interval.
 
     The statistics come from :func:`~polyzymd.analyses.shared.statistics.mean_sem_ci`.
     A condition without values gets n 0, a NaN mean and no sem or interval.
@@ -2274,8 +2274,8 @@ def _pairwise_line(pair: PairwiseReport) -> str:
     )
 
 
-def _labelled_pairwise_lines(pairwise: Sequence[PairwiseReport]) -> list[str]:
-    """Summarise per-label comparisons: counts per condition, then the significant labels."""
+def _labeled_pairwise_lines(pairwise: Sequence[PairwiseReport]) -> list[str]:
+    """Summarize per-label comparisons: counts per condition, then the significant labels."""
     lines = []
     for b in dict.fromkeys(pair.b for pair in pairwise):
         rows = [pair for pair in pairwise if pair.b == b]

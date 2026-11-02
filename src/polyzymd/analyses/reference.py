@@ -188,9 +188,9 @@ def _fitted_mean(coordinates: np.ndarray, fit: np.ndarray, target: np.ndarray) -
 def superpose(coordinates: np.ndarray, fit: np.ndarray, target: np.ndarray) -> np.ndarray:
     """Superpose every frame's ``fit`` atoms on ``target`` and return the moved frames.
 
-    Each frame is centred on the centre of geometry of its ``fit`` atoms,
+    Each frame is centered on the center of geometry of its ``fit`` atoms,
     rotated by ``MDAnalysis.analysis.align.rotation_matrix`` onto ``target``
-    and moved to the centre of ``target``, as ``AlignTraj`` does. The input
+    and moved to the center of ``target``, as ``AlignTraj`` does. The input
     array is not changed.
 
     Parameters

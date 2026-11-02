@@ -141,7 +141,7 @@ cp own/traj.dcd production_0/production_0_trajectory.dcd
 
 **GROMACS.** Copy the production run input, trajectory and log into
 `gromacs/` as `prod.tpr`, `prod.xtc` and `prod.log`. Then make the molecules
-whole and centre the protein, as PolyzyMD does after its own runs; otherwise
+whole and center the protein, as PolyzyMD does after its own runs; otherwise
 a protein split across the periodic boundary gives wrong radii of gyration,
 distances and contacts. Analysis reads `prod_centered.xtc` first, and warns
 when it can only read the raw `prod.xtc`.

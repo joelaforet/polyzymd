@@ -765,7 +765,7 @@ def _production_length_warnings(conditions: dict[str, Any]) -> list[str]:
     described = "; ".join(f"{label} {min(v):.4g}-{max(v):.4g} ns" for label, v in lengths.items())
     return [
         f"the conditions' production lengths differ ({described}); results compared across "
-        f"them may reflect simulated time, so analyse with until {shortest:.4g}ns or extend the "
+        f"them may reflect simulated time, so analyze with until {shortest:.4g}ns or extend the "
         "short runs, and say which in the methods"
     ]
 
@@ -875,7 +875,7 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
     OpenMM platform and properties) combination that ``progress.json``
     records for its production segments,
     so a reproducer knows which engine produced the trajectories, not only
-    which PolyzyMD analysed them. ``seeds`` gives the random seeds each
+    which PolyzyMD analyzed them. ``seeds`` gives the random seeds each
     equilibration stage (by name) and production segment (by index) ran
     with. For a GROMACS run, whose ``progress.json`` is in ``gromacs/``,
     ``gromacs_version`` is the version that ``gmx mdrun`` wrote into
@@ -1411,7 +1411,7 @@ def _method(protocol: Any) -> str:
         for run, entry in protocol.analyses.items()
     )
     return (
-        f"Analysed with PolyzyMD {polyzymd.__version__}: {len(protocol.conditions)} conditions "
+        f"Analyzed with PolyzyMD {polyzymd.__version__}: {len(protocol.conditions)} conditions "
         f"({', '.join(protocol.conditions)}), equilibration window {protocol.equilibration}"
         f"{_own_windows(protocol)}, stride {protocol.stride}; analyses {runs or 'none'}. The "
         "replicate is the sampling unit."

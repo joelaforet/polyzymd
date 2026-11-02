@@ -155,7 +155,7 @@ def cancel_slurm_jobs(job_ids: List[str]) -> List[str]:
 
     Mirrors :func:`check_existing_slurm_jobs`: outside a SLURM environment
     (CI, a workstation) the absence of ``scancel`` is logged and reported as
-    "nothing cancelled" rather than raised, so that the STOP-file half of
+    "nothing canceled" rather than raised, so that the STOP-file half of
     ``polyzymd cancel`` still works.
 
     Parameters
@@ -179,7 +179,7 @@ def cancel_slurm_jobs(job_ids: List[str]) -> List[str]:
         )
     except FileNotFoundError:
         LOGGER.warning(
-            "scancel not found — no SLURM jobs were cancelled "
+            "scancel not found — no SLURM jobs were canceled "
             "(this is expected outside of SLURM environments)"
         )
         return []

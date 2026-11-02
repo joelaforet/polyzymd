@@ -547,7 +547,7 @@ class AtomGroupResolver:
         """Get every protein and substrate atom, hydrogens included.
 
         This is the set of atoms that Packmol held fixed while packing polymers
-        and solvent, and the set frozen during energy minimisation so that the
+        and solvent, and the set frozen during energy minimization so that the
         prepared structure enters equilibration with its coordinates unchanged.
         """
         atoms: List[int] = []
@@ -562,8 +562,8 @@ class AtomGroupResolver:
         """Get every non-hydrogen protein and substrate atom.
 
         This is ``protein_heavy`` union ``ligand_heavy``: the set held fixed
-        during energy minimisation.  Solute hydrogens are deliberately excluded
-        so that the minimiser can pull them onto the force field's X-H
+        during energy minimization.  Solute hydrogens are deliberately excluded
+        so that the minimizer can pull them onto the force field's X-H
         constraint lengths; freezing them as well leaves the input PDB's bond
         lengths in place and hands equilibration a state whose constraints are
         violated (see ``SimulationRunner.minimize``).

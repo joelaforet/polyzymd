@@ -100,7 +100,7 @@ lists the studies and the analyses each runs).
   elsewhere. Run `polyzymd study locate DIR`, which writes the gitignored
   `data.local.yaml`, or pass `--data DIR`. Never edit the paths of the
   configs to point at moved data.
-- If a report warns that conditions were analysed up to different times, run
+- If a report warns that conditions were analyzed up to different times, run
   again with `--until <shortest>` (or `--until common`) before you compare
   them.
 - The console shows only reports and warnings. The full log is at the `log:`

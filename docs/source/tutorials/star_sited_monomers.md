@@ -2,7 +2,7 @@
 
 Dynamic polymers are built from **star-sited SMILES**. Each monomer is given as
 its repeat unit, as it is in the chain, with `*` on the two atoms that bond to
-the neighbouring repeat units. Each chain end gets a cap with one `*`.
+the neighboring repeat units. Each chain end gets a cap with one `*`.
 
 | What | Example | `*` sites |
 |---|---|---|
@@ -36,7 +36,7 @@ their C=C.
 for writing these SMILES. It:
 
 1. draws the monomer SMILES you paste (SBMA by default), with every atom
-   labelled by its index;
+   labeled by its index;
 2. lists the C=C double bonds, the usual polymerizable bond;
 3. puts `*` on the two atoms you name, redraws the repeat unit, and prints the
    star-sited SMILES;

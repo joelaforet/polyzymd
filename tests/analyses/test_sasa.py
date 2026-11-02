@@ -34,7 +34,7 @@ EQUILIBRATION = "0ns"
 
 
 def _cluster(seed: int = 0) -> np.ndarray:
-    """Twelve atoms packed tightly enough that every residue occludes its neighbours."""
+    """Twelve atoms packed tightly enough that every residue occludes its neighbors."""
     return np.random.default_rng(seed).normal(scale=2.0, size=(12, 3))
 
 

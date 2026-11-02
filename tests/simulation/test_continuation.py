@@ -234,7 +234,7 @@ class TestGetPreviousPaths:
         _write_interrupted_segment(tmp_path, 0)
         mgr = self._make_manager(tmp_path, 0)
         paths = mgr._get_previous_paths()
-        # New behaviour: interrupted_state.xml exists → use loadState (portable)
+        # New behavior: interrupted_state.xml exists → use loadState (portable)
         assert paths["use_checkpoint"] is False
         assert "interrupted_state.xml" in str(paths["state"])
         assert "interrupted_system.xml" in str(paths["system"])

@@ -68,7 +68,7 @@ fi
 
 # A chain stops when one of STOP_FILES exists or when POLYZYMD_STOP_CHAIN=1
 # is exported into the job. Checked at the start and before every successor
-# submission, so a cancelled chain stays cancelled.
+# submission, so a canceled chain stays canceled.
 stop_requested() {
     if [ "${POLYZYMD_STOP_CHAIN:-0}" = "1" ]; then
         echo "STOP: POLYZYMD_STOP_CHAIN=1 — not submitting a successor"
@@ -88,7 +88,7 @@ stop_requested() {
     return 1
 }
 
-# A successor that was already queued when the chain was cancelled does no work.
+# A successor that was already queued when the chain was canceled does no work.
 if stop_requested; then
     echo "STOP: not starting replicate $REPLICATE"
     exit 0
@@ -304,7 +304,7 @@ if [ -f state.cpt ] && [ -n "$NSTEPS" ] && [ -n "$LAST_CPT_STEP" ]; then
             echo "WARNING: trjconv could not remove PBC jumps from prod.xtc; analysis reads prod.xtc"
         elif ! echo -e "Protein\nSystem" | $GMX trjconv -s prod.tpr -f prod_nojump.xtc -o prod_centered.xtc -center -pbc mol -ur compact 2>/dev/null; then
             rm -f prod_centered.xtc
-            echo "WARNING: trjconv could not center prod.xtc; analysis reads the uncentred prod_nojump.xtc"
+            echo "WARNING: trjconv could not center prod.xtc; analysis reads the uncentered prod_nojump.xtc"
         fi
         CURRENT_PHASE="idle"
 

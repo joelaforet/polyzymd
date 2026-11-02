@@ -162,9 +162,9 @@ section that matches what its reader is doing.
 - Add each new page to the toctree of its section's `index.md`, under the
   group (`:caption:`) it belongs to; the caption labels the group in the
   sidebar.
-- Colours, the logo and the landing page live in `docs/source/_static/custom.css`
-  and `docs/source/index.rst`; use the `--pz-*` colour variables rather than
-  new colours.
+- Colors, the logo and the landing page live in `docs/source/_static/custom.css`
+  and `docs/source/index.rst`; use the `--pz-*` color variables rather than
+  new colors.
 
 ## Before opening a PR
 

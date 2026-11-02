@@ -1,7 +1,7 @@
 """Build dynamic polymer chains with mBuild from star-sited SMILES.
 
 A monomer is given as its repeat unit, with ``*`` on the two atoms that bond to
-the neighbouring repeat units (``[*]CC([*])(C)C(=O)OC`` for methyl
+the neighboring repeat units (``[*]CC([*])(C)C(=O)OC`` for methyl
 methacrylate). The first ``*`` points to the head of the chain and the second
 to its tail. A cap (end group) has one ``*`` (``[*][H]``, ``[*]C``, or a whole
 monomer that kept its double bond, ``[*]C=C(C)C(=O)OC``). Each end draws its
@@ -50,7 +50,7 @@ STAR_SITE_NOTEBOOK = "https://polyzymd.readthedocs.io/en/latest/tutorials/star_s
 #: unit and a cap, before the chain is relaxed.
 _LINK_SEPARATION_NM = 0.15
 
-#: Two atoms that are neither bonded nor share a bonded neighbour must be
+#: Two atoms that are neither bonded nor share a bonded neighbor must be
 #: farther apart than this after relaxation (half the Packmol tolerance).
 MIN_CONTACT_ANGSTROM = 1.0
 
@@ -130,7 +130,7 @@ def parse_star_smiles(smiles: str, n_sites: int, what: str) -> StarSitedUnit:
         raise ValueError(
             f"{what}: the SMILES {smiles!r} has {len(stars)} '*' sites; a {kind} needs "
             f"exactly {n_sites}.\n"
-            f"fix: put '*' on the atom(s) that bond to the neighbouring unit, for example "
+            f"fix: put '*' on the atom(s) that bond to the neighboring unit, for example "
             f"{example}. The notebook at {STAR_SITE_NOTEBOOK} helps you find them."
         )
     anchors = []
@@ -148,12 +148,12 @@ def parse_star_smiles(smiles: str, n_sites: int, what: str) -> StarSitedUnit:
                 "fix: write the repeat unit as it is in the chain (the C=C of a vinyl monomer "
                 "becomes C-C), with '*' attached to each linking atom."
             )
-        neighbour = star.GetNeighbors()[0]
-        if neighbour.GetAtomicNum() == 0:
+        neighbor = star.GetNeighbors()[0]
+        if neighbor.GetAtomicNum() == 0:
             raise ValueError(
                 f"{what}: two '*' in {smiles!r} are bonded to each other.\nfix: correct the SMILES."
             )
-        anchors.append(neighbour.GetIdx())
+        anchors.append(neighbor.GetIdx())
     if n_sites == 2 and anchors[0] == anchors[1]:
         raise ValueError(
             f"{what}: both '*' of {smiles!r} are on one atom.\n"
@@ -521,7 +521,7 @@ def stereo_signature(mol: Any) -> tuple:
     """Return the tetrahedral and double-bond configurations of ``mol``."""
     from rdkit import Chem
 
-    centres = tuple(
+    centers = tuple(
         (atom.GetIdx(), str(atom.GetChiralTag()))
         for atom in mol.GetAtoms()
         if atom.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED
@@ -531,7 +531,7 @@ def stereo_signature(mol: Any) -> tuple:
         for bond in mol.GetBonds()
         if bond.GetStereo() != Chem.BondStereo.STEREONONE
     )
-    return centres, bonds
+    return centers, bonds
 
 
 def find_pierced_rings(mol: Any, xyz: Any) -> list[tuple[tuple[int, ...], tuple[int, int]]]:
@@ -547,20 +547,20 @@ def find_pierced_rings(mol: Any, xyz: Any) -> list[tuple[tuple[int, ...], tuple[
     found = []
     for ring in mol.GetRingInfo().AtomRings():
         points = xyz[list(ring)]
-        centre = points.mean(axis=0)
-        _, _, vt = np.linalg.svd(points - centre)
+        center = points.mean(axis=0)
+        _, _, vt = np.linalg.svd(points - center)
         u, v, normal = vt[0], vt[1], vt[2]
-        polygon = np.column_stack(((points - centre) @ u, (points - centre) @ v))
+        polygon = np.column_stack(((points - center) @ u, (points - center) @ v))
         ring_atoms = set(ring)
         for bond in mol.GetBonds():
             a, b = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
             if a in ring_atoms or b in ring_atoms:
                 continue
-            da = (xyz[a] - centre) @ normal
-            db = (xyz[b] - centre) @ normal
+            da = (xyz[a] - center) @ normal
+            db = (xyz[b] - center) @ normal
             if da * db >= 0:
                 continue
-            cross = xyz[a] + da / (da - db) * (xyz[b] - xyz[a]) - centre
+            cross = xyz[a] + da / (da - db) * (xyz[b] - xyz[a]) - center
             if _inside(polygon, (cross @ u, cross @ v)):
                 found.append((tuple(ring), (a, b)))
     return found
@@ -898,7 +898,7 @@ class PolymerGenerator:
             if kept and not pierced and (contact is None or contact[0] >= MIN_CONTACT_ANGSTROM):
                 return molecule
             if not kept:
-                problems.append("the relaxation changed a stereocentre or double bond")
+                problems.append("the relaxation changed a stereocenter or double bond")
             elif pierced:
                 ring, bond = pierced[0]
                 problems.append(f"bond {bond} pierces ring {ring}")
