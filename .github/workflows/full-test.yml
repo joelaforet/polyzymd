@@ -2,9 +2,9 @@ name: Full Test Suite
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, "release/**"]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, "release/**"]
   schedule:
     # Weekly tests on Sunday at midnight
     - cron: "0 0 * * 0"
@@ -127,3 +127,21 @@ jobs:
           flags: unittests
           name: codecov-macOS-latest-audit-${{ matrix.part }}
           fail_ci_if_error: false
+
+  # The one check the branch rulesets require from this workflow, so the test
+  # jobs above can be split or renamed without editing the rulesets. A skipped
+  # job (the macOS audit on pull requests into dev) counts as passing.
+  all-tests:
+    name: All tests passed
+    if: always()
+    needs: [test, audit-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every test job passed or was skipped
+        shell: bash
+        run: |
+          echo 'results: ${{ join(needs.*.result, ', ') }}'
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::a test job failed or was cancelled"
+            exit 1
+          fi
