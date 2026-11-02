@@ -14,11 +14,45 @@
 :::
 
 In this tutorial you simulate the small protein Trp-cage in water, and then
-measure its radius of gyration. You start the way every PolyzyMD study
-starts: you make a {term}`project`, add a {term}`study` to it, and add a
-condition to the study. The condition is the example config in
-`examples/quickstart/` of the PolyzyMD repository. The simulation is a few
-picoseconds long, so it finishes on a laptop CPU in about two minutes.
+measure its radius of gyration. The simulation is a few picoseconds long, so
+it finishes on a laptop CPU in about two minutes.
+
+## How PolyzyMD organizes your work
+
+PolyzyMD keeps the simulations of one paper in one folder, the
+{term}`project`, and nests them in four levels:
+
+- a **project** holds the studies of one paper;
+- a **study** holds the conditions that you compare with each other, such as
+  one protein with and without a polymer;
+- a **condition** is one system that you simulate, written as one
+  `config.yaml`;
+- a **replicate** is one independent simulation of a condition.
+
+Each level has its own file or folder. After this tutorial, the main parts of
+your project look like this:
+
+```text
+pz_quickstart/                   # the project
+├── project.yaml                 # its studies and the analyses they run
+├── trpcage/                     # a study
+│   ├── study.yaml               # its conditions, equilibration window, and regions
+│   ├── conditions/
+│   │   └── water/               # a condition
+│   │       ├── config.yaml
+│   │       └── structures/trpcage.pdb
+│   └── results/                 # the stored analysis results
+└── runs/
+    └── trpcage/water/
+        └── trpcage_300K_run1/   # replicate 1 of the condition: its trajectories
+```
+
+You compare conditions within a study, and the replicates of a condition give
+the error bars. Git tracks the project, except `runs/`, which holds the
+trajectories. {doc}`../explanation/projects` explains why PolyzyMD organizes
+data this way.
+
+## What you will do
 
 You learn these steps:
 
@@ -30,23 +64,31 @@ You learn these steps:
 
 ## Before you start
 
-Install PolyzyMD as {doc}`installation` describes. You need the clone of the
-repository, because the example files are in it.
+:::{admonition} Two folders, one shell
+:class: important
 
-:::{admonition} Environment setup
-:class: tip
+- **The clone** of PolyzyMD, here `~/polyzymd`. It holds the environments and
+  the example files. You do not work in it.
+- **The project folder**, `~/pz_quickstart`. Step 1 makes it, and you run
+  every later command from it. The paths in the commands, such as
+  `trpcage/conditions/water/config.yaml`, start there.
 
-Run every command of this tutorial in the `build` environment. It holds
-OpenMM, PACKMOL and the analysis tools. From the repository root, activate it
-once:
+Install PolyzyMD as {doc}`installation` describes, then open a shell in the
+`build` environment from the clone:
 
 ```bash
+cd ~/polyzymd
 pixi shell -e build
 ```
 
-The commands then work in any folder of this shell.
+The shell keeps the environment when you `cd` to another folder, so step 1
+can leave the clone. If you cloned PolyzyMD somewhere else, change
+`~/polyzymd` in the commands of this page.
+:::
 
-**On the NVIDIA GPU of this machine:** in step 2, after `add-condition`, set
+:::{dropdown} Run on the NVIDIA GPU of this machine instead of the CPU
+
+In step 2, after `add-condition`, set
 `openmm.platform: CUDA` and `openmm.precision: mixed` in the copied config.
 Choose the platform before the first build of a condition. Changing it later
 is safe for replicates that have already run: the platform does not change the
@@ -61,31 +103,41 @@ polyzymd run -c trpcage/conditions/water/config.yaml -r 1      # in a sim-cuda-1
 ```
 
 Open the second shell with `pixi shell -e sim-cuda-12-6` in the clone, after
-`pixi install -e sim-cuda-12-6`. See
+`pixi install -e sim-cuda-12-6`, and `cd ~/pz_quickstart`. See
 {ref}`the local GPU recipe <local-nvidia-gpu>`.
 :::
 
 ## Step 1: Make the project
 
-A project holds the studies of one paper. A study holds the conditions of one
-protein that you compare with each other. Make a project with one study,
-`trpcage`:
+Make a project with one study, `trpcage`, outside the clone, and go into it:
 
 ```bash
 polyzymd project init ~/pz_quickstart --study trpcage
 cd ~/pz_quickstart
 ```
 
-The output is:
+After the PolyzyMD logo, the output is:
 
-```
+```text
 created project /home/me/pz_quickstart with studies trpcage
-next: fill description:, structures:, regions: and conditions: in each study.yaml (polyzymd study add-condition adds a condition), the analyses and metadata: in project.yaml, then polyzymd project check
+
+  pz_quickstart/
+  ├── project.yaml          the studies, the analyses, and the paper's metadata
+  ├── trpcage/
+  │   └── study.yaml        its conditions, structures, and regions
+  ├── analyses/  stats/  figures/  notebooks/
+  └── README.md  LICENSE-code  LICENSE-data
+
+next:
+  1. cd /home/me/pz_quickstart
+  2. polyzymd study add-condition NAME --new --study trpcage   (or --config FILE, or --from CONDITION)
+  3. fill description:, structures:, and regions: in trpcage/study.yaml
+  4. list the analyses and fill metadata: in project.yaml
+  5. polyzymd project check
 ```
 
-The project folder holds `project.yaml`, which lists the studies and the
-analyses, and the study folder `trpcage/`, with its `study.yaml`. The
-command also makes the folder a git repository.
+The command also makes the folder a git repository. This tutorial does the
+next steps for you: step 2 adds the condition, and step 5 lists the analysis.
 
 ## Step 2: Add the example as a condition
 

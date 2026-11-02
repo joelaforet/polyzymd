@@ -21,7 +21,7 @@ do not need conda or mamba installed separately.
 macOS is supported for non-CUDA setup, development, and trajectory analysis
 where the required dependencies solve. The CUDA simulation environments
 (`sim-cuda-12-0`, `sim-cuda-12-4`, and `sim-cuda-12-6`) are for NVIDIA GPUs on
-Linux, on a cluster or on this machine.
+Linux, on a cluster, or on this machine.
 ```
 
 ```{note}
@@ -68,7 +68,15 @@ polyzymd --help
 polyzymd info
 ```
 
-If those last two commands work, your install is ready.
+If those last two commands work, your install is ready. The first PolyzyMD
+command after an install takes longer than later ones, while Python compiles
+and caches the modules it loads.
+
+```{tip}
+The clone holds PolyzyMD and its environments, not your simulations. Keep your
+work in a folder outside it: {doc}`quickstart` makes one with
+`polyzymd project init` and shows how PolyzyMD organizes it.
+```
 
 (install-local-gpu)=
 ### Run on the NVIDIA GPU of this machine
@@ -160,15 +168,14 @@ NumPy 1.x runtime, while package development and analysis use Python 3.12
 with NumPy 2. Your project directory, prepared system files,
 checkpoints, and trajectories are shared across environments.
 
-Install the system-preparation environment first:
+Install the system-preparation environment first, and check it:
 
 ```bash
 git clone https://github.com/joelaforet/polyzymd.git
 cd polyzymd
 
 pixi install -e build
-pixi run -e build polyzymd validate -c config.yaml
-pixi run -e build polyzymd build -c config.yaml
+pixi run -e build polyzymd info
 ```
 
 Then install the simulation runtime assigned to your cluster:
@@ -193,10 +200,12 @@ For submission details and cluster-specific notes, see
 `pixi run` and `pixi shell` look for `pixi.toml` in the current folder and
 its parent folders. In a project folder outside the clone, they stop with
 `could not find pixi.toml`. Give them the clone's `pixi.toml` with
-`--manifest-path`:
+`--manifest-path` (change `~/polyzymd` to your clone). For example, from the
+project that {doc}`quickstart` makes:
 
 ```bash
-pixi run --manifest-path ~/polyzymd/pixi.toml -e build polyzymd validate -c config.yaml
+cd ~/pz_quickstart
+pixi run --manifest-path ~/polyzymd/pixi.toml -e build polyzymd validate -c trpcage/conditions/water/config.yaml
 ```
 
 Or start `pixi shell -e build` once in the clone and then `cd` to your
@@ -204,11 +213,13 @@ project. The shell keeps its environment in every folder. To build in `build`
 and run in a `sim-cuda-*` environment on the same machine, open one shell for
 each environment, or use `--manifest-path`.
 
-After simulations finish, switch to the analysis environment:
+After simulations finish, switch to the analysis environment, and run the
+analyses of a project from its folder:
 
 ```bash
-pixi install -e analysis
-pixi run -e analysis polyzymd analyze rmsf -c config.yaml --eq 10ns
+cd ~/polyzymd && pixi install -e analysis
+cd ~/pz_quickstart
+pixi run --manifest-path ~/polyzymd/pixi.toml -e analysis polyzymd analyze --project .
 ```
 
 ### Choose the CUDA Environment
