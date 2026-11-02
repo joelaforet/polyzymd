@@ -94,18 +94,17 @@ jobs:
     strategy:
       matrix:
         include:
+          # "checks" runs every audit file "engines" does not name, so a new
+          # audit test file always runs in one of the two.
           - part: engines
             tests: >-
               tests/audit/test_engine_parity.py
               tests/audit/test_components_and_engines.py
           - part: checks
             tests: >-
-              tests/audit/test_parameter_checks.py
-              tests/audit/test_system_checks.py
-              tests/audit/test_gates.py
-              tests/audit/test_registry.py
-              tests/audit/test_report_and_provenance.py
-              tests/audit/test_terms_and_settings.py
+              --ignore=tests/audit/test_engine_parity.py
+              --ignore=tests/audit/test_components_and_engines.py
+              tests/audit
       fail-fast: false
 
     steps:
@@ -114,20 +113,6 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0
         with:
           environments: test
-
-      - name: Every audit test file is in one part
-        shell: bash
-        run: |
-          listed="$(printf '%s\n' tests/audit/test_engine_parity.py tests/audit/test_components_and_engines.py \
-            tests/audit/test_parameter_checks.py tests/audit/test_system_checks.py tests/audit/test_gates.py \
-            tests/audit/test_registry.py tests/audit/test_report_and_provenance.py \
-            tests/audit/test_terms_and_settings.py | sort)"
-          present="$(ls tests/audit/test_*.py | sort)"
-          if [ "$listed" != "$present" ]; then
-            echo "::error::tests/audit changed; update the parts of the audit-macos job in full-test.yml"
-            diff <(echo "$listed") <(echo "$present")
-            exit 1
-          fi
 
       - name: Run audit tests
         run: |
