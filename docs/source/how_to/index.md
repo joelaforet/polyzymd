@@ -96,6 +96,7 @@ analysis_agent_protocol
 analysis_compare_conditions
 study_api
 own_analysis
+jupyter_kernel
 hpc_execution
 ```
 

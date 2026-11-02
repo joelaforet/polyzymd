@@ -42,6 +42,8 @@ pixi run -e build --manifest-path ~/polyzymd/pixi.toml jupyter lab --no-browser 
 
 Open the link with a token that JupyterLab prints. On Windows with WSL, see
 {doc}`../tutorials/star_sited_monomers` if the page does not open.
+To run it in VS Code or in a Jupyter you started another way, see
+{doc}`jupyter_kernel`.
 
 ## Find the replicate folder
 
