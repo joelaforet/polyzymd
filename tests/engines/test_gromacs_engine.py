@@ -662,7 +662,7 @@ class TestPrepareSubmissionScriptPath:
     """A requested script path keeps the live chain script untouched."""
 
     @patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator")
-    def test_script_path_is_honoured(self, mock_generator_cls, tmp_path):
+    def test_script_path_is_honored(self, mock_generator_cls, tmp_path):
         config = _make_config()
         config.gromacs.mdrun_flags_equilibration = None
         config.gromacs.mdrun_flags_production = None

@@ -40,8 +40,8 @@ merge_node_list() {
 
 # A chain stops when the run directory holds a STOP file (written by
 # `polyzymd cancel`) or when POLYZYMD_STOP_CHAIN=1 is exported into the job.
-# Checked before every successor submission so a cancelled chain stays
-# cancelled instead of resurrecting itself within seconds of `scancel`.
+# Checked before every successor submission so a canceled chain stays
+# canceled instead of resurrecting itself within seconds of `scancel`.
 stop_requested() {
     if [ "${POLYZYMD_STOP_CHAIN:-0}" = "1" ]; then
         echo "STOP: POLYZYMD_STOP_CHAIN=1 — not submitting a successor"
@@ -113,7 +113,7 @@ WORKING_DIR={{ working_dir | shell_quote }}
 STOP_FILE="${POLYZYMD_STOP_FILE:-$WORKING_DIR/STOP}"
 RUNTIME_METADATA="$WORKING_DIR/runtime_platform.json"
 
-# A successor that was already queued when the chain was cancelled must not
+# A successor that was already queued when the chain was canceled must not
 # start a new segment.  Bail out before the GPU probe so no production_N
 # directory is created.
 if stop_requested; then
@@ -262,7 +262,7 @@ if published.exists():
     immutable = ("pixi_environment", "openmm_version", "platform", "precision")
     changed = [key for key in immutable if previous.get(key) != metadata[key]]
     if changed:
-        # Exit code 3 is the wrapper's "this node cannot honour the recorded
+        # Exit code 3 is the wrapper's "this node cannot honor the recorded
         # runtime" signal: the wrapper reroutes to another node instead of
         # killing the chain (a bare SystemExit under `set -e` left no
         # successor queued and silently ended the run).
@@ -295,13 +295,13 @@ mv "$RUNTIME_METADATA_TMP" "$WORKING_DIR/runtime_platform.json"
 CHILD_PID=""
 SUCCESSOR_RECEIPT="$WORKING_DIR/.successor-${SLURM_JOB_ID:-local}"
 JOB_COMPLETE=0
-STOP_HONOURED=0
+STOP_HONORED=0
 resubmit_once() {
     if [ "$JOB_COMPLETE" -eq 1 ]; then
         return 0
     fi
     if stop_requested; then
-        STOP_HONOURED=1
+        STOP_HONORED=1
         return 0
     fi
     if [ -s "$SUCCESSOR_RECEIPT" ]; then
@@ -396,7 +396,7 @@ fi
 # Work remains (exit code 1) — reuse a signal-created successor or submit now
 echo "Work remains — resubmitting job..."
 if resubmit_once; then
-    if [ "$STOP_HONOURED" -eq 1 ]; then
+    if [ "$STOP_HONORED" -eq 1 ]; then
         echo "Chain stopped by request — no successor queued."
         exit 0
     fi

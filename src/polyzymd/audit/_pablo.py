@@ -266,7 +266,7 @@ def _definition(
 
     if in_chain:
         # The peptide bonds' leaving atoms, where the atom has room for one: a
-        # labelled N-terminal N or an amidated C-terminal C already has three bonds.
+        # labeled N-terminal N or an amidated C-terminal C already has three bonds.
         if editable.GetAtomWithIdx(by_name["N"]).GetDegree() < 3:
             add("H", "N", "H2")
         if editable.GetAtomWithIdx(by_name["C"]).GetDegree() < 3:

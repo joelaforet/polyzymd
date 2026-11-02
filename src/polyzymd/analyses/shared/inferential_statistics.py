@@ -16,13 +16,13 @@ the run produced, across all of its metrics and all of its condition pairs,
 is corrected together with Benjamini-Hochberg.
 
 One-way ANOVA sits outside that family. Its p-value is reported raw and is
-labelled an omnibus test; it is never adjusted and it never gates the
+labeled an omnibus test; it is never adjusted and it never gates the
 pairwise tests. Significance for an ANOVA is the raw p-value compared with
 the same alpha the pairwise family uses.
 
 Direction labels ("stabilizing", "increased", and the rest) describe a
 finding, so they are only assigned when the corrected test is significant.
-Everything else is labelled ``"no significant change"``.
+Everything else is labeled ``"no significant change"``.
 
 References
 ----------

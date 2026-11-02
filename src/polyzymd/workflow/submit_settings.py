@@ -5,7 +5,7 @@ partition, GPU type, ...). It records them in each replicate's run folder
 (:data:`SUBMIT_SETTINGS_FILENAME`), so that ``polyzymd recover --submit`` and
 the resubmit commands of ``polyzymd status --format agent`` reuse them instead
 of the preset's values. A replicate without the record keeps the preset-only
-behaviour.
+behavior.
 """
 
 from __future__ import annotations

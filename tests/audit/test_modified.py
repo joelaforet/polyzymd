@@ -584,7 +584,7 @@ def test_a_modified_terminus_passes_every_check(change, tmp_path) -> None:
 
 
 @pytest.mark.parametrize("change", ["acetyl", "amide"])
-def test_a_labelled_terminus_keeps_the_rest_of_its_backbone(change, tmp_path) -> None:
+def test_a_labeled_terminus_keeps_the_rest_of_its_backbone(change, tmp_path) -> None:
     """The touched backbone atoms join the site by design; the rest stay ff14SB's."""
     built = _terminus(change)
     status = _status(_realize(built, "openmm", tmp_path), built[3])

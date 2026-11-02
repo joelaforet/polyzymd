@@ -87,13 +87,13 @@ def _fail(exc: Exception) -> None:
     required=True,
     help="Label of a study of the project; also its folder name. Repeatable.",
 )
-@click.option("--holder", default=None, help="Copyright holder for the licence files.")
+@click.option("--holder", default=None, help="Copyright holder for the license files.")
 @click.option("--no-git", is_flag=True, help="Do not make the project a git repository.")
 def init_command(path: Path, studies: tuple[str, ...], holder: str | None, no_git: bool) -> None:
     """Create a project folder at PATH: project.yaml and one empty study per --study.
 
     Writes project.yaml listing the studies, analyses/, stats/, figures/,
-    licences and a README, and one study folder per --study with a
+    licenses and a README, and one study folder per --study with a
     study.yaml to fill in. Add a study later with polyzymd project
     add-study. To bring existing studies in, follow the how-to "Move
     existing studies into a project".

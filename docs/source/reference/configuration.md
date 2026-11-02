@@ -368,7 +368,7 @@ sequence:
 | `padding` | float (nm) | No | 2.0 | Room reserved for the polymer chains around the solute. Added to `solvent.box.padding` when the periodic cell is computed, and used as the padding of the confinement sphere |
 | `tolerance` | float (Å) | No | 2.0 | PACKMOL minimum distance between any two atoms, including polymer to protein |
 | `movebadrandom` | bool | No | false | Pass PACKMOL's `movebadrandom`; helps dense or heterogeneous systems converge |
-| `confine_to_sphere` | bool | No | true | Confine chains to a sphere centred on the solute (radius = half the solute bounding-box diagonal + `padding`) while packing inside the final periodic brick. Set `false` to let chains fill the whole brick |
+| `confine_to_sphere` | bool | No | true | Confine chains to a sphere centered on the solute (radius = half the solute bounding-box diagonal + `padding`) while packing inside the final periodic brick. Set `false` to let chains fill the whole brick |
 | `nloop` | int | No | 200 | Maximum PACKMOL GENCAN loops per molecule type |
 
 PACKMOL is seeded with the replicate number for both polymer packing and
@@ -484,11 +484,11 @@ the cell is the solute diameter (its largest atom-to-atom distance) plus
 `2 * padding`, as in `gmx editconf -d`. Every lattice vector of a cube or a
 rhombic dodecahedron is at least one edge long. The solute
 therefore starts at least `2 * padding` from each of its periodic copies, in
-any orientation. The solute's bounding box is centred in the brick. When
+any orientation. The solute's bounding box is centered in the brick. When
 a polymer solute is configured, its `packing.padding` is added to it and the
 resulting cell is computed from the protein and substrate before any packing
 happens, so it is identical across replicates of a condition; the packed
-topology is not re-centred afterwards. Without polymers the box is computed
+topology is not re-centered afterwards. Without polymers the box is computed
 from the solute at solvation time. The number of waters and ions follows from the box
 volume and `target_density`, so a deterministic box means deterministic
 solvent counts.

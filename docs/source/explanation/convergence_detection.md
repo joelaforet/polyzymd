@@ -73,7 +73,7 @@ two metastable states, that are obvious to a trained eye.
 For every time series measured through the study API, PolyzyMD runs
 `pymbar.timeseries.detect_equilibration` (Chodera 2016) on each replicate's
 production frames, the frames left after the equilibration window you set.
-The method tries a range of starting frames and picks the one that maximises
+The method tries a range of starting frames and picks the one that maximizes
 the number of effective samples in the remaining data. PolyzyMD tries about
 100 evenly spaced starts, so the detected start is known to about 1 percent of
 the series length.

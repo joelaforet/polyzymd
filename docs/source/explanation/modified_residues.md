@@ -28,12 +28,12 @@ atom of the attached group.
 
 The boundary is the CA-CB bond. Phi, psi, the peptide bonds and the backbone
 charges of a changed residue stay ff14SB, so its backbone is the same as its
-neighbours'. Any term that touches a site atom (the CA-CB bond, the angles at
+neighbors'. Any term that touches a site atom (the CA-CB bond, the angles at
 CA that involve CB, chi1, and everything further out) comes from the site's
 force field.
 
 **Charges of a site.** NAGL charges a small model of the site: the site's
-residues plus two bonds of neighbours, each cut bond capped with a hydrogen.
+residues plus two bonds of neighbors, each cut bond capped with a hydrogen.
 The site's charges must then sum to the formal charge of the changed residue
 and its group, minus the ff14SB charges of the backbone atoms that stay. A
 uniform shift over the site atoms closes the gap. The build stops if the shift
@@ -62,7 +62,7 @@ GlcNAc on Asn60). The modification changed the backbone charges by at most
 changed them by up to 0.29 e (on CA) and 0.22 e on N from the difference
 between the two charge models alone. Keeping ff14SB
 on the backbone keeps a modified residue's backbone the same as its
-neighbours'.
+neighbors'.
 
 GLYCAM06j follows the same rule: its glycosylated Asn, Ser and Thr (NLN, OLS,
 OLT) carry exactly the backbone charges of ff14SB's ASN, SER and THR.

@@ -173,7 +173,7 @@ class ColorScheme:
         self._module_colors = [mc for mc in self._module_colors if mc.prefix != prefix]
         self._module_colors.append(ModuleColor(prefix, rgb, xterm256, basic_ansi))
 
-    # -- colour resolution ---------------------------------------------------
+    # -- color resolution ---------------------------------------------------
 
     def _find_module_color(self, logger_name: str) -> ModuleColor | None:
         """Return the best-matching ``ModuleColor`` via longest-prefix match."""

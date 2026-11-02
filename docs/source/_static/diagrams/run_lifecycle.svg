@@ -148,7 +148,7 @@
 
     <rect x="1008" y="568" width="136" height="56" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
     <text x="1024" y="592" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">trjconv</text>
-    <text x="1024" y="612" font-size="12" fill="#52606d">nojump + centre</text>
+    <text x="1024" y="612" font-size="12" fill="#52606d">nojump + center</text>
 
     <rect x="1008" y="672" width="136" height="56" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
     <text x="1024" y="696" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">sbatch itself</text>

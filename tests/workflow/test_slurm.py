@@ -117,7 +117,7 @@ class TestPresetLoading:
         assert cfg.email == "user@example.com"
 
     def test_unknown_preset_raises_value_error(self):
-        """Unrecognised preset names raise ValueError with available presets."""
+        """Unrecognized preset names raise ValueError with available presets."""
         with pytest.raises(ValueError, match="Unknown SLURM preset 'nonexistent'"):
             SlurmConfig.from_preset("nonexistent")  # type: ignore[arg-type]
 

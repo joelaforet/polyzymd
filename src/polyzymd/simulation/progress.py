@@ -807,7 +807,7 @@ def _read_segment_provenance(params_json: Path) -> Dict[str, Any]:
     ``production_N_parameters.json`` records ``polyzymd_version``,
     ``openmm_version``, ``pixi_environment`` and ``openmm_platform`` for the
     process that ran the segment.  A ``progress.json`` rebuilt from a filesystem scan must recover
-    those fields from there, otherwise a chain that was cancelled and
+    those fields from there, otherwise a chain that was canceled and
     resubmitted loses the provenance of every segment it already ran.
 
     Parameters

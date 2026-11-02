@@ -14,7 +14,7 @@ solutes:
     charges: {method: library}
 
   # Two chains of sulfobetaine methacrylate (SBMA), built with mBuild from the
-  # repeat unit: "*" marks the two carbons that bond to the neighbouring units.
+  # repeat unit: "*" marks the two carbons that bond to the neighboring units.
   # Each end is an SBMA unit that kept its C=C double bond, so a 5-mer is an
   # end, three repeat units and an end.
   - type: polymer

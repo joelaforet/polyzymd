@@ -544,7 +544,7 @@ class TestSeparationStatistics:
         with caplog.at_level("WARNING", logger="polyzymd.utils.packmol"):
             stats = _assert_solute_solvent_separation(topo, 1, tolerance_angstrom=2.0)
         assert stats["n_below_tolerance"] == 1
-        assert any("not fully honoured" in rec.message for rec in caplog.records)
+        assert any("not fully honored" in rec.message for rec in caplog.records)
 
     def test_assert_skips_when_no_solute(self):
         from polyzymd.utils.packmol import _assert_solute_solvent_separation
@@ -780,7 +780,7 @@ class TestInsideSphereConstraint:
             )
 
     def test_constraint_from_solute_topology(self):
-        """Radius = bounding-box circumradius + padding, centre = bounding-box centre."""
+        """Radius = bounding-box circumradius + padding, center = bounding-box center."""
         from polyzymd.utils.packmol import solute_sphere_constraint
 
         solute = _MockTopology(np.array([[0.0, 0.0, 0.0], [6.0, 8.0, 0.0], [3.0, 4.0, 0.0]]))
@@ -798,7 +798,7 @@ class TestInsideSphereConstraint:
         there = solute_sphere_constraint(_MockTopology(coords + 137.0), padding_angstrom=5.0)
         assert here[3] == pytest.approx(there[3])
 
-    def test_sphere_is_centred_on_the_bounding_box(self):
+    def test_sphere_is_centered_on_the_bounding_box(self):
         """An uneven atom distribution does not pull the sphere off the bounding box."""
         from polyzymd.utils.packmol import solute_sphere_constraint
 
@@ -808,9 +808,9 @@ class TestInsideSphereConstraint:
 
 
 class TestCenterInBrick:
-    """The solute is centred in the brick by its bounding box."""
+    """The solute is centered in the brick by its bounding box."""
 
-    def test_bounding_box_is_centred(self):
+    def test_bounding_box_is_centered(self):
         """Opposite brick faces get the same clearance, whatever the atom distribution."""
         from openff.toolkit import Molecule, Topology
 
@@ -986,7 +986,7 @@ class TestPackPolymersFinalBox:
 
     def test_sphere_constraint_is_added_by_default(self, monkeypatch, tmp_path):
         text = self._run(monkeypatch, tmp_path, sphere_padding_angstrom=20.0)
-        # centred solute spans 2 A in x -> circumradius 1 A, plus 20 A padding
+        # centered solute spans 2 A in x -> circumradius 1 A, plus 20 A padding
         assert "  inside sphere 16.000000 20.000000 25.000000 21.000000" in text.splitlines()
 
     def test_sphere_can_be_disabled(self, monkeypatch, tmp_path):
@@ -1030,14 +1030,14 @@ class TestSolvateCenterSolute:
         )
         return result, mocks, original_solute
 
-    def test_centring_is_skipped(self, monkeypatch, tmp_path):
+    def test_centering_is_skipped(self, monkeypatch, tmp_path):
         result, mocks, original_solute = self._run(monkeypatch, tmp_path, center_solute=False)
         mocks["center"].assert_not_called()
         np.testing.assert_allclose(
             result.positions[: original_solute.n_atoms], original_solute.positions
         )
 
-    def test_centring_is_the_default(self, monkeypatch, tmp_path):
+    def test_centering_is_the_default(self, monkeypatch, tmp_path):
         _, mocks, _ = self._run(monkeypatch, tmp_path)
         mocks["center"].assert_called_once()
 

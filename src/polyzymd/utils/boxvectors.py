@@ -289,7 +289,7 @@ def fixed_solute_alignment(
     atomic_numbers: NDArray,
     exclude: NDArray | None = None,
 ) -> tuple[NDArray, NDArray]:
-    """Rotation and centre that align the fixed solutes for a rectangular box.
+    """Rotation and center that align the fixed solutes for a rectangular box.
 
     The inertia is that of the heavy atoms, mass-weighted, leaving out the
     atoms flagged in ``exclude``: PolyzyMD excludes a modified protein's

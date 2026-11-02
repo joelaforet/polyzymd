@@ -200,7 +200,7 @@ def test_a_glycam_result_exports_only_with_its_pairs(glycosylated) -> None:
     assert exported == pytest.approx(_energies(ours, positions)["NonbondedForce"], rel=1e-12)
 
 
-def test_thr_sites_proline_neighbours_and_adjacent_glycans_match_glycam06j() -> None:
+def test_thr_sites_proline_neighbors_and_adjacent_glycans_match_glycam06j() -> None:
     protein = mp.load_protein(TRPCAGE)
     mp.mutate(protein, "A:L7", "THR")
     mp.mutate(protein, "A:G11", "ASN")  # Pro12 follows
@@ -441,7 +441,7 @@ def test_a_glycan_on_a_terminal_residue_is_refused_by_glycam() -> None:
     message = str(refused.value)
     assert message.startswith("Refused: glycan G001 on A:SER20")
     assert "linkage residue (OLS)" in message
-    assert "a neighbouring residue on each side" in message
+    assert "a neighboring residue on each side" in message
     assert "https://github.com/joelaforet/polyzymd/issues" in message
 
 

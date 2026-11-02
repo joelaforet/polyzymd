@@ -76,7 +76,7 @@ def test_a_terminus_changed_by_protonation_alone_is_parameterized_whole(change) 
     assert np.isclose(charges.sum(), expected, atol=1e-4)
 
 
-def test_a_labelled_terminus_is_parameterized_whole() -> None:
+def test_a_labeled_terminus_is_parameterized_whole() -> None:
     from polyzymd import modifying_proteins as mp
 
     protein = mp.load_protein(TRPCAGE)

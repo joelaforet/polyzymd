@@ -52,7 +52,7 @@ def _note(fig) -> str:
 
 
 def _profile(per_condition: dict[str, list[float]]) -> ReplicateValues:
-    """Labelled values on residues 1 to 3: replicate ``v`` holds ``v, 2v, 3v``."""
+    """Labeled values on residues 1 to 3: replicate ``v`` holds ``v, 2v, 3v``."""
     source = replicate_values(per_condition).source
     rows = {
         label: [
@@ -103,7 +103,7 @@ def test_timeseries_band_is_the_interval_of_the_mean_at_each_time(tmp_path, save
         "Band: 95% Student t confidence interval of the condition mean at each time across "
         "n = 3 replicates; production window t >= 10ns."
     )
-    assert "grey: the equilibration window" in note
+    assert "gray: the equilibration window" in note
 
 
 def test_profile_band_is_the_interval_of_the_mean_at_each_label(tmp_path, saved) -> None:

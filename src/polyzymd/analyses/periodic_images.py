@@ -42,7 +42,7 @@ def solute_image_distances(
 
     The selection is treated as one piece. Its coordinates in the first frame
     are taken as whole, which they are in a PolyzyMD build (the solutes are
-    placed whole in the centre of the cell), and later frames are unwrapped
+    placed whole in the center of the cell), and later frames are unwrapped
     with MDAnalysis' :class:`~MDAnalysis.transformations.nojump.NoJump`, so
     no atom of the selection jumps across the box between frames. Chains in
     contact therefore stay in contact rather than being counted as
@@ -61,7 +61,7 @@ def solute_image_distances(
         Distances are resolved only below this value (it keeps the search fast);
         a frame with no image closer is reported as None.
     step : int
-        Analyse every ``step``-th frame.
+        Analyze every ``step``-th frame.
 
     Returns
     -------
@@ -112,6 +112,6 @@ def image_distance_findings(
     return [
         f"the solute comes within {distance:.2f} nm of its own periodic image (frame {frame}, "
         f"{time:.0f} ps), inside the {nonbonded_cutoff_nm:.2f} nm nonbonded cutoff, in "
-        f"{len(below)} of {len(distances)} analysed frames: it interacts with its own image. "
+        f"{len(below)} of {len(distances)} analyzed frames: it interacts with its own image. "
         "Use a larger padding, or a rhombic dodecahedron, which is sized for any orientation."
     ]

@@ -7,6 +7,7 @@ wrong and checks that the right check, on the right component, fails.
 
 from __future__ import annotations
 
+import functools
 import sys
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from _support.small_system import build  # noqa: E402
 
 from polyzymd.audit.findings import run_checks  # noqa: E402
 from polyzymd.audit.realized import RealizedSystem  # noqa: E402
+from polyzymd.audit.terms import SystemIndex  # noqa: E402
 
 PARAMETER_CHECKS = (
     "parameters.bonded",
@@ -45,8 +47,25 @@ def _realize(folder: Path, system, name: str) -> RealizedSystem:
     return RealizedSystem.from_openmm(xml, folder / "build" / "solvated_system.pdb")
 
 
+@functools.cache
+def _system_xml(builder) -> str:
+    """The build's OpenMM System as XML, converted once: converting it takes seconds."""
+    system = builder._interchange.to_openmm(combine_nonbonded_forces=True)
+    xml = openmm.XmlSerializer.serialize(system)
+    copy = openmm.XmlSerializer.deserialize(xml)
+    assert SystemIndex.from_system(copy) == SystemIndex.from_system(system)
+    return xml
+
+
 def _openmm_system(builder):
-    return builder._interchange.to_openmm(combine_nonbonded_forces=True)
+    """A fresh copy of the build's OpenMM System, for one test to break."""
+    return openmm.XmlSerializer.deserialize(_system_xml(builder))
+
+
+@functools.cache
+def _elements(builder) -> list[str]:
+    """The element of every atom of the build, in system order."""
+    return [a.element.symbol for a in builder.get_openmm_components()[0].atoms()]
 
 
 def _status(findings) -> dict[tuple[str, str], str]:
@@ -185,7 +204,7 @@ def test_a_wrong_mass_fails_masses(built) -> None:
 
     def edit(system, builder):
         protein = _atoms_of(builder, "protein")
-        elements = [a.element.symbol for a in builder.get_openmm_components()[0].atoms()]
+        elements = _elements(builder)
         hydrogen = next(i for i in protein if elements[i] == "H")
         system.setParticleMass(hydrogen, 3.024)
 

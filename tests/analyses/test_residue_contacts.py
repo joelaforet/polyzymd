@@ -372,7 +372,7 @@ def test_analyze_regions_average_their_residues(configs, schedules, tmp_path) ->
 
 
 @pytest.mark.parametrize("run", ["contact_fraction_residues", "SBM_contact_fraction_residues"])
-def test_analyze_residue_runs_are_labelled_by_resid(configs, schedules, tmp_path, run) -> None:
+def test_analyze_residue_runs_are_labeled_by_resid(configs, schedules, tmp_path, run) -> None:
     report = analyze("contacts", [configs["A"], configs["B"]], run=run, **_options(tmp_path))
 
     row_name = "any" if run == "contact_fraction_residues" else "SBM"

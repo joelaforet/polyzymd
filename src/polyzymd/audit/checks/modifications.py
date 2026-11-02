@@ -178,7 +178,7 @@ def applied(context: AuditContext) -> list[Finding]:
         "component",
         "FAIL",
         "the backbone (N, H, CA, HA, C, O) of a modified residue not on ff14SB: its charges "
-        "and terms must match its unmodified neighbours'",
+        "and terms must match its unmodified neighbors'",
         _PROTEIN,
     )
 )

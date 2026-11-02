@@ -75,7 +75,7 @@ controlled in separate families stays controlled overall (Benjamini and
 Yekutieli 2001). A pool of unrelated outcomes can hide real effects or
 inflate weak ones (Efron 2008).
 
-For a labelled result, such as a per-residue profile, the family is every
+For a labeled result, such as a per-residue profile, the family is every
 label of every compared condition. A scan of a profile for the labels that
 changed is a search over that whole set. A false discovery rate holds for the
 discoveries of a search only when the family is the set searched (Benjamini

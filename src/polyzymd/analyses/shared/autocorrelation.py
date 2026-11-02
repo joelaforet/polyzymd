@@ -23,7 +23,7 @@ Key Concepts
 
 Estimator
 ---------
-The statistical inefficiency is summed directly from the normalised ACF over
+The statistical inefficiency is summed directly from the normalized ACF over
 positive lags,
 
     g = 1 + 2*Σ_{t>=1} C(t)*(1 - t/N),
@@ -100,7 +100,7 @@ def statistical_inefficiency(
 ) -> float:
     """Statistical inefficiency g of a timeseries, from pymbar.
 
-    g = 1 + 2 * sum_{t>=1} C(t) * (1 - t/N), summed until the normalised ACF
+    g = 1 + 2 * sum_{t>=1} C(t) * (1 - t/N), summed until the normalized ACF
     first turns non-positive beyond ``mintime`` (Chodera et al. 2007). The
     variance of the mean is Var(x) * g / N, so N_eff = N / g. A series shorter
     than three points or with no variance has g = 1.
@@ -126,7 +126,7 @@ def statistical_inefficiency(
 def detect_equilibration(x: ArrayLike) -> int:
     """Index of the first equilibrated sample, from pymbar ``detect_equilibration``.
 
-    pymbar picks the start ``t0`` that maximises the number of effective samples
+    pymbar picks the start ``t0`` that maximizes the number of effective samples
     in ``x[t0:]`` (Chodera 2016, doi:10.1021/acs.jctc.5b00784). Only about 100
     evenly spaced starts are tried, so a long series costs no more than a short
     one and ``t0`` is known to 1 percent of the series length.

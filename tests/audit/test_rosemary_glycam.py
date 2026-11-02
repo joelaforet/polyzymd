@@ -100,7 +100,7 @@ def test_glycan_sites_take_glycam_and_the_backbone_keeps_the_charge(hybrid) -> N
     protein, result = hybrid
     record = result.record
     assert [site.name for site in record.sites] == ["G001", "G002"]
-    # Trp-cage 4-6 (with Q5N) and 12-14: the linkage residue and its two neighbours.
+    # Trp-cage 4-6 (with Q5N) and 12-14: the linkage residue and its two neighbors.
     assert [site.backbone_residues for site in record.sites] == [
         ["ILE", "ASN", "TRP"],
         ["PRO", "SER", "SER"],

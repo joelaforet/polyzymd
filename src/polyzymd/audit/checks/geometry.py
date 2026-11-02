@@ -1,10 +1,10 @@
 """Geometry checks: the starting coordinates are a system that can be simulated as intended.
 
 Distances are measured under periodic boundary conditions in the realized box,
-with MDAnalysis's neighbour search (triclinic boxes included). Clash thresholds
+with MDAnalysis's neighbor search (triclinic boxes included). Clash thresholds
 follow the Packmol tolerance the build used: closer than half of it is a clash
 (as the builder's own check counts it); between half and the full tolerance is
-reported, since Packmol honours its tolerance only approximately and
+reported, since Packmol honors its tolerance only approximately and
 minimization resolves such contacts.
 """
 
@@ -21,7 +21,7 @@ from polyzymd.audit.registry import CheckSpec, register
 #: Protein heavy atoms within BURIAL_RADIUS_NM of a water oxygen at or above which
 #: the water is reported as buried. In correctly built Paper 1 systems (CALB,
 #: LipA, RML; 45,000-92,000 atoms) the most buried water had 45-50.
-BURIED_NEIGHBOURS = 75
+BURIED_NEIGHBORS = 75
 BURIAL_RADIUS_NM = 0.8
 #: Heavy-atom distance at which a polymer chain is in contact with the protein.
 CONTACT_NM = 0.4
@@ -215,11 +215,11 @@ def buried_water(context: AuditContext) -> list[Finding]:
     oxygens = np.array([i for r in water.atoms for i in r if elements[i] == "O"], dtype=int)
     pairs, _ = _pairs(context, oxygens, protein, BURIAL_RADIUS_NM * 10.0)
     counts = np.bincount(pairs[:, 0], minlength=len(oxygens)) if len(pairs) else np.zeros(1)
-    buried = np.flatnonzero(counts >= BURIED_NEIGHBOURS)
+    buried = np.flatnonzero(counts >= BURIED_NEIGHBORS)
     most = int(counts.max()) if len(counts) else 0
     detail = (
         f"most protein heavy atoms within {BURIAL_RADIUS_NM} nm of a water oxygen: {most} "
-        f"(buried at {BURIED_NEIGHBOURS} or more)"
+        f"(buried at {BURIED_NEIGHBORS} or more)"
     )
     if len(buried):
         return [
@@ -228,7 +228,7 @@ def buried_water(context: AuditContext) -> list[Finding]:
                 "system",
                 "WARN",
                 f"{len(buried)} waters buried in the protein; " + detail,
-                [f"water oxygen {oxygens[k]}: {counts[k]} neighbours" for k in buried[:3]],
+                [f"water oxygen {oxygens[k]}: {counts[k]} neighbors" for k in buried[:3]],
             )
         ]
     return [Finding("geometry.buried_water", "system", "PASS", detail)]
@@ -259,9 +259,9 @@ def _whole(context: AuditContext, atoms: list[int]) -> np.ndarray:
                     queue.append(j)
         if start != atoms[0]:
             piece = [i for i in out if i not in placed]
-            centre = np.mean([out[i] for i in piece], axis=0)
+            center = np.mean([out[i] for i in piece], axis=0)
             anchor = np.mean([out[i] for i in placed], axis=0)
-            s = (centre - anchor) @ inverse
+            s = (center - anchor) @ inverse
             shift = -np.round(s) @ box
             for i in piece:
                 out[i] = out[i] + shift
@@ -270,7 +270,7 @@ def _whole(context: AuditContext, atoms: list[int]) -> np.ndarray:
 
 
 def _lattice(box: np.ndarray) -> list[np.ndarray]:
-    """The 26 lattice vectors to the neighbouring periodic images (nm)."""
+    """The 26 lattice vectors to the neighboring periodic images (nm)."""
     import itertools
 
     return [

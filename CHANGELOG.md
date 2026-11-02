@@ -15,7 +15,7 @@ mBuild biopolymers fork, with the physics audit extended to modified proteins
 and an opt-in to OpenFF Rosemary alpha. It is a pre-release for trying out
 the conjugation workflow; 1.3.0 stays the stable release.
 
-### Changed (behaviour)
+### Changed (behavior)
 
 - Energy minimization now runs to convergence by default: `simulation_phases.minimization.max_iterations` defaults to `0` (was `1000`). Configs that don't set it now minimize until the RMS force is below `tolerance`; set `max_iterations: 1000` to keep the old cap. This is the one default the 1.3 schema contract allows to change, by maintainer decision.
 - After minimization, `polyzymd run` checks the RMS force on the atoms that were free to move and the most stretched bond. A run stopped by an iteration cap before converging, or a state with a bond stretched more than 50 % over its equilibrium length, is minimized again to convergence once. If a bond is still torn, the run stops with the offending atoms and values named instead of entering equilibration; a torn bond between two frozen solute atoms stops it at once. The RMS force is measured as OpenMM's minimizer measures it. The outcome (`rms_force`, `max_force`, `worst_bond`, `worst_bond_stretch`, `converged`, `reminimized`) is recorded in `minimization/phase.json`, also for a failed run. A signal stops a running minimization at its next iteration.
@@ -53,7 +53,7 @@ the conjugation workflow; 1.3.0 stays the stable release.
   audited. References for GLYCAM06, mBuild biopolymers and openff-pablo.
 - `examples/modified_proteins`: ubiquitin with a GLYCAM06j glycan on Asn60, and
   with an octanoyl amide on Lys63 (Sage 2.3.0 and NAGL).
-- Acceptance builds of mutated, labelled, glycosylated and grafted proteins
+- Acceptance builds of mutated, labeled, glycosylated and grafted proteins
   (fibronectin FN7-10 with AzF and FRET dyes, lipase A with dyes and a grafted
   chain, the BG505 SOSIP protomer with 20 glycans)
   (`POLYZYMD_ACCEPTANCE=1`, local only; `POLYZYMD_ACCEPTANCE_RUN=1` also runs
@@ -118,7 +118,7 @@ the conjugation workflow; 1.3.0 stays the stable release.
   charges: {method: library}}}`, glycans only). Each glycan site takes
   GLYCAM06j's charges, terms and 1-4 pairs; the charge difference from
   Rosemary's NAGL charges is spread over the backbones of the linkage residue
-  and its two neighbours (bounded by `max_charge_shift`, recorded per site). The audit checks the
+  and its two neighbors (bounded by `max_charge_shift`, recorded per site). The audit checks the
   hybrid and marks it with a `parameters.glycan_force_field` WARN.
 - The `build` and `test` environments install `openff-forcefields` 2026.09.0
   (was 2026.01.0), which adds the Rosemary candidate
@@ -406,7 +406,7 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   (who stopped the chain, on which host, when, with which config, and how to
   undo it) and then cancels the matching queued and running jobs by name.  The
   job wrapper checks for the marker before submitting any successor and at the
-  start of every job, and also honours `POLYZYMD_STOP_CHAIN=1` and
+  start of every job, and also honors `POLYZYMD_STOP_CHAIN=1` and
   `POLYZYMD_STOP_FILE`.  `--stop-only` leaves the running job alone so the
   chain stops after the current segment, `--dry-run` reports without acting,
   and `--resume` removes the marker.
@@ -415,18 +415,18 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   `--exclude` value (replacing it, not appending), so a node can be re-tested
   without editing the preset.  Omitting the flag keeps the preset default; pass
   an empty string to exclude nothing.
-- **Frozen-solute energy minimisation.**  `SimulationRunner.minimize()` now holds
+- **Frozen-solute energy minimization.**  `SimulationRunner.minimize()` now holds
   every protein and substrate atom fixed (new `solute` atom group) and relaxes only
   solvent and polymers, so the prepared structure enters equilibration with its
   coordinates unchanged; the runner verifies a zero solute displacement and records
-  it in `minimization/phase.json`.  Implemented by minimising on a copy of the
+  it in `minimization/phase.json`.  Implemented by minimizing on a copy of the
   System with massless solute atoms and their constraints removed (OpenMM fixes
   massless particles but forbids constraints on them); the real System is untouched.
   Configurable via `simulation_phases.minimization` (`freeze_solute`, default
   `true`; `max_iterations`; `tolerance`), a runtime-only block that is excluded
   from the build-manifest config hash so existing bundles remain valid.
   Motivation: waters packed inside the protein by the pre-d96b1fcd builds were
-  "accommodated" by protein inflation during minimisation before heating.
+  "accommodated" by protein inflation during minimization before heating.
 - **Packmol seeding by replicate.**  `build_packmol_input()`,
   `solvate_with_packmol()`, `pack_polymers()`, `SolventBuilder.solvate()` and
   `SystemBuilder.pack_polymers()` accept `seed`; `build_from_config()` passes
@@ -457,7 +457,7 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
 
 - **`--run` views do not replace the stored report.**  `analyze NAME --study S --run X` replaced `results/NAME/report.json` with the result it showed, so the stored report held whichever result was looked at last. A `--run` view is now printed and not saved.
 
-- **Analysis warns about replicates built from another config.**  A replicate whose build record names another config hash than the condition's config (a changed salt concentration, for example) was analysed silently. The report now warns and names the replicates; a raised production length of a started replicate is not counted as a change. The analysis identity hash is unchanged.
+- **Analysis warns about replicates built from another config.**  A replicate whose build record names another config hash than the condition's config (a changed salt concentration, for example) was analyzed silently. The report now warns and names the replicates; a raised production length of a started replicate is not counted as a change. The analysis identity hash is unchanged.
 
 - **Unfinished replicates make an analysis partial.**  A replicate short of its configured production was counted as complete. The report is now `partial` (exit 3) with a `problem:` line giving how far it got; an OpenMM replicate's frames so far are read, and a GROMACS replicate whose production did not finish is left out (`excluded_replicates`).
 
@@ -540,12 +540,12 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   - `neutralize` counts the charge of co-solvents. A charged SMILES (`...OS(=O)(=O)[O-]`) gets counter-ions; one that carries its counter-ion (`...[O-].[Na+]`) needs none. A system left charged is an error with `neutralize: true` and a warning without it.
   - `gmx grompp` gets no blanket `-maxwarn 1`, which hid the net-charge warning. Set `grompp_flags: "-maxwarn 1"` to accept a warning you have read.
   - GROMACS runs the Langevin thermostats as Langevin dynamics (`integrator = sd`, `tau-t` = the thermostat timescale), as OpenMM does, not as `v-rescale`. Approximate mappings (the Monte Carlo barostat as `c-rescale`) and thermostats OpenMM does not implement are warned about. The new reference page "GROMACS and OpenMM" records how each setting runs on each engine.
-  - Solvent chain IDs never repeat those of the solute. A system that would need more chain IDs is refused, instead of solvent being labelled as protein or polymer.
+  - Solvent chain IDs never repeat those of the solute. A system that would need more chain IDs is refused, instead of solvent being labeled as protein or polymer.
   - `pdbindex N` selects the N-th atom of the system in analyses (`bynum`), as it does in restraints.
   - `projects_directory` and `scratch_directory` are relative to the config's folder, so commands find the runs from any folder.
   - `checkpoint_interval` defaults to 60 s, and the quickstart config validates.
   - Every config section refuses keys it does not define, so a misspelled key is an error instead of a silent default. Older configs with `simulation_phases.segments` must drop it.
-  - `freeze` recognises co-solvents, names a build file `build_manifest.json` lists that is missing, asks GROMACS studies to state the GROMACS version instead of reporting a missing OpenMM version, and mentions polymer parameters in the checklist only for systems with polymers.
+  - `freeze` recognizes co-solvents, names a build file `build_manifest.json` lists that is missing, asks GROMACS studies to state the GROMACS version instead of reporting a missing OpenMM version, and mentions polymer parameters in the checklist only for systems with polymers.
 
 - **Stored results and replicate tables.**
   - Reordering `parts:` recomputes instead of giving one part the values of another; `parts` is now part of the stored record.
@@ -563,7 +563,7 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   - In a project, each study's manifest lists the files git tracks and the project's commit.
   - Manifests and reports carry no path of the machine.
   - Configs written in flow style lose their machine paths too.
-  - The manifest no longer reports frames analysed: each analysis has its own window, and its report has `frames_per_replicate`.
+  - The manifest no longer reports frames analyzed: each analysis has its own window, and its report has `frames_per_replicate`.
   - `CITATION.cff` carries no commit; the tag is the version.
 - **Projects and `--label`.**
   - A project's studies must be folders directly inside it.
@@ -602,7 +602,7 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
 
 - **The correlation estimator every analysis plugin called was wrong.**
   `estimate_correlation_time(method="integration")` trapezoid-integrated the
-  normalised autocorrelation function from lag zero, so applying
+  normalized autocorrelation function from lag zero, so applying
   `g = 1 + 2*tau/dt` counted the lag-zero term twice, and it then floored tau
   at one timestep.  White noise came back with `g = 3.00` instead of `1.00`,
   and correlated series came back about `+2` too high, which inflated every
@@ -648,7 +648,7 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   that matches no atoms raises the same error.  A topology without element
   metadata raises rather than falling back to a selection that admits every
   atom.  Set `allow_empty_groups: true` to keep the previous warn-and-skip
-  behaviour.
+  behavior.
 
 - **A segment resumes from the state of the last written trajectory frame.**
   `restart_state.xml` used to be written only on a wall-clock timer, so after
@@ -735,7 +735,7 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   `flock` leaked on every exit path.  The command body moved into
   `_run_segment_locked()`, called inside a `try`/`finally`.
 - **Segment provenance survives a progress rebuild.**  After a chain was
-  cancelled and resubmitted, `progress.json` was reconciled from a filesystem
+  canceled and resubmitted, `progress.json` was reconciled from a filesystem
   scan and every segment's `polyzymd_version`, `openmm_version` and
   `pixi_environment` came back `null` even though
   `production_N/production_N_parameters.json` still carried them (observed
@@ -791,7 +791,7 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   PACKMOL, which runs without periodicity.  The audited builds carried 11-169
   atom pairs closer than 1.5 A to a periodic image, down to 0.10 A (CALB run5:
   17 pairs below 2 A, 11 below 1.5 A, 2.1 % of polymer atoms outside the brick);
-  such an overlap is singular, minimisation cannot resolve it and the runs died
+  such an overlap is singular, minimization cannot resolve it and the runs died
   with NaN.  Chains are now packed inside the brick of the final cell, shrunk by
   the PACKMOL tolerance, so every image pair is at least one tolerance apart.
 - **Periodic-image assertion at build time.**  New
@@ -802,23 +802,23 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   tolerance and the tolerance only warn.  It runs after polymer packing and
   after solvation.  `PeriodicImageClashError` and `SolvationClashError` are
   exported from `polyzymd.utils`.
-- **Solvation no longer re-centres an already-framed topology.**
+- **Solvation no longer re-centers an already-framed topology.**
   `solvate_with_packmol()` takes `center_solute` (default `True`); the system
   builder passes `False` when the packed topology is already framed in the
-  brick.  Re-centring it by centre of geometry is a rigid translation that
+  brick.  Re-centering it by center of geometry is a rigid translation that
   pushed 0.02-0.38 % of polymer atoms back outside the brick.
 - **Build-time solute/solvent separation assertion.**  `solvate_with_packmol()`
   and `pack_polymers()` now raise `SolvationClashError` when any packed atom
   lies within half the Packmol tolerance of the fixed solute, and
   `SolventBuilder.validate()` repeats the check on the stored topology.  Every
-  build before d96b1fcd combined a brick-centred solvent with a
-  triclinic-centred solute, so hundreds of waters started inside the protein
+  build before d96b1fcd combined a brick-centered solvent with a
+  triclinic-centered solute, so hundreds of waters started inside the protein
   while Packmol reported success; the Paper-1 audit found 54 of 118 RML/CALB
   builds affected (823 waters within 2 Å of protein heavy atoms in one CALB
   control).  Such a build is now a hard failure before any PDB is written.
   The failure threshold is `SOLVATION_CLASH_ATOM_LIMIT` (20) packed atoms below
   half the tolerance: imperfect Packmol runs (exit 173) leave a handful of such
-  contacts that minimisation resolves and now only warn, whereas a frame mismatch
+  contacts that minimization resolves and now only warn, whereas a frame mismatch
   leaves hundreds to thousands.
 - **Trajectory segment lineage check.**  `TrajectoryLoader.load_universe()`
   verifies that daisy-chained segments share one frame interval and that each
@@ -860,10 +860,10 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   the chains, so replicates of one condition differed: an RML replicate came out
   with a 23 % smaller box, 18,865 waters instead of ~25,000 and 56/47 ions
   instead of 72/63.  Replicates now share box, water count and ion count.
-  Builds without polymers keep the previous behaviour exactly (box computed from
+  Builds without polymers keep the previous behavior exactly (box computed from
   the solute at solvation time), so existing control bundles remain valid.
   Setting `polymers.packing.box_vectors` opts out of the deterministic cell and
-  is now actually honoured by `build_from_config()` (it was silently ignored).
+  is now actually honored by `build_from_config()` (it was silently ignored).
   The cell, brick and sphere radius are recorded under `provenance` in
   `build_manifest.json` (`box_vectors_nm`, `brick_nm`, `deterministic_box`,
   `polymer_sphere_radius_nm`).
@@ -872,7 +872,7 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   7-9 % for a normal RML replicate, and by up to 50 % for the under-filled
   replicates that had shrunken boxes; controls are unchanged.
 - **Polymers are packed inside a sphere around the solute.**  `pack_polymers()`
-  adds a PACKMOL `inside sphere` constraint (centre = solute centre in the
+  adds a PACKMOL `inside sphere` constraint (center = solute center in the
   brick, radius = half the solute bounding-box diagonal + `packing.padding`) on
   top of the brick-sized `inside box`, so chains stay in a shell around the
   protein instead of filling the brick corners (mean polymer-to-protein distance
@@ -895,7 +895,7 @@ of 1.3.0rc4; the rewrite guide maps each to its 1.3.0 name.
   `UniverseProvenance` and `FileIdentity` are in `polyzymd.analyses.universe`;
   `compute_config_hash` is in `polyzymd.analyses.identity`, with the same
   hash, so stored study results stay valid; `PlotSettings`, `PlotTheme`, the
-  semantic colour models and `AnalysisDefaults` are in
+  semantic color models and `AnalysisDefaults` are in
   `polyzymd.config.analysis_settings` (`polyzymd.config` still exports
   `PlotSettings` and `PlotTheme`).
 
@@ -1310,7 +1310,7 @@ dropping a module or package in `analyses/` with no modifications to core code.
   prepended the config directory, producing e.g.
   `/ocean/projects/.../default`.  The Pydantic field validator in
   `ReactionConfig` then rejected it because the path lacked a `.rxn`
-  extension.  The loader now recognises `"default"` as a sentinel value
+  extension.  The loader now recognizes `"default"` as a sentinel value
   and passes it through untouched so the validator can resolve it to the
   bundled ATRP reaction templates.  (`config/loader.py`)
 - **Dead code removed.**  `catalytic_triad/_formatters.py` (427 lines, zero
@@ -1769,7 +1769,7 @@ dropping a module or package in `analyses/` with no modifications to core code.
   co-solvents.** `validate_volume_fractions` called `sum()` over `volume_fraction`
   fields without filtering `None` values, raising `TypeError` when any co-solvent
   used `concentration` instead of `volume_fraction`. (`config/schema.py`)
-- **Equilibration stages now honour `thermostat_timescale` for integrator friction.**
+- **Equilibration stages now honor `thermostat_timescale` for integrator friction.**
   The `thermostat_timescale` field was read from the stage config but never used;
    the integrator always received the default friction of 1.0/ps. Friction is now
   computed as `1.0 / thermostat_timescale`. (`simulation/runner.py`)
@@ -1816,7 +1816,7 @@ dropping a module or package in `analyses/` with no modifications to core code.
   `f.flush()` and `os.fsync(f.fileno())` before the rename.
   (`simulation/progress.py`)
 - **`SlurmConfig.from_preset()` now raises `ValueError` for unknown preset names.**
-  Previously, an unrecognised preset name silently fell back to the `aa100` preset,
+  Previously, an unrecognized preset name silently fell back to the `aa100` preset,
   masking typos in config files or CLI arguments.  The error message lists all valid
   presets. (`workflow/slurm.py`)
 - **`save_config` no longer mutates the global `yaml.Dumper` representer registry.**

@@ -40,11 +40,11 @@ acceptors from the covalent bonds of the force field. For the rule and the
 files it reads, see {doc}`../reference/analysis_hydrogen_bonds_verification`.
 
 ```{important}
-Keep these files beside the trajectory in any copy of a run you analyse, such
+Keep these files beside the trajectory in any copy of a run you analyze, such
 as a copy thinned to fewer frames: `<segment>_system.xml` for OpenMM, and
 `prod.tpr` with `<prefix>.top` and its `.itp` files for GROMACS. Without them
 the protein has no bonds, and the analysis stops with an error naming the
-files. A run without them can still be analysed by giving `donors`,
+files. A run without them can still be analyzed by giving `donors`,
 `hydrogens` and `acceptors` as selections, which pairs each hydrogen with a
 donor within 1.2 Å instead of by bonds.
 ```
@@ -71,7 +71,7 @@ The first `-c` is the control. The analysis measures the summaries of
 `--set summaries=...`, by default `protein_polymer`, the hydrogen bonds
 between the protein (chain A) and the polymer (chain C). By default the report shows
 `protein_polymer_mean_hbonds`: for each replicate, the mean number of hydrogen
-bonds per frame. The replicate values are summarised per condition, and every
+bonds per frame. The replicate values are summarized per condition, and every
 other condition is compared with the control by Welch's t test with the
 Benjamini-Hochberg correction.
 A replicate where a summary's second group matches no atoms, such as every

@@ -1307,7 +1307,7 @@ class SystemBuilder:
             )
 
         # 5. Solvate.  With a precomputed cell the packed topology is already
-        # framed in the brick, so the solvent builder must not re-centre it.
+        # framed in the brick, so the solvent builder must not re-center it.
         LOGGER.info("Solvating system")
         self._solvent_builder.solvate_from_config(
             self._combined_topology,
@@ -1409,7 +1409,7 @@ class SystemBuilder:
         """Rotate the fixed solutes onto their principal axes for a rectangular box.
 
         Every fixed solute (protein, attachments, substrate) turns together
-        about the centre of mass of the atoms that define the rotation, so their
+        about the center of mass of the atoms that define the rotation, so their
         relative geometry and every restraint distance are unchanged. The
         rotation comes from the mass-weighted heavy atoms of the protein
         segment and the other fixed solutes; a modified protein's attachment

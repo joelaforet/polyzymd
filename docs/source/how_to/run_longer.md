@@ -118,5 +118,5 @@ study file.
   not supported yet. Build and equilibrate the new condition from its own
   config instead (`polyzymd study add-condition NAME --from <condition>`).
   To start from that state anyway, run your own protocol outside PolyzyMD
-  on the finished replicate's `production_N_state.xml`, and analyse the
+  on the finished replicate's `production_N_state.xml`, and analyze the
   result as {doc}`own_protocol` describes.

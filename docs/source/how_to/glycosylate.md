@@ -102,7 +102,7 @@ GLYCAM06j, including the 1-4 pairs that GLYCAM06j leaves unscaled.
 ## What is refused, and why
 
 - **A glycan on GLYCAM06j on the first or last residue of a chain.** The
-  GLYCAM linkage residue needs a neighbour on each side. If you meant to do this, please
+  GLYCAM linkage residue needs a neighbor on each side. If you meant to do this, please
   [open an issue](https://github.com/joelaforet/polyzymd/issues).
 - **A residue name GLYCAM06j does not define.** Rename the residues, or
   rebuild the glycan with GLYCAM-Web.

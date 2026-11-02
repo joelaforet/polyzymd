@@ -16,7 +16,7 @@ A build can differ from its config while every step succeeds. For example:
 - two force fields are loaded together, and the generic parameters of one
   replace the specific parameters of the other on some of the molecules;
 - a run computes charges again instead of reading the built system;
-- a restraint selects a neighbouring atom, because its selection counts atoms
+- a restraint selects a neighboring atom, because its selection counts atoms
   in a different way than its author expected;
 - a setting, such as a salt concentration, changes meaning between versions,
   and nothing records which meaning a build used.
@@ -83,7 +83,7 @@ ff14SB, and one domain per modification site on the parameter set its type
 names. Every term belongs to one domain: the one all its atoms belong to, or
 else the site it touches, so the bond from CA to CB and the chi1 torsion of a
 modified residue belong to the site, and its backbone (N, H, CA, HA, C, O)
-stays on ff14SB like its neighbours'. A term touching two sites belongs to
+stays on ff14SB like its neighbors'. A term touching two sites belongs to
 neither and fails `parameters.coverage`.
 
 The audit rebuilds the protein from the input PDB file and the modification

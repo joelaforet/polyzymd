@@ -2,26 +2,55 @@ name: Full Test Suite
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, "release/**"]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, "release/**"]
   schedule:
     # Weekly tests on Sunday at midnight
     - cron: "0 0 * * 0"
   workflow_dispatch:
 
+# A newer push to the same PR or branch cancels the run it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash -l {0}
 
+env:
+  # coverage.py's sys.monitoring tracer (Python 3.12+) costs far less than
+  # the default C tracer, which made the build-heavy audit tests run about
+  # three times slower than without coverage.
+  COVERAGE_CORE: sysmon
+
+# Every test still runs on both operating systems. The suite is split into
+# jobs that run side by side:
+#
+#   test        everything except tests/audit, on Ubuntu and macOS, in two
+#               halves: tests/analyses, and everything else
+#   audit-macos tests/audit on macOS, in two halves
+#
+# tests/audit on Ubuntu runs in the "Engine parity and physics audit"
+# workflow, with GROMACS installed so its GROMACS tests run too, and that
+# workflow uploads its coverage as well.
 jobs:
   test:
-    name: Test on ${{ matrix.os }}, Python ${{ matrix.python-version }}
+    name: Test on ${{ matrix.os }}, Python ${{ matrix.python-version }} (${{ matrix.part }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macOS-latest]
         python-version: ["3.12"]
+        # The two halves take about the same time. "rest" leaves out what
+        # the other half and the audit jobs run, so no test falls between.
+        part: [analyses, rest]
+        include:
+          - part: analyses
+            tests: tests/analyses
+          - part: rest
+            tests: --ignore=tests/analyses --ignore=tests/audit tests/
       fail-fast: false
 
     steps:
@@ -44,7 +73,8 @@ jobs:
 
       - name: Run tests
         run: |
-          pixi run -e test pytest -v --cov=polyzymd --cov-report=xml --color=yes tests/
+          pixi run -e test pytest -v --durations=25 --cov=polyzymd --cov-report=xml --color=yes \
+            ${{ matrix.tests }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -52,5 +82,66 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: unittests
-          name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}
+          name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}-${{ matrix.part }}
           fail_ci_if_error: false  # Don't fail if codecov upload fails
+
+  audit-macos:
+    name: Physics audit on macOS-latest (${{ matrix.part }})
+    # Pull requests into dev skip it; pull requests into main, pushes to
+    # main/dev, the weekly run and manual runs all run it.
+    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    runs-on: macOS-latest
+    strategy:
+      matrix:
+        include:
+          # "checks" runs every audit file "engines" does not name, so a new
+          # audit test file always runs in one of the two.
+          - part: engines
+            tests: >-
+              tests/audit/test_engine_parity.py
+              tests/audit/test_components_and_engines.py
+          - part: checks
+            tests: >-
+              --ignore=tests/audit/test_engine_parity.py
+              --ignore=tests/audit/test_components_and_engines.py
+              tests/audit
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0
+        with:
+          environments: test
+
+      - name: Run audit tests
+        run: |
+          pixi run -e test pytest -v --durations=25 --cov=polyzymd --cov-report=xml --color=yes \
+            ${{ matrix.tests }}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-macOS-latest-audit-${{ matrix.part }}
+          fail_ci_if_error: false
+
+  # The one check the branch rulesets require from this workflow, so the test
+  # jobs above can be split or renamed without editing the rulesets. A skipped
+  # job (the macOS audit on pull requests into dev) counts as passing.
+  all-tests:
+    name: All tests passed
+    if: always()
+    needs: [test, audit-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every test job passed or was skipped
+        shell: bash
+        run: |
+          echo 'results: ${{ join(needs.*.result, ', ') }}'
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::a test job failed or was cancelled"
+            exit 1
+          fi

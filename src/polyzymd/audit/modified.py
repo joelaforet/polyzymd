@@ -21,7 +21,7 @@ component record's reference alone:
   charges is read;
 - **OpenFF site** terms: an Interchange of the whole modified protein with the
   site's force field; site charges: NAGL with the declared model on a capped
-  model built here (the site, two bonds of neighbours, every cut bond capped
+  model built here (the site, two bonds of neighbors, every cut bond capped
   with H), shifted uniformly so that the site and the rest of its residues
   sum to their formal charge, the rest of its residues taking ff14SB library
   charges;
@@ -61,7 +61,7 @@ LOGGER = logging.getLogger(__name__)
 
 #: Backbone atom names (glycine's two alpha hydrogens included): in the
 #: Rosemary/GLYCAM06j hybrid, the backbones of a linkage residue and its two
-#: neighbours take the charge shift.
+#: neighbors take the charge shift.
 _GLYCAM_BACKBONE = frozenset({"N", "H", "CA", "HA", "HA2", "HA3", "C", "O"})
 
 #: Atoms that are not a residue's side chain (the side chain runs from CB outward).
@@ -899,13 +899,13 @@ def neutral_termini(termini: dict, records: list) -> list[str]:
     """
     found = []
     for residue, terminus in termini.items():
-        labelled = any(
+        labeled = any(
             record.kind == "attach"
             and (record.site.chain_id, record.site.resnum, record.site.icode) == residue
             and record.arguments.get("atom_name") in TERMINAL_ANCHORS[terminus]
             for record in records
         )
-        if not labelled:
+        if not labeled:
             found.append(
                 f"chain {residue[0]} residue {residue[1]}{residue[2]} ({terminus}-terminus)"
             )
@@ -986,17 +986,17 @@ def capped_model_charges(
     from openff.toolkit import Molecule
     from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
 
-    neighbours: dict[int, set[int]] = collections.defaultdict(set)
+    neighbors: dict[int, set[int]] = collections.defaultdict(set)
     orders: dict[tuple[int, int], int] = {}
     for bond in molecule.bonds:
         a, b = bond.atom1_index, bond.atom2_index
-        neighbours[a].add(b)
-        neighbours[b].add(a)
+        neighbors[a].add(b)
+        neighbors[b].add(a)
         orders[(min(a, b), max(a, b))] = bond.bond_order
     kept = set(core)
     frontier = set(core)
     for _ in range(2):
-        frontier = {j for i in frontier for j in neighbours[i]} - kept
+        frontier = {j for i in frontier for j in neighbors[i]} - kept
         kept |= frontier
     model = Molecule()
     local: dict[int, int] = {}
@@ -1010,7 +1010,7 @@ def capped_model_charges(
             aromatic = molecule.get_bond_between(a, b).is_aromatic
             model.add_bond(local[a], local[b], order, aromatic)
     for i in sorted(kept):
-        for j in neighbours[i] - kept:
+        for j in neighbors[i] - kept:
             if orders[(min(i, j), max(i, j))] != 1:
                 raise ValueError(
                     f"the capped model of a site would cut a bond of order "
@@ -1103,15 +1103,15 @@ def _owned_terms(
 
 def _expected_pairs(ref: ModifiedReference, per_atom, charges, scales, native) -> None:
     """Add every expected 1-2, 1-3 (excluded) and 1-4 pair to its owner's terms."""
-    neighbours: dict[int, set[int]] = collections.defaultdict(set)
+    neighbors: dict[int, set[int]] = collections.defaultdict(set)
     for a, b in ref.bonds:
-        neighbours[a].add(b)
-        neighbours[b].add(a)
+        neighbors[a].add(b)
+        neighbors[b].add(a)
     for start in ref.domain_of:
         distance = {start: 0}
         frontier = [start]
         for depth in (1, 2, 3):
-            frontier = [j for i in frontier for j in neighbours[i] if j not in distance]
+            frontier = [j for i in frontier for j in neighbors[i] if j not in distance]
             for j in frontier:
                 distance.setdefault(j, depth)
         for j, d in distance.items():

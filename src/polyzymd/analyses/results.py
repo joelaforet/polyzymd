@@ -39,7 +39,7 @@ class StoredResults:
         One row per stored value, with the columns :data:`COLUMNS`. ``name``
         is the measured quantity, as its folder under ``polyzymd_results/`` is
         named. A per-frame series has ``frame`` and ``time_ns`` and no
-        ``label``; a per-replicate value has neither, and a labelled one (for
+        ``label``; a per-replicate value has neither, and a labeled one (for
         example one value per residue) has its ``label`` and, when the
         function returned several parts, its ``part``.
     warnings : list of str

@@ -60,7 +60,7 @@ value:
 | `name` | The measured quantity. `rg.names` lists them |
 | `condition`, `replicate` | Where the value comes from |
 | `frame`, `time_ns` | For a per-frame series: the frame and its time |
-| `label` | For a per-residue (or other labelled) result: the residue |
+| `label` | For a per-residue (or other labeled) result: the residue |
 | `part` | For a result with several parts, such as RMSF's `rmsf`, `offset` and `rmsd_per_residue` |
 | `value`, `unit` | The value and its unit |
 

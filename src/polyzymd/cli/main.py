@@ -3115,7 +3115,7 @@ def _run_segment_locked(
 def _retire_hardkilled_segment(segment_dir: Path) -> Path:
     """Rename a hard-killed segment directory out of the way.
 
-    The scanner only recognises ``production_N``, so the renamed directory
+    The scanner only recognizes ``production_N``, so the renamed directory
     no longer participates in progress reconciliation while its trajectory
     data stays on disk for inspection or salvage.
 
@@ -3672,7 +3672,7 @@ def write_stop_file(working_dir: Path, config_path: str, replicate: int) -> Path
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Report what would be stopped without writing files or cancelling jobs",
+    help="Report what would be stopped without writing files or canceling jobs",
 )
 def cancel(
     config: str,
@@ -3774,7 +3774,7 @@ def cancel(
             )
             continue
 
-        # The marker is written *before* cancelling, so a successor that is
+        # The marker is written *before* canceling, so a successor that is
         # queued while scancel runs still sees it and exits without work.
         write_stop_file(working_dir, config_path, replicate)
         colored_echo(f"Replicate {replicate}: wrote {marker}", phase="simulation")
@@ -3790,10 +3790,10 @@ def cancel(
             )
             continue
 
-        cancelled = cancel_slurm_jobs(job_ids)
-        if cancelled:
+        canceled = cancel_slurm_jobs(job_ids)
+        if canceled:
             colored_echo(
-                f"Replicate {replicate}: cancelled job(s) {', '.join(cancelled)}",
+                f"Replicate {replicate}: canceled job(s) {', '.join(canceled)}",
                 phase="simulation",
             )
         elif job_ids:
