@@ -532,3 +532,15 @@ def test_collect_protocol_warnings_compares_a_ramp_with_the_stage_after_it(tmp_p
 
     ramp["temperature_end"] = 320.0
     assert collect_protocol_warnings(SimulationConfig.model_validate(data)) == []
+
+
+def test_installed_force_field_names_match_openff() -> None:
+    """validate finds force fields by name exactly as OpenFF's ForceField does."""
+    pytest.importorskip("openff.toolkit")
+    from openff.toolkit.typing.engines.smirnoff.forcefield import get_available_force_fields
+
+    from polyzymd.config.validation import installed_force_field_names
+
+    names = installed_force_field_names()
+    assert names == set(get_available_force_fields())
+    assert "openff-2.3.0.offxml" in names
