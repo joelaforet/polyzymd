@@ -91,7 +91,10 @@ The command writes these files and folders:
 
 It then makes the project a git repository and commits these files. Use
 `--no-git` to skip git, and `--holder NAME` to set the copyright holder of
-the licenses.
+the licenses. Put a name with spaces in quotes, such as
+`--holder "Joseph R. Laforet Jr."`. Without quotes, the shell passes each
+word as a separate argument and the command stops with
+`Got unexpected extra arguments`.
 
 To add a study later, give its label:
 

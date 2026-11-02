@@ -55,9 +55,24 @@ polyzymd project init ~/my_paper --study trpcage
 cd ~/my_paper
 ```
 
-```
+After the PolyzyMD logo, the output is:
+
+```text
 created project /home/me/my_paper with studies trpcage
-next: fill description:, structures:, regions: and conditions: in each study.yaml (polyzymd study add-condition adds a condition), the analyses and metadata: in project.yaml, then polyzymd project check
+
+  my_paper/
+  ├── project.yaml          the studies, the analyses, and the paper's metadata
+  ├── trpcage/
+  │   └── study.yaml        its conditions, structures, and regions
+  ├── analyses/  stats/  figures/  notebooks/
+  └── README.md  LICENSE-code  LICENSE-data
+
+next:
+  1. cd /home/me/my_paper
+  2. polyzymd study add-condition NAME --new --study trpcage   (or --config FILE, or --from CONDITION)
+  3. fill description:, structures:, and regions: in trpcage/study.yaml
+  4. list the analyses and fill metadata: in project.yaml
+  5. polyzymd project check
 ```
 
 A study label is also its folder name. Use lower case letters, digits and

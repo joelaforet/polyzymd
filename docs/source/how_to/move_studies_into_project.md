@@ -52,12 +52,31 @@ so use lower case, digits and `_`:
 polyzymd project init Paper_1 --study lipa363 --study calb343 --study rml333
 ```
 
-```
-created project Paper_1 with studies lipa363, calb343, rml333
+After the PolyzyMD logo, the output is:
+
+```text
+created project /home/me/Paper_1 with studies lipa363, calb343, rml333
+
+  Paper_1/
+  ├── project.yaml          the studies, the analyses, and the paper's metadata
+  ├── lipa363/
+  │   └── study.yaml        its conditions, structures, and regions
+  ├── calb343/
+  │   └── study.yaml        its conditions, structures, and regions
+  ├── rml333/
+  │   └── study.yaml        its conditions, structures, and regions
+  ├── analyses/  stats/  figures/  notebooks/
+  └── README.md  LICENSE-code  LICENSE-data
+
+next:
+  1. cd Paper_1
+  2. polyzymd study add-condition NAME --new --study lipa363   (or --config FILE, or --from CONDITION)
+  3. fill description:, structures:, and regions: in lipa363/study.yaml
+  4. list the analyses and fill metadata: in project.yaml
+  5. polyzymd project check
 ```
 
-`Paper_1/` now holds `project.yaml`, `analyses/`, `stats/`, `figures/`, the
-licenses, and one folder per study, each with a `study.yaml` full of `TODO`s.
+Each `study.yaml` is full of `TODO`s to fill in.
 
 ## 2. Add the conditions of each study
 

@@ -104,17 +104,33 @@ def init_command(path: Path, studies: tuple[str, ...], holder: str | None, no_gi
     """
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.project_scaffold import create_project
+    from polyzymd.cli.colors import echo_logo
 
     try:
         created = create_project(path, list(studies), holder=holder, git=not no_git)
     except ProtocolError as exc:
         _fail(exc)
+    echo_logo()
     click.echo(f"created project {created.root} with studies {', '.join(created.studies)}")
+    click.echo()
+    click.echo(f"  {created.root.name}/")
+    click.echo("  ├── project.yaml          the studies, the analyses, and the paper's metadata")
+    for label in created.studies:
+        click.echo(f"  ├── {label}/")
+        click.echo("  │   └── study.yaml        its conditions, structures, and regions")
+    click.echo("  ├── analyses/  stats/  figures/  notebooks/")
+    click.echo("  └── README.md  LICENSE-code  LICENSE-data")
+    click.echo()
+    first = next(iter(created.studies))
+    click.echo("next:")
+    click.echo(f"  1. cd {path}")
     click.echo(
-        "next: fill description:, structures:, regions: and conditions: in each study.yaml "
-        "(polyzymd study add-condition adds a condition), the analyses and metadata: in "
-        "project.yaml, then polyzymd project check"
+        f"  2. polyzymd study add-condition NAME --new --study {first}"
+        "   (or --config FILE, or --from CONDITION)"
     )
+    click.echo(f"  3. fill description:, structures:, and regions: in {first}/study.yaml")
+    click.echo("  4. list the analyses and fill metadata: in project.yaml")
+    click.echo("  5. polyzymd project check")
 
 
 @project_group.command("add-study")

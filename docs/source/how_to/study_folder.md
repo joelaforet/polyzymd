@@ -111,7 +111,8 @@ does not change. Each prints where the new runs go.
 `study init` also makes the folder a git repository with one commit. Use
 `--no-git` to skip git. To use a different license, replace a LICENSE file.
 `--holder NAME` sets the copyright holder. The default is your
-`git config user.name`.
+`git config user.name`. Put a name with spaces in quotes:
+`--holder "Joseph R. Laforet Jr."`.
 
 ## Say where the trajectories are
 

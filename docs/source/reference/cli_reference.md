@@ -1156,7 +1156,9 @@ Writes a project folder at `PATH`: `project.yaml` listing the studies,
 `analyses/`, `stats/` and `figures/`, licenses, a README, and one study folder
 per `--study` with a `study.yaml` to fill in. Labels are also folder names
 (lower case, digits, `_`). Without `--no-git` the project becomes a git
-repository with one commit. To move existing studies in, see
+repository with one commit. `--holder NAME` sets the copyright holder of the
+licenses; put a name with spaces in quotes, such as
+`--holder "Joseph R. Laforet Jr."`. To move existing studies in, see
 {doc}`../how_to/move_studies_into_project`.
 
 ### polyzymd project add-study
@@ -1244,7 +1246,7 @@ Creates a study folder: `study.yaml`, `conditions/`, `structures/`,
 | `--condition LABEL=CONFIG` | Copies an existing `config.yaml` to `conditions/<label>/config.yaml`, with every input file it names copied to `conditions/<label>/structures/` and its path made relative. The copy writes new runs into `runs/<label>/` of the study; where the existing runs are goes into `data.local.yaml`. Repeatable; the first is the control |
 | `--new-condition LABEL` | Creates `conditions/<label>/` with a template `config.yaml` and `structures/`. Repeatable |
 | `--equilibration TEXT` | The study's equilibration window; `0ns` with a note when left out |
-| `--holder NAME` | Copyright holder in both LICENSE files. Default: `git config user.name` |
+| `--holder NAME` | Copyright holder in both LICENSE files, in quotes when it has spaces (`--holder "Joseph R. Laforet Jr."`). Default: `git config user.name` |
 | `--no-git` | Do not make a git repository |
 
 It refuses a folder that already holds a `study.yaml`, and exits 2 on an
