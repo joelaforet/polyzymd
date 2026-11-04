@@ -19,14 +19,14 @@ Cite PolyzyMD with the version you used. `polyzymd --version` prints it, and
 the "Methods to cite" list of each `build_provenance.md` starts with PolyzyMD
 at the version that made the build.
 
-> Laforet Jr., Joseph R., PolyzyMD: build, run and analyze molecular dynamics
+> Laforet Jr., Joseph R., PolyzyMD: build, run, and analyze molecular dynamics
 > of complex biomolecular systems (version 1.3.0).
 > https://github.com/joelaforet/polyzymd. https://doi.org/10.5281/zenodo.23680214
 
 ```bibtex
 @software{laforet_polyzymd,
   author  = {Laforet Jr., Joseph R.},
-  title   = {{PolyzyMD}: build, run and analyze molecular dynamics of complex
+  title   = {{PolyzyMD}: build, run, and analyze molecular dynamics of complex
              biomolecular systems},
   version = {1.3.0},
   year    = {2026},
@@ -49,7 +49,7 @@ also the methods that your build and your analyses used, listed below.
 
 Cite each of these methods that your build used. `build_provenance.md` lists
 the ones a build used under "Methods to cite", together with the force fields,
-the water model, the ion parameters and the charge models below. For contributors:
+the water model, the ion parameters, and the charge models below. For contributors:
 each reference and when a build cites it is one `Reference` entry of the
 `REFERENCES` table in `polyzymd/simulation/build_citations.py`; to cite one
 more method, add an entry there and the reference here.
@@ -97,7 +97,7 @@ more method, add an entry there and the reference here.
   PACKMOL: a package for building initial configurations for molecular
   dynamics simulations. *Journal of Computational Chemistry*, 30(13),
   2157-2164. doi:10.1002/jcc.21224. Used by every build: Packmol places the
-  water, co-solvents and polymer chains.
+  water, co-solvents, and polymer chains.
 - Machado, M. R. and Pantano, S. (2020). Split the charge difference in two!
   A rule of thumb for adding proper amounts of ions in MD simulations.
   *Journal of Chemical Theory and Computation*, 16(3), 1367-1372.
@@ -113,7 +113,7 @@ more method, add an entry there and the reference here.
   github.com/joelaforet/mbuild (tag `biopolymers-v0.1.0`); the build record
   names its commit.
 
-## Force fields, water, ions and charge models
+## Force fields, water, ions, and charge models
 
 The build cites each force-field file by its name: ff14SB for
 `ff14sb_off_impropers_*.offxml` (the OpenFF port of Amber ff14SB), the Sage
@@ -184,7 +184,7 @@ For any other file, cite its source.
 ## Libraries we build on
 
 PolyzyMD does not reimplement trajectory input and output, neighbor searching,
-secondary structure assignment or the standard statistical tests, so the
+secondary structure assignment, or the standard statistical tests, so the
 packages that provide them are cited as methods rather than as dependencies.
 
 - Michaud-Agrawal, N., Denning, E. J., Woolf, T. B., and Beckstein, O. (2011).
@@ -213,7 +213,7 @@ packages that provide them are cited as methods rather than as dependencies.
 ## Structural algorithms
 
 These define the geometry PolyzyMD measures, so the criteria and radii they set
-decide what counts as a hydrogen bond, a helix or an exposed atom.
+decide what counts as a hydrogen bond, a helix, or an exposed atom.
 
 - Kabsch, W. (1976). A solution for the best rotation to relate two sets of
   vectors. Acta Crystallographica A32:922-923. doi:10.1107/S0567739476001873

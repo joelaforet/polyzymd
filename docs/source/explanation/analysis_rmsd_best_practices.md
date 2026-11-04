@@ -3,10 +3,10 @@
 The root mean square deviation (RMSD) measures how far a set of atoms is from
 a reference structure at each frame. It gives one value per frame: a time
 series. RMSD is a distance from one chosen structure. It does not measure
-stability, free energy or activity.
+stability, free energy, or activity.
 
 For the commands, see {doc}`../how_to/analysis_rmsd_quickstart`. For
-replicates, correlation and intervals, see
+replicates, correlation, and intervals, see
 {doc}`analysis_statistics_best_practices`.
 
 ## Definition
@@ -22,7 +22,7 @@ $$
 
 RMSF averages over time and gives one value per residue. RMSD averages over
 atoms and gives one value per frame. For the relation between RMSD, RMSF,
-offset and the per-residue deviation, see
+offset, and the per-residue deviation, see
 {ref}`Fluctuation, offset and deviation <rmsf-fluctuation-offset-deviation>`.
 
 ## What the shipped analysis does
@@ -91,7 +91,7 @@ proteins. They are not thresholds for "stable" or "unstable".
 |---|---|
 | 0.5 to 1.5 | A rigid core, a short simulation, or restraints |
 | 1.5 to 2.5 | Normal backbone motion of many compact proteins |
-| 2.5 to 3.5 | Flexible loops, termini, lid opening or domain motion |
+| 2.5 to 3.5 | Flexible loops, termini, lid opening, or domain motion |
 | 3.5 to 5.0 | Domain rearrangement or partial unfolding |
 | above 5.0 | Unfolding, or a different conformational state |
 
@@ -113,7 +113,7 @@ around a change in a molecular viewer before you name a mechanism.
 
 A plateau shows that this selection no longer drifts from this reference on
 the time scale you simulated. It does not show that other coordinates, slow
-modes or the solvent have reached equilibrium.
+modes, or the solvent have reached equilibrium.
 
 ## RMSD as an equilibration check
 
@@ -167,6 +167,6 @@ and Computation* 13(4):1518-1524. https://doi.org/10.1021/acs.jctc.7b00028
 
 - {doc}`../how_to/analysis_rmsd_quickstart` — run the analysis
 - {doc}`analysis_reference_selection` — choose the reference mode
-- {doc}`analysis_rmsf_best_practices` — fluctuation, offset and deviation
+- {doc}`analysis_rmsf_best_practices` — fluctuation, offset, and deviation
 - {doc}`convergence_detection` — the equilibration check
-- {doc}`analysis_statistics_best_practices` — replicates, intervals and tests
+- {doc}`analysis_statistics_best_practices` — replicates, intervals, and tests

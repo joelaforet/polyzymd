@@ -15,7 +15,7 @@ The builder makes each residue one unit that you would select or count:
 | Protein | One amino acid |
 | Substrate or ligand | The whole molecule |
 | Polymer | One monomer |
-| Water, ion or co-solvent | One molecule |
+| Water, ion, or co-solvent | One molecule |
 
 Some topology tools give all molecules of one type the same residue
 identity. Then you cannot tell two waters apart, or count the contacts of one
@@ -33,13 +33,13 @@ unused, so the letters of the other components never move.
 | A | Every protein molecule |
 | B | The substrate or ligand |
 | C | Every polymer chain |
-| D, E, ... | Water, ions and co-solvents |
+| D, E, ... | Water, ions, and co-solvents |
 
 Therefore `chainid A` always selects the protein, and `chainid C` always
 selects all polymer. The PDB format allows 9999 residues in a chain. The
 builder puts solvent molecules 1 to 9999 on chain D, the next 9999 on chain
 E, and so on. If the solvent needs more chains than the alphabet has after
-D, the build stops with an error. Solvent chain IDs never repeat A, B or C.
+D, the build stops with an error. Solvent chain IDs never repeat A, B, or C.
 
 ## Protein residue numbers
 
@@ -61,7 +61,7 @@ The build tells such chains apart by their input chain IDs, so keep them. If
 the input already puts both chains on one chain ID and their residue numbers
 overlap, residues of equal number and name merge into one.
 
-Use the built numbers in restraints, `core:` and `regions:` selections and
+Use the built numbers in restraints, `core:` and `regions:` selections, and
 residue lists. To compare with the input numbering, add the offset back. See
 {doc}`../how_to/restraints`.
 
@@ -80,7 +80,7 @@ residue name is the monomer's name. A selection such as
 
 ## Substrate and solvent residue numbers
 
-The substrate is residue 1 of chain B. Water, ions and co-solvent molecules
+The substrate is residue 1 of chain B. Water, ions, and co-solvent molecules
 are numbered from 1 on each solvent chain, one number per molecule. A solvent
 molecule is identified by its chain and its residue number together.
 

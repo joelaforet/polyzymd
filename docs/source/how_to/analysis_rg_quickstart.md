@@ -27,7 +27,7 @@ works too. The quickstart uses it.
 ## From the command line
 
 In a {term}`study`, give the study folder. The study names the conditions,
-the control and the equilibration window. The results go to
+the control, and the equilibration window. The results go to
 `<study>/results/rg/`:
 
 ```bash
@@ -82,7 +82,7 @@ one number in its place, for example the Rg of one polymer chain. See
 
 PolyzyMD stores the per-frame values of each replicate under
 `polyzymd_results/<name>/<condition>/replicate_<n>/`. A record beside the
-values names the function, the selection, the input files and the frames
+values names the function, the selection, the input files, and the frames
 used. The next command reuses the values only if all of these match.
 
 ## Before you interpret the numbers

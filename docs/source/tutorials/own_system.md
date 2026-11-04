@@ -9,12 +9,12 @@
 - **You need:** {doc}`../get_started/quickstart` done, and your protein as a
   PDB file cleaned for OpenFF ({doc}`prepare_pdb_for_openff`).
 - **Time:** about 30 minutes to set up. The simulations take as long as your
-  protein, durations and hardware need.
+  protein, durations, and hardware need.
 :::
 
 In this tutorial you set up simulations of your own protein. You make a
-{term}`project`, write a template config for a first condition, fill it in
-and check it. Then you copy the condition to make a second one, run both and
+{term}`project`, write a template config for a first condition, fill it in,
+and check it. Then you copy the condition to make a second one, run both, and
 analyze them.
 
 The example protein is Trp-cage, from `examples/quickstart/trpcage.pdb` of
@@ -55,12 +55,27 @@ polyzymd project init ~/my_paper --study trpcage
 cd ~/my_paper
 ```
 
-```
+After the PolyzyMD logo, the output is:
+
+```text
 created project /home/me/my_paper with studies trpcage
-next: fill description:, structures:, regions: and conditions: in each study.yaml (polyzymd study add-condition adds a condition), the analyses and metadata: in project.yaml, then polyzymd project check
+
+  my_paper/
+  ├── project.yaml          the studies, the analyses, and the paper's metadata
+  ├── trpcage/
+  │   └── study.yaml        its conditions, structures, and regions
+  ├── analyses/  stats/  figures/  notebooks/
+  └── README.md  LICENSE-code  LICENSE-data
+
+next:
+  1. cd /home/me/my_paper
+  2. polyzymd study add-condition NAME --new --study trpcage   (or --config FILE, or --from CONDITION)
+  3. fill description:, structures:, and regions: in trpcage/study.yaml
+  4. list the analyses and fill metadata: in project.yaml
+  5. polyzymd project check
 ```
 
-A study label is also its folder name. Use lower case letters, digits and
+A study label is also its folder name. Use lower case letters, digits, and
 `_`. For a second protein, add a study later with
 `polyzymd project add-study LABEL`.
 
@@ -148,7 +163,7 @@ Then let `build --dry-run` print what it would build, without building it:
 polyzymd build -c trpcage/conditions/water/config.yaml -r 1 --dry-run
 ```
 
-Check the components, the phases and the folders in its report. These lines
+Check the components, the phases, and the folders in its report. These lines
 say where the runs go:
 
 ```

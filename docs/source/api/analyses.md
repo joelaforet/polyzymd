@@ -7,11 +7,11 @@ listed in {doc}`../reference/analysis_functions`, and
 
 | Module | What it holds |
 |---|---|
-| `polyzymd.analyses.study` | `Study`, `Condition` and `Replicate`: every replicate of every condition as an MDAnalysis `Universe` with its equilibration window removed |
+| `polyzymd.analyses.study` | `Study`, `Condition`, and `Replicate`: every replicate of every condition as an MDAnalysis `Universe` with its equilibration window removed |
 | `polyzymd.analyses.project` | `Project`: the studies of `project.yaml`, and their stored results in one table |
 | `polyzymd.analyses.timeseries` | `Study.timeseries` and `Study.per_replicate`, the stored `Timeseries` and `ReplicateValues`, their summaries and comparisons |
 | `polyzymd.analyses.figures` | Figures drawn from stored values |
-| `polyzymd.analyses.reference` | Reference structures (frame, centroid, average or file) for RMSD, RMSF and native contacts |
+| `polyzymd.analyses.reference` | Reference structures (frame, centroid, average, or file) for RMSD, RMSF, and native contacts |
 | `polyzymd.analyses.protocols` | `polyzymd analyze` in Python (`analyze`) and the `ProtocolReport` it returns |
 | `polyzymd.analyses.universe` | `UniverseProvider`, which loads a replicate's `Universe` |
 | `polyzymd.analyses.study_file`, `results`, `user_functions`, `study_scaffold`, `study_git`, `study_metadata`, `study_freeze`, `study_upload_guide` | `study.yaml` and `data.local.yaml`, reading stored results without trajectories, running a study's own functions, creating a study folder, recording its git state, freezing it for publication, and preparing its upload |
@@ -123,5 +123,5 @@ listed in {doc}`../reference/analysis_functions`, and
 
 ## Related API pages
 
-- {doc}`analyses_shared`: trajectory loading, statistics, plotting and selection helpers
+- {doc}`analyses_shared`: trajectory loading, statistics, plotting, and selection helpers
 - {doc}`config`: `PlotSettings` and the other plot settings models

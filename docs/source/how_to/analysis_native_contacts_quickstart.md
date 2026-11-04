@@ -40,15 +40,15 @@ $$
 the switching function of MDAnalysis `analysis.contacts.soft_cut_q`, which is
 close to 1 while the pair stays within about `λ r0` and falls to 0 beyond it.
 Q is the mean over the native pairs. The defaults, heavy atoms of the protein,
-4.5 Å, more than 3 residues apart, β = 5 Å⁻¹ and λ = 1.8, are the definition of
-Best, Hummer and Eaton (2013). Distances on each frame use the minimum image of
+4.5 Å, more than 3 residues apart, β = 5 Å⁻¹, and λ = 1.8, are the definition of
+Best, Hummer, and Eaton (2013). Distances on each frame use the minimum image of
 the box, and the reference must be a whole structure. Each replicate's value is
 its mean Q over the production frames.
 
 ## From the command line
 
 In a {term}`study`, give the study folder. The study names the conditions,
-the control and the equilibration window. The results go to
+the control, and the equilibration window. The results go to
 `<study>/results/native_contacts/`:
 
 ```bash
@@ -91,7 +91,7 @@ Settings, passed with `--set`:
 | Setting | Default | Meaning |
 |---|---|---|
 | `selection` | `protein and not element H` | Atoms whose contacts are measured |
-| `reference_mode` | `external` with `reference_file`, otherwise `frame` | Reference structure, as for {doc}`analysis_rmsd_quickstart`: `frame`, `external`, `average` or `centroid` |
+| `reference_mode` | `external` with `reference_file`, otherwise `frame` | Reference structure, as for {doc}`analysis_rmsd_quickstart`: `frame`, `external`, `average`, or `centroid` |
 | `reference_frame` | `1` | Production frame of the reference for `frame`, counted from 1 |
 | `reference_file` | none | Structure file for `external` |
 | `radius` | `4.5` | Å; native pairs are closer than this in the reference |

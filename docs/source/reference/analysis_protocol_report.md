@@ -11,12 +11,12 @@ reads back exactly what `model_dump_json()` wrote.
 |---|---|---|
 | `analysis` | `str` | Canonical analysis name, for example `rg`. |
 | `status` | `str` | `complete`, or `partial` when a condition could not be measured or compared and the report covers the others. |
-| `problems` | `list[str]` | For a partial report, each condition left out, or the comparison that failed, with its error. Empty for a complete report. `polyzymd study check`, `study freeze` and `project freeze` name them. |
+| `problems` | `list[str]` | For a partial report, each condition left out, or the comparison that failed, with its error. Empty for a complete report. `polyzymd study check`, `study freeze`, and `project freeze` name them. |
 | `trends` | `list[TrendReport]` | For a run from a study whose conditions declare factors: one slope test per factor whose levels are all numbers or numbers written as text (untestable then). Empty otherwise. |
-| `protocol_version` | `str` | Version of the report protocol, `"2"` for every report of the study API. With `analysis` it identifies the code that defined the metric; it changes when the meaning, unit or estimator of a reported metric changes. |
+| `protocol_version` | `str` | Version of the report protocol, `"2"` for every report of the study API. With `analysis` it identifies the code that defined the metric; it changes when the meaning, unit, or estimator of a reported metric changes. |
 | `metric` | `str` | Name of the reported values, for example `mean_rg`. |
 | `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, such as a fraction. |
-| `run` | `str \| None` | Selected result when the analysis reports several: for sasa each context's total and per-residue SASA; for distances each pair's mean distance (`<label>`) and fraction below threshold; for hydrogen_bonds each summary's counts, lifetimes, per-residue and per-pair occupancies; for rmsf and rmsd_per_residue the core, region and plain-mean values and the per-residue profiles. `None` when the analysis reports one result. |
+| `run` | `str \| None` | Selected result when the analysis reports several: for sasa each context's total and per-residue SASA; for distances each pair's mean distance (`<label>`) and fraction below threshold; for hydrogen_bonds each summary's counts, lifetimes, per-residue and per-pair occupancies; for rmsf and rmsd_per_residue the core, region, and plain-mean values and the per-residue profiles. `None` when the analysis reports one result. |
 | `all_metrics` | `list[str]` | Other metric names of the result, `metric` first. Empty in the reports of the shipped analyses, which name each result in `all_runs` instead. |
 | `all_runs` | `list[str]` | Every result the analysis measured, the reported one first. Empty when it measures one. Select another with `--run LABEL`. |
 | `equilibration` | `str` | Equilibration window discarded from the start of every replicate, for example `10ns`. Applied uniformly to every replicate of every condition; a study's analysis entry may set its own. |
@@ -25,15 +25,15 @@ reads back exactly what `model_dump_json()` wrote.
 | `conditions` | `list[ConditionReport]` | One entry per condition, in the order the configs were given; for a labeled result such as a per-residue profile, one entry per condition and label. |
 | `pairwise` | `list[PairwiseReport]` | One entry per comparison of the primary metric, or per comparison and label for a labeled result. Empty for a single condition. |
 | `warnings` | `list[str]` | Sampling and interval warnings: conditions with one replicate or the same value in every replicate, intervals that cross the bounds of a bounded quantity, untestable comparisons, and pymbar equilibration diagnostics. |
-| `provenance` | `ProtocolProvenance` | Versions, config hashes and output paths. |
+| `provenance` | `ProtocolProvenance` | Versions, config hashes, and output paths. |
 | `verdict` | `list[str]` | One sentence per pairwise comparison, or one sentence describing the single condition. |
 
 `ProtocolReport.to_agent_text()` renders the report as plain text with no
-borders and no blank lines, one line for each condition, comparison, warning
+borders and no blank lines, one line for each condition, comparison, warning,
 and verdict. No line is dropped, however many conditions the report holds.
 For a labeled result the comparisons are summarized instead: one line per
 compared condition gives the number of labels, the number tested, the family
-size and how many labels are significantly lower and higher, followed by lines
+size, and how many labels are significantly lower and higher, followed by lines
 listing each significant label. A final `note:` line says how many per-label
 rows the JSON form holds; every one of them is kept there.
 
@@ -103,7 +103,7 @@ rows the JSON form holds; every one of them is kept there.
 | `config_hashes` | `dict[str, str]` | `polyzymd.analyses.identity.compute_config_hash` of each simulation config, keyed by condition label: the first 16 hex characters of the SHA-256 of the config fields that locate and describe its trajectories. |
 | `settings_fingerprint` | `str \| None` | `None`: no shipped analysis sets it. |
 | `settings` | `dict` | Settings a study-API analysis ran with. For rmsf and rmsd_per_residue: every setting, the resolved `reference_mode`, and under `residues` the residue IDs of the core and of each region. Empty for other analyses. |
-| `study` | `dict \| None` | Set for a run from a study file: `path` and `sha256` of `study.yaml`; the `run`; the `settings` it was given (from the file and `--set`), with paths inside the study or project written relative to the study and any other path as its file name; the `selections` of a study's own function; the condition `factors` its trend tests used; the `comparison` block, when `study.yaml` has one; for a study of a project, `project` with the `path`, study `label` and `sha256` of `project.yaml`; and `git`, with the `commit` of the study folder (of the project folder for a study of a project), its `uncommitted` files and `inputs_uncommitted`, those outside `results/`, `logs/`, `deposit/` and `data.local.yaml`; `git` is `None` outside a repository. A rerun whose report differs from the saved `report.json` only in that `commit` keeps the saved file. |
+| `study` | `dict \| None` | Set for a run from a study file: `path` and `sha256` of `study.yaml`; the `run`; the `settings` it was given (from the file and `--set`), with paths inside the study or project written relative to the study and any other path as its file name; the `selections` of a study's own function; the condition `factors` its trend tests used; the `comparison` block, when `study.yaml` has one; for a study of a project, `project` with the `path`, study `label`, and `sha256` of `project.yaml`; and `git`, with the `commit` of the study folder (of the project folder for a study of a project), its `uncommitted` files and `inputs_uncommitted`, those outside `results/`, `logs/`, `deposit/`, and `data.local.yaml`; `git` is `None` outside a repository. A rerun whose report differs from the saved `report.json` only in that `commit` keeps the saved file. |
 | `output_paths` | `dict[str, str]` | `results` is the `polyzymd_results/<name>/` folder holding every replicate's stored values and record; `figures` is the directory holding the generated plots, absent with `--no-plots`. |
 
 ## Verdict vocabulary
@@ -121,7 +121,7 @@ branch on them without parsing the rest.
 | `not testable` | a condition has fewer than three replicates (the sentence then starts `not testable (n < 3)` and gives both means), has no variance in either condition, or has no partner, so no test exists. A trend needs three replicates in every condition too |
 
 A single-condition report has no comparison, and its one sentence states the
-label, the metric, the mean with its unit, the interval and the replicate
+label, the metric, the mean with its unit, the interval, and the replicate
 count.
 
 ## See also

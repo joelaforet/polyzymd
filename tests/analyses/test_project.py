@@ -234,6 +234,8 @@ class TestProjectInit:
             + ["--no-git"],
         )
         assert result.exit_code == 0, result.output
+        assert f"1. cd {tmp_path / 'P'}" in result.output
+        assert "--new --study lipa363" in result.output and "└── study.yaml" in result.output
         text = (tmp_path / "P" / "project.yaml").read_text()
         assert "studies:" in text and "  lipa363: lipa363\n  rml333: rml333" in text
         assert "title: TODO" in text and "polyzymd:" not in text

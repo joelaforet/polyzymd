@@ -7,19 +7,19 @@ Analyze simulations you have already run in a second study, without running
 them again: copy the condition's config into the second study. Copying a
 config is cheap; the copy keeps reading the existing trajectories. Each study
 then analyzes the same trajectories with its own equilibration window,
-regions, control and factors.
+regions, control, and factors.
 
 Reuse a condition when the same simulations answer more than one question.
 For example, a project has a study `solvents` that compares a protein with
 SBMA chains in water and in 10 % DMSO, at 300 K. A second study,
-`temperatures`, compares the same system in water at 300 K, 330 K and 360 K.
+`temperatures`, compares the same system in water at 300 K, 330 K, and 360 K.
 The 300 K water condition belongs to both studies, and it is simulated once.
 
 ## What the project keeps, and where the trajectories are
 
 A project folder holds what describes the simulations and the analyses: each
 condition's `config.yaml` and its input files, `study.yaml`, `project.yaml`,
-the analysis code and the stored results. Git tracks these, and freeze
+the analysis code, and the stored results. Git tracks these, and freeze
 publishes them.
 
 The trajectories are not part of the project. Each config says where its runs
@@ -46,7 +46,7 @@ runs: the copy reuses the runs in /home/me/Paper_1/runs/solvents/water; nothing 
 ```
 
 The copy's `scratch_directory` points at the existing runs. So analysis,
-`polyzymd status`, `run` and `submit` find the same replicates from either
+`polyzymd status`, `run`, and `submit` find the same replicates from either
 study, and a replicate run with either config goes into the same folder.
 
 ## Step 2: Add the other conditions
@@ -79,7 +79,7 @@ polyzymd study check temperatures
 | Shared by both studies | Each study's own |
 |---|---|
 | The replicates and their trajectories | The equilibration window (`equilibration:` in `study.yaml`) |
-| The run folder: a replicate run or submitted with either config goes there | The control, the factors and the comparisons |
+| The run folder: a replicate run or submitted with either config goes there | The control, the factors, and the comparisons |
 | | The structures and the regions |
 | | The stored results, in each study's `results/` |
 | | Its copy of the config |

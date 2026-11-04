@@ -57,7 +57,7 @@ The GitHub Actions workflows run them
   with GROMACS installed, on every pull request.
 - `.github/workflows/full-test.yml`: the whole test suite on Linux and macOS,
   for pull requests to `main` and `dev` and once a week.
-- `.github/workflows/ci.yml`: lint, type check, package build, install test
+- `.github/workflows/ci.yml`: lint, type check, package build, install test,
   and a docs build with warnings as errors, for pull requests to `main` and
   `dev`.
 
@@ -87,7 +87,7 @@ Use:
 - a valid SMILES string
 - a literature or database-backed density
 - a molar mass in g/mol
-- a 3-letter residue name that is not an amino-acid, nucleic-acid, water or
+- a 3-letter residue name that is not an amino-acid, nucleic-acid, water, or
   ion name (the PDB chemical-component code, where there is one)
 - common alternative names that should resolve to the same solvent
 
@@ -151,7 +151,7 @@ section that matches what its reader is doing.
 |---|---|---|
 | Tutorials | learn, by doing a whole lesson with a known result | starts from nothing, says what it teaches and how long it takes |
 | How-to guides | do one task they already understand | starts from the task, gives the steps, links to the reference |
-| Reference | look up a fact | lists every key, command, file or check, and the evidence behind them |
+| Reference | look up a fact | lists every key, command, file, or check, and the evidence behind them |
 | Explanation | understand why | discusses design and reasoning; has no steps to follow |
 
 - Titles are in sentence case ("Run a simulation longer"); proper names keep
@@ -162,7 +162,7 @@ section that matches what its reader is doing.
 - Add each new page to the toctree of its section's `index.md`, under the
   group (`:caption:`) it belongs to; the caption labels the group in the
   sidebar.
-- Colors, the logo and the landing page live in `docs/source/_static/custom.css`
+- Colors, the logo, and the landing page live in `docs/source/_static/custom.css`
   and `docs/source/index.rst`; use the `--pz-*` color variables rather than
   new colors.
 

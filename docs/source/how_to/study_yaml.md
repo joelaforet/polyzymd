@@ -2,9 +2,9 @@
 
 A {term}`study` is a set of conditions that you compare with each other.
 All its conditions share one analysis frame: the same residue numbering,
-reference structures, named regions, equilibration window and control.
+reference structures, named regions, equilibration window, and control.
 `study.yaml` holds the analysis protocol of the study: the conditions, the
-equilibration window and the settings of each analysis. The simulation of
+equilibration window, and the settings of each analysis. The simulation of
 each condition stays in its own `config.yaml`.
 
 Use `study.yaml` when you analyze a study again and again, or when someone
@@ -199,7 +199,7 @@ warning: the conditions were analyzed up to different times (No polymer 456.4 ns
 
 ### Give one analysis its own window
 
-An analysis entry can set its own `equilibration:`, `until:` and `stride:`.
+An analysis entry can set its own `equilibration:`, `until:`, and `stride:`.
 Use a stride for an analysis that costs too much to run on every frame.
 
 Use a separate window, for example, for a system that still changes at the
@@ -228,7 +228,7 @@ segments.
 ## Run your own function
 
 First check whether a shipped analysis measures your quantity.
-`polyzymd analyze --list` prints each shipped analysis, what it measures and
+`polyzymd analyze --list` prints each shipped analysis, what it measures, and
 its settings with their defaults. For example, `contacts` with
 `method: occlusion` is the buried-surface definition of a contact. A shipped
 analysis is verified and documented, and its settings go straight into an
@@ -236,7 +236,7 @@ entry of `study.yaml`.
 
 To run your own function, write it in a Python file of the study and list it
 in `study.yaml`. It then runs like a shipped analysis, with stored records,
-statistics, a report and figures:
+statistics, a report, and figures:
 
 ```python
 # my_study/analyses/lid.py
@@ -323,11 +323,11 @@ recomputes the results at the next analysis:
   `analyses/data/reference_distances.csv`. Put each data file that a
   function reads there.
 
-No other file counts. Notes, figures, PDFs or a copied trajectory in
+No other file counts. Notes, figures, PDFs, or a copied trajectory in
 `analyses/` change no result, and PolyzyMD reads none of them. The analysis
 log names the files that it leaves out, so a data file outside `data/` is
 easy to find. Hidden folders (`.git`, `.pixi`, `.venv`), `results/`,
-`logs/`, `deposit/`, `conditions/`, `figures/`, job folders and the folders
+`logs/`, `deposit/`, `conditions/`, `figures/`, job folders, and the folders
 of other studies never count.
 
 A function file beside `study.yaml` or `project.yaml` depends only on the
@@ -366,7 +366,7 @@ that `polyzymd analyze --output-dir` wrote elsewhere, use
 and `study freeze` see only `results/`.
 
 `results.table` has the columns `name`, `condition`, `replicate`, `part`,
-`label`, `frame`, `time_ns`, `value` and `unit`:
+`label`, `frame`, `time_ns`, `value`, and `unit`:
 
 - A per-frame series fills `frame` and `time_ns`. The table then has one row
   per frame.
@@ -375,7 +375,7 @@ and `study freeze` see only `results/`.
   components, fills `part`.
 
 `study.replicate_table(run)` has one row per replicate, quantity (`name`),
-part and label. Every test of the report uses these values.
+part, and label. Every test of the report uses these values.
 
 `study.settings("contacts_4A")` returns the settings of a run. When the
 trajectories are present, the conditions load as usual
@@ -390,7 +390,7 @@ trajectories are present, the conditions load as usual
 | The conditions | `study.conditions`, `for condition in study`, `study["SBMA 50%"]` |
 | The replicates of a condition | `study["SBMA 50%"].replicates`. Each has `.index`, `.frames`, `.times`, `.universe()` |
 | The stored results of a run | `study.results("rg")` (`.table`, `.report`, `.warnings`) |
-| One row per replicate | `study.replicate_table("rg")`: one row per replicate, quantity (`name`), part and label |
+| One row per replicate | `study.replicate_table("rg")`: one row per replicate, quantity (`name`), part, and label |
 | The settings of a run | `study.settings("rg")` |
 | A file of the study, from a relative path in its settings | `study.path(study.settings("rmsf")["reference_file"])`. `study.root` is the folder |
 | The Python code of the study, as the analyses import it | `study.module("interface")` for `analyses/interface.py` (also looked up in the project folder) |

@@ -15,7 +15,7 @@ of the command that fails:
 |------|------------------|
 | PDB preparation, `polyzymd validate`, `polyzymd build`, `polyzymd run` | `build` |
 | OpenMM `polyzymd submit` or `recover --submit` | `build`. The SLURM job activates the site environment |
-| OpenMM inside a SLURM job on an NVIDIA GPU | `sim-cuda-12-0`, `sim-cuda-12-4` or `sim-cuda-12-6` |
+| OpenMM inside a SLURM job on an NVIDIA GPU | `sim-cuda-12-0`, `sim-cuda-12-4`, or `sim-cuda-12-6` |
 | Trajectory analysis and plots, `polyzymd analyze ...` | `analysis` |
 
 Use `pixi shell -e <env>` to activate an environment, or put
@@ -63,7 +63,7 @@ of each section, see {doc}`../reference/configuration`.
 error: config: this config uses the layout of PolyzyMD 1.2 and 1.3.0rc4 and earlier (enzyme -> a solutes entry with type: protein). Rewrite it from the template (polyzymd study add-condition LABEL --new writes one) or see https://polyzymd.readthedocs.io/en/latest/how_to/rewrite_config_rc5.html
 ```
 
-The config has an `enzyme:`, `substrate:`, `polymers:` or top-level
+The config has an `enzyme:`, `substrate:`, `polymers:`, or top-level
 `force_field:` section. PolyzyMD 1.3.0 lists each solute as an entry of
 `solutes:`, with its own `force_field`. Rewrite the config as
 {doc}`rewrite_config_rc5` shows.
@@ -131,20 +131,20 @@ co_solvents:
     charges: {method: preset}
 ```
 
-The same rule applies to every list, such as `co_solvents`, `monomers` and
+The same rule applies to every list, such as `co_solvents`, `monomers`, and
 `restraints`.
 
 ## System build
 
-### Charge assignment fails for a substrate, co-solvent or polymer
+### Charge assignment fails for a substrate, co-solvent, or polymer
 
-1. Check that the SDF file has correct bond orders, formal charges and
+1. Check that the SDF file has correct bond orders, formal charges, and
    explicit hydrogens.
 2. Use `charges: {method: nagl, model: "openff-gnn-am1bcc-1.0.0.pt"}`
    ({term}`NAGL`). It needs no extra program.
 3. For a polymer that NAGL cannot charge, compute the charges outside
-   PolyzyMD, store them in the cached SDF files and use
-   `charges: {method: preset}`. A small molecule takes `nagl`, `am1bcc` or
+   PolyzyMD, store them in the cached SDF files, and use
+   `charges: {method: preset}`. A small molecule takes `nagl`, `am1bcc`, or
    `espaloma` only.
 
 The `am1bcc` method ({term}`AM1-BCC`) needs AmberTools, which the PolyzyMD
@@ -367,7 +367,7 @@ a row, not three failures in the whole simulation.
 ### `Segment N was hard-killed ... Moved to production_N.hardkilled-...`
 
 A segment stopped without a grace period, for example after `SIGKILL`, an
-out-of-memory kill or a node failure. It left no `INTERRUPTED` marker and no
+out-of-memory kill, or a node failure. It left no `INTERRUPTED` marker and no
 `restart_state.xml`. PolyzyMD cannot tell how much of the segment is good. It
 renames the folder and runs segment `N` again from the last good state.
 
@@ -425,14 +425,14 @@ segment left no portable state file.
    last portable state.
 
 PolyzyMD always loads a portable state file (`production_N_state.xml`,
-`interrupted_state.xml` or `restart_state.xml`) before a checkpoint, and logs
+`interrupted_state.xml`, or `restart_state.xml`) before a checkpoint, and logs
 its choice. So this error appears only when a checkpoint was the only file
 left.
 
 ### `TrajectoryLineageError: Trajectory segments do not form a single contiguous time line`
 
 The analysis loader refuses production segments whose times overlap, run
-backward or leave a gap, or whose frame intervals differ. It repairs two
+backward, or leave a gap, or whose frame intervals differ. It repairs two
 boundary faults of the OpenMM restart chain, and prints a warning:
 
 - A segment starts at the time of the last frame of the previous segment.
@@ -459,7 +459,7 @@ changed during the chain.
 1. Read the error. It names the two segments, with their first and last
    times.
 2. Read `progress.json`. Each segment records `polyzymd_version`,
-   `openmm_version`, `pixi_environment` and `started_at`. Compare it with the
+   `openmm_version`, `pixi_environment`, and `started_at`. Compare it with the
    `production_N/` folders, and find the second chain.
 3. Move the segments of the second chain out of the replicate folder. Do not
    delete them. Then run the analysis again.

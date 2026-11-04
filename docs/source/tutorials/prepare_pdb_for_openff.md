@@ -13,9 +13,9 @@ You learn these steps:
 4. Check the file with OpenFF.
 5. Build the system with PolyzyMD.
 
-1UBQ is a good first structure. It has one protein chain, no missing residues
+1UBQ is a good first structure. It has one protein chain, no missing residues,
 and no alternate locations. Many PDB entries need more work: several copies of
-the protein, missing residues, ligands or disulfide bonds. The last section of
+the protein, missing residues, ligands, or disulfide bonds. The last section of
 this tutorial shows two of these steps on PDB entry 181L: a chain that ends
 early, and a crystal ligand. For the other cases, see
 {doc}`../how_to/troubleshoot_openff_pdb_ingestion` after this tutorial.
@@ -24,7 +24,7 @@ early, and a crystal ligand. For the other cases, see
 :class: tip
 
 Run every command of this tutorial in the `build` environment. It holds
-PolyzyMD, PDBFixer, OpenMM and OpenFF. From the repository root, activate it
+PolyzyMD, PDBFixer, OpenMM, and OpenFF. From the repository root, activate it
 once:
 
 ```bash
@@ -143,7 +143,7 @@ stays deprotonated.
 ## Step 5: Check the file with OpenFF
 
 PolyzyMD reads the protein with `openff.toolkit.Topology.from_pdb()`. OpenFF
-matches each residue to a template, with its atoms, bonds and formal charges.
+matches each residue to a template, with its atoms, bonds, and formal charges.
 Run the same call directly:
 
 ```bash
@@ -223,7 +223,7 @@ grep -v "^HETATM" structures/181L.pdb > structures/181L_protein.pdb
 ```
 
 The `grep` keeps the protein. It removes the waters, the ions, the
-crystallization additives and the benzene.
+crystallization additives, and the benzene.
 
 (add-terminal-oxt)=
 ### Add the terminal oxygen of a chain that ends early
@@ -319,7 +319,7 @@ Chem.MolToMolFile(ligand, sdf_path)
 print(f"{sdf_path}: {ligand.GetNumAtoms()} atoms, formal charge {Chem.GetFormalCharge(ligand)}")
 ```
 
-Give the PDB file, the residue name of the ligand, its SMILES and the SDF to
+Give the PDB file, the residue name of the ligand, its SMILES, and the SDF to
 write. The residue name of benzene in 181L is `BNZ`:
 
 ```bash
@@ -355,7 +355,7 @@ solutes:
 ```
 
 The SDF has no atom names. In the built system OpenFF names the benzene atoms
-by element, count and an `x` suffix: `C1x` to `C6x`, then `H1x` to `H6x`. The
+by element, count, and an `x` suffix: `C1x` to `C6x`, then `H1x` to `H6x`. The
 carbons keep the order of the `HETATM` records, so crystal atom `C1` becomes
 `C1x`. A restraint on benzene selects `name C1x`, not `name C1`; see
 {ref}`restraint-ligand-atom-names`. `polyzymd validate` refuses a
@@ -374,5 +374,5 @@ and checked the result with OpenFF and with a PolyzyMD build. The file
   in {doc}`../get_started/quickstart`. Make the durations longer for a real
   study.
 - Add polymers: {doc}`../how_to/polymers`.
-- Prepare a harder structure, with several protein copies, cleaved chains or
+- Prepare a harder structure, with several protein copies, cleaved chains, or
   disulfide bonds: {doc}`../how_to/troubleshoot_openff_pdb_ingestion`.

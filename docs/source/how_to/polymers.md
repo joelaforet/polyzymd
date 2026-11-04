@@ -143,7 +143,7 @@ The builder does these steps:
 
 The replicate number seeds PACKMOL, so each replicate gets its own placement.
 The cell does not depend on the placement. All replicates of one condition
-therefore get the same box, the same number of waters and the same number of
+therefore get the same box, the same number of waters, and the same number of
 ions.
 
 ### Packing settings
@@ -245,7 +245,7 @@ An exit code of 173 is not a failure. The build continues. A
 
 ### OpenFF cannot assign parameters to a chain
 
-1. Check that each SDF file has correct bond orders, formal charges and
+1. Check that each SDF file has correct bond orders, formal charges, and
    explicit hydrogens.
 2. Check that each SDF file has partial charges. The builder uses them.
 3. Build the chains in `dynamic` mode with

@@ -15,7 +15,7 @@ PolyzyMD, understand the codebase, or add new capabilities.
 An analysis is a Python function of an MDAnalysis `AtomGroup` or `Universe`,
 run on every replicate by `Study.timeseries` or `Study.per_replicate`.
 [Add an analysis](adding_an_analysis.md) shows how to write one, ship it in
-`polyzymd.analyses.functions`, expose it through `polyzymd analyze` and test
+`polyzymd.analyses.functions`, expose it through `polyzymd analyze`, and test
 it; [Study API](../reference/study_api.md) describes
 the study API in full.
 

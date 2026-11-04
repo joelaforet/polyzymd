@@ -31,7 +31,7 @@ Run `polyzymd submit` from the `build` environment. Prefix each command with
 `pixi run -e build`, or activate the environment once with `pixi shell -e build`.
 
 Which environment runs what: `build` runs `build`, `validate`, `submit`,
-`status`, `recover` and `cancel`. A `sim-cuda-*` environment runs only inside
+`status`, `recover`, and `cancel`. A `sim-cuda-*` environment runs only inside
 the OpenMM jobs (and for a run on a local GPU). `analysis`, or `build`, runs
 `analyze`.
 
@@ -165,7 +165,7 @@ You cannot use `--dry-run` and `--generate-only` together.
 
 ## Step 3: choose a preset
 
-A preset sets the partition, QoS, account and time limit of each job.
+A preset sets the partition, QoS, account, and time limit of each job.
 
 | Preset | Partition | QoS | Time limit | Use |
 |--------|-----------|-----|------------|-----|
@@ -177,18 +177,18 @@ A preset sets the partition, QoS, account and time limit of each job.
 | `generic-gpu` | `gpu` | none | 23:59:59 | A starting point for any other cluster with NVIDIA GPUs: no account, 3G memory, 1 GPU of any type. Give your site's `--partition` and `--account` (and `--qos` or `--gpu-type` if it needs them) |
 | `testing` | `aa100` | `gpu-testing` | 0:05:59 | Short tests on an A100 slice (`a100_3g.20gb`, reservation `a100_test`) of CU Boulder Alpine |
 
-The Alpine presets (`aa100`, `al40` and `testing`) set the account
+The Alpine presets (`aa100`, `al40`, and `testing`) set the account
 `ucb-general`, which every CU Boulder user has. For a lab allocation, give
 `--account <account>`. CURC renames partitions and QoS values from time to
 time; check the values with `sbatch --test-only` before a campaign. To use
-another cluster, start from `generic-gpu` and set the site's fields with `--partition`, `--account`, `--qos` and
+another cluster, start from `generic-gpu` and set the site's fields with `--partition`, `--account`, `--qos`, and
 `--gpu-type`. An empty value, such as `--qos ""`, removes the preset's line (see
 [If your cluster is not listed](#hpc-slurm-other-cluster)). For the CU Boulder clusters, see
 {doc}`site_cu_boulder`.
 
 For the CU Boulder clusters, see {doc}`site_cu_boulder`.
 
-Each OpenMM job asks for one GPU, one task and `--mem=3G` (the `bridges2`
+Each OpenMM job asks for one GPU, one task, and `--mem=3G` (the `bridges2`
 preset sets no memory line). Change the memory with `--memory`.
 
 ## Step 4: submit one short test job
@@ -204,7 +204,7 @@ pixi run -e build polyzymd submit \
     --replicates 1
 ```
 
-A short job finds a wrong path, a scheduler problem or a broken environment
+A short job finds a wrong path, a scheduler problem, or a broken environment
 in minutes. Use a test or debug partition if your site has one (add
 `--partition <test-partition>`); on CU Boulder Alpine, use the `testing`
 preset.
@@ -260,7 +260,7 @@ pixi run -e build polyzymd check-progress -c config.yaml -r 1
 ```
 
 `polyzymd status --format agent` prints the SLURM state, the throughput, the
-time to completion and the reason a chain stopped, for many configs at once.
+time to completion, and the reason a chain stopped, for many configs at once.
 See {doc}`monitor_simulations`.
 
 (hpc-slurm-recover)=
@@ -283,7 +283,7 @@ pixi run -e build polyzymd recover -c config.yaml -r 1 --submit
 
 
 The job uses the preset and overrides (account, QoS, partition, GPU type,
-time limit, pixi environment and the others) that `polyzymd submit` recorded
+time limit, pixi environment, and the others) that `polyzymd submit` recorded
 in the replicate's `submit_settings.json`. An option given to `recover`, such
 as `--account`, replaces that one value. A replicate submitted by an older
 PolyzyMD has no record: give `--preset` and the overrides yourself, or run
@@ -365,7 +365,7 @@ replicate folder:
 The build writes `build_provenance.json` last. It replaced
 `build_manifest.json` in 1.3.0, and PolyzyMD still reads the old name.
 `submit`, and the job before OpenMM makes a simulation, check the record's
-{term}`build config hash`, its file hashes and its particle count. A missing or damaged
+{term}`build config hash`, its file hashes, and its particle count. A missing or damaged
 record means that the build did not finish. Build the replicate again.
 
 `submit` and `run` refuse a replicate that has not started unless a current
@@ -379,10 +379,10 @@ commits no files. A GROMACS job checks `audited_files.sha256` with
 
 The build and the simulation share the lock file `.polyzymd.lock` in the
 replicate folder. A second process exits and does not write. PolyzyMD refuses
-to build again in a folder that has progress, minimization, equilibration or
+to build again in a folder that has progress, minimization, equilibration, or
 production files. Use a new output folder for a new molecular system.
 
-A continuation loads `production_N_topology.pdb`, the System and the State of
+A continuation loads `production_N_topology.pdb`, the System, and the State of
 the previous segment. If the segment has no `production_N_topology.pdb`, the
 continuation stops with an error. If an error
 names two different particle counts, restore all files from the same build. Do
@@ -400,7 +400,7 @@ preset, `auto` is resolved on each node from its driver, by the thresholds in
 [If your cluster is not listed](#hpc-slurm-other-cluster).
 
 On the allocated node, the job checks the driver and activates the
-environment. It then makes an explicit CUDA Context, calculates an energy and
+environment. It then makes an explicit CUDA Context, calculates an energy, and
 runs one integration step. This test finds an unusable CUDA runtime or PTX
 compiler before the molecular setup. PolyzyMD does not fall back to the CPU.
 
@@ -411,7 +411,7 @@ use an attempt (see {ref}`excluded-blanca-gpu-nodes`). On another cluster,
 give known-bad nodes with `--exclude`.
 
 PolyzyMD records the runtime of each replicate. A replicate cannot change its
-pixi environment, OpenMM version, platform or precision when it is submitted
+pixi environment, OpenMM version, platform, or precision when it is submitted
 again. For the supported runtimes and for new hardware, see
 {doc}`hardware_platforms`.
 
@@ -449,7 +449,7 @@ Each OpenMM job script for an NVIDIA GPU does these steps:
 2. It reads the GPU's capability and checks the environment selected at
    submission.
 3. It activates the environment, makes an explicit CUDA Context, calculates an
-   energy and runs one integration step.
+   energy, and runs one integration step.
 4. It runs `polyzymd run-segment`.
 5. It runs `polyzymd check-progress`.
 6. It submits itself again if work remains and no `STOP` file exists.
@@ -484,7 +484,7 @@ sees a preemption signal within seconds, whatever the reporter interval.
 
 The GROMACS job scripts do these steps:
 
-- They run minimization, the equilibration stages and production, and restart
+- They run minimization, the equilibration stages, and production, and restart
   each from its checkpoint.
 - They pass `-maxh` to `gmx mdrun`, so GROMACS stops before the wall-time
   limit, and `-cpt`, so it writes a checkpoint every `checkpoint_interval`.
@@ -526,7 +526,7 @@ pixi run -e build polyzymd submit \
 For tested CU Boulder recipes, see {doc}`site_cu_boulder`.
 
 GROMACS uses the site module or container that the config's `gromacs:` block
-names. For CPU and GPU settings, MPI, constraints and recovery, see
+names. For CPU and GPU settings, MPI, constraints, and recovery, see
 {doc}`run_gromacs`.
 
 ## Common fixes

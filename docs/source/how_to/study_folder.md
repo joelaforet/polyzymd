@@ -2,10 +2,10 @@
 
 A {term}`study` folder holds a set of conditions that you compare with each
 other. All its conditions share one residue numbering, one set of reference
-structures and regions, one equilibration window and one control. The folder
+structures and regions, one equilibration window, and one control. The folder
 holds the config of each condition, the analysis protocol, your analysis and
 figure code, and the stored results. You can version it,
-share it and publish it. To write `study.yaml` and run the analyses, see
+share it, and publish it. To write `study.yaml` and run the analyses, see
 {doc}`study_yaml`. For the reasons behind the layout, see
 {doc}`../explanation/study_folders`.
 
@@ -106,12 +106,13 @@ does not change. Each prints where the new runs go.
 | `data.example.yaml` | How to write `data.local.yaml` |
 | `data.local.yaml` | Where this machine keeps the simulations. Git ignores it |
 | `runs/` | The runs of the condition configs that set no `scratch_directory`. Git ignores it |
-| `.gitignore` | Leaves out `data.local.yaml`, `runs/`, caches and SLURM logs |
+| `.gitignore` | Leaves out `data.local.yaml`, `runs/`, caches, and SLURM logs |
 
 `study init` also makes the folder a git repository with one commit. Use
 `--no-git` to skip git. To use a different license, replace a LICENSE file.
 `--holder NAME` sets the copyright holder. The default is your
-`git config user.name`.
+`git config user.name`. Put a name with spaces in quotes:
+`--holder "Joseph R. Laforet Jr."`.
 
 ## Say where the trajectories are
 
@@ -155,7 +156,7 @@ projects and scratch directories. Stored records name each trajectory file
 relative to the folder that holds the replicate folders.
 
 Stored records identify each trajectory and topology file by its SHA-256 and
-size. So moved, copied or downloaded data reuses every stored result. At a
+size. So moved, copied, or downloaded data reuses every stored result. At a
 new location, the first analysis reads each file once to hash it. This takes
 about one second per gigabyte. It is not necessary when the hashes of the
 replicate are recorded.
