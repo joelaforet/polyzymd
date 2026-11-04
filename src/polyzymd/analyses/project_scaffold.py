@@ -164,7 +164,7 @@ def create_project(
     studies : list of str
         Study labels; each is also its folder name.
     holder : str, optional
-        Copyright holder written into the licence files.
+        Copyright holder written into the license files.
     git : bool, optional
         Make the project a git repository and commit everything.
 
@@ -242,11 +242,11 @@ def _check_study_label(label: str) -> None:
 
 
 def _write_study(folder: Path) -> Path:
-    """Write an empty study of a project into ``folder``, without licences, and return it."""
+    """Write an empty study of a project into ``folder``, without licenses, and return it."""
     from polyzymd.analyses.study_scaffold import create_study
 
     create_study(folder, git=False)
-    # The project holds the licences, once.
+    # The project holds the licenses, once.
     for name in ("LICENSE-code", "LICENSE-data"):
         (folder / name).unlink(missing_ok=True)
     (folder / "study.yaml").write_text(STUDY_YAML)

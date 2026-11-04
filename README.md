@@ -90,7 +90,7 @@ its `build_provenance.md`.
 ```bibtex
 @software{laforet_polyzymd,
   author = {Laforet, Jr., Joseph R.},
-  title = {PolyzyMD: build, run and analyse molecular dynamics of complex biomolecular systems},
+  title = {PolyzyMD: build, run and analyze molecular dynamics of complex biomolecular systems},
   version = {1.3.0},
   year = {2026},
   doi = {10.5281/zenodo.23680214},

@@ -57,11 +57,11 @@ compared with the control only, not with every other condition.
 
 One call is one family. For one number per replicate, the family is the
 conditions compared with the control: four treated conditions against one
-control correct four tests together. For labelled values, such as a
+control correct four tests together. For labeled values, such as a
 per-residue profile, the family is every tested label of every compared
 condition, because scanning a profile for the labels that changed is a search
 over that set. `family_size` on each row records the size of its family.
-Labels passed as `untested=` are summarised but left out of the tests and the
+Labels passed as `untested=` are summarized but left out of the tests and the
 family.
 
 The family never spans separate commands or calls. For why the boundary is
@@ -88,8 +88,8 @@ For which number to quote, see
 |----------|----------|
 | One replicate in a condition | The row is not testable: no `p`, no `delta_ci95`; the report warns that the condition has no interval. |
 | The same value in every replicate of both conditions | The row is not testable. |
-| One condition | No comparison rows; the verdict summarises the condition. |
-| A label in `untested` | Summarised in `conditions`, absent from `pairwise` and from the family. |
+| One condition | No comparison rows; the verdict summarizes the condition. |
+| A label in `untested` | Summarized in `conditions`, absent from `pairwise` and from the family. |
 
 ---
 

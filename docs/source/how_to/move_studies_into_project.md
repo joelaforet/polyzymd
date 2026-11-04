@@ -256,5 +256,5 @@ pz.Project("Paper_1").results("rmsf").table
 
 ## Next steps
 
-- {doc}`project`: analyse, run statistics and publish a project.
+- {doc}`project`: analyze, run statistics and publish a project.
 - {doc}`../explanation/projects`: why the conditions of a study share one analysis frame.

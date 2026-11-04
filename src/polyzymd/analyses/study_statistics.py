@@ -28,7 +28,7 @@ def replicate_table(study: Any, run: str) -> Any:
     them: with the ``reduce`` of the analysis entry's function when the entry
     has one (``mean``; ``fraction`` as the mean; ``std`` with ``ddof=1``),
     otherwise with the mean. Values stored once per replicate are kept as
-    they are. Labelled and multi-part results keep one row per label and
+    they are. Labeled and multi-part results keep one row per label and
     part. Only the replicates the run's report lists are kept, when it lists
     them. Rows are sorted by the study's condition order, then by replicate.
 
@@ -251,7 +251,7 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
         is not finite, fewer than three levels (two make it a pairwise
         comparison), or condition means that are all equal, has ``testable=False``, its
         ``reason``, and no slope. A condition without partner
-        (``no_partner``) is left out of the fit, and ``reason`` says so. The list is empty when the report holds labelled results
+        (``no_partner``) is left out of the fit, and ``reason`` says so. The list is empty when the report holds labeled results
         (any condition with an ``entry``, such as one value per residue).
 
     Notes

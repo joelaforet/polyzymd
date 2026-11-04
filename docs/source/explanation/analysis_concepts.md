@@ -9,7 +9,7 @@ of the output, and the reasons behind the choices.
 Every analysis in PolyzyMD runs on the study API, in the same four steps:
 
 ```text
-load replicates  →  measure  →  reduce per replicate  →  summarise or compare
+load replicates  →  measure  →  reduce per replicate  →  summarize or compare
 ```
 
 | Step | Scope | What it does |
@@ -17,7 +17,7 @@ load replicates  →  measure  →  reduce per replicate  →  summarise or comp
 | **load replicates** | Every replicate of every condition | `Study.from_configs` finds the replicates of each simulation `config.yaml`, loads each one as an MDAnalysis `Universe` with its production segments in order, and removes the equilibration window |
 | **measure** | One replicate | `study.timeseries` runs a per-frame function on every production frame; `study.per_replicate` runs a function once on the replicate's production frames. Each replicate's result is written to `polyzymd_results/<name>/<condition>/replicate_<n>/` with a `record.json` of how it was made |
 | **reduce per replicate** | One replicate | A time series becomes one number per replicate, for example its mean or the fraction of frames that pass a test |
-| **summarise or compare** | All conditions | The replicate values give each condition's mean, standard error and 95 percent Student t interval, and each condition is compared with the control |
+| **summarize or compare** | All conditions | The replicate values give each condition's mean, standard error and 95 percent Student t interval, and each condition is compared with the control |
 
 `polyzymd analyze NAME -c A/config.yaml -c B/config.yaml` runs these steps for
 a shipped analysis and prints a report in which every number states its unit,

@@ -276,12 +276,12 @@ PRODUCTION_LENGTH_TOLERANCE = 0.10
 
 
 def production_length_warnings(study: Any, labels: Sequence[str] | None = None) -> list[str]:
-    """Warn when the conditions were analysed over production of different lengths.
+    """Warn when the conditions were analyzed over production of different lengths.
 
     A difference between conditions can then come from simulated time rather
     than from the conditions: a structure that drifts late appears only in the
-    longer runs. Each condition's analysed span is the range of its
-    replicates' last analysed times; conditions whose longest and shortest
+    longer runs. Each condition's analyzed span is the range of its
+    replicates' last analyzed times; conditions whose longest and shortest
     spans across the study differ by more than
     :data:`PRODUCTION_LENGTH_TOLERANCE` are named, with the remedy. This is a
     warning only; no value changes.
@@ -318,11 +318,11 @@ def production_length_warnings(study: Any, labels: Sequence[str] | None = None) 
     # otherwise only replicates within each condition differ, the same way.
     if differ([min(v) for v in ends.values()]) or differ([max(v) for v in ends.values()]):
         return [
-            f"the conditions were analysed up to different times ({described}); a difference "
+            f"the conditions were analyzed up to different times ({described}); a difference "
             f"may come from simulated time rather than the condition. {remedy}"
         ]
     return [
-        f"the replicates within each condition were analysed up to different times "
+        f"the replicates within each condition were analyzed up to different times "
         f"({described}), the same range in every condition; a replicate's value may depend on "
         f"how long it ran. {remedy}"
     ]
@@ -419,7 +419,7 @@ class Condition:
             if self.not_run and len(self.not_run) < len(found):
                 LOGGER.warning(
                     "Condition %r: replicate %s %s no production output yet (never built "
-                    "or never run); left out. Name the replicates to analyse with "
+                    "or never run); left out. Name the replicates to analyze with "
                     "replicates: in study.yaml to make that explicit.",
                     label,
                     ", ".join(str(index) for index in self.not_run),
@@ -863,7 +863,7 @@ class Study:
         return run_timeseries(self, function, *args, **kwargs)
 
     def per_replicate(self, function: Any, *args: Any, **kwargs: Any) -> Any:
-        """Compute one value, or one labelled array, per replicate with ``function``.
+        """Compute one value, or one labeled array, per replicate with ``function``.
 
         See :func:`polyzymd.analyses.timeseries.run_per_replicate` for the
         arguments and what is stored.

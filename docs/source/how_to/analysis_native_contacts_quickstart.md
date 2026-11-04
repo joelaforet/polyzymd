@@ -64,7 +64,7 @@ polyzymd analyze native_contacts -c noPoly/config.yaml -c SBMA50/config.yaml \
 ```
 
 The first `-c` is the control. The report shows `q`, each replicate's mean Q,
-summarised per condition, and every other condition is compared with the
+summarized per condition, and every other condition is compared with the
 control by Welch's t test with the Benjamini-Hochberg correction.
 
 By default the reference is the first production frame of each replicate, so

@@ -936,7 +936,7 @@ class TestGromacsEngineConfigWarnings:
 
 
 class TestMinimizationConfig:
-    """Runtime-only minimisation block: defaults on, never part of the build hash."""
+    """Runtime-only minimization block: defaults on, never part of the build hash."""
 
     def test_defaults_freeze_solute(self, minimal_config_data):
         cfg = SimulationConfig(**minimal_config_data)
@@ -945,7 +945,7 @@ class TestMinimizationConfig:
         assert m.max_iterations == 1000
         assert m.tolerance == pytest.approx(10.0)
 
-    def test_explicit_values_are_honoured(self, minimal_config_data):
+    def test_explicit_values_are_honored(self, minimal_config_data):
         minimal_config_data["simulation_phases"]["minimization"] = {
             "freeze_solute": False,
             "max_iterations": 0,
@@ -1093,7 +1093,7 @@ class TestPolymerPackingSphereConfinement:
         assert "packing" not in str(control.model_dump(mode="json")["solutes"])
 
     def test_minimization_stays_out_of_the_hash(self, minimal_config_data):
-        """The runtime-only minimisation block must remain excluded."""
+        """The runtime-only minimization block must remain excluded."""
         import copy
 
         from polyzymd.simulation.artifact_integrity import config_hash

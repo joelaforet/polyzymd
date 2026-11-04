@@ -56,7 +56,7 @@ _PACKMOL_MOLECULE_PREFIX = "_PACKING_MOLECULE"
 #:
 #: Packmol exit code 173 ("imperfect packing") legitimately leaves a handful of
 #: residual contacts (observed: 1 atom at 0.6 A and 3-5 atoms below the tolerance in
-#: dense 30-chain polymer shells); energy minimisation resolves those.  A solute/solvent
+#: dense 30-chain polymer shells); energy minimization resolves those.  A solute/solvent
 #: frame mismatch instead puts hundreds to thousands of solvent atoms inside
 #: the solute (observed: 1182 atoms below 1 A in a defective CALB control build).  The
 #: limit sits two orders of magnitude from both observations.
@@ -84,7 +84,7 @@ class PeriodicImageClashError(ValueError):
     rectangular box before the final cell was known — atoms protrude through
     the brick faces and land on top of their images across a lattice vector.
     Packmol never sees those contacts (it is run without periodicity), so the
-    defect is silent until minimisation blows up or the run dies with NaN.
+    defect is silent until minimization blows up or the run dies with NaN.
     This error turns it into a hard build failure.
     """
 
@@ -154,7 +154,7 @@ def periodic_image_statistics(
         if shift == (0, 0, 0):
             continue
         translation = np.asarray(shift, dtype=float) @ box
-        distances, neighbours = tree.query(
+        distances, neighbors = tree.query(
             positions + translation,
             k=1,
             distance_upper_bound=tolerance_angstrom,
@@ -163,15 +163,15 @@ def periodic_image_statistics(
         if not hits.any():
             continue
         below_tolerance[hits] = True
-        below_tolerance[neighbours[hits]] = True
+        below_tolerance[neighbors[hits]] = True
         close = distances < half_tolerance
         if close.any():
             below_half[close] = True
-            below_half[neighbours[close]] = True
+            below_half[neighbors[close]] = True
         nearest = int(np.argmin(distances))
         if float(distances[nearest]) < float(stats["min_distance_angstrom"]):
             stats["min_distance_angstrom"] = float(distances[nearest])
-            stats["worst_pair"] = (nearest, int(neighbours[nearest]))
+            stats["worst_pair"] = (nearest, int(neighbors[nearest]))
             stats["worst_lattice_vector"] = tuple(int(v) for v in shift)
 
     stats["n_atoms_below_tolerance"] = int(np.count_nonzero(below_tolerance))
@@ -201,7 +201,7 @@ def _assert_periodic_image_separation(
     whole system).  Atoms closer than ``0.5 * tolerance_angstrom`` to an image
     atom raise :class:`PeriodicImageClashError`; contacts between
     ``0.5 * tolerance`` and ``tolerance`` only warn, since Packmol's own
-    tolerance is not enforced across the periodic boundary and minimisation
+    tolerance is not enforced across the periodic boundary and minimization
     resolves a marginal contact.
 
     Parameters
@@ -241,7 +241,7 @@ def _assert_periodic_image_separation(
             f"{stats['min_distance_angstrom']:.3f} A between atoms {pair} across lattice "
             f"vector {stats['worst_lattice_vector']}; {stats['n_atoms']} atoms checked). "
             "Molecules were packed outside the periodic brick, so they overlap themselves "
-            "across the cell boundary; minimisation cannot resolve this and the run would "
+            "across the cell boundary; minimization cannot resolve this and the run would "
             "die with NaN. Refusing to continue the build."
         )
 
@@ -249,7 +249,7 @@ def _assert_periodic_image_separation(
         logger.warning(
             "%d atom(s) of the %s lie between %.2f and %.2f A of a periodic image "
             "(minimum %.3f A); Packmol does not enforce its tolerance across the "
-            "periodic boundary and minimisation will resolve this.",
+            "periodic boundary and minimization will resolve this.",
             stats["n_atoms_below_tolerance"],
             label,
             0.5 * tolerance_angstrom,
@@ -326,7 +326,7 @@ def _assert_solute_solvent_separation(
     :data:`SOLVATION_CLASH_ATOM_LIMIT` clashing atoms means the solute and the
     packed coordinates are expressed in different frames and the build is
     aborted; a handful of clashes is the residue of an imperfect Packmol run
-    (exit code 173) that minimisation resolves, and only produces a warning,
+    (exit code 173) that minimization resolves, and only produces a warning,
     as do distances between ``0.5 * tolerance`` and ``tolerance``.
 
     Parameters
@@ -385,7 +385,7 @@ def _assert_solute_solvent_separation(
     if stats["n_below_half_tolerance"] > 0:
         logger.warning(
             "%d %s atom(s) lie within %.2f A of the solute (minimum %.3f A); this is the "
-            "residue of an imperfect Packmol run and will be resolved by minimisation.",
+            "residue of an imperfect Packmol run and will be resolved by minimization.",
             stats["n_below_half_tolerance"],
             label,
             0.5 * tolerance_angstrom,
@@ -394,8 +394,8 @@ def _assert_solute_solvent_separation(
     elif stats["n_below_tolerance"] > 0:
         logger.warning(
             "%d %s atom(s) lie between %.2f and %.2f A of the solute "
-            "(minimum %.3f A); Packmol tolerance was not fully honoured. Energy "
-            "minimisation resolves contacts this close; no action is needed.",
+            "(minimum %.3f A); Packmol tolerance was not fully honored. Energy "
+            "minimization resolves contacts this close; no action is needed.",
             stats["n_below_tolerance"],
             label,
             0.5 * tolerance_angstrom,
@@ -454,7 +454,7 @@ def build_packmol_input(
     movebadrandom : bool, optional
         If ``True``, add the ``movebadrandom`` global keyword, which places
         badly-packed molecules at random positions in the box rather than
-        near well-packed neighbours. This improves convergence when the
+        near well-packed neighbors. This improves convergence when the
         restraints are complex (many unique chain types, dense packing).
         Default is ``False``.
     ignore_conect : bool, optional
@@ -471,7 +471,7 @@ def build_packmol_input(
         box is the full periodic brick.  Ignored when *use_pbc* is ``True``.
         Default is ``None`` (no spherical confinement).
     nloop : int or None, optional
-        Maximum number of GENCAN optimisation loops *per molecule type*.
+        Maximum number of GENCAN optimization loops *per molecule type*.
         Packmol's default is 50; for dense shell-packing with many
         molecules, higher values (200–500) improve convergence.
         Default is ``None`` (use Packmol's built-in default).
@@ -631,7 +631,7 @@ def run_packmol(
 
     # Exit code 173 means "ended without perfect packing".  Packmol still
     # writes its best solution to the output file.  Since systems are
-    # energy-minimised before MD, minor steric violations are acceptable.
+    # energy-minimized before MD, minor steric violations are acceptable.
     # Treat 173 as a warning rather than a fatal error.
     _PACKMOL_EXIT_IMPERFECT = 173
 
@@ -640,7 +640,7 @@ def run_packmol(
         logger.warning(
             "Packmol exited with code %d (imperfect packing). "
             "The best solution was written to %s and will be used. "
-            "Minor steric clashes will be resolved during energy minimisation. "
+            "Minor steric clashes will be resolved during energy minimization. "
             "See %s for details.",
             _PACKMOL_EXIT_IMPERFECT,
             output_path.name,
@@ -709,11 +709,11 @@ def pack_polymers(
     This is a drop-in replacement for the OpenFF ``pack_box()`` call in
     :meth:`~polyzymd.builders.system_builder.SystemBuilder.pack_polymers`.
     It adds support for the ``movebadrandom`` Packmol keyword.  *box_vectors*
-    are the **final periodic box of the simulation**: the solute is centred in
+    are the **final periodic box of the simulation**: the solute is centered in
     the rectangular brick of that cell and the chains are packed inside the
     brick (shrunk by the tolerance), so no atom can protrude through a brick
     face and overlap its own periodic image.  By default the chains are also
-    confined to a sphere centred on the solute (``confine_to_sphere``) so that
+    confined to a sphere centered on the solute (``confine_to_sphere``) so that
     they stay in a shell around the protein instead of spreading into the
     corners of the brick; the fixed solute and the Packmol tolerance keep them
     off the protein itself.
@@ -735,13 +735,13 @@ def pack_polymers(
     movebadrandom : bool, optional
         Pass the ``movebadrandom`` keyword to Packmol (default ``False``).
     nloop : int or None, optional
-        Maximum GENCAN optimisation loops per molecule type.  Packmol's
+        Maximum GENCAN optimization loops per molecule type.  Packmol's
         default is 50; for dense shell-packing with many molecules, higher
         values (200-500) improve convergence.  Default is ``200``.
     seed : int or None, optional
         Packmol random seed (see :func:`build_packmol_input`).
     confine_to_sphere : bool, optional
-        Add an ``inside sphere`` constraint centred on the solute with radius
+        Add an ``inside sphere`` constraint centered on the solute with radius
         ``0.5 * |solute bounding-box diagonal| + sphere_padding_angstrom``,
         keeping the chains in a shell around the protein rather than in the
         corners of the brick.  Default ``True``.
@@ -960,11 +960,11 @@ def solvate_with_packmol(
     seed : int or None, optional
         Packmol random seed (see :func:`build_packmol_input`).
     center_solute : bool, optional
-        Re-centre the solute at the centre of the periodic brick before
+        Re-center the solute at the center of the periodic brick before
         packing (default ``True``).  Pass ``False`` when the solute is a
         topology that was already framed in *this* brick — for example the
         output of :func:`pack_polymers`, whose chains are packed against the
-        brick faces.  Re-centring such a topology by its centre of geometry
+        brick faces.  Re-centering such a topology by its center of geometry
         shifts it as a rigid body and pushes atoms back out of the brick.
     working_directory : str, Path, or None, optional
         Directory for Packmol input/output files.  A temporary directory is
@@ -1012,12 +1012,12 @@ def solvate_with_packmol(
 
     # --- center solute in the brick ---
     # Skipped when the caller already framed the topology in this brick
-    # (polymer packing does), because a centre-of-geometry shift of an
+    # (polymer packing does), because a center-of-geometry shift of an
     # already-framed system pushes atoms back out through the brick faces.
     if center_solute:
         centered_solute = center_in_brick(solute, box_size_angstrom)
     else:
-        logger.info("Solute is already framed in the periodic brick; skipping re-centring.")
+        logger.info("Solute is already framed in the periodic brick; skipping re-centering.")
         centered_solute = solute
 
     # detect whether PBC is usable (rectangular box + packmol >= 20.15.0)
@@ -1113,9 +1113,9 @@ def solvate_with_packmol(
 
 
 def center_in_brick(topology, brick_angstrom: "NDArray"):
-    """Return a copy of *topology* with its bounding box centred in the brick.
+    """Return a copy of *topology* with its bounding box centered in the brick.
 
-    Centring the bounding box, not the centre of geometry, gives the solute
+    Centring the bounding box, not the center of geometry, gives the solute
     the same clearance to opposite brick faces. The box is sized for that
     clearance (see :func:`polyzymd.utils.boxvectors.plan_box`).
     """
@@ -1138,7 +1138,7 @@ def solute_sphere_constraint(
 ) -> "NDArray":
     """Spherical confinement region around a solute, in Angstrom.
 
-    The sphere is centred on the solute's bounding box — which is where
+    The sphere is centered on the solute's bounding box — which is where
     :func:`center_in_brick` puts it in the brick — and its radius is the
     circumradius of that bounding box plus
     *padding_angstrom*.  The radius therefore depends only on the solute's
@@ -1148,7 +1148,7 @@ def solute_sphere_constraint(
     Parameters
     ----------
     solute : openff.toolkit.Topology
-        Solute topology carrying positions (typically already brick-centred).
+        Solute topology carrying positions (typically already brick-centered).
     padding_angstrom : float
         Extra room for the chains beyond the solute's bounding-box
         circumradius, in Angstrom.

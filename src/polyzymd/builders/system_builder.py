@@ -1157,7 +1157,7 @@ class SystemBuilder:
             )
 
         # 5. Solvate.  With a precomputed cell the packed topology is already
-        # framed in the brick, so the solvent builder must not re-centre it.
+        # framed in the brick, so the solvent builder must not re-center it.
         LOGGER.info("Solvating system")
         self._solvent_builder.solvate_from_config(
             self._combined_topology,

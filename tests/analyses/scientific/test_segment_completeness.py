@@ -136,7 +136,7 @@ class TestSegmentStatusFiltering:
         assert layout.segment_status == {0: "interrupted", 1: "completed"}
 
     def test_missing_progress_file_keeps_every_segment(self, tmp_path: Path) -> None:
-        """Runs with no ``progress.json`` keep the previous inclusive behaviour."""
+        """Runs with no ``progress.json`` keep the previous inclusive behavior."""
 
         for index in (0, 1):
             segment_dir = tmp_path / f"production_{index}"

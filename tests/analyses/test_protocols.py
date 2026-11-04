@@ -397,7 +397,7 @@ def test_a_single_replicate_is_not_said_to_have_the_same_value_in_every_replicat
     assert "same value in every replicate" not in text
 
 
-def test_a_stratum_whose_control_is_left_out_is_summarised_the_others_compared() -> None:
+def test_a_stratum_whose_control_is_left_out_is_summarized_the_others_compared() -> None:
     """With within, only the conditions whose control matched no atoms go uncompared."""
     from polyzymd.analyses.protocols import _report_skipping
     from tests.analyses.test_study_timeseries import temperature_polymer_values
@@ -413,7 +413,7 @@ def test_a_stratum_whose_control_is_left_out_is_summarised_the_others_compared()
     ]
     assert "SBMA 330 K" in [condition.label for condition in report.conditions]
     assert any(
-        "summarised and not compared: SBMA 330 K (control none 330 K)" in text
+        "summarized and not compared: SBMA 330 K (control none 330 K)" in text
         for text in report.warnings
     )
     assert len(_report_skipping(temperature_polymer_values(), study, {}, "x").pairwise) == 5

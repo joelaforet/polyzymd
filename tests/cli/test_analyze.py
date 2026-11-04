@@ -876,7 +876,7 @@ def test_the_json_document_of_a_failed_study_is_failed_and_written_once(tmp_path
     out = tmp_path / "all.json"
     studies = {
         "good": {"rg": {"analysis": "rg", "status": "complete"}},
-        "bad": {"status": "failed", "error": "the study could not be analysed"},
+        "bad": {"status": "failed", "error": "the study could not be analyzed"},
     }
     import click
 

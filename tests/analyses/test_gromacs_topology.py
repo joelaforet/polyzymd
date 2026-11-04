@@ -111,7 +111,7 @@ def test_top_universe_layout() -> None:
     assert len(u.trajectory) == 1
 
 
-def test_tpr_unsupported_recognises_only_the_version_refusal() -> None:
+def test_tpr_unsupported_recognizes_only_the_version_refusal() -> None:
     try:
         raise ValueError("Failed") from None
     except ValueError as plain:

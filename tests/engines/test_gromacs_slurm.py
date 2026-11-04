@@ -1769,7 +1769,7 @@ class TestGlobalTermHandling:
         assert start_idx < trjconv_idx < end_idx
 
     def test_trjconv_failure_is_reported_not_hidden(self, monkeypatch) -> None:
-        """A failed trjconv prints a warning; the uncentred prod.xtc stays for analysis."""
+        """A failed trjconv prints a warning; the uncentered prod.xtc stays for analysis."""
         monkeypatch.setattr(
             "polyzymd.engines.gromacs.slurm._discover_manifest_path",
             lambda: "/tmp/pixi.toml",

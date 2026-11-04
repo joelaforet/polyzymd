@@ -19,7 +19,7 @@ with an unanswered item.
 
 1. Do not cherry-pick. Use all available data unless there is an objective
    reason not to, and apply any sampling metric uniformly to every simulation.
-2. Remove an equilibration portion and analyse only the production part. The
+2. Remove an equilibration portion and analyze only the production part. The
    offset is one user-set value applied to every condition and replicate.
 3. Run multiple simulations and compare results across them.
 4. Estimate the number of statistically independent samples. Sequential frames

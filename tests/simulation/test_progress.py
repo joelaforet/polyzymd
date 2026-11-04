@@ -939,7 +939,7 @@ class TestScanEquilibrationStages:
 class TestScanFilesystemProvenance:
     """Segment provenance survives a progress.json rebuilt from the filesystem.
 
-    A cancelled-and-resubmitted chain reconciles ``progress.json`` from a
+    A canceled-and-resubmitted chain reconciles ``progress.json`` from a
     filesystem scan.  Before this, the ``polyzymd_version`` /
     ``openmm_version`` / ``pixi_environment`` fields added in #90 came back
     ``null`` even though ``production_N_parameters.json`` still had them.

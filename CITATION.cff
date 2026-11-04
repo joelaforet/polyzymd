@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use PolyzyMD in work you publish, please cite it as below."
-title: "PolyzyMD: build, run and analyse molecular dynamics of complex biomolecular systems"
+title: "PolyzyMD: build, run and analyze molecular dynamics of complex biomolecular systems"
 abstract: >-
   PolyzyMD builds, runs and analyses molecular dynamics simulations of
   complex biomolecular systems, including proteins, polymers and mixed

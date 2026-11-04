@@ -129,8 +129,8 @@ recorded.
 |---|---|
 | `summary(conditions=None)` | A `ProtocolReport` with n, the mean, the standard error, the 95 % interval and every replicate value of each condition |
 | `compare(control=None, conditions=None, test="welch", untested=(), within=None)` | A `ProtocolReport` with each condition against the control, or against the control of its stratum |
-| `over_labels(how="mean", metric=None, labels=None)` | One number per replicate from a labelled array, over every label or over `labels` |
-| `plot(output_dir=None, name=None, title=None, plot_settings=None, highlight=(), xlabel="label")` | The path of a figure of the mean and interval of each condition, with every replicate value. For a labelled result, a profile |
+| `over_labels(how="mean", metric=None, labels=None)` | One number per replicate from a labeled array, over every label or over `labels` |
+| `plot(output_dir=None, name=None, title=None, plot_settings=None, highlight=(), xlabel="label")` | The path of a figure of the mean and interval of each condition, with every replicate value. For a labeled result, a profile |
 | `values` | The stored values |
 
 `compare` details:
@@ -152,7 +152,7 @@ recorded.
 - Each row gives `mean(b) - mean(a)` with its 95 % interval, the p value, the
   {term}`Benjamini-Hochberg` adjusted p value, and Cohen's d and Hedges' g.
 - The correction family is every tested row of the call, over every stratum
-  with `within`. For a labelled result, that is every label of every compared
+  with `within`. For a labeled result, that is every label of every compared
   condition.
 - A row is not testable when a condition has fewer than three replicates, or
   when both conditions have the same value in every replicate. It then takes
@@ -170,7 +170,7 @@ every field, see {doc}`analysis_protocol_report`.
 | `pz.plot_values(results, labels=None, output_dir=None, name="values", title=None, plot_settings=None)` | One group of bars per `ReplicateValues`, one bar per condition, with intervals and replicate points. All results must share a unit |
 | `pz.plot_distributions(series, thresholds=None, titles=None, output_dir=None, name="distributions", quantity="value", plot_settings=None)` | One panel per `Timeseries`, with a shared axis and a threshold per panel |
 | `polyzymd.analyses.figures.plot_differences(values, report, output_dir, name, title=None, plot_settings=None, xlabel="label")` | One panel per condition: the difference from the control at each label, its 95 % interval from the `compare()` report, and a point on each significant label |
-| `polyzymd.analyses.figures.plot_decomposition(parts, output_dir, name, title=None, plot_settings=None, xlabel="label")` | Several labelled results of one unit, one panel per condition |
+| `polyzymd.analyses.figures.plot_decomposition(parts, output_dir, name, title=None, plot_settings=None, xlabel="label")` | Several labeled results of one unit, one panel per condition |
 
 Every figure goes to `figures/` beside `polyzymd_results/`, or to
 `output_dir`. A figure with error bars or a band has a footnote that names
