@@ -416,8 +416,8 @@ class SimulationRunner:
         """Return a copy of the System in which *frozen_indices* cannot move.
 
         The frozen set is the solute *heavy* atoms; solute hydrogens stay mobile so
-        that the minimiser can pull them onto the force field's X-H constraint
-        lengths.  OpenMM's minimiser leaves massless particles exactly where they
+        that the minimizer can pull them onto the force field's X-H constraint
+        lengths.  OpenMM's minimizer leaves massless particles exactly where they
         are, but it refuses to build a Context for any constraint that involves a
         massless particle ("A constraint cannot involve a massless particle"), so a
         heavy--hydrogen constraint cannot simply be carried over into the copy.
@@ -425,7 +425,7 @@ class SimulationRunner:
         field emits no harmonic term for a constrained bond, so an unconstrained
         hydrogen has nothing holding it to its parent atom.  Each frozen--mobile
         constraint is therefore replaced by a stiff harmonic bond at the constraint
-        distance, which reproduces the constraint to within the minimiser's
+        distance, which reproduces the constraint to within the minimizer's
         tolerance; :meth:`minimize` then verifies the real System's constraints and
         applies them exactly if any residual remains.  Constraints whose two
         particles are both frozen are removed (they are satisfied trivially because
@@ -518,7 +518,7 @@ class SimulationRunner:
                 prepared heavy-atom structure then enters equilibration with its
                 coordinates unchanged; the method verifies this and raises if any
                 frozen atom moved.  Solute hydrogens are deliberately left mobile
-                so the minimiser can place them on the force field's X-H
+                so the minimizer can place them on the force field's X-H
                 constraint lengths instead of keeping the input PDB's.
 
         Returns:
@@ -562,7 +562,7 @@ class SimulationRunner:
         selection = self._get_platform()
 
         if frozen_indices:
-            # Minimise on a copy in which the solute heavy atoms are massless (hence
+            # Minimize on a copy in which the solute heavy atoms are massless (hence
             # fixed), then hand the relaxed solvent/polymer/hydrogen coordinates to
             # the real System.
             frozen_system = self._frozen_copy_of_system(frozen_indices)
@@ -680,7 +680,7 @@ class SimulationRunner:
 
         LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
         if is_interrupted():
-            # A signal that arrived during minimization is honoured only now,
+            # A signal that arrived during minimization is honored only now,
             # after the result is saved, so the next job does not redo it.
             raise GracefulExit(get_interrupt_signal())
 
@@ -1687,7 +1687,7 @@ class SimulationRunner:
         # Periodic checkpoint reporter — ensures a .chk file is written every
         # report_interval steps.  Without this, segment 0 has NO checkpoint on
         # disk until the very end, so a hard kill (SIGKILL / OOM / node failure)
-        # would lose all progress.  Matches the behaviour already present in
+        # would lose all progress.  Matches the behavior already present in
         # continuation.py for segments >= 1.
         prod_chk_path = phase_dir / f"{phase_name}_checkpoint.chk"
         self._simulation.reporters.append(CheckpointReporter(str(prod_chk_path), report_interval))

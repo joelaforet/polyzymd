@@ -72,7 +72,7 @@
       <text x="584" y="262">coordinates, topology, force field</text>
       <text x="584" y="318">run parameters, seeds set per replicate</text>
       <text x="584" y="374">one flat production run, resumed from its checkpoint</text>
-      <text x="584" y="430">trajectory; centred copy made when production ends</text>
+      <text x="584" y="430">trajectory; centered copy made when production ends</text>
       <text x="584" y="486">same records as OpenMM, kept here</text>
     </g>
 

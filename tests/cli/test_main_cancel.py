@@ -3,13 +3,13 @@
 A self-resubmitting chain cannot be stopped with ``scancel`` alone: SIGTERM
 makes ``run-segment`` exit 99, which the job wrapper reads as "interrupted,
 work remains", so it queues a successor within seconds.  ``polyzymd cancel``
-writes a STOP marker that the wrapper honours, then cancels the jobs.
+writes a STOP marker that the wrapper honors, then cancels the jobs.
 
 Covers:
 - STOP marker contents and location
 - job lookup and cancellation by run directory or job name
 - --resume, --stop-only and --dry-run
-- cancel_slurm_jobs best-effort behaviour outside SLURM
+- cancel_slurm_jobs best-effort behavior outside SLURM
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ class TestCancelCommand:
             assert stop_file_path(tmp_path / f"run_{replicate}").exists()
         assert cancel_jobs.call_count == 3
 
-    def test_scratch_dir_override_is_honoured(self, tmp_path):
+    def test_scratch_dir_override_is_honored(self, tmp_path):
         override = tmp_path / "elsewhere"
         config_path, sim_config = _config_and_mock(tmp_path, lambda r: tmp_path / "unused")
 
@@ -376,7 +376,7 @@ class TestCancelSlurmJobs:
         with patch.object(daisy_chain.subprocess, "run", side_effect=FileNotFoundError):
             assert daisy_chain.cancel_slurm_jobs(["1"]) == []
 
-    def test_nonzero_exit_reports_nothing_cancelled(self):
+    def test_nonzero_exit_reports_nothing_canceled(self):
         from polyzymd.workflow import daisy_chain
 
         completed = MagicMock(returncode=1, stdout="", stderr="Invalid job id")

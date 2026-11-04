@@ -311,7 +311,7 @@ No GPU is free. Wait, or use another partition:
 polyzymd submit -c config.yaml --preset al40
 ```
 
-### A cancelled job comes back
+### A canceled job comes back
 
 ```
 scancel 1234567

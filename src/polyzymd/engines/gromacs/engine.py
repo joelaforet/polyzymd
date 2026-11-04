@@ -424,7 +424,7 @@ class GromacsEngine(SimulationEngine):
         )
 
     #: Production trajectories a GROMACS run leaves: the raw ``mdrun`` output and the
-    #: post-processed whole-molecule and centred copies that analyses read.
+    #: post-processed whole-molecule and centered copies that analyses read.
     TRAJECTORY_NAMES: ClassVar[tuple[str, ...]] = (
         "prod.xtc",
         "prod_nojump.xtc",

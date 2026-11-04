@@ -232,7 +232,7 @@ def _hb_options(tmp_path: Path, name: str, settings: dict | None = None, **extra
 
 
 def _row(report, label, entry=None):
-    """The condition row of ``label`` (and ``entry``, for a labelled result)."""
+    """The condition row of ``label`` (and ``entry``, for a labeled result)."""
     return next(r for r in report.conditions if r.label == label and r.entry == entry)
 
 

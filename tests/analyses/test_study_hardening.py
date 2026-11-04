@@ -50,7 +50,7 @@ class TestProductionLength:
         report = (
             study.timeseries(rg, pz.select("all"), unit="A", output_dir=tmp_path).reduce().compare()
         )
-        notes = [w for w in report.warnings if "analysed up to different times" in w]
+        notes = [w for w in report.warnings if "analyzed up to different times" in w]
         assert len(notes) == 1
         assert "Short 0.9 ns" in notes[0] and "Long 2.9 ns" in notes[0]
         assert "until 0.9ns" in notes[0]
@@ -249,7 +249,7 @@ class TestAllowEmpty:
         assert (table["value"] == 0.0).all()
 
 
-class TestLabelledVerdict:
+class TestLabeledVerdict:
     def _rows(self, testable: bool):
         from polyzymd.analyses.protocols import ConditionReport, PairwiseReport
 
@@ -264,18 +264,18 @@ class TestLabelledVerdict:
         return conditions, pairwise
 
     def test_one_replicate_is_not_testable(self) -> None:
-        from polyzymd.analyses.timeseries import _labelled_verdict
+        from polyzymd.analyses.timeseries import _labeled_verdict
 
         conditions, pairwise = self._rows(False)
-        (sentence,) = _labelled_verdict("q", None, ["A", "B"], conditions, pairwise)
+        (sentence,) = _labeled_verdict("q", None, ["A", "B"], conditions, pairwise)
         assert sentence.startswith("not testable: q for A vs B") and "(n 1 vs 1)" in sentence
         assert "0 of 0" not in sentence
 
     def test_label_means_ignore_nan(self) -> None:
-        from polyzymd.analyses.timeseries import _labelled_verdict
+        from polyzymd.analyses.timeseries import _labeled_verdict
 
         conditions, _ = self._rows(True)
-        sentence = _labelled_verdict("q", None, ["A"], conditions, [])[0]
+        sentence = _labeled_verdict("q", None, ["A"], conditions, [])[0]
         assert "nan" not in sentence and "from 1 to 1" in sentence
         assert "1 labels without a mean" in sentence
 

@@ -168,8 +168,8 @@ def test_a_water_placed_inside_the_protein_fails_and_is_reported_buried(built) -
     protein = _atoms(builder, "protein")
     solvent = next(c for c in builder.components() if c.type == "solvent")
     water = next(d for d in solvent.domains if d.name == "water").atoms[0]
-    centre = positions[protein].mean(axis=0)
-    positions[list(water)] += centre - positions[water.start]
+    center = positions[protein].mean(axis=0)
+    positions[list(water)] += center - positions[water.start]
     findings = _run(built, positions=positions)
     assert _status(findings, "geometry.water_overlap") == {"FAIL"}
 

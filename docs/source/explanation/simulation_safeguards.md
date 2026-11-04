@@ -77,13 +77,13 @@ box vectors = edge * shape_matrix
 Every lattice vector is at least one edge long, so the solute starts at least
 `2 * padding` from each of its periodic copies. The edge grows further if the
 solute's bounding box would come closer than the PACKMOL tolerance to a face of
-the brick. PolyzyMD centres the bounding box, not the centre of mass, in the
+the brick. PolyzyMD centers the bounding box, not the center of mass, in the
 brick, so opposite faces get the same clearance. A solute that pokes through a
 face, or comes within the tolerance of it, overlaps the solvent that PACKMOL
 places next to its periodic image. Earlier versions made the rhombic
 dodecahedron from `bbox + 2 * padding` per axis. Its brick was too short along
 `z` for an elongated protein such as T4 lysozyme (0.12 nm clearance at 1.2 nm
-padding), and centring the centre of mass left one face of ubiquitin only
+padding), and centering the center of mass left one face of ubiquitin only
 0.06 nm from the solute.
 
 Then it does these steps:
@@ -232,7 +232,7 @@ segments; `progress.json` records each segment and each completed
 equilibration stage. Each job checks for
 `STOP`, runs `run-segment`, runs `check-progress` and submits itself again
 while work remains. A GROMACS job resumes one production run with `-cpi` and
-`-maxh`, and centres the trajectory when production is finished.
+`-maxh`, and centers the trajectory when production is finished.
 ```
 
 **A preempted job goes back to the queue.** Schedulers differ in how they

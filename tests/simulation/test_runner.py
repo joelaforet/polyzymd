@@ -1,4 +1,4 @@
-"""Tests for simulation runner behaviour.
+"""Tests for simulation runner behavior.
 
 These tests verify runner logic using mocks to avoid requiring a full
 OpenMM simulation setup (GPU, topology, system, etc.).

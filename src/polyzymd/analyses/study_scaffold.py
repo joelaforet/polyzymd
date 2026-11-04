@@ -107,7 +107,7 @@ https://creativecommons.org/licenses/by/4.0/legalcode
 
 SPDX-License-Identifier: CC-BY-4.0
 
-Replace this file and LICENSE-code to publish under other licences, and set
+Replace this file and LICENSE-code to publish under other licenses, and set
 metadata.license in study.yaml to match.
 """
 
@@ -525,7 +525,7 @@ analysis setting. Each condition's simulation is in `conditions/<name>/config.ya
 | `study.yaml` | The analysis protocol |
 {rows}
 | `data.example.yaml` | How to say where this machine keeps the trajectories (`data.local.yaml`) |
-| `LICENSE-data`, `LICENSE-code` | The licences of the data and of the code |
+| `LICENSE-data`, `LICENSE-code` | The licenses of the data and of the code |
 
 ## Reproduce
 

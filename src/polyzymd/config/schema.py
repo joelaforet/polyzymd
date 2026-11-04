@@ -442,13 +442,13 @@ class PolymerPackingConfig(_ConfigModel):
         tolerance: Minimum molecular spacing for PACKMOL in Angstrom.
         movebadrandom: When ``True``, pass the ``movebadrandom`` keyword to
             PACKMOL.  This places badly-packed molecules at random positions
-            in the box rather than near well-packed neighbours, which
+            in the box rather than near well-packed neighbors, which
             improves convergence for dense or heterogeneous systems (many
             unique chain types).  Has no effect when only a single chain
             type is present.  Default is ``False`` (PACKMOL default
-            behaviour is preserved).
+            behavior is preserved).
         confine_to_sphere: When ``True`` (default), chains are packed inside a
-            sphere centred on the solute with radius
+            sphere centered on the solute with radius
             ``0.5 * |solute bbox diagonal| + padding``, in addition to the
             periodic brick.  Without it the chains spread into the corners of
             the brick and drift away from the protein.
@@ -509,7 +509,7 @@ class MonomerSpec(_ConfigModel):
     """Specification for a single monomer type in a co-polymer.
 
     For dynamic generation, ``smiles`` is the repeat unit as it is in the chain,
-    with ``*`` on the two atoms that bond to the neighbouring repeat units:
+    with ``*`` on the two atoms that bond to the neighboring repeat units:
     ``[*]CC([*])(C)C(=O)OC`` for methyl methacrylate. The first ``*`` bonds
     toward the head of the chain, the second toward its tail.
 
@@ -717,7 +717,7 @@ class PolymerSolute(_Solute):
                     raise ValueError(
                         f"monomer {monomer.label!r}: its smiles {monomer.smiles!r} has {stars} "
                         "'*' sites; a repeat unit needs exactly 2, on the atoms that bond to "
-                        "the neighbouring units ([*]CC([*])(C)C(=O)OC for methyl "
+                        "the neighboring units ([*]CC([*])(C)C(=O)OC for methyl "
                         "methacrylate). The notebook at "
                         "https://polyzymd.readthedocs.io/en/latest/tutorials/"
                         "star_sited_monomers.html helps you place them."
@@ -1588,24 +1588,24 @@ class EquilibrationStageConfig(_ConfigModel):
 
 
 class MinimizationConfig(_ConfigModel):
-    """Energy-minimisation settings.
+    """Energy-minimization settings.
 
     Attributes:
         freeze_solute: Hold every protein and substrate atom fixed during
-            minimisation so that only solvent and polymers relax. The prepared
+            minimization so that only solvent and polymers relax. The prepared
             structure therefore enters equilibration with its coordinates
             unchanged (solute RMSD to the input structure is zero), and no
-            packing artefact can be "accommodated" by protein deformation.
-        max_iterations: Maximum minimiser iterations (0 = until convergence).
+            packing artifact can be "accommodated" by protein deformation.
+        max_iterations: Maximum minimizer iterations (0 = until convergence).
         tolerance: Energy tolerance in kJ/mol/nm.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     freeze_solute: bool = Field(
-        True, description="Freeze protein and substrate atoms during minimisation"
+        True, description="Freeze protein and substrate atoms during minimization"
     )
-    max_iterations: int = Field(1000, ge=0, description="Maximum minimiser iterations")
+    max_iterations: int = Field(1000, ge=0, description="Maximum minimizer iterations")
     tolerance: float = Field(10.0, gt=0, description="Energy tolerance in kJ/mol/nm")
 
 
@@ -1613,7 +1613,7 @@ class SimulationPhasesConfig(_ConfigModel):
     """Configuration for all simulation phases.
 
     Attributes:
-        minimization: Energy-minimisation settings (runtime only, see below)
+        minimization: Energy-minimization settings (runtime only, see below)
         equilibration_stages: Multi-stage equilibration protocol
         production: Production phase settings
     """
@@ -1622,11 +1622,11 @@ class SimulationPhasesConfig(_ConfigModel):
 
     # Runtime-only setting: excluded from model_dump() so that adding or changing it
     # does not alter the build-manifest config hash and invalidate pre-built bundles
-    # (minimisation happens at run time, not at build time).
+    # (minimization happens at run time, not at build time).
     minimization: MinimizationConfig = Field(
         default_factory=MinimizationConfig,
         exclude=True,
-        description="Energy-minimisation settings (does not affect the built system)",
+        description="Energy-minimization settings (does not affect the built system)",
     )
 
     equilibration_stages: list[EquilibrationStageConfig] | None = Field(

@@ -2,7 +2,7 @@
 
 The unit tests build small MDAnalysis universes in memory, every atom carbon
 unless stated. A lone carbon residue has the full-sphere SASA; a shell of the
-26 points of a cube around it (:func:`_shell`), 2.6 or 3.4 Å from its centre,
+26 points of a cube around it (:func:`_shell`), 2.6 or 3.4 Å from its center,
 leaves it no SASA at all. Expected areas come from
 :func:`~polyzymd.analyses.functions.residue_sasa` on explicit contexts, never
 from hard-coded MDTraj numbers. The study tests write OpenMM run directories
@@ -59,10 +59,10 @@ def _both(value: float) -> dict:
     return {"exposed_threshold": value, "buried_threshold": value}
 
 
-def _shell(radius: float, centre=(0.0, 0.0, 0.0)) -> np.ndarray:
-    """The 26 points of a cube's faces, edges and corners, ``radius`` Å per axis from ``centre``."""
+def _shell(radius: float, center=(0.0, 0.0, 0.0)) -> np.ndarray:
+    """The 26 points of a cube's faces, edges and corners, ``radius`` Å per axis from ``center``."""
     points = [p for p in itertools.product((-1.0, 0.0, 1.0), repeat=3) if any(p)]
-    return np.asarray(points) * radius + np.asarray(centre)
+    return np.asarray(points) * radius + np.asarray(center)
 
 
 def _universe(
@@ -412,9 +412,9 @@ BOX = np.array([60.0, 60.0, 60.0, 90.0, 90.0, 90.0], dtype=np.float32)
 
 
 def _boxed_shell(shift: float, *, bonds: bool = True) -> "mda.Universe":
-    """ALA at the box centre and a bonded SBM shell around the point ``shift`` Å along x from it."""
-    centre = np.array([30.0, 30.0, 30.0])
-    positions = np.vstack([[centre], _shell(2.6, centre + [shift, 0.0, 0.0])])
+    """ALA at the box center and a bonded SBM shell around the point ``shift`` Å along x from it."""
+    center = np.array([30.0, 30.0, 30.0])
+    positions = np.vstack([[center], _shell(2.6, center + [shift, 0.0, 0.0])])
     return _universe(
         positions,
         [("ALA", "A", 1), ("SBM", "C", 26)],
@@ -714,7 +714,7 @@ def test_analyze_occlusion_is_the_default_and_reports_coverage(
     warnings = [text for text in report.warnings if "maximum ASA" in text]
     assert len(warnings) == 1
     assert "1 residues" in warnings[0] and "ACE1" in warnings[0]
-    assert "still cover their neighbours" in warnings[0]
+    assert "still cover their neighbors" in warnings[0]
 
 
 @pytest.mark.parametrize(
@@ -753,7 +753,7 @@ def test_analyze_occluded_area_sums_the_residues_in_square_angstrom(
     assert _by_label(report)["A"] == pytest.approx(expected, rel=1e-9)
 
 
-def test_analyze_occluded_area_residues_are_labelled_by_measured_resid(
+def test_analyze_occluded_area_residues_are_labeled_by_measured_resid(
     configs, schedules, tmp_path
 ) -> None:
     area = _lone_carbon_area()

@@ -149,7 +149,7 @@ class SemanticFamilyColorConfig(BaseModel):
 
 
 class SemanticColorSettings(BaseModel):
-    """Condition colours and plotting order, from families, values, roles or explicit colours.
+    """Condition colors and plotting order, from families, values, roles or explicit colors.
 
     Defaults define the canonical v1.3 plot behavior: semantic color mapping is
     disabled until users opt in with ``enabled: true``.
@@ -213,7 +213,7 @@ class PlotTheme(BaseModel):
     bar_alpha : float
         Opacity for bar chart fill.
     bar_edgecolor : str
-        Edge colour for bar outlines.
+        Edge color for bar outlines.
     bar_linewidth : float
         Edge line width for bars.
     bar_capsize : int
@@ -223,13 +223,13 @@ class PlotTheme(BaseModel):
     dot_alpha : float
         Opacity for replicate dots.
     dot_color : str
-        Colour for replicate dots.
+        Color for replicate dots.
     line_alpha : float
         Opacity for line plots (e.g. RMSF profiles).
     fill_alpha : float
         Opacity for fill_between bands (e.g. SEM regions).
     reference_line_color : str
-        Colour for horizontal/vertical reference lines.
+        Color for horizontal/vertical reference lines.
     reference_line_style : str
         Linestyle for reference lines (e.g. ``"--"``).
     reference_line_width : float
@@ -248,7 +248,7 @@ class PlotTheme(BaseModel):
     legend_bbox : tuple of float
         ``bbox_to_anchor`` for legend placement, relative to axes.
         Default ``(1.02, 0.5)`` places it just outside the right edge,
-        vertically centred.
+        vertically centered.
     show_watermark : bool
         Whether to render a subtle "Made by PolyzyMD" watermark in the
         bottom-right corner of every saved figure.  Default ``True``.
@@ -336,7 +336,7 @@ class PlotTheme(BaseModel):
 
 
 class PlotSettings(BaseModel):
-    """Figure format, resolution, style preset, palette, theme and condition colours.
+    """Figure format, resolution, style preset, palette, theme and condition colors.
 
     The functions in :mod:`polyzymd.analyses.figures` take one as
     ``plot_settings``; ``PlotSettings()`` is the default. Unknown keys raise a

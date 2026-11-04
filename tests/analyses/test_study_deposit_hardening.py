@@ -1,7 +1,7 @@
 # ruff: noqa: F811 - the tests take the study fixture imported from test_study_freeze
 """add-condition, check's production lengths, and a deposit free of machine paths and self-describing.
 
-Uses the analysed, committed study of test_study_freeze.py.
+Uses the analyzed, committed study of test_study_freeze.py.
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ class TestDeposit:
         assert "## How to cite" in readme and "PolyzyMD:" in readme and "## Results" in readme
         assert "**rg:**" in readme and "CC-BY-4.0" in readme and "MIT" in readme
 
-    def test_upload_lists_both_licences_and_the_schema(self, study: Path) -> None:
+    def test_upload_lists_both_licenses_and_the_schema(self, study: Path) -> None:
         result = freeze(study)
         assert "CC-BY-4.0 (data, results and figures) and MIT (code" in result.guide.read_text()
         assert (result.upload / "manifest-1.schema.json").is_file()

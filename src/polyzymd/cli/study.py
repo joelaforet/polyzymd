@@ -539,7 +539,7 @@ def init_command(
     holder: str | None,
     no_git: bool,
 ) -> None:
-    """Create a study folder at DIRECTORY, ready to version, analyse and publish.
+    """Create a study folder at DIRECTORY, ready to version, analyze and publish.
 
     Writes study.yaml, conditions/, structures/, analyses/, figures/,
     results/, environment/, a README, LICENSE-data (CC-BY-4.0) and
@@ -605,7 +605,7 @@ def init_command(
             else "warning: git could not commit; run git init and commit yourself"
         )
     if equilibration is None:
-        click.echo("note: set equilibration in study.yaml before analysing")
+        click.echo("note: set equilibration in study.yaml before analyzing")
     click.echo(f"next: polyzymd study check {created.root}")
 
 

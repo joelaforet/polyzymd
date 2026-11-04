@@ -95,9 +95,9 @@ Analysis
 - :py:func:`~polyzymd.analyses.functions.hydrogen_bonds` - Hydrogen-bond counts between two groups
 - :py:func:`~polyzymd.analyses.functions.residue_occlusion` - Polymer-protein contacts by occluded SASA
 - :py:class:`~polyzymd.analyses.timeseries.Timeseries` - Per-frame values of every replicate, from ``Study.timeseries``
-- :py:class:`~polyzymd.analyses.timeseries.ReplicateValues` - One value or labelled array per replicate, with ``summary()`` and ``compare()``
+- :py:class:`~polyzymd.analyses.timeseries.ReplicateValues` - One value or labeled array per replicate, with ``summary()`` and ``compare()``
 - :py:class:`~polyzymd.analyses.universe.UniverseProvider` - Loads a replicate's universe and records its input files
-- :py:class:`~polyzymd.config.analysis_settings.PlotSettings` - Figure format, style preset, theme and condition colours
+- :py:class:`~polyzymd.config.analysis_settings.PlotSettings` - Figure format, style preset, theme and condition colors
 
 Comparison
 ~~~~~~~~~~

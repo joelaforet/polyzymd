@@ -165,7 +165,7 @@ def run_user_analysis(
 
     ``user`` is the :class:`~polyzymd.analyses.study_file.UserFunction` of
     the entry ``run``; ``settings`` (from ``--set``) override its
-    ``settings``. With one condition the report summarises it, and with
+    ``settings``. With one condition the report summarizes it, and with
     several it compares each with the first. With ``parts``, every part is
     stored and plotted, and the report covers ``part`` (``--run``), the first
     part by default, naming the others in ``all_runs``.

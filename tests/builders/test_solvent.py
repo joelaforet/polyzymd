@@ -329,11 +329,11 @@ def test_solvate_with_precomputed_box_skips_centring(monkeypatch) -> None:
         captured.update(kwargs)
         return kwargs["solute"]
 
-    def fail_if_centred(self, topology, box_vecs):
-        raise AssertionError("an already-framed topology must not be re-centred")
+    def fail_if_centered(self, topology, box_vecs):
+        raise AssertionError("an already-framed topology must not be re-centered")
 
     monkeypatch.setattr(packmol_utils, "solvate_with_packmol", fake_solvate_with_packmol)
-    monkeypatch.setattr(SolventBuilder, "_center_topology_in_box", fail_if_centred)
+    monkeypatch.setattr(SolventBuilder, "_center_topology_in_box", fail_if_centered)
 
     topology = _real_solute_topology()
     box = SolventBuilder().compute_box_vectors(topology, padding=1.2, extra_padding=2.0)
@@ -344,14 +344,14 @@ def test_solvate_with_precomputed_box_skips_centring(monkeypatch) -> None:
     np.testing.assert_array_equal(captured["box_vectors"].m_as("nanometer"), box.m_as("nanometer"))
 
 
-def test_solvate_without_box_centres_and_derives_the_box(monkeypatch) -> None:
-    """Solute-only builds keep the legacy compute-centre-solvate behaviour."""
+def test_solvate_without_box_centers_and_derives_the_box(monkeypatch) -> None:
+    """Solute-only builds keep the legacy compute-center-solvate behavior."""
     import numpy as np
 
     import polyzymd.utils.packmol as packmol_utils
 
     captured = {}
-    centred = []
+    centered = []
 
     def fake_solvate_with_packmol(**kwargs):
         captured.update(kwargs)
@@ -361,7 +361,7 @@ def test_solvate_without_box_centres_and_derives_the_box(monkeypatch) -> None:
     monkeypatch.setattr(
         SolventBuilder,
         "_center_topology_in_box",
-        lambda self, topology, box_vecs: centred.append(box_vecs),
+        lambda self, topology, box_vecs: centered.append(box_vecs),
     )
 
     topology = _real_solute_topology()
@@ -370,7 +370,7 @@ def test_solvate_without_box_centres_and_derives_the_box(monkeypatch) -> None:
     SolventBuilder().solvate(topology=topology, padding=1.2)
 
     assert captured["center_solute"] is True
-    assert len(centred) == 1
+    assert len(centered) == 1
     np.testing.assert_allclose(
         captured["box_vectors"].m_as("nanometer"), expected.m_as("nanometer")
     )

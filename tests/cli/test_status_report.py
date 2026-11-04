@@ -234,7 +234,7 @@ def test_render_agent_lines_and_resubmit_hint():
         in text
     )
     assert "polyzymd submit -c a/config.yaml -r 4 --preset blanca-shirts" in text
-    assert "\x1b[" not in text  # no colour codes
+    assert "\x1b[" not in text  # no color codes
 
 
 def test_render_agent_warns_when_slurm_unavailable():

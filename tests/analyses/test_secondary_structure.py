@@ -311,7 +311,7 @@ def test_analyze_reports_the_helix_fraction_by_default(configs, coordinates, tmp
     assert a.mean > b.mean
 
 
-def test_analyze_residue_run_is_labelled_by_residue(configs, coordinates, tmp_path) -> None:
+def test_analyze_residue_run_is_labeled_by_residue(configs, coordinates, tmp_path) -> None:
     report = analyze(
         "secondary_structure",
         [configs["A"], configs["B"]],

@@ -138,7 +138,7 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     version = tag or "unversioned"
     _write_gitignore(root)
     method = (
-        f"Analysed with PolyzyMD {polyzymd.__version__}: {len(studies)} studies "
+        f"Analyzed with PolyzyMD {polyzymd.__version__}: {len(studies)} studies "
         f"({', '.join(studies)}), each against its own control; the replicate is "
         "the sampling unit."
     )

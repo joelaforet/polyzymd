@@ -1,4 +1,4 @@
-"""Tests for labelled per-replicate results, the rmsf function and ``polyzymd analyze rmsf``.
+"""Tests for labeled per-replicate results, the rmsf function and ``polyzymd analyze rmsf``.
 
 Each replicate is an OpenMM run directory with one DCD segment of three
 residues of two atoms each. Every frame is the same shape with atom noise
@@ -148,7 +148,7 @@ def test_rmsf_deviation_and_offset_equal_aligntraj_and_gmx_definitions() -> None
         rmsf(atoms, atoms, ref.atoms[:4], frames)
 
 
-def test_per_replicate_profile_is_labelled_by_residue(study, tmp_path) -> None:
+def test_per_replicate_profile_is_labeled_by_residue(study, tmp_path) -> None:
     """Each replicate's profile equals the hand-aligned RMSF, and summary rows are per residue."""
     profile = _profile(study, tmp_path, "frame", frame=1)
     assert profile.labels == [1, 2, 3]
@@ -208,7 +208,7 @@ def test_mean_rmsf_is_the_mean_over_residues(study, tmp_path) -> None:
     report = mean.compare()
     assert [row.entry for row in report.pairwise] == [None]
     assert report.verdict[0].startswith("B larger mean_rmsf than A")
-    with pytest.raises(ProtocolError, match="labelled values"):
+    with pytest.raises(ProtocolError, match="labeled values"):
         mean.over_labels()
 
 

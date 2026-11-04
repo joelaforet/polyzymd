@@ -255,7 +255,7 @@ When no condition of the study has runs on this machine and a stored report
 exists, `analyze --study` exits 2 with `error: no runs of study ... are on this
 machine.` It never prints the stored values as its result. Read them with
 `pz.Study("study.yaml").results(run)`, or give the runs with
-`polyzymd study locate DIR --verify` to analyse again.
+`polyzymd study locate DIR --verify` to analyze again.
 
 ### `the control ... has no replicate where every selection matches atoms`
 

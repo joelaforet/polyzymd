@@ -376,7 +376,7 @@ class UniverseProvider:
 
         Read through the engine of the config
         (:meth:`~polyzymd.engines.base.SimulationEngine.recorded_trajectory_hashes`),
-        so every engine's way of recording them is honoured. None when the
+        so every engine's way of recording them is honored. None when the
         loader has no simulation engine, and empty when the run recorded none.
         """
         provenance = self.provenance_for(replicate)

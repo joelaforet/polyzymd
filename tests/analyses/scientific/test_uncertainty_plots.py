@@ -169,7 +169,7 @@ class TestFootnote:
         assert "not a 95% interval" in footnote
 
     def test_detector_sees_an_error_bar(self) -> None:
-        """The uncertainty detector recognises a bar chart with yerr."""
+        """The uncertainty detector recognizes a bar chart with yerr."""
 
         fig, ax = plt.subplots()
         try:
@@ -179,7 +179,7 @@ class TestFootnote:
             plt.close(fig)
 
     def test_detector_sees_a_shaded_band(self) -> None:
-        """The uncertainty detector recognises a fill_between band."""
+        """The uncertainty detector recognizes a fill_between band."""
 
         fig, ax = plt.subplots()
         try:

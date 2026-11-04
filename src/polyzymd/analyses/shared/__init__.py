@@ -25,5 +25,5 @@ aa_classification
 groupings
     Physicochemical classes of amino acids.
 plotting
-    Axis styling, condition colours, grouped bars, uncertainty bands, figure saving.
+    Axis styling, condition colors, grouped bars, uncertainty bands, figure saving.
 """

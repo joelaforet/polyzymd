@@ -43,7 +43,7 @@ _TRAJECTORIES = ("doi", "conditions", "title")
 _EXPERIMENTAL = ("doi", "description")
 _FUNDING = ("funder", "award", "funder_doi")
 _ZENODO = ("communities", "access_right")
-#: Default licences, matching the LICENSE files polyzymd study init writes.
+#: Default licenses, matching the LICENSE files polyzymd study init writes.
 DEFAULT_LICENSE = {"data": "CC-BY-4.0", "code": "MIT"}
 #: Values of ``related.paper.status``, those of Citation File Format 1.2.0.
 PAPER_STATUS = ("in-preparation", "submitted", "in-press", "preprint", "advance-online", "abstract")
@@ -96,7 +96,7 @@ def check_metadata(raw: Any, what: str = "study") -> tuple[dict[str, Any], list[
     """Check the ``metadata:`` block and return it completed, with a warning per gap.
 
     Missing ``title``, ``description``, ``purpose`` and ``authors`` become
-    ``TODO`` placeholders; a missing licence becomes the default
+    ``TODO`` placeholders; a missing license becomes the default
     (:data:`DEFAULT_LICENSE`); a missing or placeholder paper DOI is noted.
     ``doi`` is the dataset's own DOI, reserved in Zenodo before publishing;
     it is ``None`` until set, with a warning that names ``what`` is published

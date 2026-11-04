@@ -2,7 +2,7 @@
 
 Every check a build runs is registered here with a stable ID, the severity it has
 unless a config's ``modeling_exceptions`` accepts it, and a sentence saying which
-modelling mistake it catches. The docs page listing every check and the comments
+modeling mistake it catches. The docs page listing every check and the comments
 in the config template are generated from this catalog, so they cannot drift from
 the code.
 """
@@ -28,7 +28,7 @@ class CheckSpec:
             may name a component), ``system`` if it runs once per build.
         severity: ``FAIL`` stops the build unless the config accepts it; ``WARN``
             and ``INFO`` are recorded only.
-        catches: The modelling mistake the check catches, in one sentence.
+        catches: The modeling mistake the check catches, in one sentence.
         component_types: Component types the check applies to; None means all.
     """
 

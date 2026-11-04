@@ -115,7 +115,7 @@ solutes:
 
 The entry asks for two chains of five SBMA monomers. `dynamic` builds each
 chain with mBuild from the repeat unit of the monomer: its SMILES has `*` on
-the two carbons that bond to the neighbouring units. `end_groups` puts an
+the two carbons that bond to the neighboring units. `end_groups` puts an
 SBMA unit that kept its C=C double bond at each end, as in the chains PolyzyMD built before 1.3.0,
 so a 5-mer is an end, three repeat units and an end. `residue_name: SBM` names the
 monomers in the topology.

@@ -295,7 +295,7 @@ def death_action(last_error: str | None, directory: str | None) -> str:
 
     Only causes known to leave a valid checkpoint get ``resubmit``: node,
     scheduler, GPU-routing and environment-activation faults. Physics
-    blow-ups, build refusals, a missing package and anything unrecognised
+    blow-ups, build refusals, a missing package and anything unrecognized
     need a person. ``directory`` is kept for callers; the action does not
     depend on it.
     """
@@ -1013,7 +1013,7 @@ def render_agent(
     slurm_queried: bool = True,
     unfinished: bool = False,
 ) -> str:
-    """Compact, colour-free, fixed-vocabulary text for agents and terminals.
+    """Compact, color-free, fixed-vocabulary text for agents and terminals.
 
     Each system header carries ``done/total completed``. With *unfinished*,
     completed replicates are omitted and fully completed systems collapse to

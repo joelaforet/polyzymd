@@ -1533,7 +1533,7 @@ class TrajectoryLoader:
         if self._engine is None:
             from polyzymd.engines import create_engine
 
-            # Reading a run needs no engine binary: a GROMACS run is analysed
+            # Reading a run needs no engine binary: a GROMACS run is analyzed
             # on a machine without GROMACS.
             self._engine = create_engine(
                 self.config, override=self._engine_override, defer_binary=True
@@ -1812,7 +1812,7 @@ class TrajectoryLoader:
         pbc_policy : str, optional
             Periodic boundary policy, ``"as_is"`` (default) or
             ``"make_whole"``. See :func:`apply_pbc_policy`. The default keeps
-            the historical behaviour of reading coordinates exactly as stored.
+            the historical behavior of reading coordinates exactly as stored.
 
         Returns
         -------

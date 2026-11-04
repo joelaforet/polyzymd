@@ -4,7 +4,7 @@
 ``AnalysisFromFunction`` on each replicate's production frames and stores each
 replicate's series with a JSON record of the code, arguments and inputs that
 produced it. :meth:`Timeseries.reduce` turns each series into one value per
-replicate, and :class:`ReplicateValues` summarises and compares those values
+replicate, and :class:`ReplicateValues` summarizes and compares those values
 with the replicate as the sampling unit, using
 :mod:`polyzymd.analyses.shared.statistics` and
 :mod:`polyzymd.analyses.shared.inferential_statistics`: Student t intervals,
@@ -62,7 +62,7 @@ RESULTS_DIR = "polyzymd_results"
 
 #: A replicate is warned about when pymbar's detected start of the
 #: equilibrated region falls later than this fraction of its production frames.
-#: detect_equilibration picks the start that maximises the effective sample
+#: detect_equilibration picks the start that maximizes the effective sample
 #: size, and on a stationary series that maximum is flat, so the start moves
 #: into the series by chance. On 200 stationary AR(1) series of 2000 frames
 #: the start passed 5 percent in 5 to 10 percent of series with 100 or more
@@ -670,7 +670,7 @@ def run_per_replicate(
     parts: Sequence[str] | None = None,
     **kwargs: Any,
 ) -> ReplicateValues | dict[str, ReplicateValues]:
-    """Compute one value, or one labelled array, per replicate with ``function``.
+    """Compute one value, or one labeled array, per replicate with ``function``.
 
     ``function`` is called once per replicate with the built ``args``, the
     keyword ``frames`` holding the replicate's production frame indices and
@@ -726,7 +726,7 @@ def run_per_replicate(
     Returns
     -------
     ReplicateValues or dict of str to ReplicateValues
-        One value or one labelled array per replicate, or with ``parts`` one
+        One value or one labeled array per replicate, or with ``parts`` one
         such result per part, sharing one record per replicate.
 
     Raises
@@ -1152,7 +1152,7 @@ class Timeseries:
 
 
 class ReplicateValues:
-    """One value, or one labelled array, per replicate of every condition.
+    """One value, or one labeled array, per replicate of every condition.
 
     ``labels`` is ``None`` for one number per replicate. Otherwise each
     replicate's value is an array with one entry per label, in the order of
@@ -1191,7 +1191,7 @@ class ReplicateValues:
         }
 
     def _entries(self, untested: Sequence = ()) -> list[tuple[int | None, str | None]]:
-        """Return the position and text of each label to report, or one unlabelled entry."""
+        """Return the position and text of each label to report, or one unlabeled entry."""
         if self.labels is None:
             return [(None, None)]
         skip = {str(key) for key in untested}
@@ -1203,7 +1203,7 @@ class ReplicateValues:
         metric: str | None = None,
         labels: Sequence | None = None,
     ) -> ReplicateValues:
-        """Turn each replicate's labelled array, or the entries of some labels, into one number.
+        """Turn each replicate's labeled array, or the entries of some labels, into one number.
 
         Parameters
         ----------
@@ -1227,7 +1227,7 @@ class ReplicateValues:
         function = np.mean if how == "mean" else how
         if self.labels is None or not callable(function):
             raise ProtocolError(
-                f"{self.metric}: over_labels needs labelled values and 'mean' or a function.",
+                f"{self.metric}: over_labels needs labeled values and 'mean' or a function.",
                 hint="Use over_labels('mean') on a result computed with labels=.",
             )
         name = how if isinstance(how, str) else getattr(how, "__name__", "reduced")
@@ -1261,7 +1261,7 @@ class ReplicateValues:
         """Draw each condition's mean with its 95 percent interval and every replicate value.
 
         See :func:`polyzymd.analyses.figures.plot_condition_values`, or for
-        labelled values :func:`polyzymd.analyses.figures.plot_profile`, which
+        labeled values :func:`polyzymd.analyses.figures.plot_profile`, which
         marks the ``highlight`` labels and names the x axis ``xlabel``. The
         figure goes to ``<output_dir>/<name>.<format>``; ``output_dir``
         defaults to the ``figures`` folder next to ``polyzymd_results``,
@@ -1283,7 +1283,7 @@ class ReplicateValues:
         for n replicates times the standard error, from
         :func:`~polyzymd.analyses.shared.statistics.mean_sem_ci`. Every
         replicate value is listed, with the statistical inefficiency and
-        effective sample size of its series when it came from one. Labelled
+        effective sample size of its series when it came from one. Labeled
         values give one row per condition and label, with the label in
         ``entry``.
 
@@ -1307,7 +1307,7 @@ class ReplicateValues:
         untested: Sequence = (),
         within: str | Sequence[str] | None = None,
     ) -> ProtocolReport:
-        """Compare every condition against the control, per label for labelled values.
+        """Compare every condition against the control, per label for labeled values.
 
         Without ``within`` every condition is compared with one control.
         With ``within``, one factor name or a list, the conditions that share
@@ -1337,12 +1337,12 @@ class ReplicateValues:
         answer one question, whether the condition changes the metric in any
         stratum, and a family is the set of tests behind one conclusion
         (Bender and Lange 2001, doi:10.1016/S0895-4356(00)00314-0).
-        For labelled values it is every label of every condition
+        For labeled values it is every label of every condition
         compared, because scanning a profile for the labels that changed is a
         selective search over that set, and a false discovery rate holds for
         the discoveries of a search only when the family is the set searched
         (Benjamini 2010, doi:10.1111/j.1467-9868.2010.00746.x). Labels in
-        ``untested`` are summarised but take no part in the tests or the
+        ``untested`` are summarized but take no part in the tests or the
         correction.
 
         Parameters
@@ -1508,7 +1508,7 @@ class ReplicateValues:
         left_out = [str(key) for key in untested if str(key) in map(str, self.labels or [])]
         if left_out:
             report.warnings.append(
-                f"labels {', '.join(left_out)} are summarised but left out of the tests and the "
+                f"labels {', '.join(left_out)} are summarized but left out of the tests and the "
                 "correction, as untested= asks"
             )
         return report
@@ -1634,7 +1634,7 @@ class ReplicateValues:
         if self.labels is None:
             verdict = _verdict(self.metric, self.unit, conditions, pairwise)
         else:
-            verdict = _labelled_verdict(self.metric, self.unit, chosen, conditions, pairwise)
+            verdict = _labeled_verdict(self.metric, self.unit, chosen, conditions, pairwise)
         return ProtocolReport(
             analysis=self.source.name,
             protocol_version="2",
@@ -1656,7 +1656,7 @@ class ReplicateValues:
         )
 
 
-def _labelled_verdict(
+def _labeled_verdict(
     metric: str, unit: str | None, chosen: list[str], conditions: list, pairwise: list
 ) -> list[str]:
     """Write one sentence per condition, or per comparison, naming every significant label."""
