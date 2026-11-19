@@ -28,6 +28,8 @@ class PhaseRecord(BaseModel):
     #: Seeds of every job that ran this phase, oldest first; a resumed
     #: equilibration stage keeps the seeds of the attempts before it.
     seeds_by_attempt: list[dict[str, int | None]] = []
+    #: Force backend of a dynamics phase (polyzymd.simulation.backends); None means "openmm".
+    backend: str | None = None
     updated_at: str
 
 

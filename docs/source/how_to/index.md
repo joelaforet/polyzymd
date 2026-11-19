@@ -65,6 +65,7 @@ hpc_slurm
 monitor_simulations
 run_longer
 hardware_platforms
+run_with_cupotential
 run_gromacs
 own_protocol
 site_cu_boulder

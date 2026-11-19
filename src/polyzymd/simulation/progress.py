@@ -182,6 +182,8 @@ class SegmentRecord(BaseModel):
     openmm_version: str | None = None
     pixi_environment: str | None = None
     openmm_platform: dict[str, Any] | None = None
+    #: Force backend (polyzymd.simulation.backends); None for older records, which ran "openmm".
+    backend: str | None = None
     #: The segment's System compared with the audited build
     #: (polyzymd.audit.runtime.record_system_check); None for older records.
     system_check: dict[str, Any] | None = None
@@ -835,7 +837,13 @@ def _read_segment_provenance(params_json: Path) -> Dict[str, Any]:
         return {}
     recovered = {
         key: provenance.get(key)
-        for key in ("polyzymd_version", "openmm_version", "pixi_environment", "openmm_platform")
+        for key in (
+            "polyzymd_version",
+            "openmm_version",
+            "pixi_environment",
+            "openmm_platform",
+            "backend",
+        )
         if provenance.get(key) is not None
     }
     return recovered

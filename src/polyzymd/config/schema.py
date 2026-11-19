@@ -1945,6 +1945,28 @@ class OpenMMEngineConfig(_ConfigModel):
     device_index: str | None = Field(None, description="GPU device index")
     precision: str = Field("mixed", description="Floating-point precision")
 
+    # Runtime-only setting: excluded from model_dump() like
+    # simulation_phases.minimization, so they never change the build-manifest
+    # config hash. system.xml is the same stock OpenMM System for either backend.
+    backend: Literal["openmm", "openmm_cupotential"] = Field(
+        "openmm",
+        exclude=True,
+        description="Run dynamics on stock OpenMM or on NVIDIA's cuPotential plugin "
+        "(nonbonded force, LangevinMiddle integrator and Monte Carlo barostat)",
+    )
+
+    @model_validator(mode="after")
+    def _check_cupotential_platform(self) -> Self:
+        """cuPotential runs only on CUDA in mixed or single precision."""
+        if self.backend == "openmm_cupotential" and (
+            self.platform.upper() != "CUDA" or self.precision.lower() not in ("mixed", "single")
+        ):
+            raise ValueError(
+                "openmm.backend 'openmm_cupotential' needs platform 'CUDA' and precision 'mixed' or "
+                f"'single'; got platform {self.platform!r}, precision {self.precision!r}"
+            )
+        return self
+
 
 class GromacsEngineConfig(_ConfigModel):
     """GROMACS-specific engine settings.

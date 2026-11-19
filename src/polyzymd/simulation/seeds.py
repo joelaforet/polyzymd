@@ -43,7 +43,10 @@ def openmm_seeds(simulation: Any, velocities: int | None = None) -> dict[str, in
     phase drew its starting velocities with, given only when it drew them.
     """
     seeds = {"integrator": int(simulation.integrator.getRandomNumberSeed())}
-    for force in simulation.system.getForces():
+    from polyzymd.simulation.backends import stock_system
+
+    # The stock System holds the barostat seed; a cuPotential context runs a converted copy.
+    for force in stock_system(simulation).getForces():
         if "Barostat" in type(force).__name__:
             seeds["barostat"] = int(force.getRandomNumberSeed())
     if velocities is not None:

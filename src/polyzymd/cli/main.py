@@ -3232,6 +3232,7 @@ def _run_initial_segment(
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
         replicate=replicate,
+        backend=sim_config.openmm.backend,
     )
 
     # ------------------------------------------------------------------
@@ -3366,6 +3367,7 @@ def _run_continuation_segment(
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
         replicate=replicate,
+        backend=sim_config.openmm.backend,
     )
     manager.load_previous_state()
     saved = manager.saved_dynamics()
