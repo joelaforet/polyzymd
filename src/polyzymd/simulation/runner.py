@@ -738,6 +738,7 @@ class SimulationRunner:
             stages=config.equilibration_stages,
             atom_group_resolver=resolver,
             target_temperature=temperature,
+            pressure=pressure,
         )
 
     def run_equilibration_stage(
@@ -1392,6 +1393,7 @@ class SimulationRunner:
         stages: List["EquilibrationStageConfig"],
         atom_group_resolver: "AtomGroupResolver",
         target_temperature: float,
+        pressure: float = 1.0,
     ) -> Dict[str, Any]:
         """Run complete multi-stage equilibration protocol.
 
@@ -1410,6 +1412,8 @@ class SimulationRunner:
             stages: List of EquilibrationStageConfig objects
             atom_group_resolver: Resolver for predefined atom group names
             target_temperature: Final target temperature (for logging)
+            pressure: Pressure in atmospheres for NPT stages (the config's
+                ``thermodynamics.pressure``), passed to every stage
 
         Returns:
             Dictionary with all stage results and summary

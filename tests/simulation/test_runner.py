@@ -1309,6 +1309,32 @@ def test_an_npt_equilibration_stage_runs_the_configured_pressure(tmp_path):
     assert result["pressure_atm"] == 100.0
 
 
+def test_staged_equilibration_runs_the_configured_pressure(tmp_path):
+    """run_equilibration passes thermodynamics.pressure through the staged path to an NPT stage."""
+    openmm = pytest.importorskip("openmm")
+    from types import SimpleNamespace
+
+    from openmm import unit
+
+    from polyzymd.config.schema import EquilibrationStageConfig
+
+    stage = EquilibrationStageConfig(
+        name="npt", ensemble="NPT", temperature=300.0, duration=0.00001, samples=2
+    )
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    runner.run_equilibration(
+        temperature=300.0,
+        config=SimpleNamespace(equilibration_stages=[stage]),
+        pressure=100.0,
+    )
+    (barostat,) = [
+        force
+        for force in runner.simulation.system.getForces()
+        if isinstance(force, openmm.MonteCarloBarostat)
+    ]
+    assert barostat.getDefaultPressure().value_in_unit(unit.atmosphere) == pytest.approx(100.0)
+
+
 def test_an_nvt_equilibration_stage_runs_no_barostat(tmp_path):
     """An NVT stage removes the barostat whatever the pressure, and records no pressure."""
     openmm = pytest.importorskip("openmm")
