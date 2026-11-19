@@ -1132,6 +1132,7 @@ def test_equilibration_stage_result_records_its_times_and_seeds(tmp_path):
         reference_positions=runner._current_positions,
         atom_group_resolver=EmptyResolver(),
         stage_index=0,
+        pressure=1.0,
     )
     assert result["started_at"] <= result["finished_at"]
     assert result["seeds"] == {
@@ -1307,6 +1308,74 @@ def test_an_npt_equilibration_stage_runs_the_configured_pressure(tmp_path):
     assert barostat.getDefaultPressure().value_in_unit(unit.atmosphere) == pytest.approx(100.0)
     assert result["ensemble"] == "NPT"
     assert result["pressure_atm"] == 100.0
+
+
+def test_staged_equilibration_runs_the_configured_pressure(tmp_path):
+    """run_equilibration passes thermodynamics.pressure through the staged path to an NPT stage."""
+    openmm = pytest.importorskip("openmm")
+    from types import SimpleNamespace
+
+    from openmm import unit
+
+    from polyzymd.config.schema import EquilibrationStageConfig
+
+    stage = EquilibrationStageConfig(
+        name="npt", ensemble="NPT", temperature=300.0, duration=0.00001, samples=2
+    )
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    runner.run_equilibration(
+        temperature=300.0,
+        config=SimpleNamespace(equilibration_stages=[stage]),
+        pressure=100.0,
+    )
+    (barostat,) = [
+        force
+        for force in runner.simulation.system.getForces()
+        if isinstance(force, openmm.MonteCarloBarostat)
+    ]
+    assert barostat.getDefaultPressure().value_in_unit(unit.atmosphere) == pytest.approx(100.0)
+
+
+def test_nvt_staged_equilibration_needs_no_pressure(tmp_path):
+    """An all-NVT staged equilibration runs with pressure None and adds no barostat."""
+    openmm = pytest.importorskip("openmm")
+    from types import SimpleNamespace
+
+    from polyzymd.config.schema import EquilibrationStageConfig
+
+    stage = EquilibrationStageConfig(
+        name="nvt", ensemble="NVT", temperature=300.0, duration=0.00001, samples=2
+    )
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    result = runner.run_equilibration(
+        temperature=300.0, config=SimpleNamespace(equilibration_stages=[stage]), pressure=None
+    )
+    forces = runner.simulation.system.getForces()
+    assert not any(isinstance(force, openmm.MonteCarloBarostat) for force in forces)
+    assert result["stages"][0]["pressure_atm"] is None
+
+
+def test_an_npt_stage_without_a_pressure_fails_before_any_stage_runs(tmp_path):
+    """An NPT stage never falls back to an assumed pressure: it raises before stage 0 runs."""
+    pytest.importorskip("openmm")
+    from types import SimpleNamespace
+
+    from polyzymd.config.schema import EquilibrationStageConfig
+
+    stages = [
+        EquilibrationStageConfig(
+            name="heat", ensemble="NVT", temperature=300.0, duration=0.00001, samples=2
+        ),
+        EquilibrationStageConfig(
+            name="press", ensemble="NPT", temperature=300.0, duration=0.00001, samples=2
+        ),
+    ]
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    with pytest.raises(ValueError, match="press.*need a pressure"):
+        runner.run_equilibration(
+            temperature=300.0, config=SimpleNamespace(equilibration_stages=stages), pressure=None
+        )
+    assert runner.simulation is None
 
 
 def test_an_nvt_equilibration_stage_runs_no_barostat(tmp_path):
