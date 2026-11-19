@@ -41,6 +41,25 @@ else:
 
 LOGGER = logging.getLogger(__name__)
 
+
+def _require_npt_pressure(stages: List[Any], pressure: float | None) -> None:
+    """Raise ``ValueError`` if an NPT stage in ``stages`` has no pressure to run at.
+
+    NVT stages run no barostat and need no pressure, so ``None`` is valid when
+    no stage is NPT. PolyzyMD never assumes a pressure for an NPT stage.
+    """
+    from polyzymd.config.schema import Ensemble
+
+    if pressure is not None:
+        return
+    npt = [stage.name for stage in stages if stage.ensemble == Ensemble.NPT]
+    if npt:
+        raise ValueError(
+            f"NPT equilibration stage(s) {', '.join(npt)} need a pressure "
+            "(thermodynamics.pressure), but none was given"
+        )
+
+
 # Phase types
 PhaseType = Literal["equilibration", "production"]
 
@@ -690,7 +709,7 @@ class SimulationRunner:
         self,
         temperature: float,
         config: "SimulationPhasesConfig",
-        pressure: float = 1.0,
+        pressure: float | None = None,
     ) -> Dict[str, Any]:
         """Run equilibration phase.
 
@@ -702,7 +721,9 @@ class SimulationRunner:
             temperature: Temperature in Kelvin
             config: SimulationPhasesConfig containing equilibration stages
             pressure: Pressure in atmospheres for NPT stages (the config's
-                ``thermodynamics.pressure``)
+                ``thermodynamics.pressure``). ``None`` is allowed when every
+                stage is NVT; an NPT stage without a pressure raises
+                ``ValueError`` before any stage runs.
 
         Returns:
             Dictionary with equilibration results
@@ -751,7 +772,7 @@ class SimulationRunner:
         default_friction: float = 1.0,
         resume_from_step: int = 0,
         resume_temperature: float | None = None,
-        pressure: float = 1.0,
+        pressure: float | None = None,
     ) -> Dict[str, Any]:
         """Run a single equilibration stage with optional position restraints.
 
@@ -775,7 +796,9 @@ class SimulationRunner:
                 stage. Only used when ``resume_from_step > 0`` and the stage uses
                 temperature ramping.
             pressure: Pressure in atmospheres for an NPT stage (the config's
-                ``thermodynamics.pressure``). An NVT stage runs no barostat.
+                ``thermodynamics.pressure``). An NVT stage runs no barostat and
+                ignores it, so it may be ``None``; an NPT stage without one
+                raises ``ValueError``.
 
         Returns:
             Dictionary with stage results
@@ -812,6 +835,7 @@ class SimulationRunner:
         # Handle ensemble - add/remove barostat
         barostat_freq = None
         if stage.ensemble == Ensemble.NPT:
+            _require_npt_pressure([stage], pressure)
             self._remove_barostat()
             barostat_freq = stage.barostat_frequency if stage.barostat_frequency else 25
             start_temp = stage.get_start_temperature()
@@ -1393,7 +1417,7 @@ class SimulationRunner:
         stages: List["EquilibrationStageConfig"],
         atom_group_resolver: "AtomGroupResolver",
         target_temperature: float,
-        pressure: float = 1.0,
+        pressure: float | None = None,
     ) -> Dict[str, Any]:
         """Run complete multi-stage equilibration protocol.
 
@@ -1413,11 +1437,14 @@ class SimulationRunner:
             atom_group_resolver: Resolver for predefined atom group names
             target_temperature: Final target temperature (for logging)
             pressure: Pressure in atmospheres for NPT stages (the config's
-                ``thermodynamics.pressure``), passed to every stage
+                ``thermodynamics.pressure``), passed to every stage. ``None``
+                is allowed when every stage is NVT; an NPT stage without a
+                pressure raises ``ValueError`` before any stage runs.
 
         Returns:
             Dictionary with all stage results and summary
         """
+        _require_npt_pressure(stages, pressure)
         import shutil
 
         LOGGER.info(f"Starting multi-stage equilibration with {len(stages)} stages")
