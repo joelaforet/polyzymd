@@ -99,7 +99,7 @@ for _spec in (
         "parameters.bonded",
         "component",
         "FAIL",
-        "bonds, angles, torsions or impropers not from the component's declared force field",
+        "bonds, angles, torsions, or impropers not from the component's declared force field",
     ),
     CheckSpec(
         "parameters.nonbonded",

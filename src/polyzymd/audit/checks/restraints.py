@@ -53,7 +53,7 @@ def _enabled(context: AuditContext) -> list[Any]:
         "restraint.parameters",
         "system",
         "FAIL",
-        "a restraint whose form, distance or force constant differs from the config, or a "
+        "a restraint whose form, distance, or force constant differs from the config, or a "
         "restraint missing or extra",
     )
 )
