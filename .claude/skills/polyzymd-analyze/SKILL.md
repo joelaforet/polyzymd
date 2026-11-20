@@ -80,7 +80,8 @@ lists the studies and the analyses each runs).
   (`docs/source/how_to/study_yaml.md`).
 - A project is made top down: `polyzymd project init`, then
   `polyzymd study add-condition LABEL --new` (or `--from OTHER`, or
-  `--config CONFIG`) in each study. Its runs are in the git-ignored
+  `--config CONFIG`, with `--set KEY=VALUE` and `--factor NAME=VALUE` for
+  what differs) in each study. Its runs are in the git-ignored
   `PROJECT/runs/<study>/<condition>/` unless a config sets
   `scratch_directory`; `study check` finds them through the config.
   `analyze --project` runs the analyses listed under `analyses:` in

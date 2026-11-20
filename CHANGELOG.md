@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `polyzymd study add-condition` takes `--set KEY=VALUE` and `--factor NAME=VALUE`, so a condition that differs from another in a few settings is one command. `--set` sets a key of the copied config, written as a dotted path with list indices, such as `solutes[1].monomers[0].probability=0.5`, and reads the value as YAML. It keeps the config's comments, and the edited config must load: an unknown key fails with the closest valid key, and the study is left unchanged. `--factor` sets the condition's factor in `study.yaml`, over one copied with `--from`. The command prints one line for each, such as `set: thermodynamics.temperature = 330`.
+
 ### Fixed
 
 - `polyzymd study add-condition --config` keeps an absolute `scratch_directory` of the copied config, so new runs go to scratch storage, not into the project's `runs/` folder. `--from` gives the new condition a folder of its own in that scratch storage, `<scratch>/<study>/<condition>/`, so it never shares run folders with the condition it copies, and it copies that condition's `factors` in `study.yaml`. The printed message and the copied config's header now say where the runs go.

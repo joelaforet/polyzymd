@@ -15,7 +15,8 @@ polyzymd project init my_paper --study trpcage    # project.yaml and the study f
 cd my_paper
 polyzymd study add-condition Water --new --study trpcage                 # template config to fill in
 polyzymd study add-condition Water --config ~/polyzymd/examples/quickstart/config.yaml --study trpcage  # or copy a config
-polyzymd study add-condition "Urea 2 M" --from Water --study trpcage     # copy a condition, then edit what differs
+polyzymd study add-condition "Water 330 K" --from Water --study trpcage \
+    --set thermodynamics.temperature=330 --factor temperature=330      # a copy that differs in a few settings
 polyzymd project add-study calb --project .       # another protein
 ```
 
@@ -23,6 +24,13 @@ polyzymd project add-study calb --project .       # another protein
 (Trp-cage, OpenMM on the CPU; `config_gromacs.yaml` for GROMACS). Put the
 user's PDB in `<study>/conditions/<name>/structures/` and set `pdb_path` on
 the `type: protein` entry of `solutes:`.
+`--set KEY=VALUE` takes a dotted path with list indices (quote it:
+`--set 'solutes[1].monomers[0].probability=0.5'`), keeps the config's comments,
+checks that the edited config loads, and prints `set: KEY = VALUE` for each, so
+there is no need to read or edit the YAML afterward. `--factor NAME=VALUE`
+sets the condition's factor in `study.yaml`. Set every value that differs,
+such as each equilibration stage's temperature
+(`'simulation_phases.equilibration_stages[0].temperature=330'`).
 
 **The scientific choices are the user's.** Every solute names its
 `force_field` files and its `charges` (with the NAGL `model` file for
