@@ -1132,7 +1132,7 @@ Commands on a project folder: the studies of one paper; see
 ### polyzymd project check
 
 ```bash
-polyzymd project check [PATH] [--production]
+polyzymd project check [PATH] [--production] [--publish]
 ```
 
 Reads `project.yaml` (`PATH` is the file or its folder, by default the
@@ -1140,8 +1140,11 @@ current directory) and each study's `study.yaml` without loading any
 trajectory. Prints `analysis <run>: studies <labels>` for each project
 analysis, `stats <function>: up to date|stale: ...|not run` when it names a
 plan, then `== study <label>` and the `polyzymd study check` of each study,
-then `== project` with the git line and the project's metadata line, once.
-A study's metadata line is printed only when the study has its own metadata.
+then `== project` with the git line, once. The last line,
+`publishing: <n> gaps (polyzymd project check --publish)`, counts the
+publishing gaps of the project and all its studies. `--publish` lists them
+instead, as `study check --publish` does, with the citation once at the end.
+A study's metadata gaps are its own only when the study has its own metadata.
 `--production` adds each condition's production length to each study's
 lines, as `study check --production` does. It reads every run's trajectory.
 Exits 2 when the project file or a study cannot be read.
@@ -1195,12 +1198,13 @@ Commands on a study folder; see {doc}`../how_to/study_yaml` and
 ### polyzymd study check
 
 ```bash
-polyzymd study check [PATH] [--production]
+polyzymd study check [PATH] [--production] [--publish]
 ```
 
 `--production` adds each condition's production length, read from every run's
 trajectory headers and segments (minutes for long restarted chains); without
-it no trajectory is read.
+it no trajectory is read. `--publish` lists the publishing gaps, the freeze
+step and the citation, which the default output counts on its last line.
 
 Reads `study.yaml` (`PATH` is the file or its folder, by default the current
 directory) without loading any trajectory, and prints:
@@ -1214,9 +1218,15 @@ directory) without loading any trajectory, and prints:
 | condition | `control\|condition <label>: replicates <numbers> under <directory> (from data.local.yaml\|config)`, with `; production <ns>` (a range when the replicates differ) under `--production`, or `no replicates found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
 | git | `git: commit <sha>; inputs committed`, `git: commit <sha>; <n> uncommitted inputs: <first five paths> and <m> more`, or `git: not a repository` |
-| metadata | `metadata (<file>): complete`, or `metadata (<file>): <n> gaps for publishing: <gap>; <gap> ...` |
-| publish | `publish: follow <study>/deposit/UPLOAD.md` after a freeze, or `publish: when the analyses are final, run polyzymd study freeze` |
 | reproduce | In a downloaded frozen study (a `manifest.json` but no `deposit/`): how to point it at the trajectories and rerun or redraw |
+| publishing | `publishing: <n> gaps (polyzymd study check --publish)`, the last line without `--publish` |
+
+With `--publish`, the `publishing` line is replaced by:
+
+| Line | Fields |
+|---|---|
+| gap | `publishing gap: <gap>`, one per missing metadata field (`(<file>)` names study.yaml or project.yaml), condition config outside the study (freeze refuses it), or input file outside the study |
+| publish | `publish: follow <study>/deposit/UPLOAD.md` after a freeze, or `publish: when the analyses are final, run polyzymd study freeze` |
 | citation | `cite: <how to cite PolyzyMD>` |
 
 `analyze` and the `study` commands print only reports and warnings on the

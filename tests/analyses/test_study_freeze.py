@@ -445,10 +445,13 @@ class TestReproduce:
 
     def test_check_reports_metadata_gaps_and_the_next_step(self, study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(study)])
-        assert "metadata (study.yaml): 2 gaps" in result.output
+        assert "publishing: 2 gaps (polyzymd study check --publish)" in result.output
+        assert "(study.yaml)" not in result.output and "publish:" not in result.output
+        result = CliRunner().invoke(cli, ["study", "check", str(study), "--publish"])
+        assert result.output.count("(study.yaml)") == 2
         assert "publish: when the analyses are final, run polyzymd study freeze" in result.output
         freeze(study)
-        result = CliRunner().invoke(cli, ["study", "check", str(study)])
+        result = CliRunner().invoke(cli, ["study", "check", str(study), "--publish"])
         assert "publish: follow" in result.output and "UPLOAD.md" in result.output
 
     def test_study_doi_reaches_the_citation_files(self, study: Path) -> None:
@@ -1061,6 +1064,9 @@ def test_freeze_refuses_a_condition_config_outside_the_study(tmp_path: Path) -> 
     )
     assert result.exit_code == 0, result.output
     check = CliRunner().invoke(cli, ["study", "check", str(root)])
+    assert "freeze will refuse" not in check.output and "publishing: " in check.output
+    check = CliRunner().invoke(cli, ["study", "check", str(root), "--publish"])
+    assert "publishing gap: Polymer: the config is outside" in check.output
     assert "freeze will refuse" in check.output
     with pytest.raises(ProtocolError, match="outside the study") as caught:
         freeze(root)

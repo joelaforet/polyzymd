@@ -289,13 +289,15 @@ These rules apply to the names in `project.yaml`:
 
 ```bash
 polyzymd project check Paper_1                    # which studies run each analysis, then each study's check
+polyzymd project check Paper_1 --publish          # also every publishing gap, before you freeze
 polyzymd study check Paper_1/lipa363 --production # the production length of each condition of one study
 polyzymd analyze rmsf --project Paper_1           # every study that runs rmsf, one after another
 polyzymd analyze --project Paper_1                # every analysis of every study
 polyzymd analyze rmsf --study Paper_1/lipa363     # one study
 ```
 
-`project check` reads no trajectory. `study check --production` reads the
+`project check` reads no trajectory. Its last line counts the publishing gaps
+of the project and its studies; `--publish` lists them. `study check --production` reads the
 trajectory headers, and gives the simulated time of each condition. Use it to
 choose the equilibration window.
 

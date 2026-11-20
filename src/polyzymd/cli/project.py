@@ -26,19 +26,36 @@ def project_group() -> None:
     help="Also give each condition's production length, as study check --production does; "
     "this reads every run's trajectory.",
 )
+@click.option(
+    "--publish",
+    is_flag=True,
+    help="Also list every publishing gap of the project and its studies, the freeze step and "
+    "the citation, as study check --publish does.",
+)
 @click.pass_context
-def check_command(ctx: click.Context, path: Path, production: bool = False) -> None:
+def check_command(
+    ctx: click.Context, path: Path, production: bool = False, publish: bool = False
+) -> None:
     """Check a project.yaml and each of its studies.
 
     PATH is the project.yaml or the folder holding it (default: here). Prints
     which studies run each project analysis, then the polyzymd study check of
-    every study. No trajectory is loaded unless --production is given. Exits
-    2 when the project file or any study cannot be read.
+    every study. No trajectory is loaded unless --production is given. The
+    last line counts the publishing gaps of the project and its studies;
+    --publish lists them. Exits 2 when the project file or any study cannot
+    be read.
     """
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.project import Project
     from polyzymd.analyses.study_git import describe, git_state
-    from polyzymd.cli.study import PROJECT_CHECK, _echo_metadata, _study_logging
+    from polyzymd.citation import citation_line
+    from polyzymd.cli.study import (
+        PROJECT_CHECK,
+        PROJECT_GAPS,
+        _study_logging,
+        metadata_gaps_of,
+        publishing_summary,
+    )
     from polyzymd.cli.study import check_command as study_check
 
     _study_logging(path, "project-check")
@@ -57,13 +74,21 @@ def check_command(ctx: click.Context, path: Path, production: bool = False) -> N
     for label, folder in project.protocol.studies.items():
         click.echo(f"== study {label}")
         try:
-            ctx.invoke(study_check, path=folder, production=production)
+            ctx.invoke(study_check, path=folder, production=production, publish=publish)
         except SystemExit as exit_:
             if exit_.code:
                 failed.append(label)
     click.echo("== project")
     click.echo(describe(git_state(project.root)))
-    metadata_read = _echo_metadata(project.protocol.metadata, "project.yaml")
+    gaps = metadata_gaps_of(project.protocol.metadata, "project.yaml")
+    metadata_read = gaps is not None
+    if publish:
+        for gap in gaps or []:
+            click.echo(f"publishing gap: {gap}")
+        click.echo(f"cite: {citation_line()}")
+    else:
+        count = ctx.meta.get(PROJECT_GAPS, 0) + len(gaps or [])
+        click.echo(publishing_summary(count, "project check"))
     if failed:
         click.echo(f"error: studies {', '.join(failed)} did not check", err=True)
     if failed or not metadata_read:

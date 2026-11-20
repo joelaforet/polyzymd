@@ -36,6 +36,31 @@ def test_project_check_prints_the_git_line_once(tmp_path: Path) -> None:
     assert "more" in git_lines[0] and "note_19.txt" not in git_lines[0]
 
 
+def test_project_check_counts_publishing_gaps_on_one_line(tmp_path: Path) -> None:
+    """Without --publish, one last line counts every gap; --publish lists them and the citation."""
+    from polyzymd.cli.main import cli
+    from tests._support.analysis_testkit import write_simulation_config
+
+    for study in ("one", "two"):
+        write_simulation_config(tmp_path / study / "control", scratch=tmp_path / "data" / study)
+        (tmp_path / study / "study.yaml").write_text(
+            "equilibration: 0ns\nconditions: {Control: control}\n"
+        )
+    (tmp_path / "two" / "study.yaml").write_text(
+        "equilibration: 0ns\nconditions: {Control: control}\nmetadata: {title: Two}\n"
+    )
+    (tmp_path / "project.yaml").write_text("studies: {one: one, two: two}\n")
+    output = CliRunner().invoke(cli, ["project", "check", str(tmp_path)]).output
+    summaries = [line for line in output.splitlines() if line.startswith("publishing: ")]
+    assert summaries == [output.splitlines()[-1]], output
+    assert "publishing gap" not in output and "cite:" not in output
+    count = int(summaries[0].split()[1])
+    published = CliRunner().invoke(cli, ["project", "check", str(tmp_path), "--publish"]).output
+    assert published.count("publishing gap: ") == count
+    assert "(study.yaml)" in published and "(project.yaml)" in published
+    assert published.count("cite: ") == 1 and "publishing: " not in published
+
+
 def test_add_study_writes_the_study_and_lists_it(tmp_path: Path) -> None:
     """add-study makes the study folder project init would, and lists it after the others."""
     from polyzymd.analyses.project_file import load_project_file
