@@ -845,7 +845,10 @@ def add_condition_command(
     --config, when the config's scratch_directory holds its runs, that
     folder is written to data.local.yaml, and the copy keeps its runs there:
     a condition of another study copied this way reuses that condition's
-    runs, which are not run again.
+    runs, which are not run again. Otherwise --config keeps an absolute
+    scratch_directory as written. --from gets runs of its own, in a folder
+    of its own in the other condition's scratch storage when that condition
+    sets an absolute scratch_directory, and copies its factors.
 
     \b
     Examples:
@@ -869,12 +872,19 @@ def add_condition_command(
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_STUDY_ERROR)
     click.echo(f"condition {label}: {path}, listed in study.yaml")
+    copy = yaml.safe_load(path.read_text()) or {}
     if source is not None:
-        name = (yaml.safe_load(path.read_text()) or {}).get("name")
         click.echo(
-            f"name: set to {name!r} in the copy; change description: and the settings "
-            f"in which {label} differs from {source}"
+            f"name: set to {copy.get('name')!r} in the copy; change description: and the "
+            f"settings in which {label} differs from {source}"
         )
+        study = yaml.safe_load(find_study_file(study_path).read_text()) or {}
+        entry = (study.get("conditions") or {}).get(label)
+        factors = entry.get("factors") if isinstance(entry, dict) else None
+        if factors:
+            shown = ", ".join(f"{key}: {value}" for key, value in factors.items())
+            click.echo(f"factors: copied from {source} ({shown}); change the ones that differ")
+    scratch = (copy.get("output") or {}).get("scratch_directory")
     root = find_study_file(study_path).parent
     data = root / DATA_FILE
     where = (yaml.safe_load(data.read_text()) or {}).get(label) if data.is_file() else None
@@ -883,6 +893,16 @@ def add_condition_command(
         click.echo(
             f"runs: the copy reuses the runs in {where}; nothing is run again, and new "
             "replicates of either config go there too"
+        )
+    elif scratch and source is not None:
+        click.echo(
+            f"runs: new replicates go into {scratch}, a folder of their own in the scratch "
+            f"storage of {source}, so the two conditions never share run folders"
+        )
+    elif scratch and config is not None:
+        click.echo(
+            f"runs: new replicates go into {scratch}, the scratch_directory kept from the "
+            "config; replicates run with either config share those run folders"
         )
     else:
         runs = os.path.relpath(runs_folder(root, label))

@@ -333,7 +333,11 @@ class TestReusedConditions:
 
         assert self._copy(project, "Half 2", "--from", "Half").exit_code == 0
         copy = SimulationConfig.from_yaml(project / "rml/conditions/half_2/config.yaml")
-        assert copy.output.scratch_directory is None and copy.discover_replicate_dirs() == []
+        # Half runs in <data>/rml/half, named as its runs/ folder is: the copy runs
+        # beside it, in a folder of its own, never in Half's run folders.
+        half = SimulationConfig.from_yaml(project / "rml/conditions/half/config.yaml")
+        assert copy.output.scratch_directory == half.output.scratch_directory.parent / "half_2"
+        assert half.discover_replicate_dirs() and copy.discover_replicate_dirs() == []
 
     def test_study_check_warns_when_configs_sharing_runs_differ(self, project: Path) -> None:
         assert (

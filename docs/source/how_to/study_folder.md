@@ -55,11 +55,13 @@ For each `--condition`, `study init` does these steps:
 2. It copies each input file that the config names (the protein PDB, a
    substrate SDF, polymer building blocks) to `conditions/<name>/structures/`.
    The paths in the copied config are relative.
-3. It removes the machine paths from the copied config. `projects_directory`
-   becomes `runs/<name>/` of the study, given relative to the config, and
-   `scratch_directory` becomes `null`. So new runs of the copy go into
-   `runs/`, which git ignores. These paths are not part of the
-   {term}`config hash`, so stored results still match.
+3. It sets where the copy writes its runs. `projects_directory` becomes
+   `runs/<name>/` of the study, given relative to the config. An absolute
+   `scratch_directory`, such as `/scratch/alpine/$USER/sims`, is kept, so new
+   runs of the copy go to the same scratch storage. A relative or missing
+   `scratch_directory` becomes `null`, and new runs go into `runs/`, which
+   git ignores. These paths are not part of the {term}`config hash`, so
+   stored results still match. The comments of the config are kept.
 4. If the original `scratch_directory` holds runs of the config, it writes
    that folder to `data.local.yaml`. The analyses then read those runs.
 
@@ -84,8 +86,14 @@ polyzymd study add-condition "SBMA 100%" --config sims/SBMA100/config.yaml --stu
 ```
 
 `add-condition --from` copies the config of another condition of the study,
-with the input files it names. It sets `name:` in the copy to the new
-condition's folder name. Then change what differs. `--config` copies
+with the input files it names, and its `factors` in `study.yaml`. It sets
+`name:` in the copy to the new condition's folder name. Then change what
+differs. The copy gets runs of its own: when the other condition sets an
+absolute `scratch_directory`, the copy's runs go into a folder of their own
+there, `<scratch>/<study>/<name>/`, so the two conditions never share run
+folders. When the other condition's own folder already ends in
+`<study>/<its name>/`, as a copy made with `--from` does, the new folder goes
+beside it instead of inside it. `--config` copies
 the config and its inputs as `study init` does. All three forms add one line
 under `conditions:` in `study.yaml`. The rest of the file, with its comments,
 does not change. Each prints where the new runs go.

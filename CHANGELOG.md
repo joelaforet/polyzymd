@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `polyzymd study add-condition --config` keeps an absolute `scratch_directory` of the copied config, so new runs go to scratch storage, not into the project's `runs/` folder. `--from` gives the new condition a folder of its own in that scratch storage, `<scratch>/<study>/<condition>/`, so it never shares run folders with the condition it copies, and it copies that condition's `factors` in `study.yaml`. The printed message and the copied config's header now say where the runs go.
+
 ## [1.4.0b1] - 2026-10-30
 
 The AIChE beta of 1.4: covalent protein modification (mutations, protonation

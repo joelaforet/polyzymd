@@ -53,7 +53,10 @@ study, and a replicate run with either config goes into the same folder.
 
 Add the conditions that are new to this study as usual. To start from the
 reused condition, copy it with `--from`. A copy made with `--from` is a new
-condition, with runs of its own:
+condition, with runs of its own. If the reused condition's `scratch_directory`
+is absolute, the copy's runs go into a folder of their own in it,
+`<scratch>/<study>/<name>/`. The copy also takes the reused condition's
+`factors` in `study.yaml`:
 
 ```bash
 polyzymd study add-condition "Water 330 K" --from "Water 300 K" --study temperatures
@@ -61,7 +64,8 @@ polyzymd study add-condition "Water 330 K" --from "Water 300 K" --study temperat
 
 Then change the copy's temperatures: `thermodynamics.temperature` and the
 temperatures of the equilibration stages. Give the conditions their factors in
-`study.yaml` if the study compares by them.
+`study.yaml` if the study compares by them, and change the copied factor that
+differs, here the temperature.
 
 ## Step 3: Check the study
 

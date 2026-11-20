@@ -166,6 +166,18 @@ REUSE_NOTE = (
     "and its new replicates go there too"
 )
 
+#: The header of a copied config that keeps the absolute scratch_directory of the original.
+KEPT_NOTE = (
+    "scratch_directory is kept from {config}: the runs go there, into the same "
+    "run folders as those of {config}"
+)
+
+#: The header of a new condition copied with --from whose original sets an absolute scratch_directory.
+OWN_NOTE = (
+    "scratch_directory is a folder of this condition's own, in the scratch storage of "
+    "the {config} it was copied from, so the two never share run folders"
+)
+
 
 def runs_folder(study_root: Path, label: str) -> Path:
     """Return the folder that a new condition's config writes its runs into.
@@ -200,7 +212,13 @@ def ignore_runs(folder: Path) -> None:
 
 
 def copy_condition(
-    config: Path, folder: Path, runs: Path, *, name: str | None = None, keep_runs: bool = True
+    config: Path,
+    folder: Path,
+    runs: Path,
+    *,
+    name: str | None = None,
+    own_folder: str | None = None,
+    source_folder: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Copy ``config`` to ``folder/config.yaml`` with the input files it names.
 
@@ -208,13 +226,19 @@ def copy_condition(
     existing file or directory is copied into ``folder/structures/`` and
     written as a path relative to the new config. ``projects_directory``
     becomes ``runs`` (the folder :func:`runs_folder` gives), relative to the
-    new config. With ``keep_runs``, ``scratch_directory`` becomes the folder
-    that holds the config's runs, when it has any (:func:`existing_runs`),
-    so the copy reuses them: analysis, ``status``, ``run`` and ``submit`` of
-    either config see the same replicates, and new ones go beside them.
-    Otherwise it becomes null, and new runs go into ``runs``: a copy made
-    to become another condition (``add-condition --from``) gets runs of its
-    own. A polymer ``cache_directory`` is
+    new config. ``scratch_directory`` becomes the folder that holds the
+    config's runs, when it has any (:func:`existing_runs`), so the copy
+    reuses them: analysis, ``status``, ``run`` and ``submit`` of either
+    config see the same replicates, and new ones go beside them. Otherwise
+    an absolute ``scratch_directory`` (or one starting with an environment
+    variable) is kept as written, and a relative or missing one becomes
+    null, so new runs go into ``runs``. With ``own_folder``, the copy is to
+    become another condition (``add-condition --from``) and gets runs of its
+    own: existing runs are not reused, and a kept ``scratch_directory`` gets
+    ``own_folder`` appended, after removing ``source_folder`` from its end
+    when the original was itself such a copy. The run folders of the two
+    configs, named by the same ``naming_template``, then never coincide.
+    A polymer ``cache_directory`` is
     left out so the default is used. The config hash leaves these out, so
     stored results still match. The text is kept with its comments and
     indentation, and only the lines of the copied paths, the output
@@ -281,11 +305,17 @@ def copy_condition(
     dropped_cache = isinstance(polymers, dict) and "cache_directory" in polymers
     if isinstance(polymers, dict):
         polymers.pop("cache_directory", None)
-    existing = existing_runs(config) if keep_runs else None
+    existing = existing_runs(config) if own_folder is None else None
+    scratch = _absolute_scratch(raw.get("output")) if existing is None else None
+    if scratch is not None and own_folder is not None:
+        scratch = scratch.rstrip("/")
+        if source_folder and scratch.endswith(f"/{source_folder}"):
+            scratch = scratch[: -len(source_folder) - 1]
+        scratch = f"{scratch}/{own_folder}"
     output = rewritten.setdefault("output", {})
     if isinstance(output, dict):
         output["projects_directory"] = os.path.relpath(runs, folder.resolve())
-        output["scratch_directory"] = None if existing is None else _from(folder, existing)
+        output["scratch_directory"] = _from(folder, existing) if existing is not None else scratch
     if name is not None:
         rewritten["name"] = name
     target = folder / "config.yaml"
@@ -306,14 +336,16 @@ def copy_condition(
         same = False
     if not same:
         kept = yaml.dump(rewritten, Dumper=_indented_list_dumper(), sort_keys=False)
-    if existing is None:
-        where = f"{os.path.relpath(runs, folder.resolve())} (relative to this file)"
-        note = textwrap.wrap(RUNS_WARNING.format(runs=where) + ".", 74)
+    if existing is not None:
+        note = REUSE_NOTE.format(config=config.name)
+    elif scratch is not None:
+        note = (KEPT_NOTE if own_folder is None else OWN_NOTE).format(config=config.name)
     else:
-        note = textwrap.wrap(f"{REUSE_NOTE.format(config=config.name)}.", 74)
+        where = f"{os.path.relpath(runs, folder.resolve())} (relative to this file)"
+        note = RUNS_WARNING.format(runs=where)
     target.write_text(
         f"# Copied by polyzymd from {config.name}\n"
-        + "".join(f"#   {line}\n" for line in note)
+        + "".join(f"#   {line}\n" for line in textwrap.wrap(f"{note}.", 74))
         + kept
     )
     try:
@@ -341,6 +373,20 @@ def existing_runs(config: Path) -> Path | None:
     except (OSError, ValueError):
         return None
     return (where if where.is_absolute() else Path(config).resolve().parent / where).resolve()
+
+
+def _absolute_scratch(output: Any) -> str | None:
+    """Return the ``scratch_directory`` of a raw ``output`` block when it is absolute.
+
+    One starting with ``~`` or an environment variable counts as absolute:
+    it names a machine's storage, not a folder beside the config.
+    """
+    value = output.get("scratch_directory") if isinstance(output, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    expanded = os.path.expanduser(os.path.expandvars(value))
+    return value if value.startswith("$") or Path(expanded).is_absolute() else None
 
 
 def _from(folder: Path, target: Path) -> str:
@@ -690,7 +736,8 @@ def add_condition(
     With ``config``, the config and its input files are copied as
     :func:`copy_condition` does; with ``source``, the config of that
     condition of the study is copied the same way, with ``name:`` set to the
-    new condition's folder name; with ``new``,
+    new condition's folder name, runs of its own and the source's
+    ``factors``; with ``new``,
     ``conditions/<name>/`` gets a template config to fill in
     (:func:`new_condition`). The new config writes its runs into
     :func:`runs_folder`. The condition is added as one line under
@@ -726,31 +773,41 @@ def add_condition(
             f"{file} already has a condition {label!r} or a folder {folder}.",
             hint="Choose another label.",
         )
+    factors: dict[str, Any] = {}
     if source is not None:
         if source not in conditions:
             raise ProtocolError(
                 f"{file} has no condition {source!r} to copy.",
                 hint=f"Use one of: {', '.join(map(str, conditions)) or 'none yet'}.",
             )
-        config, _ = _condition(source, conditions[source], file)
+        config, factors = _condition(source, conditions[source], file)
     # A failure removes the condition folder and restores study.yaml, so the
     # study is left as it was.
     text = file.read_text()
     try:
         if config is not None:
             # A copy of another condition of the study is renamed as --new names
-            # a template; a config from outside keeps its name.
-            renamed = condition_folder(label) if source is not None else None
-            copy_condition(
-                Path(config),
-                folder,
-                runs_folder(root, label),
-                name=renamed,
-                keep_runs=source is None,
-            )
+            # a template, and its runs go into a folder of its own named as its
+            # runs/ folder is; a config from outside keeps its name and runs.
+            runs = runs_folder(root, label)
+            if source is None:
+                copy_condition(Path(config), folder, runs)
+            else:
+                home = runs_home(root) / "runs"
+                copy_condition(
+                    Path(config),
+                    folder,
+                    runs,
+                    name=condition_folder(label),
+                    own_folder=runs.relative_to(home).as_posix(),
+                    source_folder=runs_folder(root, source).relative_to(home).as_posix(),
+                )
         else:
             new_condition(folder, runs_folder(root, label))
-        _list_entry(file, "conditions", label, str((folder / "config.yaml").relative_to(root)))
+        entry = str((folder / "config.yaml").relative_to(root))
+        _list_entry(
+            file, "conditions", label, {"config": entry, "factors": factors} if factors else entry
+        )
         if label not in (_read_yaml(file).get("conditions") or {}):
             raise ProtocolError(
                 f"{file}: the condition {label!r} was not listed under conditions:.",
@@ -781,13 +838,25 @@ def _read_yaml(file: Path) -> dict:
     return raw
 
 
-def _list_entry(file: Path, block: str, label: str, path: str) -> None:
-    """Insert ``label: path`` as the last entry of the top-level ``block:`` of ``file``, keeping the rest."""
+def _list_entry(file: Path, block: str, label: str, path: str | dict) -> None:
+    """Insert ``label: path`` as the last entry of the top-level ``block:`` of ``file``, keeping the rest.
+
+    A mapping, such as ``{config: ..., factors: {...}}``, is written on one line in flow style.
+    """
     import json
+
+    import yaml
 
     lines = file.read_text().splitlines()
     # A JSON string is a double-quoted YAML string, so any label and path read back as written.
-    entry = f"  {json.dumps(label, ensure_ascii=False)}: {json.dumps(path, ensure_ascii=False)}"
+    value = (
+        yaml.safe_dump(
+            path, default_flow_style=True, sort_keys=False, allow_unicode=True, width=10**6
+        ).strip()
+        if isinstance(path, dict)
+        else json.dumps(path, ensure_ascii=False)
+    )
+    entry = f"  {json.dumps(label, ensure_ascii=False)}: {value}"
     for index, line in enumerate(lines):
         match = re.match(rf"^{block}:\s*(\{{\s*\}})?\s*(#.*)?$", line)
         if match:
