@@ -124,10 +124,15 @@ condition SBMA 50%: replicates [1, 2, 3, 4, 5] under /data/me/LipA_363K (from da
 analysis rg: defaults; no stored results
 analysis contacts as contacts_4A: method=distance, cutoff=4.0; no stored results
 git: commit 53cd9f37d690; inputs committed
-metadata (study.yaml): 3 gaps for publishing: metadata.title is missing; ...
-publish: when the analyses are final, run polyzymd study freeze
-cite: Laforet, Joseph R., Jr. PolyzyMD: ... (version 1.3.0). https://github.com/joelaforet/polyzymd
+publishing: 3 gaps (polyzymd study check --publish)
 ```
+
+- The default output is what you need while the research runs: the
+  conditions, their replicates, problems, and the state of each analysis.
+  The last line only counts what publishing still needs.
+- `polyzymd study check my_study --publish` lists each gap (missing
+  metadata, a config or input file outside the study), the freeze step and
+  how to cite PolyzyMD. Use it before you freeze.
 
 - Without `--production`, `study check` reads no trajectory.
 - With `--production`, it reads the trajectory headers and segments of each

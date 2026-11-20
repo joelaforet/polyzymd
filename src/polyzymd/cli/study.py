@@ -13,6 +13,13 @@ from polyzymd.cli.config_errors import report_config_error
 EXIT_STUDY_ERROR = 2
 #: Context ``meta`` key set by project check, which prints the git and metadata lines once.
 PROJECT_CHECK = "polyzymd.project_check"
+#: Context ``meta`` key where each study check of a project check adds its publishing gaps.
+PROJECT_GAPS = "polyzymd.project_gaps"
+
+
+def publishing_summary(count: int, command: str) -> str:
+    """Return the line that ends a check without --publish: how many publishing gaps it hides."""
+    return f"publishing: {count} gap{'' if count == 1 else 's'} (polyzymd {command} --publish)"
 
 
 def _tested_below_three(report: dict) -> bool:
@@ -122,13 +129,22 @@ def _other_studies_runs(protocol: Any) -> dict[Path, list[tuple[str, str]]]:
     help="Also give each condition's production length, read from every run's trajectory "
     "headers and segments: seconds for a few runs, minutes for long restarted chains.",
 )
-def check_command(path: Path, production: bool = False) -> None:
+@click.option(
+    "--publish",
+    is_flag=True,
+    help="Also list the publishing gaps (metadata, configs or inputs outside the study), "
+    "the freeze step and the citation.",
+)
+def check_command(path: Path, production: bool = False, publish: bool = False) -> None:
     """Check a study.yaml without loading any trajectory.
 
     PATH is the study.yaml or the folder holding it (default: here). Prints
-    one line per condition, saying where its runs were found, and one per
-    analysis run, saying whether it has stored results. With --production,
-    each condition line also gives how long its replicates were simulated.
+    one line per condition, saying where its runs were found, one per
+    analysis run, saying whether it has stored results, and the git state of
+    the inputs. With --production, each condition line also gives how long
+    its replicates were simulated. What publishing still needs is one count
+    on the last line; --publish lists each gap, the freeze step and the
+    citation.
     Exits 2 when the file or a condition's config cannot be read; missing
     runs are reported but are not errors, so a study folder without its
     trajectories still checks.
@@ -176,13 +192,15 @@ def check_command(path: Path, production: bool = False) -> None:
         within, control = protocol.comparison["within"], protocol.comparison["control"]
         pairs = comparison_pairs(labels, labels, protocol.factors, within, control)
         controls = [label for label in labels if label not in {pair[1] for pair in pairs}]
+    from polyzymd.analyses.study_freeze import _outside_inputs
+
+    gaps = [
+        f"{label}: the config is outside the study folder, so polyzymd study freeze will "
+        "refuse it; copy it in with polyzymd study add-condition"
+        for label in outside
+    ] + _outside_inputs(protocol)
     for label, config_path in protocol.conditions.items():
         role = "control" if label in controls else "condition"
-        if label in outside:
-            click.echo(
-                f"warning: {role} {label}: the config is outside the study folder, so "
-                "polyzymd study freeze will refuse it; copy it in with polyzymd study add-condition"
-            )
         try:
             config = SimulationConfig.from_yaml(config_path)
         except Exception as exc:  # noqa: BLE001 - any unreadable config is reported the same way
@@ -312,29 +330,41 @@ def check_command(path: Path, production: bool = False) -> None:
     # analyses/ count among its inputs. project check prints the git line and the
     # project's metadata line once, for all its studies.
     project = protocol.project
-    in_project = click.get_current_context().meta.get(PROJECT_CHECK, False)
+    context = click.get_current_context()
+    in_project = context.meta.get(PROJECT_CHECK, False)
     if not in_project:
         click.echo(describe(git_state(project.root if project is not None else protocol.root)))
     if not (in_project and protocol.metadata == project.metadata):
         # A study's own metadata, differing from its project's, is its study.yaml's.
         own = project is None or protocol.metadata != project.metadata
         owner = "study.yaml" if own else "project.yaml"
-        if not _echo_metadata(protocol.metadata, owner):
+        metadata_gaps = metadata_gaps_of(protocol.metadata, owner)
+        if metadata_gaps is None:
             failed = True
+        else:
+            gaps += metadata_gaps
     guide = protocol.root / "deposit" / "UPLOAD.md"
     frozen = protocol.root / "manifest.json"
-    if guide.is_file():
-        click.echo(f"publish: follow {guide}")
-    elif frozen.is_file():
+    if frozen.is_file() and not guide.is_file():
         click.echo(
             "reproduce: this study was frozen (manifest.json); point it at downloaded "
             "trajectories with polyzymd study locate DIR --verify, then rerun polyzymd analyze "
             "--study --recompute, or redraw figures from results/ without trajectories"
         )
-    elif protocol.analyses:
-        command = "project freeze" if protocol.project is not None else "study freeze"
-        click.echo(f"publish: when the analyses are final, run polyzymd {command}")
-    click.echo(f"cite: {citation_line()}")
+    if publish:
+        for gap in gaps:
+            click.echo(f"publishing gap: {gap}")
+        if guide.is_file():
+            click.echo(f"publish: follow {guide}")
+        elif protocol.analyses and not frozen.is_file():
+            command = "project freeze" if protocol.project is not None else "study freeze"
+            click.echo(f"publish: when the analyses are final, run polyzymd {command}")
+        if not in_project:
+            click.echo(f"cite: {citation_line()}")
+    elif in_project:
+        context.meta[PROJECT_GAPS] = context.meta.get(PROJECT_GAPS, 0) + len(gaps)
+    else:
+        click.echo(publishing_summary(len(gaps), "study check"))
     if failed:
         sys.exit(EXIT_STUDY_ERROR)
 
@@ -651,8 +681,8 @@ def _matches_manifest(root: Path, label: str, folder: Path, verify: bool = False
     )
 
 
-def _echo_metadata(metadata: dict, owner: str) -> bool:
-    """Print the metadata line of ``owner``; return False when the metadata cannot be read."""
+def metadata_gaps_of(metadata: dict, owner: str) -> list[str] | None:
+    """Return the publishing gaps of ``owner``'s metadata, or None (printing why) if unreadable."""
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.study_metadata import check_metadata
 
@@ -660,13 +690,8 @@ def _echo_metadata(metadata: dict, owner: str) -> bool:
         _, gaps = check_metadata(metadata)
     except ProtocolError as exc:
         click.echo(f"error: {' '.join(str(exc).split())}")
-        return False
-    click.echo(
-        f"metadata ({owner}): {len(gaps)} gaps for publishing: {'; '.join(gaps)}"
-        if gaps
-        else f"metadata ({owner}): complete"
-    )
-    return True
+        return None
+    return [f"{gap} ({owner})" for gap in gaps]
 
 
 def _production_summary(label: str, config_path: Path, protocol: Any) -> str:

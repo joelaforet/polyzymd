@@ -332,7 +332,15 @@ class TestCheck:
             "analysis rg as rg_first: selection=index 0; window eq 0.25ns; no stored results"
             in result.output
         )
-        assert "cite: " in result.output and "PolyzyMD" in result.output
+        assert "cite: " not in result.output and "publishing gap" not in result.output
+        assert result.output.splitlines()[-1] == (
+            "publishing: 8 gaps (polyzymd study check --publish)"
+        )
+        published = CliRunner().invoke(cli, ["study", "check", str(study_dir), "--publish"])
+        assert published.exit_code == 0, published.output
+        assert published.output.count("publishing gap: ") == 8
+        assert "cite: " in published.output and "PolyzyMD" in published.output
+        assert "publishing: " not in published.output
 
     def test_condition_lines_in_the_docs_match_the_output(self, study_dir: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(study_dir)])

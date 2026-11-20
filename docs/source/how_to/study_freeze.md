@@ -87,7 +87,8 @@ metadata:
 PolyzyMD refuses an unknown key, and gives the nearest spelling. A missing
 field gives a warning and a `TODO` placeholder in the files. It does not stop
 the freeze. So you can freeze early, and freeze again when you fill the gaps.
-`polyzymd study check` prints the number of gaps that remain.
+`polyzymd study check` prints the number of gaps that remain, and
+`polyzymd study check --publish` lists them.
 
 ## 2. Prepare the study
 
@@ -270,7 +271,7 @@ and 45 days. For a later change, freeze again and upload a **New version**.
 Each version has its own DOI. The concept DOI always points to the latest
 version.
 
-When a freeze has written `UPLOAD.md`, `polyzymd study check` prints
+When a freeze has written `UPLOAD.md`, `polyzymd study check --publish` prints
 `publish: follow deposit/UPLOAD.md`.
 
 ## 5. Deposit the trajectories

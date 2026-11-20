@@ -781,8 +781,8 @@ class TestFigureLayerFriction:
             study.module("nothing")
 
     def test_a_study_of_a_project_points_at_project_freeze(self, project: Path) -> None:
-        result = CliRunner().invoke(cli, ["study", "check", str(project / "lipa")])
-        assert "run polyzymd project freeze" in result.output
+        command = ["study", "check", str(project / "lipa"), "--publish"]
+        assert "run polyzymd project freeze" in CliRunner().invoke(cli, command).output
 
     def test_citation_names_preferred_citation_only_with_a_paper(self) -> None:
         from polyzymd.analyses.study_metadata import check_metadata, citation_cff

@@ -213,7 +213,8 @@ warning: the study has uncommitted changes (study.yaml); the report records them
 PolyzyMD reuses stored results by content, never by commit. So a commit never
 causes a recomputation. Before you freeze, PolyzyMD commits only once, in
 `study init`. After that, you decide what to commit. `polyzymd study check` prints the commit and
-each uncommitted input.
+each uncommitted input. Its last line counts what publishing still needs;
+`polyzymd study check --publish` lists it.
 
 Commit every input before you publish. `polyzymd study freeze` stops while an
 input is not committed; see {doc}`study_freeze`.

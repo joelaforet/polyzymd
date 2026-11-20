@@ -74,6 +74,8 @@ lists the studies and the analyses each runs).
   `pixi run -e analysis polyzymd study check STUDY --production`. It prints
   the replicates of each condition, their production length, and whether each
   analysis run has stored results. Choose `--eq` from the production lengths.
+  Its last line only counts publishing gaps; add `--publish` to list them,
+  which is needed only before a freeze.
 - `polyzymd analyze RUN --study STUDY` runs one entry of `analyses:`.
   `polyzymd analyze --study STUDY` runs them all. Command-line options
   override the file. Results go to `STUDY/results/RUN/`
