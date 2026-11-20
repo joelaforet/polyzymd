@@ -290,6 +290,7 @@ These rules apply to the names in `project.yaml`:
 ```bash
 polyzymd project check Paper_1                    # which studies run each analysis, then each study's check
 polyzymd project check Paper_1 --publish          # also every publishing gap, before you freeze
+polyzymd status --format agent --project Paper_1  # the progress of every replicate of every study
 polyzymd study check Paper_1/lipa363 --production # the production length of each condition of one study
 polyzymd analyze rmsf --project Paper_1           # every study that runs rmsf, one after another
 polyzymd analyze --project Paper_1                # every analysis of every study

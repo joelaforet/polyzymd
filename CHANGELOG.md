@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `polyzymd study check` and `polyzymd project check` now print what the daily research loop needs: the control and conditions, the replicates found, problems such as missing runs, drifted configs and uncommitted inputs, and the state of each analysis's stored results. The publishing gaps (metadata, configs or inputs outside the study), the freeze step and the citation moved behind the new `--publish` flag. Without it, the last line counts them, as in `publishing: 7 gaps (polyzymd study check --publish)`, so nothing is hidden. `project check` prints one count for the project and all its studies. `freeze` still checks and prints every gap.
 
+### Added
+
+- `polyzymd status --study STUDY` and `polyzymd status --project PROJECT` report the replicates of every condition of a study or of a project's studies. Each takes the YAML file or its folder, and finds the runs where `study check` does, including the folders `data.local.yaml` gives. They are the way to monitor a study; `--all` still searches a directory for loose configs.
+
 ## [1.4.0b1] - 2026-10-30
 
 The AIChE beta of 1.4: covalent protein modification (mutations, protonation

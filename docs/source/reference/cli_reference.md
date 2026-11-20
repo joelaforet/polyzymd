@@ -676,8 +676,10 @@ polyzymd status -c config.yaml
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `-c, --config PATH` | One of `-c`/`--all` | Path to a YAML configuration file. Repeatable with `--format agent` or `json`. |
-| `--all DIR` | One of `-c`/`--all` | Search `DIR` (up to 3 levels deep, hidden directories skipped) for `config.yaml` files. Repeatable. |
+| `-c, --config PATH` | One of `-c`/`--all`/`--study`/`--project` | Path to a YAML configuration file. Repeatable with `--format agent` or `json`. |
+| `--all DIR` | One of `-c`/`--all`/`--study`/`--project` | Search `DIR` (up to 3 levels deep, hidden directories skipped) for `config.yaml` files. Repeatable. |
+| `--study STUDY` | One of `-c`/`--all`/`--study`/`--project` | `study.yaml` or its folder: report every condition it lists, with its runs where `study check` finds them (the folder `data.local.yaml` gives, or the config's `scratch_directory`). Repeatable. The way to monitor a study. |
+| `--project PROJECT` | One of `-c`/`--all`/`--study`/`--project` | `project.yaml` or its folder: report every condition of every study it lists, as `--study` does. Repeatable. |
 | `--format table\|agent\|json` | No | `table` (default) prints progress bars for one config. `agent` prints one compact line per replicate with SLURM state, throughput and ETA. `json` emits the same data as JSON. |
 | `--no-slurm` | No | Skip the `squeue` query. Verdicts then rely on `progress.json` alone and cannot separate dead chains from running ones. |
 | `--preset NAME` | No | Preset name for the resubmit commands (`agent` format) of replicates without `submit_settings.json`; a replicate with the record gets the preset and overrides `submit` recorded. |

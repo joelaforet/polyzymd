@@ -153,7 +153,13 @@ equally, so a biased run needs reweighting.
 polyzymd submit -c $C -r 1-5 --dry-run   # show what would be submitted first
 polyzymd submit -c $C -r 1-5             # submit; jobs resubmit themselves
 polyzymd status -c $C
+polyzymd status --format agent --study STUDY   # every condition of a study
+polyzymd status --format agent --project PROJECT --unfinished
 ```
+
+To monitor a study or a project, use `--study` or `--project`, not `--all`:
+they find each condition's runs where `study check` does, including
+`data.local.yaml`.
 
 Check `--preset` and its SLURM account before submitting.
 
