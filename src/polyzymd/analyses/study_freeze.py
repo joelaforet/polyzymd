@@ -46,6 +46,7 @@ from typing import Any
 
 from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.simulation.artifact_integrity import build_record_path
+from polyzymd.utils.paths import names_existing
 
 DEPOSIT = "deposit"
 MANIFEST = "manifest.json"
@@ -430,7 +431,7 @@ def _named_files(value: Any) -> dict[str, str]:
     elif isinstance(value, list):
         for item in value:
             files.update(_named_files(item))
-    elif isinstance(value, str) and len(value) < 4096 and Path(value).is_file():
+    elif isinstance(value, str) and names_existing(value, file=True):
         files[Path(value).name] = hashlib.sha256(Path(value).read_bytes()).hexdigest()
     return files
 

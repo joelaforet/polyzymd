@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `polyzymd study check`, `polyzymd analyze --study`, `freeze`, and the project commands no
+  longer stop with `OSError: [Errno 36] File name too long` when a setting, such as a
+  selection with a large `region <name>` in it, is longer than a file name may be. Such a
+  setting is treated as text, not as a file.
+
 ## [1.4.0b1] - 2026-10-30
 
 The AIChE beta of 1.4: covalent protein modification (mutations, protonation

@@ -352,6 +352,28 @@ class TestCheck:
         for page, word in documented:
             assert word == shape.group(1), page
 
+    def test_a_long_region_in_a_selection_is_not_read_as_a_file(self, study_dir: Path) -> None:
+        # A region of 111 residues makes a selection longer than the 255
+        # bytes a file name may have; probing it as a path raised
+        # "OSError: [Errno 36] File name too long".
+        core = "resid " + " ".join(str(i) for i in range(1, 112))
+        text = (study_dir / "study.yaml").read_text()
+        text = text.replace("analyses:\n", f"regions:\n  core: {core}\nanalyses:\n")
+        text += "  rg_core:\n    analysis: rg\n    selection: name CA and region core\n"
+        (study_dir / "study.yaml").write_text(text)
+        result = CliRunner().invoke(cli, ["study", "check", str(study_dir)])
+        assert result.exit_code == 0, result.output
+        assert "analysis rg as rg_core: selection=name CA and (resid 1 2 3" in result.output
+
+    def test_long_settings_are_not_files_when_checked_or_frozen(self) -> None:
+        from polyzymd.analyses.study_file import missing_files
+        from polyzymd.analyses.study_freeze import _named_files
+
+        long = "name CA and resid " + " ".join(str(i) for i in range(1, 112))
+        assert missing_files({"selection": long}) == []
+        assert missing_files({"reference": long + ".pdb"}) == [long + ".pdb"]
+        assert _named_files({"selection": [long]}) == {}
+
     def test_missing_trajectories_are_not_errors(self, study_dir: Path, tmp_path: Path) -> None:
         shutil.rmtree(tmp_path / "data")
         result = CliRunner().invoke(cli, ["study", "check", str(study_dir)])

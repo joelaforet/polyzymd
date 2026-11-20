@@ -30,3 +30,18 @@ def tidy_path(path: str | os.PathLike[str]) -> Path:
 def shown_path(path: object) -> str:
     """Return ``path`` without ``..`` parts, for printing (:func:`tidy_path`)."""
     return str(tidy_path(str(path)))
+
+
+def names_existing(path: str | os.PathLike[str], *, file: bool = False) -> bool:
+    """Return whether ``path`` names an existing file or folder (only a file with ``file``).
+
+    A setting such as a selection may be probed in case it names a file. Text
+    that cannot be a path, such as a name part longer than the operating
+    system allows (``File name too long``) or a null byte, names nothing, so
+    the answer is False instead of an error.
+    """
+    try:
+        candidate = Path(path)
+        return candidate.is_file() if file else candidate.exists()
+    except (OSError, ValueError):
+        return False
