@@ -3839,6 +3839,22 @@ def cancel(
     help="Directory to search (3 levels deep) for config.yaml files (repeatable)",
 )
 @click.option(
+    "--study",
+    "studies",
+    multiple=True,
+    type=click.Path(exists=True),
+    help="study.yaml, or the folder holding it: the replicates of its conditions, found where "
+    "study check finds them (repeatable)",
+)
+@click.option(
+    "--project",
+    "projects",
+    multiple=True,
+    type=click.Path(exists=True),
+    help="project.yaml, or the folder holding it: the replicates of every condition of its "
+    "studies (repeatable)",
+)
+@click.option(
     "--format",
     "output_format",
     type=click.Choice(["table", "agent", "json"]),
@@ -3869,6 +3885,8 @@ def cancel(
 def status(
     configs: tuple[str, ...],
     all_roots: tuple[str, ...],
+    studies: tuple[str, ...],
+    projects: tuple[str, ...],
     output_format: str,
     no_slurm: bool,
     preset_hint: str | None,
@@ -3884,10 +3902,15 @@ def status(
     throughput in ns/day, an ETA, and for DEAD chains the last FATAL line of
     the newest SLURM log plus a ready-to-run ``polyzymd submit`` command.
 
+    ``--study`` and ``--project`` cover the conditions their study.yaml files
+    list, with the run folders data.local.yaml gives, as study check does.
+
     \b
     Examples:
         polyzymd status -c config.yaml
         polyzymd status --format agent -c a/config.yaml -c b/config.yaml
+        polyzymd status --format agent --study Paper_1/lipa363
+        polyzymd status --format agent --project Paper_1 --unfinished
         polyzymd status --format agent --all /projects/me/sims --preset blanca-shirts
     """
     config_paths = list(configs)
@@ -3895,11 +3918,15 @@ def status(
         from polyzymd.cli.status_report import discover_config_files
 
         config_paths.extend(str(p) for p in discover_config_files(all_roots))
+    data_dirs = _study_condition_configs(studies, projects)
+    config_paths.extend(data_dirs)
     # de-duplicate, preserving order
     seen: set[str] = set()
     config_paths = [p for p in config_paths if not (p in seen or seen.add(p))]
     if not config_paths:
-        raise click.UsageError("Provide at least one -c/--config or --all directory.")
+        raise click.UsageError(
+            "Provide at least one -c/--config, --all directory, --study or --project."
+        )
 
     if output_format != "table":
         _status_report(
@@ -3908,13 +3935,46 @@ def status(
             no_slurm=no_slurm,
             preset_hint=preset_hint,
             unfinished=unfinished,
+            data_dirs=data_dirs,
         )
         return
     if len(config_paths) > 1:
         raise click.UsageError(
             "--format table shows one config at a time; use --format agent or json for several."
         )
-    _status_table(config_paths[0])
+    _status_table(config_paths[0], data_dirs.get(config_paths[0]))
+
+
+def _study_condition_configs(
+    studies: tuple[str, ...], projects: tuple[str, ...]
+) -> dict[str, Path | None]:
+    """Return the config of each condition of ``studies`` and the studies of ``projects``.
+
+    Each config maps to the folder data.local.yaml gives for its condition,
+    or None when the config's own scratch directory holds its runs. A study
+    or project file that cannot be read exits 2 with the error and its fix.
+    """
+    if not (studies or projects):
+        return {}
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.project_file import load_project_file
+    from polyzymd.analyses.study_file import load_study_file
+
+    found: dict[str, Path | None] = {}
+    try:
+        folders = [Path(study) for study in studies]
+        for project in projects:
+            folders.extend(load_project_file(project).studies.values())
+        for folder in folders:
+            study = load_study_file(folder)
+            for label, config in study.conditions.items():
+                found[str(config)] = study.data.get(label)
+    except ProtocolError as exc:
+        click.echo(f"error: {' '.join(str(exc).split())}", err=True)
+        if exc.hint:
+            click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
+        sys.exit(2)
+    return found
 
 
 def _status_report(
@@ -3924,8 +3984,13 @@ def _status_report(
     no_slurm: bool,
     preset_hint: str | None,
     unfinished: bool = False,
+    data_dirs: dict[str, Path | None] | None = None,
 ) -> None:
-    """Multi-config, SLURM-aware status (``--format agent|json``)."""
+    """Multi-config, SLURM-aware status (``--format agent|json``).
+
+    ``data_dirs`` maps a config to the folder holding its runs, when a
+    study's data.local.yaml moves them from the config's scratch directory.
+    """
     from datetime import datetime, timezone
 
     from polyzymd.cli.status_report import (
@@ -3963,6 +4028,10 @@ def _status_report(
                 )
             )
             continue
+        if (data_dirs or {}).get(config_path) is not None:
+            from polyzymd.analyses.study import with_data_dir
+
+            sim_config = with_data_dir(sim_config, data_dirs[config_path])
         engine_name = _resolve_engine_name(sim_config, override=None)
         engine_inst = create_engine(sim_config, override=engine_name, defer_binary=True)
         reports.append(
@@ -3998,8 +4067,11 @@ def _status_report(
         )
 
 
-def _status_table(config: str) -> None:
-    """Single-config progress-bar view (``--format table``, the default)."""
+def _status_table(config: str, data_dir: Path | None = None) -> None:
+    """Single-config progress-bar view (``--format table``, the default).
+
+    ``data_dir``, from a study's data.local.yaml, is where the runs are.
+    """
     from polyzymd.cli.colors import render_progress_bar
     from polyzymd.cli.status_report import _run_started, _stop_file_present, _stopped_gracefully
     from polyzymd.config.schema import SimulationConfig
@@ -4011,6 +4083,10 @@ def _status_table(config: str) -> None:
     logging.getLogger("polyzymd.simulation.progress").setLevel(logging.ERROR)
 
     sim_config = load_config_or_exit(config)
+    if data_dir is not None:
+        from polyzymd.analyses.study import with_data_dir
+
+        sim_config = with_data_dir(sim_config, data_dir)
 
     engine_name = _resolve_engine_name(sim_config, override=None)
     engine_inst = create_engine(sim_config, override=engine_name, defer_binary=True)

@@ -1006,3 +1006,45 @@ def test_conditions_sharing_a_run_folder_name_get_distinct_headers():
         SystemReport("trp", "s/b/config.yaml", "/s", [], config_name="x"),
     ]
     assert system_labels(same) == ["trp [a]", "trp [b]"]
+
+
+def test_status_of_a_study_or_project_covers_its_conditions_where_their_runs_are(
+    tmp_path: Path,
+) -> None:
+    """--study and --project report each condition, with runs in data.local.yaml's folder."""
+    from tests._support.analysis_testkit import write_simulation_config
+
+    for study in ("one", "two"):
+        for condition in ("control", "polymer"):
+            write_simulation_config(
+                tmp_path / study / condition, scratch=tmp_path / "scratch", name=condition
+            )
+        (tmp_path / study / "study.yaml").write_text(
+            "equilibration: 0ns\nconditions: {Control: control, Polymer: polymer}\n"
+        )
+    moved = tmp_path / "moved"
+    (tmp_path / "one" / "data.local.yaml").write_text(f"Polymer: {moved}\n")
+    (tmp_path / "project.yaml").write_text("studies: {one: one, two: two}\n")
+
+    def systems(*args: str) -> dict[str, str]:
+        with patch("polyzymd.cli.main.warn_if_wrong_pixi_env"):
+            result = CliRunner().invoke(cli, ["status", "--format", "json", "--no-slurm", *args])
+        assert result.exit_code == 0, result.output
+        return {
+            s["config_path"]: s["scratch_directory"] for s in json.loads(result.output)["systems"]
+        }
+
+    one = systems("--study", str(tmp_path / "one" / "study.yaml"))
+    assert one == {
+        str(tmp_path / "one" / "control" / "config.yaml"): str(tmp_path / "scratch"),
+        str(tmp_path / "one" / "polymer" / "config.yaml"): str(moved),
+    }
+    both = systems("--project", str(tmp_path))
+    assert len(both) == 4 and both.items() >= one.items()
+
+
+def test_status_of_an_unreadable_study_says_why(tmp_path: Path) -> None:
+    (tmp_path / "study.yaml").write_text("conditions: [not, a, mapping]\n")
+    result = CliRunner().invoke(cli, ["status", "--format", "agent", "--study", str(tmp_path)])
+    assert result.exit_code == 2
+    assert "error: " in result.output

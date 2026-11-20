@@ -48,9 +48,26 @@ queued or running; the `last:` field is the line from the newest SLURM log
 that explains why, and the footer gives the command that resumes it from its
 checkpoint. The full verdict table is in {ref}`cli-status`.
 
+## Check a study or a project
+
+To monitor a study, give its `study.yaml` or its folder to `--study`. To
+monitor every study of a project, give `project.yaml` or its folder to
+`--project`:
+
+```bash
+pixi run -e build polyzymd status --format agent --study Paper_1/lipa363 --preset blanca-shirts
+pixi run -e build polyzymd status --format agent --project Paper_1 --unfinished
+```
+
+Each condition that `study.yaml` lists gets one block. PolyzyMD looks for its
+runs where `polyzymd study check` finds them: in the folder that
+`data.local.yaml` gives for the condition, or else in the config's
+`scratch_directory`. Both options are repeatable and combine with `-c` and
+`--all`.
+
 ## Check a whole campaign
 
-Point `--all` at the directory tree that holds your config files. It finds
+For configs that are not in a study, point `--all` at the directory tree that holds your config files. It finds
 every `config.yaml` up to three levels deep, makes a single `squeue` call for
 all of them, and prints one block per system:
 
@@ -135,7 +152,7 @@ or ETA, run this first and answer from its output:
     ml slurm/<cluster>
     cd /projects/$USER/sims
     pixi run -e build polyzymd status --format agent --preset <preset> \
-        --all CALB --all RML
+        --project Paper_1    # or --study STUDY, or --all DIR for loose configs
 
 Read the verdict column. COMPLETED and RUNNING/QUEUED need no action.
 DEAD means no job is driving the replicate; report the `last:` line
