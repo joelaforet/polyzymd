@@ -28,7 +28,10 @@
 # submit the same request again before the current job exits.
 THIS_SCRIPT="${SLURM_JOB_SCRIPT:-$(realpath "$0")}"
 ROUTING_RETRY_COUNT="${POLYZYMD_ROUTING_RETRY_COUNT:-0}"
-ROUTING_FAILED_NODES="${POLYZYMD_ROUTING_FAILED_NODES:-}"
+# The failed-node list travels between jobs colon-separated: `sbatch --export`
+# splits its argument on commas, so a comma-separated value would arrive with
+# only its first node. Commas are used everywhere else (--exclude, messages).
+ROUTING_FAILED_NODES="$(printf '%s' "${POLYZYMD_ROUTING_FAILED_NODES:-}" | tr ':' ',')"
 ROUTING_RETRY_LIMIT=3
 CONFIGURED_EXCLUDE={{ configured_exclude | shell_quote }}
 
@@ -95,7 +98,7 @@ resubmit_after_routing_failure() {
     if sbatch \
         --dependency="afterany:$SLURM_JOB_ID" \
         --exclude="$excluded_node" \
-        --export="ALL,POLYZYMD_ROUTING_RETRY_COUNT=$next_count,POLYZYMD_ROUTING_FAILED_NODES=$failed_nodes" \
+        --export="ALL,POLYZYMD_ROUTING_RETRY_COUNT=$next_count,POLYZYMD_ROUTING_FAILED_NODES=${failed_nodes//,/:}" \
         "$THIS_SCRIPT"; then
         echo "ROUTING: successor submitted; exiting current job" >&2
         exit 0

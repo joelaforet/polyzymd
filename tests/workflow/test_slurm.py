@@ -546,7 +546,7 @@ class TestGeneratedOpenMMScript:
         assert '--dependency="afterany:$SLURM_JOB_ID"' in script
         assert '--exclude="$excluded_node"' in script
         assert "POLYZYMD_ROUTING_RETRY_COUNT=$next_count" in script
-        assert "POLYZYMD_ROUTING_FAILED_NODES=$failed_nodes" in script
+        assert "POLYZYMD_ROUTING_FAILED_NODES=${failed_nodes//,/:}" in script
         assert "ROUTING_RETRY_LIMIT=3" in script
         assert "runtime_platform.json" in script
         assert 'PIXI_ENV="$RECORDED_PIXI_ENV"' in script
@@ -609,7 +609,7 @@ class TestGeneratedOpenMMScript:
                 "SLURMD_NODENAME": "bad-gpu-2",
                 "SLURM_JOB_SCRIPT": str(script_path),
                 "POLYZYMD_ROUTING_RETRY_COUNT": "1",
-                "POLYZYMD_ROUTING_FAILED_NODES": "bad-gpu-1",
+                "POLYZYMD_ROUTING_FAILED_NODES": "bad-gpu-0:bad-gpu-1",
             }
         )
 
@@ -618,9 +618,13 @@ class TestGeneratedOpenMMScript:
         assert result.returncode == 0
         submitted = sbatch_log.read_text()
         assert "--dependency=afterany:1234" in submitted
-        assert "--exclude=bad-gpu-1,bad-gpu-2" in submitted
+        assert "--exclude=bad-gpu-0,bad-gpu-1,bad-gpu-2" in submitted
         assert "POLYZYMD_ROUTING_RETRY_COUNT=2" in submitted
-        assert "POLYZYMD_ROUTING_FAILED_NODES=bad-gpu-1,bad-gpu-2" in submitted
+        # Parse --export the way Slurm does (comma-separated NAME=VALUE items): the
+        # whole failed-node list must survive into the successor's environment.
+        export = next(a for a in submitted.splitlines() if a.startswith("--export="))
+        exported = dict(i.split("=", 1) for i in export.split("=", 1)[1].split(",") if "=" in i)
+        assert exported["POLYZYMD_ROUTING_FAILED_NODES"] == "bad-gpu-0:bad-gpu-1:bad-gpu-2"
         assert "successor submitted; exiting current job" in result.stderr
 
     def test_incompatible_driver_excludes_node_before_pixi(self, monkeypatch, tmp_path):
@@ -838,7 +842,7 @@ class TestGeneratedOpenMMScript:
         )
         assert second.returncode == 0
         assert "--exclude=bgpu-g4-u20,bgpu-g4-u24" in second_log
-        assert "POLYZYMD_ROUTING_FAILED_NODES=bgpu-g4-u20,bgpu-g4-u24" in second_log
+        assert "POLYZYMD_ROUTING_FAILED_NODES=bgpu-g4-u20:bgpu-g4-u24" in second_log
 
     def test_repeated_failure_on_same_node_is_not_duplicated(self, monkeypatch, tmp_path):
         """The excluded-node list is a set, not an append-only log."""
