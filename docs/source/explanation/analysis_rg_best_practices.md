@@ -6,7 +6,7 @@ mass. A lower Rg means a more compact selection. Rg alone does not tell you
 which motion changed the size.
 
 For the commands, see {doc}`../how_to/analysis_rg_quickstart`. For replicates,
-correlation and intervals, see {doc}`analysis_statistics_best_practices`.
+correlation, and intervals, see {doc}`analysis_statistics_best_practices`.
 
 ## Definition
 
@@ -81,7 +81,7 @@ Therefore a larger protein has a larger Rg. Do not compare Rg values of two
 different proteins directly. Compare each protein with its own control.
 
 These exponents describe ideal polymers. A finite enzyme, a conjugated
-polymer or a multi-domain protein does not follow them exactly. Use them to
+polymer, or a multi-domain protein does not follow them exactly. Use them to
 see whether a change is large, not to classify a state.
 
 ## Reading the time series
@@ -120,7 +120,7 @@ together:
 | Falls | Stable | Small compaction without a change of structure |
 
 A lower protein Rg does not show that a polymer stabilizes the fold. Check
-the native contacts, the secondary structure and the RMSF as well. A lower Rg
+the native contacts, the secondary structure, and the RMSF as well. A lower Rg
 with native contacts kept means something different from a lower Rg with
 helices lost.
 
@@ -161,6 +161,6 @@ an indicator of protein structure compactness." *Molecular Biology*
 ## See also
 
 - {doc}`../how_to/analysis_rg_quickstart` — run the analysis
-- {doc}`analysis_statistics_best_practices` — replicates, intervals and tests
+- {doc}`analysis_statistics_best_practices` — replicates, intervals, and tests
 - {doc}`analysis_rmsd_best_practices` — distance from a reference
 - {doc}`convergence_detection` — the equilibration check

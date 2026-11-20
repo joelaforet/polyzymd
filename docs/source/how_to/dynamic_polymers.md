@@ -17,7 +17,7 @@ the coordinates as built, before any simulation; water and ions in front of
 the chains and the protein are cut away.
 ```
 
-For the keys that both modes share, such as `monomers`, `length`, `count` and
+For the keys that both modes share, such as `monomers`, `length`, `count`, and
 `packing`, see {doc}`polymers`.
 
 :::{admonition} Environment setup
@@ -43,7 +43,7 @@ Alternatively, prefix each command with `pixi run -e build`.
 
 Give each monomer as its **repeat unit**, as it is in the chain, with `*` on
 the two atoms that bond to the neighboring repeat units. For a vinyl,
-acrylate or methacrylate monomer these are the two carbons of the C=C double
+acrylate, or methacrylate monomer these are the two carbons of the C=C double
 bond, which is a single bond in the chain:
 
 | Monomer | SMILES as sold (PubChem) | Repeat unit |
@@ -76,7 +76,7 @@ probabilities of each end sum to 1. A fixed cap is one option with probability
 with a `residue_name` is its own residue; a cap without one joins the residue
 of the repeat unit it caps.
 
-`length` counts the two ends: `length: 5` is a head cap, three repeat units and
+`length` counts the two ends: `length: 5` is a head cap, three repeat units, and
 a tail cap. This holds for every cap, a hydrogen included, so `length` is at
 least 3.
 
@@ -147,8 +147,8 @@ For hydrogen caps on both ends, write:
 | `end_groups` | `head` and `tail`, each a list of caps with `label`, `smiles` (exactly one `*`), `probability`, and optionally `name` and `residue_name`. Each end's probabilities sum to 1. Required. |
 | `length` | Monomers per chain, the two ends included; at least 3. |
 | `name` | The monomer name, used in log messages and the cache metadata. Optional; the `label` is used without it. Names must differ between monomers. |
-| `residue_name` | The 3-character residue name of the monomer in the topology. Optional. If you leave it out, PolyzyMD makes one from `name`. It must not be an amino-acid, nucleic-acid, water or ion name, and it must differ between monomers, except between stereoisomers of one monomer (see {ref}`tacticity`). |
-| `charges` | The partial-charge method for the chains: `{method: nagl, model: ...}`, `{method: am1bcc}` or `{method: espaloma}`. `preset` is for `cached` mode only. |
+| `residue_name` | The 3-character residue name of the monomer in the topology. Optional. If you leave it out, PolyzyMD makes one from `name`. It must not be an amino-acid, nucleic-acid, water, or ion name, and it must differ between monomers, except between stereoisomers of one monomer (see {ref}`tacticity`). |
+| `charges` | The partial-charge method for the chains: `{method: nagl, model: ...}`, `{method: am1bcc}`, or `{method: espaloma}`. `preset` is for `cached` mode only. |
 | `max_retries` | The number of builds tried, each with new monomer conformers, before a chain with a pierced ring or overlapping atoms is refused (default 10). |
 | `cache_directory` | The folder of the generated chains (default `.polymer_cache`, relative to the config). |
 
@@ -230,10 +230,10 @@ them in `cached` mode, or open an issue on GitHub so we can add them.
 
 For each chain, the build does these steps:
 
-1. It draws the chain's head cap, `length - 2` repeat units and its tail cap
+1. It draws the chain's head cap, `length - 2` repeat units, and its tail cap
    from their probabilities. The replicate number seeds the draw, unless you
    set `random_seed`. The sequence is the head cap's label, the repeat units'
-   labels and the tail cap's label, read from head to tail, so `AAB...` and
+   labels, and the tail cap's label, read from head to tail, so `AAB...` and
    `BAA...` are different chains.
 2. It joins the units: each bond between two units replaces the `*` of both.
    Repeat units join head to tail: the second `*` of one unit bonds to the
@@ -250,7 +250,7 @@ For each chain, the build does these steps:
    `<type_prefix>_seq=<sequence>_<length>-mer_charged.sdf` in
    `cache_directory`, with a `.metadata.json` file beside it. This is the name
    that `cached` mode reads, so a later config can set
-   `generation_mode: cached`, `sdf_directory` to this folder and
+   `generation_mode: cached`, `sdf_directory` to this folder, and
    `charges: {method: preset}`; cached mode then checks the config's monomer
    SMILES and caps, if it gives them, against that metadata.
 
@@ -261,7 +261,7 @@ change one is refused and built again.
 
 The next build with the same monomers loads the chains from
 `cache_directory`. It builds a chain again if the metadata does not match the
-config, for example after you change a SMILES, a cap, the charges or the
+config, for example after you change a SMILES, a cap, the charges, or the
 mBuild version.
 
 The build record (`build_provenance.json` and `.md`) names the mBuild version

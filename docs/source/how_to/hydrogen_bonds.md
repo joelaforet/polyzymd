@@ -52,7 +52,7 @@ donor within 1.2 Å instead of by bonds.
 ## From the command line
 
 In a {term}`study`, give the study folder. The study names the conditions,
-the control and the equilibration window. The results go to
+the control, and the equilibration window. The results go to
 `<study>/results/hydrogen_bonds/`:
 
 ```bash
@@ -126,7 +126,7 @@ Settings, passed with `--set`:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `groups` | `{protein: null, polymer: null}` | Names and MDAnalysis selections of the groups. A null selection selects the atoms of the role the group is named after: `protein` (chain A), `ligand` (chain B) or `polymer` (chain C). The report records the selection used |
+| `groups` | `{protein: null, polymer: null}` | Names and MDAnalysis selections of the groups. A null selection selects the atoms of the role the group is named after: `protein` (chain A), `ligand` (chain B), or `polymer` (chain C). The report records the selection used |
 | `summaries` | `{protein_polymer: {between: [protein, polymer]}}` | Names of the summaries, each `between: [a, b]` or `within: a` |
 | `d_a_cutoff` | `3.5` | Largest donor-acceptor distance, in Å; 3.0 is also common |
 | `d_h_a_angle_cutoff` | `150` | Smallest donor-hydrogen-acceptor angle, in degrees |

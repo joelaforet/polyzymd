@@ -2,7 +2,7 @@
 
 Run a PolyzyMD system with GROMACS on your computer, or as a chain of SLURM
 jobs on a cluster. PolyzyMD builds the system with OpenFF, writes the GROMACS
-files, and runs minimization, equilibration and production.
+files, and runs minimization, equilibration, and production.
 
 :::{admonition} Prerequisites
 :class: tip
@@ -30,7 +30,7 @@ on OpenMM:
 - **Distance restraints** (`restraints:`) are not applied. To hold a ligand in
   its site, use OpenMM, or a position restraint in the equilibration stages.
 - **Position restraints** work for `protein_heavy`, `protein_backbone`,
-  `protein_calpha`, `ligand_heavy` and `polymer_heavy`. Each group has one
+  `protein_calpha`, `ligand_heavy`, and `polymer_heavy`. Each group has one
   `force_constant` in every stage, and all stages use the same protein group,
   so a gradual release ({doc}`equilibration`) runs on OpenMM only.
 - **A finished replicate cannot run longer.** Run new replicates with the
@@ -67,10 +67,10 @@ mdrun settings a [SLURM job](#submit-to-a-slurm-cluster) gets from the
 a thread-MPI `gmx`), the GPU offload flags when `gpu: true`, and
 `mdrun_flags` (with the stage flags `mdrun_flags_equilibration` and
 `mdrun_flags_production`). Energy minimization runs without `-pme gpu`,
-`-update gpu` and `-bonded gpu`, which it cannot use.
+`-update gpu`, and `-bonded gpu`, which it cannot use.
 
 PolyzyMD builds the system, writes the GROMACS files to
-`<replicate folder>/gromacs/` and runs each stage in order. It prints the
+`<replicate folder>/gromacs/`, and runs each stage in order. It prints the
 GROMACS output while it runs. If a stage fails, the run stops and keeps the
 files. For the list of files, see [Output files](#gromacs-output-files).
 
@@ -108,7 +108,7 @@ parameterize the system:
 pixi run -e build polyzymd build -c config.yaml --format gromacs
 ```
 
-The handoff is the `.gro` coordinate file, the `.top` topology file and the
+The handoff is the `.gro` coordinate file, the `.top` topology file, and the
 component `.itp` parameter files. PolyzyMD also writes MDP files and a run
 script from `config.yaml`. You do not need them. Use them as a starting point,
 or replace them with your own GROMACS workflow. To analyze a run made with
@@ -116,7 +116,7 @@ your own `.mdp` files in the study, see {doc}`own_protocol`.
 
 :::{important}
 An edited file locks `polyzymd run` and `polyzymd submit` out of that
-replicate. The build hashes every `.mdp`, `.top`, `.itp` and `.gro` file it
+replicate. The build hashes every `.mdp`, `.top`, `.itp`, and `.gro` file it
 audited (`audited_files.sha256`). If one is missing or changed, PolyzyMD
 refuses the replicate and says which file: for example, `prod.mdp is missing
 or changed since the build was audited`. Either restore the file or build
@@ -130,7 +130,7 @@ the replicate again, or run your edited files with `gmx grompp` and
 ## Submit to a SLURM cluster
 
 `polyzymd submit` writes one self-resubmitting SLURM script for each
-replicate. The script runs minimization, equilibration and production, and
+replicate. The script runs minimization, equilibration, and production, and
 restarts each stage from its checkpoint.
 
 `submit` does not build. Build the GROMACS inputs of each replicate first, in
@@ -201,7 +201,7 @@ need this.
 :::
 
 For every field of the `gromacs:` block and the `gmx mdrun` flags, see
-{ref}`config-gromacs`. For thread-MPI, real MPI and OpenMP threads, see
+{ref}`config-gromacs`. For thread-MPI, real MPI, and OpenMP threads, see
 {doc}`../explanation/gromacs_parallelism`.
 
 ## Use GROMACS on different clusters
@@ -494,8 +494,8 @@ gromacs/
 
 Each `mdrun` stage also writes a `.log` file, and a `.trr` file when the stage
 writes full-precision coordinates. `solvated_system.pdb`,
-`build_provenance.json` (PACKMOL seeds, box, the SHA-256 of each input file
-and the physics audit) and `build_provenance.md` are in the replicate folder,
+`build_provenance.json` (PACKMOL seeds, box, the SHA-256 of each input file,
+and the physics audit), and `build_provenance.md` are in the replicate folder,
 beside `gromacs/`.
 
 The build writes `audited_files.sha256` only when the physics audit passes.
@@ -524,9 +524,9 @@ The order of `[ molecules ]` is the order of the atoms in the `.gro` file. To
 find which atoms belong to which component, use
 `components.ndx`: it has one group per component name (such as `trpcage`,
 `polymer`, `solvent`, `ions`) and one per segment ID (`PROT`, `POLY`, `SOL`,
-`ION`). Use it with `gmx make_ndx`, `gmx trjconv -n` or `gmx select`. The
+`ION`). Use it with `gmx make_ndx`, `gmx trjconv -n`, or `gmx select`. The
 component table of `build_provenance.md` lists each component with its
-molecule count, force field and charges.
+molecule count, force field, and charges.
 
 ### The single-point energy file
 
@@ -572,7 +572,7 @@ gromacs:
 
 **Cause**: GPU offload flags that energy minimization does not accept.
 
-**Fix**: PolyzyMD removes `-pme gpu`, `-bonded gpu` and `-update gpu` from the
+**Fix**: PolyzyMD removes `-pme gpu`, `-bonded gpu`, and `-update gpu` from the
 minimization `mdrun` command. If you see this error, check that you use
 PolyzyMD 1.3.0 or later.
 
@@ -627,9 +627,9 @@ polyzymd submit -c config.yaml --engine gromacs --memory 64G ...
 
 - {doc}`../reference/gromacs_openmm` — What each config setting becomes on GROMACS and on OpenMM
 - {ref}`engine-parity` — engine parity tests and a single-point energy on both engines
-- {doc}`../reference/cli_reference` — CLI options for `run`, `submit` and `recover`
+- {doc}`../reference/cli_reference` — CLI options for `run`, `submit`, and `recover`
 - {doc}`../reference/configuration` — Full configuration reference including `gromacs:` block
-- {doc}`../explanation/gromacs_parallelism` — Thread-MPI, real MPI and OpenMP threads
+- {doc}`../explanation/gromacs_parallelism` — Thread-MPI, real MPI, and OpenMP threads
 - {doc}`hpc_slurm` — General SLURM submission workflow (OpenMM and GROMACS)
 - {doc}`site_cu_boulder` — CU Boulder Alpine and Blanca recipes
 - {doc}`own_protocol` — Run the build with your own protocol and analyze it in the study

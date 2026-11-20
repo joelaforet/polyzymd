@@ -16,8 +16,8 @@ code can do anything that they do.
 |---|---|
 | A function that measures one frame, or one replicate | Loads each replicate as a `Universe`, with its production segments in order and its equilibration window removed |
 | The atom selections of the function, as selection strings | Builds the `AtomGroup` of each selection in each replicate, and runs the function on the production frames |
-| Optionally, how the frames of one replicate become one value | Stores each per-frame and per-replicate result with the code, arguments and input files that produced it, and reuses it only when all of them match |
-| Nothing more for the statistics | Computes the mean, the standard error and the 95 % Student t interval across replicates, tests each condition against the control, and corrects for multiple tests |
+| Optionally, how the frames of one replicate become one value | Stores each per-frame and per-replicate result with the code, arguments, and input files that produced it, and reuses it only when all of them match |
+| Nothing more for the statistics | Computes the mean, the standard error, and the 95 % Student t interval across replicates, tests each condition against the control, and corrects for multiple tests |
 
 The per-frame interface follows MDAnalysis
 [`AnalysisFromFunction`](https://docs.mdanalysis.org/stable/documentation_pages/analysis/base.html).
@@ -81,7 +81,7 @@ changed is a search over that whole set. A false discovery rate holds for the
 discoveries of a search only when the family is the set searched (Benjamini
 2010). The text report gives, for each condition, the number of labels that
 are significantly lower and higher, and lists them. The JSON report keeps
-every row. Each comparison line gives the raw p value, the adjusted p value
+every row. Each comparison line gives the raw p value, the adjusted p value,
 and the family size, `family <m>`.
 
 If you make one claim from several outcomes together, such as "any of these
@@ -133,10 +133,10 @@ Figures read the stored results, so they read no trajectory.
 ## Why stored results are reused
 
 A per-replicate result is stored with a record of the function, the
-arguments, the config hash, the input files, the window, the frames and the
+arguments, the config hash, the input files, the window, the frames, and the
 software versions. PolyzyMD reuses the result only when every field except
 the versions and the bounds matches the new call. A change to the function,
-an argument or an input file, or a longer trajectory, measures the affected
+an argument, or an input file, or a longer trajectory, measures the affected
 replicates again.
 
 A function defined in a notebook cell, or a lambda, has no stable source
@@ -146,7 +146,7 @@ identifies the function less reliably.
 ## What is out of scope
 
 - An analysis that needs all replicates at once inside the measurement, such
-  as a principal component basis, clustering or a Markov state model. Load
+  as a principal component basis, clustering, or a Markov state model. Load
   the universes with `replicate.universe()` and fit such models yourself.
 - A quantity defined between two conditions, not for one replicate, such as
   a divergence between two distributions. Compute it in your own script from

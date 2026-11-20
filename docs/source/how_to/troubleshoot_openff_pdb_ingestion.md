@@ -183,8 +183,8 @@ structure. The scripts are in `examples/pdb_preparation/4cha/`.
 
 The 4CHA header records say:
 
-- COMPND puts one enzyme copy on chains `A`, `B` and `C`, and a second copy
-  on chains `E`, `F` and `G`.
+- COMPND puts one enzyme copy on chains `A`, `B`, and `C`, and a second copy
+  on chains `E`, `F`, and `G`.
 - Mature alpha-chymotrypsin is cleaved into three peptide fragments.
   Residues 14-15 and 147-148 are excised activation peptides. So TER records
   between the fragments are correct.
@@ -216,7 +216,7 @@ zoom first_copy
 
 `prepare_4cha.py` does these steps with PDBFixer:
 
-1. It keeps chains `A`, `B` and `C`, the first copy.
+1. It keeps chains `A`, `B`, and `C`, the first copy.
 2. It removes the waters and the other heterogens.
 3. It adds hydrogens at pH 7. It does not add missing residues or heavy
    atoms.
@@ -258,14 +258,14 @@ items:
   fragments.
 
 Tools for this work are PyMOL or ChimeraX for manual editing, PDBFixer with
-a review of each added atom, `pdb4amber`, and MODELLER, AlphaFold or
+a review of each added atom, `pdb4amber`, and MODELLER, AlphaFold, or
 SWISS-MODEL to rebuild missing regions. After you curate the file, keep TER
 records between disconnected fragments and do not join chains into one; the
 build puts every protein molecule on chain `A`. Then validate again with
 `Topology.from_pdb()`.
 
 `polyzymd clean-pdb` only replaces nonstandard residues and adds hydrogens.
-It does not select a copy, remove molecules, set chain IDs or model missing
+It does not select a copy, remove molecules, set chain IDs, or model missing
 atoms.
 
 ## Report a new error

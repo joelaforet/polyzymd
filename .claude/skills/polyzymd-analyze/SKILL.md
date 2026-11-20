@@ -1,6 +1,6 @@
 ---
 name: polyzymd-analyze
-description: Get a validated number out of PolyzyMD trajectories with ONE command, `polyzymd analyze <name> -c config.yaml [-c other.yaml]`. Use whenever the question is "what is the Rg / RMSF / SASA / contact count of this system" or "does condition A differ from condition B". Do not write your own MDAnalysis loop for an analysis that already exists.
+description: Analyze PolyzyMD trajectories with `polyzymd analyze` (`--study STUDY`, `--project PROJECT`, or `-c config.yaml`), and measure your own quantity on every replicate with a `function:` entry in study.yaml or `Study.timeseries`. Use whenever a question needs numbers from PolyzyMD runs, such as Rg, RMSD, RMSF, SASA, secondary structure, native contacts, polymer contacts, hydrogen bonds, distances or a custom per-frame measurement, or whether condition A differs from condition B. Check `polyzymd analyze --list` before writing any MDAnalysis code, and never loop over replicates or study folders by hand.
 ---
 
 # polyzymd-analyze, one command for one validated number
@@ -32,8 +32,9 @@ hydrogen_bonds, `--run protein_polymer_mean_lifetime`, `protein_polymer_residues
 and `protein_polymer_pairs` report how long the bonds last and how often each
 residue and residue pair is bonded.
 
-`rmsd` is one number per frame; `rmsd_per_residue`, `rmsf` and `offset` are one
-number per residue over all frames, measured from the reference, from each
+`rmsd` is one number per frame; `rmsd_per_residue`, `rmsf` and the offset
+(`polyzymd analyze rmsf --run offset`; `offset` is a result of `rmsf`, not an
+analysis name) are one number per residue over all frames, measured from the reference, from each
 atom's own mean, and as the mean's distance from the reference, with
 `rmsd_per_residue² = rmsf² + offset²`. Report `rmsf` for flexibility and
 `offset` for distance from a reference state; read the "Fluctuation, offset
@@ -46,10 +47,36 @@ with `functions.hbond_count` and combines them with `Timeseries.transform`:
 follow `docs/source/how_to/analysis_triad_quickstart.md`
 (https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html),
 and run `polyzymd analyze distances -c config.yaml --set pairs=pairs.yaml` for
-the triad distances. For any other question, write a function of an MDAnalysis
-`Universe` and run it with `Study.timeseries` or `Study.per_replicate`; see
-`docs/source/how_to/study_api.md`, `docs/source/reference/study_api.md` and
-`docs/source/reference/analysis_functions.md`.
+the triad distances.
+
+Your own quantity. When no shipped analysis measures it, write a plain
+function and let PolyzyMD run it on every replicate. Do not write a loop over
+replicates, trajectory files or study folders.
+
+- In a study folder, put the function in `STUDY/analyses/<file>.py`, list it
+  in `study.yaml`, and run `polyzymd analyze <run> --study STUDY`. Results,
+  statistics and figures go to `STUDY/results/<run>/`, where `study check` and
+  `freeze` find them:
+
+  ```yaml
+  analyses:
+    lid_opening:
+      function: analyses/lid.py:lid_distance
+      kind: timeseries          # called on each frame; per_replicate: once per replicate
+      unit: A
+      selections:               # each key becomes an AtomGroup argument
+        lid: "protein and resid 140-150 and name CA"
+        core: "protein and resid 4-120 and name CA"
+  ```
+
+- Without a study folder, or to try a function first:
+  `study.timeseries(fn, pz.select("protein"), unit="A")` then
+  `.reduce("mean").compare()`. Its results go to `./polyzymd_results` unless
+  you pass `output_dir=`, so `study check` and `freeze` do not see them.
+- Docs: `docs/source/how_to/study_api.md` (the recipe),
+  `docs/source/how_to/study_yaml.md` (every key of an entry),
+  `docs/source/reference/analysis_functions.md` (functions you can reuse
+  inside yours, such as `native_contacts` and `pair_distance`).
 
 Many replicates: add `--submit --preset <cluster>` (`alpine-cpu`,
 `blanca-shirts`, `blanca-chbe-rdi`, `bridges2-rm`; `--partition`, `--account`,
@@ -145,7 +172,7 @@ Verdict vocabulary, fixed so you can branch on it:
 | `larger` / `smaller` | the second condition differs from the control after correction |
 | `no significant difference` | the test ran and did not clear alpha; read the CI before calling it "the same" |
 | `no test recorded` | the row has no corrected p value; the line describes, it does not decide |
-| `not testable` | a condition has fewer than two replicates, so no test exists |
+| `not testable` | a condition has fewer than three replicates, so no test exists |
 
 Report the verdict sentence verbatim, with the unit and the replicate counts.
 

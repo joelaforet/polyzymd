@@ -6,7 +6,7 @@ replicate.
 
 For how to read RMSD curves and choose a reference, see
 {doc}`../explanation/analysis_rmsd_best_practices`. `rmsd` gives one number per
-frame. For the per-residue quantities `rmsd_per_residue`, `rmsf` and `offset`,
+frame. For the per-residue quantities `rmsd_per_residue`, `rmsf`, and `offset`,
 see {ref}`Fluctuation, offset and deviation <rmsf-fluctuation-offset-deviation>`.
 
 :::{admonition} Environment setup
@@ -27,7 +27,7 @@ works too. The quickstart uses it.
 ## From the command line
 
 In a {term}`study`, give the study folder. The study names the conditions,
-the control and the equilibration window. The results go to
+the control, and the equilibration window. The results go to
 `<study>/results/rmsd/`:
 
 ```bash
@@ -57,7 +57,7 @@ Change what is measured and what it is measured against with `--set`:
 |---|---|---|
 | `selection` | `protein and name CA` | The atoms to measure. PolyzyMD superposes each frame on these atoms |
 | `alignment_selection` | `protein and name CA` | Atoms superposed to build the `average` and `centroid` references |
-| `reference_mode` | `external` if `reference_file` is set, else `centroid` | `centroid`, `average`, `frame` or `external` |
+| `reference_mode` | `external` if `reference_file` is set, else `centroid` | `centroid`, `average`, `frame`, or `external` |
 | `reference_frame` | `1` | Production frame used by `frame` mode, counted from 1 after the equilibration window |
 | `reference_file` | none | Structure file used by `external` mode |
 
@@ -127,10 +127,10 @@ print(values.reduce("mean").compare(control="No polymer").to_agent_text())
 ```
 
 `pz.reference(mode, selection, *, frame=None, file=None, alignment=None)`
-gives the reference atoms. Pass `frame`, `file` and `alignment` by keyword,
+gives the reference atoms. Pass `frame`, `file`, and `alignment` by keyword,
 for example `pz.reference("frame", "name CA", frame=5)`. PolyzyMD builds the reference once per replicate in a
 separate universe, so the trajectory is not changed. The record of each
-replicate holds the mode, the selections and the reference frame. For
+replicate holds the mode, the selections, and the reference frame. For
 `external`, it also holds the SHA-256 of the file.
 
 To measure your own quantity, see {doc}`study_api`.

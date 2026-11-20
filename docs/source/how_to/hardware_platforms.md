@@ -1,4 +1,4 @@
-# Run OpenMM on a local GPU, a CPU or another cluster
+# Run OpenMM on a local GPU, a CPU, or another cluster
 
 PolyzyMD does not require a particular cluster. The molecular build files and the
 OpenMM simulation code are portable. The automatic SLURM routing in version
@@ -132,7 +132,7 @@ A replicate that is built but has not started must be built again, because
 1. Find the highest CUDA version of your driver. `nvidia-smi` prints it as
    `CUDA Version` in its first lines.
 2. Pick the newest `sim-cuda-*` environment that does not exceed that
-   version: `sim-cuda-12-6`, `sim-cuda-12-4` or `sim-cuda-12-0`.
+   version: `sim-cuda-12-6`, `sim-cuda-12-4`, or `sim-cuda-12-0`.
 3. Set the CUDA platform in the simulation configuration:
 
    ```yaml
@@ -158,7 +158,7 @@ A replicate that is built but has not started must be built again, because
    ```
 
 `polyzymd run` finds the finished build and prints
-`Reusing the build in <replicate folder>`. It then minimizes, equilibrates
+`Reusing the build in <replicate folder>`. It then minimizes, equilibrates,
 and runs production on the GPU. Give the same `-r` replicates to both
 commands. Without a build, or with build files that changed since the build,
 `polyzymd run` in a `sim-cuda-*` environment stops before it writes anything.
@@ -167,7 +167,7 @@ It prints the `polyzymd build` command to run in `build`.
 ### Stop and continue a local run
 
 Stop a local run with `kill -TERM <pid>`. The run saves its state, prints the
-command that continues it and exits with code 99. Run the same command again
+command that continues it, and exits with code 99. Run the same command again
 to continue:
 
 ```bash
@@ -203,7 +203,7 @@ environment holds PolyzyMD and OpenMM:
 pixi run -e build polyzymd run -c config.yaml -r 1
 ```
 
-`polyzymd run` builds the system, minimizes it, runs the equilibration stages
+`polyzymd run` builds the system, minimizes it, runs the equilibration stages,
 and runs production, in one process. The shipped example
 `examples/quickstart/config.yaml` uses the CPU platform. See
 {doc}`../get_started/quickstart`.
@@ -211,7 +211,7 @@ and runs production, in one process. The shipped example
 The CPU platform uses `SLURM_CPUS_PER_TASK` as the OpenMM thread count when
 the variable exists. `polyzymd submit` does not write CPU batch scripts for
 OpenMM. To run on CPU nodes of a cluster, write a batch script that requests
-CPU resources, activates the environment and runs `polyzymd run`.
+CPU resources, activates the environment, and runs `polyzymd run`.
 
 ## Evaluate an AMD GPU
 

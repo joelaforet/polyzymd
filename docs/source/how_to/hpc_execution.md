@@ -110,9 +110,9 @@ The command writes `analysis_results/slurm/hydrogen_bonds_<YYYYmmdd-HHMMSS>/`:
 
 | File | What it holds |
 |---|---|
-| `tasks.tsv` | One line per array task: config, label and replicate |
+| `tasks.tsv` | One line per array task: config, label, and replicate |
 | `replicates.sbatch` | The array. Each task runs `polyzymd analyze hydrogen_bonds -c <config> --label <label> --replicates <n>` with the same `--eq`, `--stride`, `--set`, `--run` and `--output-dir` and `--no-plots`, and stores its replicate's result under `analysis_results/polyzymd_results/` |
-| `report.sbatch` | The full command with every `-c`, which reads every stored result, measures any replicate a task left unmeasured, draws the figures and writes the report |
+| `report.sbatch` | The full command with every `-c`, which reads every stored result, measures any replicate a task left unmeasured, draws the figures, and writes the report |
 | `logs/` | `replicate.<array>_<task>.out` and `report.<job>.out` |
 | `report.txt` | The report, written by the report job; `report.json` with `--format json`, or the path given with `-o` |
 
@@ -138,7 +138,7 @@ condition and replicate, stores its result but never writes the run's
   with the same PolyzyMD and packages and resolve relative `-c` paths as the
   command did. Submit through `pixi run -e analysis` and the jobs use the
   analysis environment.
-- **Presets.** `--preset` sets the partition, QoS and account:
+- **Presets.** `--preset` sets the partition, QoS, and account:
 
   | Preset | Partition | QoS | Account |
   |---|---|---|---|
@@ -147,7 +147,7 @@ condition and replicate, stores its result but never writes the run's
   | `blanca-chbe-rdi` | `blanca-chbe-rdi` | `blanca-chbe-rdi` | `blanca-chbe-rdi` |
   | `bridges2-rm` | `RM-shared` | none | none |
 
-  `--partition`, `--account` and `--qos` replace the preset's values, or give
+  `--partition`, `--account`, and `--qos` replace the preset's values, or give
   them without a preset. On a cluster no preset covers, leave out `--preset`
   and give your site's values; leave out `--qos` when the site uses none, and
   the script has no QoS line:
@@ -157,7 +157,7 @@ condition and replicate, stores its result but never writes the run's
       --submit --partition <cpu-partition> --account <account> --dry-run
   ```
 
-  Each job gets `--time 12:00:00`, `--mem 16G` and `--cpus 2` unless you pass
+  Each job gets `--time 12:00:00`, `--mem 16G`, and `--cpus 2` unless you pass
   others. These analysis presets are CPU presets, so their names differ from
   the GPU presets of `polyzymd submit` (see {doc}`hpc_slurm`).
 
@@ -209,7 +209,7 @@ sbatch --dependency=afterany:$array hbonds.sbatch
 
 A stored result is read back only when its record matches, so give every
 job the same analysis, `--set` settings, `--label` per condition,
-`--eq` and `--stride`. Each task loads its replicate as a single run would,
+`--eq`, and `--stride`. Each task loads its replicate as a single run would,
 so an analysis's own requirements hold for every task, such as the
 force-field files that {doc}`hydrogen_bonds` needs beside each trajectory
 (`<segment>_system.xml` for OpenMM, `prod.tpr` and `<prefix>.top` for
@@ -238,7 +238,7 @@ the same stride.
 
 ## Cluster settings
 
-Every cluster needs its own partition, account and QoS flags in the
+Every cluster needs its own partition, account, and QoS flags in the
 `#SBATCH` lines. `polyzymd analyze --submit --preset` sets them for the
 clusters in the preset table under
 [Measure replicates in parallel](#measure-replicates-in-parallel). For

@@ -114,8 +114,8 @@ never retired: the next job resumes from that portable state.
 
 | File | Key contents |
 |------|--------------|
-| `build_provenance.json` | The build record: versions, seeds, config hash, the SHA-256 of every file the engine reads, one record per component and the physics audit. `build_provenance.md` holds the same record as tables to read. See {ref}`build-record` below |
-| `progress.json` | One record per equilibration stage and production segment with `polyzymd_version`, `openmm_version`, `pixi_environment` (null in files written by older versions). A production segment also records `openmm_platform`: the platform name and the property values its Context used, such as `DeterministicForces`. Each record holds `started_at`, `finished_at` and `seeds`, the random seeds it ran with: `integrator`, `barostat` and, when it drew new velocities, `velocities` (OpenMM; 0 means OpenMM chose one), or `ld_seed` and `gen_seed` (GROMACS; null means GROMACS chose a seed it did not log). An OpenMM equilibration stage that was interrupted and resumed holds the seeds of its last job in `seeds` and those of every job, oldest first, in `seeds_by_attempt`. A GROMACS record of a run that was killed or is still going ends at the last write of its log. A production segment's record also holds `system_check`, the comparison of the System it ran with the audited build (see below). A GROMACS run keeps its `progress.json` in `gromacs/` and its `build_provenance.json` in the replicate folder. Rebuilt from a filesystem scan after a chain is canceled and resubmitted; the segment provenance is then recovered from each `production_N_parameters.json` rather than lost. Published atomically (unique temporary file, fsync, rename) so a second writer cannot corrupt it |
+| `build_provenance.json` | The build record: versions, seeds, config hash, the SHA-256 of every file the engine reads, one record per component, and the physics audit. `build_provenance.md` holds the same record as tables to read. See {ref}`build-record` below |
+| `progress.json` | One record per equilibration stage and production segment with `polyzymd_version`, `openmm_version`, `pixi_environment` (null in files written by older versions). A production segment also records `openmm_platform`: the platform name and the property values its Context used, such as `DeterministicForces`. Each record holds `started_at`, `finished_at`, and `seeds`, the random seeds it ran with: `integrator`, `barostat` and, when it drew new velocities, `velocities` (OpenMM; 0 means OpenMM chose one), or `ld_seed` and `gen_seed` (GROMACS; null means GROMACS chose a seed it did not log). An OpenMM equilibration stage that was interrupted and resumed holds the seeds of its last job in `seeds` and those of every job, oldest first, in `seeds_by_attempt`. A GROMACS record of a run that was killed or is still going ends at the last write of its log. A production segment's record also holds `system_check`, the comparison of the System it ran with the audited build (see below). A GROMACS run keeps its `progress.json` in `gromacs/` and its `build_provenance.json` in the replicate folder. Rebuilt from a filesystem scan after a chain is canceled and resubmitted; the segment provenance is then recovered from each `production_N_parameters.json` rather than lost. Published atomically (unique temporary file, fsync, rename) so a second writer cannot corrupt it |
 | `production_N/production_N_parameters.json` | Simulation parameters plus a top-level `provenance` block (`polyzymd_version`, `openmm_version`, `pixi_environment`, `hostname`, `slurm_job_id`, `openmm_platform`) of the process that ran the segment |
 | `minimization/phase.json` | Phase status, state path, `frozen_atoms` (the number of solute **heavy** atoms held fixed), `frozen_rmsd_angstrom` (0.0 when the solute was frozen), and `hydrogen_max_displacement_angstrom` (how far the furthest solute hydrogen moved onto its force-field constraint length; `null` for unfrozen minimization and for records written by older versions) |
 
@@ -137,10 +137,10 @@ what, and did the built system pass the physics audit. It replaced
 | `build_uuid` | A unique ID of this build |
 | `config_hash` | The {term}`build config hash`: SHA-256 of the config as built. `run` and `submit` refuse a build whose hash no longer matches `config.yaml`. The hash counts input files by their SHA-256 and leaves out the config's folder and output folders, so a copy of `config.yaml` in another folder matches |
 | `particle_count` | Number of atoms |
-| `artifacts` | Each file the engine reads (`system.xml`, `solvated_system.pdb`, `system.prmtop`; for GROMACS the `.top`, `.itp`, `.gro` and `.mdp` files), with its SHA-256. A file changed after the build is refused |
+| `artifacts` | Each file the engine reads (`system.xml`, `solvated_system.pdb`, `system.prmtop`; for GROMACS the `.top`, `.itp`, `.gro`, and `.mdp` files), with its SHA-256. A file changed after the build is refused |
 | `components` | One record per component (each solute, `solvent`, `ions`): `name`, `type`, `segid`, `placement` (`fixed` or `packed`), `n_atoms`, `n_molecules`, the atom ranges of each molecule, and its `domains`. A domain is a set of atoms with one `force_field` list and one `charges` source (`method`, `model`, `source_file`), and the inputs it can be rebuilt from (`reference`). `provenance` holds each input file's path and SHA-256 |
 | `provenance` | Seeds and the box: see below |
-| `audit` | The physics audit: `passed`, `counts` per status, every `finding` (`check`, `component`, `status`, `detail`, and `examples` of the first terms that differ) and `accepted_exceptions` |
+| `audit` | The physics audit: `passed`, `counts` per status, every `finding` (`check`, `component`, `status`, `detail`, and `examples` of the first terms that differ), and `accepted_exceptions` |
 | `cite` | References of what this build used: PolyzyMD at its version, the engine (OpenMM 8 or GROMACS), the OpenFF Toolkit (its paper and the DOI of the release used), OpenFF Interchange (the DOI of the release used) and the Open Force Field Initiative paper, as OpenFF asks, each force-field file (the Sage 2.3.0 paper too for `openff-2.3.0*`, and the DOI of the openff-forcefields release used for OpenFF files), the water model, the Na+ and Cl- parameters (Joung and Cheatham) when the build added ions with an OpenFF Sage or Parsley file, the charge models (AshGC or another NAGL model with the AM1-BCC papers, AM1-BCC, or EspalomaCharge; AM1-BCC also for a library co-solvent's shipped charges), Packmol when the build packed solvent or polymer chains with it, mBuild when it built polymer chains, and Machado and Pantano when `ionic_strength` set the ions. A force-field file PolyzyMD has no reference for is listed with a note to cite its source. A reference cited for two things, such as the Sage 2.3.0 and AshGC paper, is listed once. `build_provenance.md` lists them under "Methods to cite"; see {doc}`references` |
 
 `provenance` keys:
@@ -149,23 +149,23 @@ what, and did the built system pass the physics audit. It replaced
 |-----|---------|
 | `polymer_seed`, `packmol_seed` | Replicate seed used for polymer generation and PACKMOL |
 | `polymer_sequence_seed` | Seed of the polymer sequence draw: `random_seed` of the polymer solute, or the replicate seed |
-| `polymer_builder` | The mBuild that built dynamic polymer chains: version, source URL, tag and commit (absent when no chain was built) |
+| `polymer_builder` | The mBuild that built dynamic polymer chains: version, source URL, tag, and commit (absent when no chain was built) |
 | `polymer_packmol_seed` | Seed passed to the polymer-packing PACKMOL run |
 | `solvent_packmol_seed` | Seed passed to the solvation PACKMOL run |
 | `box_vectors_nm` | The periodic cell as a 3x3 row-major matrix in nm |
 | `brick_nm` | Diagonal of the cell — the rectangular brick that PACKMOL fills, in nm |
 | `deterministic_box` | `true` when the cell was computed from the fixed solutes before packing (the default for polymer builds); `false` for solute-only builds |
 | `polymer_sphere_radius_nm` | Radius of the confinement sphere used for the chains (absent when `confine_to_sphere: false`) |
-| `nagl_model`, `nagl_model_sha256`, `openff_nagl_models` | The NAGL model file, its SHA-256 and the model package version, when a component is charged with `nagl` |
+| `nagl_model`, `nagl_model_sha256`, `openff_nagl_models` | The NAGL model file, its SHA-256, and the model package version, when a component is charged with `nagl` |
 
-Replicates of one condition must agree on `box_vectors_nm`, `brick_nm` and
+Replicates of one condition must agree on `box_vectors_nm`, `brick_nm`, and
 `polymer_sphere_radius_nm`, and therefore on their water and ion counts; they
 differ only in the seeds. Diffing two records is the quickest way to confirm
 that.
 
 `audit.findings` lists one finding per check and component. `status` is
 `PASS`, `INFO` (recorded, not judged), `WARN` (reported; the build goes on),
-`FAIL` (the build stops) or `ACCEPTED` (a failure or warning the config
+`FAIL` (the build stops), or `ACCEPTED` (a failure or warning the config
 accepts under `modeling_exceptions`; the finding then holds the `reason`, and
 `accepted_from` holds the status it would have had). {doc}`physics_checks` lists every check.
 
@@ -280,7 +280,7 @@ and production trajectories as indexed daisy-chain segments:
 
 - `system.prmtop` is the analysis topology. It is built from the OpenMM
   topology and System together, so it carries every atom, residue, element,
-  mass, charge and bond, including constrained bonds, with no column widths
+  mass, charge, and bond, including constrained bonds, with no column widths
   and no atom limit. Analyses load it when it is present. It has no chain
   IDs, so the loader takes them from `solvated_system.pdb` beside it, and
   `chainid A` selects the protein. For this it reads only the residue name and
@@ -298,7 +298,7 @@ reader accepts the hex serials it writes, so this works for any size.
 
 GROMACS runs have the same split. `prod.tpr`, the compiled run input that
 grompp writes before production, plays the role of `system.prmtop`: every
-atom, bond, mass and charge, no atom limit, read natively by MDAnalysis.
+atom, bond, mass, and charge, no atom limit, read natively by MDAnalysis.
 Analyses prefer it over `solvated_system.pdb` and over any `.gro`, which
 carries no bonds at all. No extra step is needed; the run directory keeps
 `prod.tpr` after production.
@@ -308,9 +308,9 @@ reads GROMACS 2025 files but not GROMACS 2026 ones. For a TPR it cannot read,
 the loader warns and reads the run's `<prefix>.top`, with the `.itp` files it
 includes, through MDAnalysis's `ITPParser`, laid out as MDAnalysis lays out a
 TPR. Atoms, residue numbers, segments, charges, masses, elements (from the
-atomic numbers in `[ atomtypes ]`), bonds, angles and dihedrals are then the
+atomic numbers in `[ atomtypes ]`), bonds, angles, and dihedrals are then the
 same as from the TPR, so results do not depend on the GROMACS version: on a
-94,019-atom lysozyme-polymer run, `hydrogen_bonds`, `rmsd` and `contacts`
+94,019-atom lysozyme-polymer run, `hydrogen_bonds`, `rmsd`, and `contacts`
 stored identical values from a GROMACS 2026 run read this way and from the
 same run's TPR compiled by GROMACS 2025.
 
@@ -326,7 +326,7 @@ loader warns and the chains keep the molecule-type names.
 | `prod.tpr` | Atoms, bonds, charges, masses, elements |
 | `<prefix>.top` and its `.itp` files | The same, when MDAnalysis cannot read `prod.tpr` |
 | `solvated_system.pdb` (replicate directory) | Chain IDs |
-| `prod_centered.xtc`, `prod_nojump.xtc` or `prod.xtc` | Coordinates |
+| `prod_centered.xtc`, `prod_nojump.xtc`, or `prod.xtc` | Coordinates |
 
 Each completed production segment of an OpenMM run records, in
 `progress.json`, the SHA-256 and size of its trajectory (`trajectory_sha256`,
@@ -339,7 +339,7 @@ copies, and runs that finished before segments recorded their hashes,
 `progress.json`; running it again changes nothing.
 
 The provenance of each replicate names where the bonds came from, as
-`bond_source`: `system_xml`, `tpr`, `top`, `conect`, `guessed` or `none`.
+`bond_source`: `system_xml`, `tpr`, `top`, `conect`, `guessed`, or `none`.
 
 When multiple daisy-chain segments exist (e.g., `production_0/`,
 `production_1/`, `production_2/`), they are automatically stitched together in

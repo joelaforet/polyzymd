@@ -27,7 +27,7 @@ restart chain, are exactly the frames used.
 ## What the tests check
 
 `tests/analyses/test_rmsf.py` checks, on synthetic trajectories of noisy,
-rotated and translated copies of a small structure:
+rotated, and translated copies of a small structure:
 
 - `rmsf` equals MDAnalysis `rms.RMSF` after `AlignTraj` onto the same
   reference, and `rmsd_per_residue` and the offset equal the definitions computed
@@ -40,7 +40,7 @@ rotated and translated copies of a small structure:
 - the core and region values are the root of the mean of `msf` over their
   residues, and `core_rmsd_per_residue² = core_rmsf² + core_offset²` for every
   replicate;
-- a reference with the wrong number of atoms, a core that selects no residues
+- a reference with the wrong number of atoms, a core that selects no residues,
   and a reserved region name are refused;
 - per-residue comparisons line replicates up by residue ID, correct over every
   residue of every compared condition, and keep every row in the JSON report.
@@ -53,7 +53,7 @@ four reference modes, and to within 3e-8 Å² for the core and region values.
 
 `scripts/benchmarks/rmsf_gromacs_parity.py` compares the per-residue values
 with GROMACS `gmx rmsf`. For each reference mode, PolyzyMD builds the reference
-with `pz.reference` and computes `rmsf`, `rmsd_per_residue` and `offset`. The same
+with `pz.reference` and computes `rmsf`, `rmsd_per_residue`, and `offset`. The same
 production frames of the same atoms, not superposed, are written to a TRR file
 and the reference positions to a GROMOS96 file, and `gmx rmsf -res` fits every
 frame to that reference and writes the fluctuation (`-o`) and the deviation
@@ -79,7 +79,7 @@ residues, against the 1ISP crystal for `external`, production frame 50 for
 `gmx rmsf` writes its values to 4 decimals in nm, so it rounds each value by
 up to 0.00005 nm, 5e-4 Å. Every maximum difference is at that rounding, so the
 values agree to the precision GROMACS writes. The offset computed from the
-rounded GROMACS values agrees to within 5e-3 Å in `external`, `centroid` and
+rounded GROMACS values agrees to within 5e-3 Å in `external`, `centroid`, and
 `frame` modes, the larger difference coming from taking the root of a
 difference of two rounded squares. In `average` mode both programs give an
 offset of almost zero (below 1.2e-4 Å), since the reference is the mean
@@ -99,9 +99,9 @@ quantity.
 
 ## Scope
 
-These checks cover the tested selections, reference modes and trajectory
+These checks cover the tested selections, reference modes, and trajectory
 formats. They are not a guarantee for every topology, periodic-boundary
-treatment or external-reference atom mapping. In particular, an external
+treatment, or external-reference atom mapping. In particular, an external
 reference is checked only for its atom count; whether its atoms correspond to
 the trajectory's is up to the structure preparation (see
 {doc}`../explanation/analysis_reference_selection`).

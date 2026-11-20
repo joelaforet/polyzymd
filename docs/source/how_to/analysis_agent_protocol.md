@@ -3,7 +3,7 @@
 Run one `polyzymd analyze` command to get the value of a metric for one
 condition, or to find out whether two conditions differ. The command reads the
 `config.yaml` of each condition. Its result carries the unit, the 95 %
-confidence interval, the number of replicates and the provenance.
+confidence interval, the number of replicates, and the provenance.
 
 ## Summarize one condition
 
@@ -64,7 +64,7 @@ Some analyses report several results:
 - `sasa` reports the total and the per-residue SASA of each context.
 - `distances` reports a mean distance and a fraction below the threshold for
   each atom pair.
-- `rmsf` reports core, region and mean values, and the per-residue profiles.
+- `rmsf` reports core, region, and mean values, and the per-residue profiles.
 
 The report covers one result at a time. It names that result in `run` and
 lists the others in `all_runs`. To report a different result, use `--run`:
@@ -143,7 +143,7 @@ The command writes two folders in the current folder, or in `--output-dir`:
 - `figures/<name>/` holds the figures.
 
 PolyzyMD reuses a stored replicate result if these items are unchanged: the
-function, the settings, the config, the input files, the equilibration window
+function, the settings, the config, the input files, the equilibration window,
 and the frames. To measure it again, add `--recompute`.
 
 ## Troubleshooting
@@ -151,7 +151,7 @@ and the frames. To measure it again, add `--recompute`.
 | Message | Fix |
 |---|---|
 | `error: No analysis named 'rgyr'.` | Use one of the names that the `fix:` line lists. |
-| `error: Condition ...: replicates [...] have no run directory under ...` | Give replicates that exist with `--replicates`, or run the simulations first. If the replicate folders are in another place, name it with `data.local.yaml`, `polyzymd study locate DIR` or `--data`. |
+| `error: Condition ...: replicates [...] have no run directory under ...` | Give replicates that exist with `--replicates`, or run the simulations first. If the replicate folders are in another place, name it with `data.local.yaml`, `polyzymd study locate DIR`, or `--data`. |
 | `Condition ...: no runs found under ...` | The condition is not simulated yet, or its runs are elsewhere. With `--study` the report is `partial` and names it in a `problem:` line; run the simulations or name the place of the runs as above. |
 | `error: no runs of study ... are on this machine.` | No condition has runs here. Read the stored report named on the `fix:` line with `pz.Study(...).results(run)`, or give the runs with `polyzymd study locate DIR --verify` and run again. |
 | `error: Config file(s) not found` | Point `-c` at a simulation `config.yaml`. For a study, use `--study` with its `study.yaml`. |

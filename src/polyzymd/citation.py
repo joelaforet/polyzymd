@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-TITLE = "PolyzyMD: build, run and analyze molecular dynamics of complex biomolecular systems"
+TITLE = "PolyzyMD: build, run, and analyze molecular dynamics of complex biomolecular systems"
 AUTHORS = "Laforet, Joseph R., Jr."
 REPOSITORY = "https://github.com/joelaforet/polyzymd"
 #: The authors, as CITATION.cff persons.

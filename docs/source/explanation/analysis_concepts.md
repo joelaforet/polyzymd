@@ -17,30 +17,30 @@ load replicates  →  measure  →  reduce per replicate  →  summarize or comp
 | **load replicates** | Every replicate of every condition | `Study.from_configs` finds the replicates of each simulation `config.yaml`, loads each one as an MDAnalysis `Universe` with its production segments in order, and removes the equilibration window |
 | **measure** | One replicate | `study.timeseries` runs a per-frame function on every production frame; `study.per_replicate` runs a function once on the replicate's production frames. Each replicate's result is written to `polyzymd_results/<name>/<condition>/replicate_<n>/` with a `record.json` of how it was made |
 | **reduce per replicate** | One replicate | A time series becomes one number per replicate, for example its mean or the fraction of frames that pass a test |
-| **summarize or compare** | All conditions | The replicate values give each condition's mean, standard error and 95 percent Student t interval, and each condition is compared with the control |
+| **summarize or compare** | All conditions | The replicate values give each condition's mean, standard error, and 95 percent Student t interval, and each condition is compared with the control |
 
 `polyzymd analyze NAME -c A/config.yaml -c B/config.yaml` runs these steps for
 a shipped analysis and prints a report in which every number states its unit,
-its uncertainty and its sample size. The first `-c` config is the control. The
+its uncertainty, and its sample size. The first `-c` config is the control. The
 same steps are open to your own functions in Python; see
 {doc}`../how_to/study_api`.
 
 Figures are drawn from the stored values into `figures/<name>/`. They do not
 reload trajectories or rerun the measurement.
 
-## Conditions, replicates and the control
+## Conditions, replicates, and the control
 
-A **condition** is one simulation setup, such as "No polymer", "SBMA 100%"
+A **condition** is one simulation setup, such as "No polymer", "SBMA 100%",
 or "Urea 2 M". Each condition has its own `config.yaml`, which defines the
-system: the protein, the polymer or co-solvent, the force field and the
+system: the protein, the polymer or co-solvent, the force field, and the
 temperature.
 
 A **replicate** is one independent simulation of a condition. Replicates
-have the numbers 1, 2, 3 and so on, and use the same `config.yaml`. The
-replicate number seeds the starting structure, the starting velocities and
+have the numbers 1, 2, 3, and so on, and use the same `config.yaml`. The
+replicate number seeds the starting structure, the starting velocities, and
 the thermostat noise, so each replicate starts differently. These choices
 separate the trajectories, but they do not make them statistically independent by
-themselves. Independence also depends on equilibration, stationarity and
+themselves. Independence also depends on equilibration, stationarity, and
 whether the simulated time is long enough for the process that you measure.
 
 The replicate is the sampling unit: every interval and test uses one value
@@ -85,7 +85,7 @@ Each shipped analysis is a function in `polyzymd.analyses.functions`, and
 | `secondary_structure` | DSSP secondary-structure fractions |
 | `contacts` | Polymer-protein contacts and how long they last |
 | `native_contacts` | Fraction of native contacts |
-| `hydrogen_bonds` | Hydrogen-bond counts, lifetimes and per-residue occupancy |
+| `hydrogen_bonds` | Hydrogen-bond counts, lifetimes, and per-residue occupancy |
 | `distances` | Pair distances and the fraction of frames below a threshold |
 
 The catalytic triad is not a separate analysis but a routine that combines
@@ -151,7 +151,7 @@ contacts are counted alongside real hydrogen bonds.
 The IUPAC definition requires the donor to be more electronegative than
 hydrogen and the acceptor to carry a lone pair or a pi cloud, which carbon
 generally does not (Arunan et al. 2011). `functions.hbond_atoms` therefore
-takes as donors only the hydrogens covalently bonded to nitrogen, oxygen or
+takes as donors only the hydrogens covalently bonded to nitrogen, oxygen, or
 sulfur, and as acceptors every oxygen and every nitrogen or sulfur bonded to at
 most two atoms, which keeps a lone pair. The practical reason matters as much
 as the formal one: the share of short C-H...O geometries depends on polymer
@@ -202,10 +202,10 @@ out/
 ```
 
 A per-frame measurement writes `series.npz`, a per-replicate one
-`values.npz`. The `record.json` beside it holds the function's name, module and
+`values.npz`. The `record.json` beside it holds the function's name, module, and
 source hash, the arguments with their selection strings, the config hash, the
 topology and trajectory file records, the equilibration window, the frames, the
-times, the unit and the PolyzyMD, MDAnalysis, NumPy and Python versions.
+times, the unit, and the PolyzyMD, MDAnalysis, NumPy, and Python versions.
 `--no-plots` skips the figures, and `--format json` prints the whole report.
 
 ## Why a cached result is checked against its inputs
@@ -221,8 +221,8 @@ apart.
 Reuse is therefore conditional rather than automatic. A stored result is read
 back only when every field of its `record.json`, except the versions and the
 plot bounds, equals the record the new call would write: the same function
-source, arguments, config, equilibration window, stride and frames, and a
-topology and set of trajectory files with the recorded relative paths, sizes
+source, arguments, config, equilibration window, stride, and frames, and a
+topology and set of trajectory files with the recorded relative paths, sizes,
 and SHA-256 hashes. A file that grew, or changed in any other way, therefore
 does not match. PolyzyMD reads a trajectory hash from `progress.json` or
 `trajectory_hashes.json` when the run recorded it, or else computes it once

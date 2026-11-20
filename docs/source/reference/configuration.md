@@ -25,7 +25,7 @@ openmm: { ... }             # Optional (has defaults; read when engine is openmm
 gromacs: { ... }            # Optional (has defaults; read when engine is gromacs)
 ```
 
-PolyzyMD assumes no force field, charge model or water model. Every solute
+PolyzyMD assumes no force field, charge model, or water model. Every solute
 and the solvent name their own, so each choice is on record in the config
 that built the system. The physics audit then checks that the built system
 carries exactly these choices; see {doc}`physics_checks` and
@@ -43,8 +43,8 @@ went. See {doc}`../how_to/rewrite_config_rc5`.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `type` | string | Yes | - | `protein`, `small_molecule` or `polymer`. It selects which keys the entry takes and how its physics is checked. It is never guessed from the other keys |
-| `name` | string | No | the type | The handle that restraints, `modeling_exceptions`, the build record and analysis use. No spaces, `/` or `\`; not `solvent`, `ions`, `SOL` or `ION`. Names must be unique |
+| `type` | string | Yes | - | `protein`, `small_molecule`, or `polymer`. It selects which keys the entry takes and how its physics is checked. It is never guessed from the other keys |
+| `name` | string | No | the type | The handle that restraints, `modeling_exceptions`, the build record, and analysis use. No spaces, `/`, or `\`; not `solvent`, `ions`, `SOL`, or `ION`. Names must be unique |
 | `segid` | string | No | `PROT`, `LIG`, `POLY` | Segment ID of the component's atoms in the built PDB (columns 73-76), in analysis and in the GROMACS `components.ndx`. 1-4 characters, not `SOL` or `ION` |
 | `force_field` | list of paths | Yes | - | The `.offxml` files that parameterize this component |
 | `charges` | object | Yes | - | Where its partial charges come from; see below |
@@ -78,7 +78,7 @@ model.
 `nagl` and OpenFF charging need no extra program. `am1bcc` depends on
 AmberTools, which is not in every pixi environment (in particular macOS NumPy 2
 environments). `validate` refuses `nagl` for elements other than H, C, N, O,
-F, P, S, Cl, Br and I, and a method whose software is not installed.
+F, P, S, Cl, Br, and I, and a method whose software is not installed.
 
 ### Protein (`type: protein`)
 
@@ -122,7 +122,7 @@ an apo simulation.
 | `sdf_path` | path | Yes | - | SDF with the docked, protonated conformers. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
 | `conformer_index` | int | No | 0 | Index of the conformer to place (0-indexed). `validate` refuses an index the SDF does not hold |
 | `residue_name` | string | No | "LIG" | 3-letter code for the topology |
-| `charges` | object | Yes | - | `nagl` (with `model`), `am1bcc` or `espaloma` |
+| `charges` | object | Yes | - | `nagl` (with `model`), `am1bcc`, or `espaloma` |
 
 ---
 
@@ -209,7 +209,7 @@ that kept its C=C double bond:
 | `cache_directory` | path | No | ".polymer_cache" | Cache directory |
 | `end_groups` | object | In dynamic mode; optional in cached mode | - | `head` and `tail`: lists of caps (`label`, `smiles` with one `*`, `probability`, optional `name` and `residue_name`); each end's probabilities sum to 1. In cached mode the chains then draw their caps too, and the caps are checked against the build metadata of cached chains that dynamic mode made |
 | `force_field` | list | Yes | - | Force field files; the same file as `solvent.force_field` |
-| `charges` | object | Yes | - | `preset` in cached mode (the charges in the SDFs); `nagl` (with `model`), `am1bcc` or `espaloma` in dynamic mode |
+| `charges` | object | Yes | - | `preset` in cached mode (the charges in the SDFs); `nagl` (with `model`), `am1bcc`, or `espaloma` in dynamic mode |
 | `max_retries` | int | No | 10 | Builds tried before a chain with a pierced ring or overlapping atoms is refused (dynamic mode) |
 | `random_seed` | int | No | null | Seed for polymer sequence draws (default: the replicate number) |
 | `packing` | object | No | see below | PACKMOL placement settings |
@@ -242,7 +242,7 @@ Chains are then packed inside the rectangular *brick* of that cell (shrunk by
 `tolerance`, PACKMOL's own convention) plus the confinement sphere, and the
 solvent fills the same brick afterwards. Because the cell depends only on the
 enzyme and substrate, every replicate of a condition gets the same box volume,
-the same water count and the same ion counts. The cell, the brick and the
+the same water count, and the same ion counts. The cell, the brick, and the
 sphere radius are recorded under `provenance` in `build_provenance.json`
 (`box_vectors_nm`, `brick_nm`, `polymer_sphere_radius_nm`), so replicates can
 be compared by diffing their build records.
@@ -264,13 +264,13 @@ each brick face.
 | `probability` | float | Yes | Selection probability (must sum to 1.0) |
 | `name` | string | No | Full monomer name |
 | `smiles` | string | Dynamic mode; optional in cached mode | Repeat-unit SMILES with `*` on the two linking atoms; the first `*` bonds toward the head. In cached mode it is checked against the build metadata of cached chains that dynamic mode made |
-| `residue_name` | string | No | 3-letter residue code for topology; one per monomer, not an amino-acid, nucleic-acid, water or ion name |
+| `residue_name` | string | No | 3-letter residue code for topology; one per monomer, not an amino-acid, nucleic-acid, water, or ion name |
 
 ### Charges
 
 Cached chains carry their charges in the SDF files: write
 `charges: {method: preset}`. Dynamically generated chains are charged when
-they are made: write `nagl` (with `model`), `am1bcc` or `espaloma`. `validate`
+they are made: write `nagl` (with `model`), `am1bcc`, or `espaloma`. `validate`
 refuses any other combination, so the config never names a charge source the
 build did not use. See [Charges](#charges).
 
@@ -301,7 +301,7 @@ solvent:
     tolerance: 2.0                       # PACKMOL tolerance (Angstrom)
 ```
 
-`force_field` names the file that parameterizes water, ions and co-solvents;
+`force_field` names the file that parameterizes water, ions, and co-solvents;
 Sage carries the TIP3P water and the ion parameters. `water.model` is
 required: PolyzyMD assumes no water model. Water and co-solvents carry
 segment ID `SOL` (co-solvents are told apart by residue name) and ions `ION`.
@@ -327,7 +327,7 @@ model. It needs `neutralize: true`. Example: 50 mM sodium phosphate at pH 7.5 ha
 ionic strength of about 0.13 M, so `ionic_strength: 0.13` gives the box that
 buffer's ionic strength with NaCl.
 
-NaCl is the only salt the build adds: `validate`, `build`, `run` and `submit`
+NaCl is the only salt the build adds: `validate`, `build`, `run`, and `submit`
 refuse a non-zero `kcl_concentration` or `mgcl2_concentration`.
 
 `box.padding` is the distance from the **solute** to the box edge. The edge of
@@ -348,7 +348,7 @@ solvent counts.
 
 `tip3p` (TIP3P) is the only water model PolyzyMD builds, and
 `solvent.water.model` must name it. The force fields it
-loads carry the TIP3P water parameters, so `validate`, `build`, `run` and
+loads carry the TIP3P water parameters, so `validate`, `build`, `run`, and
 `submit` refuse any other `model`. A config of an existing run with another
 model still loads for `status` and analysis.
 
@@ -364,7 +364,7 @@ periodic copies. The rhombic dodecahedron needs fewer waters.
 
 ### Co-solvents
 
-PolyzyMD supports adding co-solvents to a water primary solvent. Give the amount of each as a **mole fraction**, a **molar concentration** or a **count** of molecules.
+PolyzyMD supports adding co-solvents to a water primary solvent. Give the amount of each as a **mole fraction**, a **molar concentration**, or a **count** of molecules.
 
 #### Specification Methods
 
@@ -390,7 +390,7 @@ co_solvents:
 Every co-solvent names its charges. `preset` takes the charges PolyzyMD ships
 for a library co-solvent (see the table below); `validate` refuses `preset`
 for any other molecule, including a library name given another SMILES. A new
-molecule takes `nagl` (with `model`), `am1bcc` or `espaloma`.
+molecule takes `nagl` (with `model`), `am1bcc`, or `espaloma`.
 
 **Formula:**
 
@@ -456,9 +456,9 @@ PolyzyMD includes a library of common co-solvents with pre-defined SMILES and de
 | `dioxane` | `C1COCCO1` | 1.033 | `DIO` | [CID 31275](https://pubchem.ncbi.nlm.nih.gov/compound/31275) |
 | `ethylene_glycol` | `C(CO)O` | 1.114 | `EDO` | [CID 174](https://pubchem.ncbi.nlm.nih.gov/compound/174) |
 
-A co-solvent's residue name must not be an amino-acid, nucleic-acid, water or ion name, because selections such as `protein` would then include it. Without `residue_name`, a custom co-solvent gets the first three letters of its name, or, when those clash, the first two letters and the next letter or digit that does not clash (`methylurea` becomes `MEH`, not `MET`); the dry run prints it. `validate` and `build` refuse a `residue_name` you set that clashes. Library co-solvents whose short name clashed use the PDB chemical-component code (glycerol is `GOL`, not `GLY`). Topologies built before PolyzyMD 1.3 still have the old names (`GLY` glycerol, `MET` methanol, `ACE` acetone and acetonitrile, `ETH` ethylene glycol); an older build has the clash when one of these residues has no `CA` atom, which MDAnalysis shows with `[r for r in u.select_atoms("resname GLY MET").residues if "CA" not in r.atoms.names]`.
+A co-solvent's residue name must not be an amino-acid, nucleic-acid, water, or ion name, because selections such as `protein` would then include it. Without `residue_name`, a custom co-solvent gets the first three letters of its name, or, when those clash, the first two letters and the next letter or digit that does not clash (`methylurea` becomes `MEH`, not `MET`); the dry run prints it. `validate` and `build` refuse a `residue_name` you set that clashes. Library co-solvents whose short name clashed use the PDB chemical-component code (glycerol is `GOL`, not `GLY`). Topologies built before PolyzyMD 1.3 still have the old names (`GLY` glycerol, `MET` methanol, `ACE` acetone and acetonitrile, `ETH` ethylene glycol); an older build has the clash when one of these residues has no `CA` atom, which MDAnalysis shows with `[r for r in u.select_atoms("resname GLY MET").residues if "CA" not in r.atoms.names]`.
 
-For library co-solvents, you only need to specify the `name`, the amount and
+For library co-solvents, you only need to specify the `name`, the amount, and
 `charges: {method: preset}`:
 
 ```yaml
@@ -590,10 +590,10 @@ When you use a custom co-solvent (not in the library), PolyzyMD:
 1. Generates the molecule from your SMILES string.
 2. Assigns partial charges with the method its `charges` names: `nagl`
    (the OpenFF graph network trained on AM1-BCC, with the `model` you name),
-   `am1bcc` (needs AmberTools) or `espaloma`. With `nagl`, the build writes a
+   `am1bcc` (needs AmberTools), or `espaloma`. With `nagl`, the build writes a
    warning that asks you to check that NAGL charges suit the molecule.
 3. Caches the charged molecule in `~/.polyzymd/solvent_cache/`, one file per
-   SMILES, charge method and NAGL model, and reuses it. A changed SMILES gives a new
+   SMILES, charge method, and NAGL model, and reuses it. A changed SMILES gives a new
    molecule, even under the same `name`.
 
 A charged molecule can carry Na+ or Cl- counter-ions in its SMILES
@@ -665,10 +665,10 @@ are named `C1x`, `C2x`, ..., `H1x` in the built system (see
 
 Only the OpenMM engine applies distance restraints. With `engine: gromacs`,
 `validate` refuses an enabled restraint, and `build --format gromacs`,
-`run --engine gromacs` and `submit --engine gromacs` refuse it too. Position
+`run --engine gromacs`, and `submit --engine gromacs` refuse it too. Position
 restraints in equilibration stages (`position_restraints:`) work on both
 engines. On GROMACS they work for `protein_heavy`, `protein_backbone`,
-`protein_calpha`, `ligand_heavy` and `polymer_heavy`; each group must have
+`protein_calpha`, `ligand_heavy`, and `polymer_heavy`; each group must have
 the same `force_constant` in every stage, and all stages must use the same
 protein group. `validate` refuses other position restraints on GROMACS, and
 refuses `ligand_heavy` without a small-molecule solute or `polymer_heavy` without a polymer solute
@@ -702,7 +702,7 @@ modeling_exceptions:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `check` | string | Yes | A check ID from {doc}`physics_checks`. `validate` refuses an unknown ID and names the closest ones |
-| `component` | string | No | A solute name, `solvent`, `ions` or `system`. It must be a component the check runs on |
+| `component` | string | No | A solute name, `solvent`, `ions`, or `system`. It must be a component the check runs on |
 | `reason` | string | Yes | Why the departure is deliberate. No code reads it; it is there for the reader of the published config |
 
 An accepted failure is recorded in `build_provenance.json` and
@@ -848,7 +848,7 @@ output:
   
 ```
 
-The schema still accepts `save_checkpoint`, `save_state_data` and
+The schema still accepts `save_checkpoint`, `save_state_data`, and
 `trajectory_format` so the configs of existing runs load, but no code reads
 them, and a config that gives one prints a warning. Both engines always write
 checkpoints and energies; OpenMM writes DCD trajectories and GROMACS writes
@@ -880,7 +880,7 @@ The removed `volume_fraction` field is not part of naming-template resolution.
 ## Force Fields
 
 There is no `force_field:` section. Each solute names its own force field files
-in `force_field:`, and `solvent.force_field` names the file for water, ions
+in `force_field:`, and `solvent.force_field` names the file for water, ions,
 and co-solvents:
 
 ```yaml
@@ -901,7 +901,7 @@ A config of 1.3.0rc4 or earlier that named no small-molecule force field was
 built with `openff-2.0.0.offxml`; name that file to build the same physics.
 
 Each component is parameterized by its own files alone. The
-`parameters.bonded`, `parameters.nonbonded` and `charges.source` checks rebuild
+`parameters.bonded`, `parameters.nonbonded`, and `charges.source` checks rebuild
 every component from the files its entry names and compare the built system
 with them term by term, so a term taken from another component's force field
 fails the build.
@@ -909,13 +909,13 @@ fails the build.
 ### Two force fields in one system
 
 A system with a protein and other molecules is built from two force-field
-files: the protein's and the one the small molecule, the polymers and the
+files: the protein's and the one the small molecule, the polymers, and the
 solvent share. PolyzyMD loads both into one OpenFF `ForceField` and
 parameterizes the whole solvated system in one `create_interchange()` call. In
 that call the file loaded last, the small-molecule file, would also give the
 protein its generic bonded and Lennard-Jones terms. So PolyzyMD then
 parameterizes the protein alone with its own file and replaces every protein
-bonded, Lennard-Jones and constraint term with that result. The protein keeps
+bonded, Lennard-Jones, and constraint term with that result. The protein keeps
 the library charges of its file. The build stops if the protein file does not
 cover a protein term that the combined call covered, or if the two files use
 different nonbonded scaling factors or mixing rules.
@@ -938,12 +938,12 @@ The optional `openmm:` block selects the OpenMM platform. It is used when
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `platform` | `str` | `"CUDA"` | OpenMM platform: `CUDA`, `OpenCL`, `CPU`, `Reference` or `HIP`; `validate` refuses other names. PolyzyMD never falls back to another platform. |
+| `platform` | `str` | `"CUDA"` | OpenMM platform: `CUDA`, `OpenCL`, `CPU`, `Reference`, or `HIP`; `validate` refuses other names. PolyzyMD never falls back to another platform. |
 | `device_index` | `str \| null` | `null` | GPU device index. |
-| `precision` | `str` | `"mixed"` | Floating-point precision on CUDA: `single`, `mixed` or `double`. |
+| `precision` | `str` | `"mixed"` | Floating-point precision on CUDA: `single`, `mixed`, or `double`. |
 
 The replicate number fixes the starting structure and every random seed. On
-the CPU, OpenCL and CUDA platforms, CPU threads, PME and GPUs add up forces in
+the CPU, OpenCL, and CUDA platforms, CPU threads, PME, and GPUs add up forces in
 a different order on each run, so two runs of a replicate differ from the
 first minimization on (the slow Reference platform is deterministic). They agree
 statistically, not frame by frame. Each production segment records the
@@ -962,7 +962,7 @@ The optional `gromacs:` block sets how PolyzyMD calls GROMACS and which SLURM
 resources a GROMACS job asks for. `analysis_topology` is read by the analyses
 and by freeze. A local `polyzymd run` and the `run_<prefix>_gromacs.sh`
 script that `build --format gromacs` writes pass `ntmpi`, `ntomp`, `gpu`
-(the GPU offload flags), `mdrun_flags` and the stage `mdrun_flags_*` to
+(the GPU offload flags), `mdrun_flags`, and the stage `mdrun_flags_*` to
 `gmx mdrun`, as a SLURM job does. Every other field is used only by the SLURM
 scripts that `polyzymd submit` and `polyzymd recover` write when the engine is
 GROMACS (`engine: gromacs` in the config, or `--engine gromacs`).
@@ -989,7 +989,7 @@ gromacs:
   mdrun_flags: "-pin on"
 ```
 
-`gpu: true` adds `-nb gpu`, `-pme gpu` and `-bonded gpu` unless
+`gpu: true` adds `-nb gpu`, `-pme gpu`, and `-bonded gpu` unless
 `mdrun_flags` sets those flags. It never adds `-update gpu`. See the notes.
 
 ### Full Field Reference
@@ -1012,7 +1012,7 @@ gromacs:
 | `ntomp` | `int` | `8` | OpenMP threads per rank for `gmx mdrun -ntomp`. Sets SLURM `--cpus-per-task`. Must be >= 1. |
 | `gpu` | `bool` | `false` | Request GPU via SLURM. When false, the `--gres=gpu` directive is omitted entirely. |
 | `gpus` | `int` | `1` | Number of GPUs to request when `gpu` is true. Ignored when `gpu` is false. Must be >= 1. |
-| `memory` | `str` | `"16G"` | SLURM `--mem` allocation for GROMACS jobs: a number with an optional `K`, `M`, `G` or `T`. |
+| `memory` | `str` | `"16G"` | SLURM `--mem` allocation for GROMACS jobs: a number with an optional `K`, `M`, `G`, or `T`. |
 
 ### Notes
 
@@ -1054,7 +1054,7 @@ Use one of the two, not both.
   `mpirun -genv I_MPI_FABRICS shm:tcp gmx_mpi mdrun ...`.
 
 With `command_prefix` and a real-MPI binary, PolyzyMD writes no `mpirun`,
-ignores `mpi_launcher_flags` and logs a warning.
+ignores `mpi_launcher_flags`, and logs a warning.
 
 ### `env_exports` and `setup_commands`
 
@@ -1073,7 +1073,7 @@ gromacs:
 
 ### mdrun flags
 
-These `gmx mdrun` flags go in `mdrun_flags`, `mdrun_flags_equilibration` or
+These `gmx mdrun` flags go in `mdrun_flags`, `mdrun_flags_equilibration`, or
 `mdrun_flags_production`.
 
 | Flag | Description |
@@ -1090,7 +1090,7 @@ These `gmx mdrun` flags go in `mdrun_flags`, `mdrun_flags_equilibration` or
 | `-dlb yes\|auto` | Dynamic load balancing. |
 | `-gpu_id NNN` | GPU device IDs, for example `012` for 3 GPUs. |
 
-For thread-MPI, real MPI and OpenMP threads, see
+For thread-MPI, real MPI, and OpenMP threads, see
 {doc}`../explanation/gromacs_parallelism`. For how to run and submit GROMACS
 jobs, see {doc}`../how_to/run_gromacs`.
 
@@ -1102,14 +1102,14 @@ Start from one of these complete configs:
 
 - `polyzymd study add-condition "<label>" --new`, run in a study folder,
   writes `conditions/<label>/config.yaml`. This template has every section.
-  The small-molecule, polymer, co-solvent, restraint and
+  The small-molecule, polymer, co-solvent, restraint, and
   `modeling_exceptions` entries are commented out, with a comment on each key.
 - `examples/quickstart/config.yaml` (OpenMM) and
   `examples/quickstart/config_gromacs.yaml` (GROMACS), in the PolyzyMD
   repository, are a protein in water with NaCl. See
   {doc}`../get_started/quickstart`.
 
-To add a small molecule, co-solvents or polymers, copy the entries of this
+To add a small molecule, co-solvents, or polymers, copy the entries of this
 page into one of these configs.
 
 ---

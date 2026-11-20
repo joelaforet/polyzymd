@@ -12,8 +12,8 @@
 </p>
 
 <p align="center">
-  <strong>Build, run and analyze molecular dynamics of proteins, alone or with
-  polymers, ligands and co-solvents, on OpenMM or GROMACS.</strong>
+  <strong>Build, run, and analyze molecular dynamics of proteins, alone or with
+  polymers, ligands, and co-solvents, on OpenMM or GROMACS.</strong>
 </p>
 
 <p align="center">
@@ -77,7 +77,7 @@ explains each step and its output.
 |---|---|
 | Learn PolyzyMD step by step | [Tutorials](https://polyzymd.readthedocs.io/en/latest/tutorials/index.html) |
 | Run on my NVIDIA GPU, or on a SLURM cluster | [Run on a GPU](https://polyzymd.readthedocs.io/en/latest/how_to/hardware_platforms.html), [Run on SLURM](https://polyzymd.readthedocs.io/en/latest/how_to/hpc_slurm.html) |
-| Add polymers, a co-solvent or a ligand | [Polymers from SMILES](https://polyzymd.readthedocs.io/en/latest/how_to/dynamic_polymers.html), [Co-solvents](https://polyzymd.readthedocs.io/en/latest/how_to/cosolvents.html), [Ligands](https://polyzymd.readthedocs.io/en/latest/how_to/ligand.html) |
+| Add polymers, a co-solvent, or a ligand | [Polymers from SMILES](https://polyzymd.readthedocs.io/en/latest/how_to/dynamic_polymers.html), [Co-solvents](https://polyzymd.readthedocs.io/en/latest/how_to/cosolvents.html), [Ligands](https://polyzymd.readthedocs.io/en/latest/how_to/ligand.html) |
 | Compare conditions, and publish | [Compare conditions](https://polyzymd.readthedocs.io/en/latest/how_to/analysis_compare_conditions.html), [Publish](https://polyzymd.readthedocs.io/en/latest/how_to/study_freeze.html) |
 | Move from PolyzyMD 1.2 | [Rewrite a 1.2 config](https://polyzymd.readthedocs.io/en/latest/how_to/rewrite_config_rc5.html) |
 
@@ -90,7 +90,7 @@ its `build_provenance.md`.
 ```bibtex
 @software{laforet_polyzymd,
   author = {Laforet, Jr., Joseph R.},
-  title = {PolyzyMD: build, run and analyze molecular dynamics of complex biomolecular systems},
+  title = {PolyzyMD: build, run, and analyze molecular dynamics of complex biomolecular systems},
   version = {1.3.0},
   year = {2026},
   doi = {10.5281/zenodo.23680214},

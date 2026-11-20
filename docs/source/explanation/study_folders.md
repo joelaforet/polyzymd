@@ -42,7 +42,7 @@ To make a study folder, see {doc}`../how_to/study_folder`.
 | 3. Simulations | The folder and compute time | Each `conditions/<label>/config.yaml`. The replicate number seeds the starting structure and the dynamics |
 
 Level 3 gives the same results within the statistical noise of MD, not bit
-for bit. Floating-point arithmetic, the order of parallel sums and the
+for bit. Floating-point arithmetic, the order of parallel sums, and the
 hardware differ between machines (Thompson et al. 2020).
 
 ## Layout
@@ -66,7 +66,7 @@ my_study/
 └── .gitignore
 ```
 
-`polyzymd study init DIR` writes this layout, runs `git init` and makes the
+`polyzymd study init DIR` writes this layout, runs `git init`, and makes the
 first commit. For each condition, `study init` and `study add-condition` copy
 the config into `conditions/<label>/`, with the input files that it names.
 Conditions that share a structure each get a copy. These copies are small
@@ -125,7 +125,7 @@ The rules of the file, and the reason for each:
 |---|---|
 | `polyzymd analyze NAME --study study.yaml` | Runs one listed analysis, shipped or your own |
 | `polyzymd analyze --study study.yaml` | Runs every listed analysis. With `--submit`, it submits one SLURM array for each analysis |
-| `polyzymd study check` | Checks paths, configs and setting names, and imports every function. It loads no trajectory. It prints where it found the replicates of each condition |
+| `polyzymd study check` | Checks paths, configs, and setting names, and imports every function. It loads no trajectory. It prints where it found the replicates of each condition |
 
 ## Where the trajectories are: `data.local.yaml`
 
@@ -167,7 +167,7 @@ its results, and you can check its numbers against the published numbers.
 | The config of a condition | Its simulation content. Input structures count by the SHA-256 of their content. The projects and scratch directories do not count |
 | A shipped function | Its module file, and the PolyzyMD modules that the file imports |
 | Your function | Every file in the folder of its file |
-| Trajectory and topology files | The path relative to the folder of the replicate folders, the size and the SHA-256 |
+| Trajectory and topology files | The path relative to the folder of the replicate folders, the size, and the SHA-256 |
 | A file that an analysis reads, such as a reference structure | Its name and its SHA-256, not its location |
 
 PolyzyMD gets the SHA-256 of a trajectory from the first of these sources:
@@ -201,20 +201,20 @@ results.
    analysis whose stored results do not match its current code and settings.
 2. It collects these items without user input:
    - the engine inputs of each replicate (OpenMM `system.xml`, or GROMACS
-     `.top`, `.mdp` and `.tpr`). They record the parameters that the toolkit
+     `.top`, `.mdp`, and `.tpr`). They record the parameters that the toolkit
      assigned, generated polymer parameters included (Thompson et al. 2020);
    - the final-frame coordinates of each replicate (Reliability and
      reproducibility checklist 2023);
    - the force-field names and versions, the charge method and its toolkit
-     version, the cutoffs and the long-range method;
-   - the platform, the precision and the production length of each
+     version, the cutoffs, and the long-range method;
+   - the platform, the precision, and the production length of each
      replicate, and any post-processing such as a stride or stripped solvent
      (Tiemann et al. 2024);
    - a system-setup table, `system_summary.csv`: the box, the atom count, the
-     waters, the salt and the composition (Reliability and reproducibility
+     waters, the salt, and the composition (Reliability and reproducibility
      checklist 2023).
 3. It writes `manifest.json`: the file hashes and sizes, the package versions,
-   the provenance above, the trajectory DOIs and the parent of the tagged
+   the provenance above, the trajectory DOIs, and the parent of the tagged
    commit.
 4. It writes `md_checklist.yaml`, the reliability and reproducibility
    checklist of Communications Biology (2023), filled in from the manifest.
@@ -224,7 +224,7 @@ results.
    block, so the two files always agree. Zenodo ignores `CITATION.cff` when
    `.zenodo.json` exists.
 6. It commits these files and `results/`, and tags the commit.
-7. It lays out `deposit/`. The manifest, the README and `CITATION.cff` are at
+7. It lays out `deposit/`. The manifest, the README, and `CITATION.cff` are at
    the top level and not zipped, so Zenodo indexes them and shows a preview
    (Tiemann et al. 2024).
 
@@ -233,7 +233,7 @@ permanent and gets a DOI, so the author does that step. `freeze` writes these
 files:
 
 - `deposit/upload/`: the files to add to one Zenodo record, within its limits
-  (100 files and 50 GB by default). The study, the engine inputs and the
+  (100 files and 50 GB by default). The study, the engine inputs, and the
   final frames are one zip file each.
 - `deposit/trajectories.csv`: the trajectory files, in batches that each fit
   one record.

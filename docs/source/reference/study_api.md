@@ -6,7 +6,7 @@ design, see {doc}`../explanation/analysis_api`. The module documentation is
 in {doc}`../api/analyses`.
 
 `import polyzymd as pz` exports `Study`, `Project`, `select`, `universe`,
-`reference`, `plot_values` and `plot_distributions`.
+`reference`, `plot_values`, and `plot_distributions`.
 
 ## Load a study
 
@@ -24,7 +24,7 @@ in {doc}`../api/analyses`.
 | `data` | Condition label to the folder that holds its replicate folders, in place of the `scratch_directory` of the config. The key `"*"` applies to every condition that the mapping does not name |
 | `until` | The end of a common analysis window, such as `"38ns"` or `"common"` |
 
-## Study, condition and replicate
+## Study, condition, and replicate
 
 | Attribute or method | Gives |
 |---|---|
@@ -37,7 +37,7 @@ in {doc}`../api/analyses`.
 | `replicate.times` | The times of those frames, in ns |
 | `replicate.production_ns` | The simulated production time of the replicate, in ns |
 | `study.results(run, *, folder=None)` | The stored results of a run of a study file, read without trajectories (`.table`, `.report`, `.warnings`) |
-| `study.replicate_table(run)` | One row per replicate, quantity (`name`), part and label, with a column for each factor |
+| `study.replicate_table(run)` | One row per replicate, quantity (`name`), part, and label, with a column for each factor |
 | `study.settings(run)` | The settings of a run of `study.yaml` |
 | `study.path(relative)`, `study.root` | A file of the study, and the study folder |
 | `study.module(name)` | A Python module of the study, as the analyses import it |
@@ -127,7 +127,7 @@ recorded.
 
 | Method | Returns |
 |---|---|
-| `summary(conditions=None)` | A `ProtocolReport` with n, the mean, the standard error, the 95 % interval and every replicate value of each condition |
+| `summary(conditions=None)` | A `ProtocolReport` with n, the mean, the standard error, the 95 % interval, and every replicate value of each condition |
 | `compare(control=None, conditions=None, test="welch", untested=(), within=None)` | A `ProtocolReport` with each condition against the control, or against the control of its stratum |
 | `over_labels(how="mean", metric=None, labels=None)` | One number per replicate from a labeled array, over every label or over `labels` |
 | `plot(output_dir=None, name=None, title=None, plot_settings=None, highlight=(), xlabel="label")` | The path of a figure of the mean and interval of each condition, with every replicate value. For a labeled result, a profile |
@@ -183,7 +183,7 @@ Each replicate of a result is stored in
 
 | File | Holds |
 |---|---|
-| `series.npz` | `timeseries`: the values, frames and times |
+| `series.npz` | `timeseries`: the values, frames, and times |
 | `values.npz` | `per_replicate`: the values |
 | `labels.json` | `per_replicate` with `labels="returned"`: the labels of the replicate |
 | `record.json` | What produced the values. See below |
@@ -193,10 +193,10 @@ Each replicate of a result is stored in
 - the name and module of the function, and the hash of its code;
 - every argument, with the selection strings;
 - the config hash;
-- the relative path, size and SHA-256 of every topology and trajectory file;
-- the equilibration window, the frames and the times;
+- the relative path, size, and SHA-256 of every topology and trajectory file;
+- the equilibration window, the frames, and the times;
 - the unit and the labels;
-- the PolyzyMD, MDAnalysis, NumPy and Python versions.
+- the PolyzyMD, MDAnalysis, NumPy, and Python versions.
 
 A new call reuses a stored result when every field except the versions and
 the bounds is equal. The hash of the code depends on the function:

@@ -45,7 +45,7 @@ Write the pairs to a YAML (or JSON) file, for example `pairs.yaml`:
   selection_b: "resname RBY and name C13x"
 ```
 
-Each pair needs `label`, `selection_a` and `selection_b`. Each pair label must
+Each pair needs `label`, `selection_a`, and `selection_b`. Each pair label must
 be unique. The optional keys are:
 
 - `threshold`: the cutoff for the fraction of frames below it. A pair without
@@ -75,7 +75,7 @@ The path is relative to `study.yaml`.
 ## Run it
 
 In a {term}`study`, give the study folder. The study names the conditions,
-the control and the equilibration window. The results go to
+the control, and the equilibration window. The results go to
 `<study>/results/distances/`:
 
 ```bash
@@ -108,7 +108,7 @@ over the compared conditions with the {term}`Benjamini-Hochberg` method.
 ## Write selections
 
 A selection is an MDAnalysis selection string. PolyzyMD adds three forms:
-`midpoint(...)`, `com(...)` and `pdbindex N`.
+`midpoint(...)`, `com(...)`, and `pdbindex N`.
 
 ````{warning}
 **Include the chain in each selection**

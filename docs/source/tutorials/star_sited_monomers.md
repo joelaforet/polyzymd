@@ -13,7 +13,7 @@ the neighboring repeat units. Each chain end gets a cap with one `*`.
 | Methyl cap | `[*]C` | 1 |
 
 The first `*` bonds toward the head of the chain, the second toward the tail.
-For a vinyl, acrylate or methacrylate monomer, the two linking atoms are the
+For a vinyl, acrylate, or methacrylate monomer, the two linking atoms are the
 carbons of the C=C double bond, which is a single bond in the chain.
 
 ```{figure} ../_static/renders/star_sites.webp

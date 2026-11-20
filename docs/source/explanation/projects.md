@@ -6,7 +6,7 @@ PolyzyMD organizes simulations in four levels:
 |---|---|---|---|
 | {term}`Project <project>` | The studies of one paper | The analyses that the studies share, the `stats/` scripts, the figure code, the publishing metadata | `project.yaml` |
 | **{term}`Study <study>`** | **A set of conditions that you compare with each other** | Its analysis frame: its equilibration window, its structures, its named residue regions, its control. Its conditions | `study.yaml` |
-| {term}`Condition <condition>` | One point in the space of independent variables: one value of each variable, such as the protein variant, the polymer composition, the co-solvent and the temperature | A simulation `config.yaml`, and optionally its `factors:`, which name its coordinates | `conditions/<name>/config.yaml` |
+| {term}`Condition <condition>` | One point in the space of independent variables: one value of each variable, such as the protein variant, the polymer composition, the co-solvent, and the temperature | A simulation `config.yaml`, and optionally its `factors:`, which name its coordinates | `conditions/<name>/config.yaml` |
 | {term}`Replicate <replicate>` | One independent simulation of a condition | Its trajectories. Its number seeds its starting structure and its dynamics | The {term}`replicate folder` |
 
 The figure shows how the four levels nest, and where the runs live on disk.
@@ -42,7 +42,7 @@ Each part of the frame is something that an analysis must know:
   structure for every condition of the study. Some proteins need two, such as
   an open lid and a closed lid.
 - **Regions.** The fold of the protein sets which residues form the core, the
-  active site or a lid. A region names the same residues in every condition.
+  active site, or a lid. A region names the same residues in every condition.
 - **Equilibration.** PolyzyMD removes the same start of production from
   every condition of the study.
 - **The control.** PolyzyMD compares each condition with the first condition
@@ -52,7 +52,7 @@ Each part of the frame is something that an analysis must know:
 
 So two conditions go in one study when they share all of these parts. A
 study can vary several variables together. For example, one enzyme at 300 K,
-330 K and 360 K, each with and without SBMA, is one study with six
+330 K, and 360 K, each with and without SBMA, is one study with six
 conditions:
 
 ```yaml
@@ -82,7 +82,7 @@ The conditions with the same `temperature_K` form one stratum. Each condition
 is compared with the control of its stratum: the condition whose other
 factors equal those of the first condition. Here the first condition has no
 factor other than `temperature_K`, so each control is the condition with no
-other factor: `No polymer 300 K`, `No polymer 330 K` and `No polymer 360 K`.
+other factor: `No polymer 300 K`, `No polymer 330 K`, and `No polymer 360 K`.
 `SBMA 360 K` is compared with `No polymer 360 K`, so the difference holds the
 effect of the polymer only. `control: {polymer: none}` names the control's
 factor values instead, when every condition declares `polymer`. PolyzyMD
@@ -94,7 +94,7 @@ model, write a script in `stats/`.
 
 A point mutant keeps the residue numbering of its wild type. It can share the
 frame of the wild type when one reference structure fits both. A different
-protein usually cannot: its numbering, structures and regions differ. So it
+protein usually cannot: its numbering, structures, and regions differ. So it
 goes in its own study. By default, PolyzyMD never compares a condition of one study with the
 control of a different study.
 
@@ -228,7 +228,7 @@ A reader then reproduces the paper from one dataset.
 
 Stored results identify their inputs by content:
 
-- trajectories, topologies and argument files by name, size and SHA-256;
+- trajectories, topologies, and argument files by name, size, and SHA-256;
 - configs by the {term}`config hash`, which leaves out where the data is.
 
 So when you move a study into a project, or move a project to a different
@@ -236,7 +236,7 @@ machine, every stored result with unchanged inputs is reused.
 
 ## See also
 
-- {doc}`../how_to/project`: analyze, test and publish a project.
+- {doc}`../how_to/project`: analyze, test, and publish a project.
 - {doc}`../how_to/move_studies_into_project`: bring existing studies into a project.
 - {doc}`../how_to/reuse_condition`: analyze one condition's runs in a second study.
 - {doc}`study_folders`: what a study folder holds and how it is published.

@@ -22,7 +22,7 @@ roughly in proportion to the atom count.
 | Hardware | System | Atoms | ns/day | Software | Date |
 |---|---|---:|---:|---|---|
 | NVIDIA A100, CU Boulder Alpine (`aa100`) | not recorded | ~18,000 | 442 | not recorded | not recorded |
-| NVIDIA A40, CU Boulder Blanca (`blanca-shirts`) | enzyme, substrate and 2 polymer chains, NPT, 2 fs | ~70,000 | 159 | not recorded | not recorded |
+| NVIDIA A40, CU Boulder Blanca (`blanca-shirts`) | enzyme, substrate, and 2 polymer chains, NPT, 2 fs | ~70,000 | 159 | not recorded | not recorded |
 
 No measurement exists yet for the L40 nodes (`al40`) or for Bridges-2.
 
@@ -78,7 +78,7 @@ Unless a row says otherwise, the runs use:
    `prod.log`.
 3. Count the atoms of `solvated_system.pdb` in the replicate folder.
 4. Add a row with the hardware, the system, the atom count, the speed, the
-   PolyzyMD and engine versions (from `build_provenance.md`) and the date.
+   PolyzyMD and engine versions (from `build_provenance.md`), and the date.
 
 ## Estimate the simulation time
 

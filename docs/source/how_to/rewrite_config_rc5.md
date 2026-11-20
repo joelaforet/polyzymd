@@ -107,7 +107,7 @@ restraints:
 ```
 
 The atom name changes too. This SDF carries no atom names, so the built atoms
-are named by element, count in SDF order and `x`. The ester carbonyl carbon is
+are named by element, count in SDF order, and `x`. The ester carbonyl carbon is
 `C13x`. See {ref}`restraint-ligand-atom-names`.
 
 ## New keys
@@ -119,19 +119,19 @@ are named by element, count in SDF order and `x`. The ester carbonyl carbon is
   names (`{enzyme}`, `{substrate}`) and analysis identities are built from
   them, so the same names find your existing runs.
 - **`segid`** (optional) is the segment ID of the component's atoms in the
-  built PDB (columns 73-76) and in analysis: `PROT`, `LIG` and `POLY` by
-  default, `SOL` for water and co-solvents and `ION` for ions. Select a
+  built PDB (columns 73-76) and in analysis: `PROT`, `LIG`, and `POLY` by
+  default, `SOL` for water and co-solvents, and `ION` for ions. Select a
   component with `segid PROT` in MDAnalysis or `segi PROT` in PyMOL. GROMACS
   builds also write `components.ndx` with one group per component.
 - **`charges`** (required on every solute and co-solvent) names where partial
   charges come from: `library` (the protein force field's own), `preset` (the
   charges stored in the SDF files, or shipped with PolyzyMD for co-solvents
   such as DMSO), `nagl` (with a required `model`, such as
-  `openff-gnn-am1bcc-1.0.0.pt`, the model Sage 2.3.0 names), `am1bcc` or
+  `openff-gnn-am1bcc-1.0.0.pt`, the model Sage 2.3.0 names), `am1bcc`, or
   `espaloma`.
 - **`force_field`** (required on every solute and on `solvent`) and
   **`solvent.water.model`** (required): PolyzyMD assumes no force field,
-  charge model or water model. Each is your choice, on record in the config
+  charge model, or water model. Each is your choice, on record in the config
   that built the system.
 
 ## Limits of this release
@@ -146,7 +146,7 @@ something else.
 
 ## Existing builds and runs
 
-- **A replicate that has started** (it has minimization, equilibration or
+- **A replicate that has started** (it has minimization, equilibration, or
   production output) continues from its own files. `submit` and the job
   scripts do not hold it to the new checks.
 - **A replicate that has not started**, built by 1.2 or by 1.3.0rc4 or
@@ -170,7 +170,7 @@ its result. {doc}`../explanation/physics_audit` explains the checks, and
 On GROMACS, the audit also reads every `.mdp` file the export wrote and
 compares it with the config. Each GROMACS job script, local or SLURM, checks
 `gromacs/audited_files.sha256`
-before `grompp`. If you edit an exported `.top`, `.itp` or `.mdp` file by
+before `grompp`. If you edit an exported `.top`, `.itp`, or `.mdp` file by
 hand, the job stops: change the config and export again instead.
 
 ## If a build fails its audit

@@ -19,7 +19,7 @@ which one to reach for, and why the others exist.
 `polyzymd analyze` and `polyzymd.analyses.analyze` are the same code path. They
 build a study from the simulation config paths, run the shipped function of the
 named analysis on every replicate, and return a `ProtocolReport` in which every
-number states its unit, its interval and the method of the interval, its
+number states its unit, its interval, and the method of the interval, its
 replicate count, and a provenance block. Nothing has to be written first, and
 this is the right default for the analyses PolyzyMD ships.
 

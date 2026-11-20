@@ -5,11 +5,11 @@ its mean position. It shows where a protein is rigid and where it is flexible.
 It does not, by itself, show that a protein is more stable.
 
 For the commands, see {doc}`../how_to/analysis_rmsf_quickstart`. For
-replicates, correlation and intervals, see
+replicates, correlation, and intervals, see
 {doc}`analysis_statistics_best_practices`.
 
 (rmsf-fluctuation-offset-deviation)=
-## Fluctuation, offset and deviation
+## Fluctuation, offset, and deviation
 
 Four quantities describe how a structure moves relative to a reference. They
 differ in two ways: what each distance is measured **from**, and what is
@@ -133,9 +133,9 @@ the effect it is meant to show.
 
 Low RMSF often indicates a relatively rigid region, such as a buried core or
 structured secondary element. High RMSF often indicates a flexible region,
-such as a loop, terminus or mobile binding-site element. These are
+such as a loop, terminus, or mobile binding-site element. These are
 interpretations, not automatic conclusions: RMSF depends on the fitted atoms,
-the equilibration window, the force field and the sampling.
+the equilibration window, the force field, and the sampling.
 
 RMSF is related to crystallographic B-factors by
 
@@ -143,17 +143,17 @@ $$
 B_i = \frac{8\pi^2}{3} \, \text{RMSF}_i^2
 $$
 
-(Kuzmanic and Zagrovic 2010), but crystal packing, refinement models and
+(Kuzmanic and Zagrovic 2010), but crystal packing, refinement models, and
 simulation conditions make the correspondence approximate.
 
 ## Lower RMSF is not higher stability
 
-Rigidity and thermal stability are not reliably linked. Karshikoff, Nilsson
+Rigidity and thermal stability are not reliably linked. Karshikoff, Nilsson,
 and Ladenstein (2015) review experimental and simulation evidence that
 "thermal tolerance of a protein is not necessarily correlated with the
 suppression of internal fluctuations and mobility". On *B. subtilis* lipase A,
 a network-rigidity measure correlated only fairly with the thermostability of
-16 variants, R² = 0.46 (Rathi, Jaeger and Gohlke 2015, Fig. 4B). A lower RMSF in one
+16 variants, R² = 0.46 (Rathi, Jaeger, and Gohlke 2015, Fig. 4B). A lower RMSF in one
 condition supports "this region moves less". It does not by itself support
 "the protein is more stable".
 
@@ -163,7 +163,7 @@ Match each quantity to the claim it can support:
 |---|---|
 | "Region X moves less" | RMSF over a core or a named region, and the per-residue RMSF difference |
 | "The structure stays closer to the crystal" | Offset and deviation from an `external` reference, over the core or a region such as the active site |
-| "The protein resists unfolding at this temperature" | Measures of native structure over time, such as the fraction of native contacts and secondary-structure retention, rather than RMSF (Best, Hummer and Eaton 2013) |
+| "The protein resists unfolding at this temperature" | Measures of native structure over time, such as the fraction of native contacts and secondary-structure retention, rather than RMSF (Best, Hummer, and Eaton 2013) |
 
 At high temperature, a replicate that partly unfolds mixes states. Its mean
 position is then an average over those states, and its RMSF grows with when
@@ -182,7 +182,7 @@ number per replicate in two ways:
 | `mean_rmsf` | $\tfrac{1}{\lvert S \rvert}\sum_i \text{RMSF}_i$ | Plain mean of the residue values |
 
 Here $\overline{\text{MSF}}_i$ is the mean over the residue's atoms of the
-squared per-atom RMSF. The same forms give `core_offset`, `core_rmsd_per_residue`
+squared per-atom RMSF. The same forms give `core_offset`, `core_rmsd_per_residue`,
 and the region values. Only the root-mean-square form keeps the decomposition
 exact for the whole set: $F_{\text{deviation}}^2 = F_{\text{RMSF}}^2 +
 F_{\text{offset}}^2$. The plain mean is always smaller than or equal to $F$,
@@ -196,7 +196,7 @@ the residue set, not the formula:
 - Define the core before looking at results, for example the crystal
   structure's helix and strand residues with the termini left out, with
   `--set core=...`.
-- Report the loops, the lid or the active site as named regions with
+- Report the loops, the lid, or the active site as named regions with
   `--set regions=...`, a handful fixed in advance, which keeps the number of
   outcomes small.
 - Fit on the same atoms as the core with `alignment_selection`. The frames are
@@ -207,7 +207,7 @@ the residue set, not the formula:
 
 Every comparison uses one value per replicate: the replicate is the sampling
 unit, so the number of frames never narrows an interval. For one-value results
-(the core, region and plain-mean values), each condition is compared with the
+(the core, region, and plain-mean values), each condition is compared with the
 control by Welch's t test. The {term}`Benjamini-Hochberg` correction runs over
 the compared conditions.
 
@@ -260,7 +260,7 @@ each replicate are reported as information and never change the calculation
 The following ranges are rough heuristics for Cα RMSF in folded proteins under
 typical simulation conditions. They are not universal thresholds, and they do
 not apply to offsets, deviations from an external structure, intrinsically
-disordered regions, polymers or ligands.
+disordered regions, polymers, or ligands.
 
 | Approximate Cα RMSF | Common interpretation |
 |---------------------|-----------------------|
@@ -272,9 +272,9 @@ disordered regions, polymers or ligands.
 
 For enzyme active sites, lower RMSF is not automatically better. A rigid
 active site may preserve catalytic geometry, but some enzymes need
-conformational breathing, induced fit or loop motion. Active-site RMSF is most
+conformational breathing, induced fit, or loop motion. Active-site RMSF is most
 useful together with the offset of the active site from a competent
-structure, catalytic distances and experimental activity data.
+structure, catalytic distances, and experimental activity data.
 
 ## Common interpretation pitfalls
 
@@ -293,7 +293,7 @@ uncertainty but whether the window represents one ensemble.
 ### Over-interpreting small differences
 
 Differences of a few hundredths of an Å can be smaller than the variation
-between replicates, fit choices or reference selection. Report the interval
+between replicates, fit choices, or reference selection. Report the interval
 and avoid mechanistic conclusions from tiny differences alone.
 
 ### Cherry-picking replicates
@@ -306,7 +306,7 @@ be scientifically important rather than an error.
 
 Do not compare RMSF with deviation from an external structure, or `core_*`
 values with `mean_*` values, as if they were the same quantity. Name the
-quantity, the reference, the fitted atoms and the residue set with every
+quantity, the reference, the fitted atoms, and the residue set with every
 number.
 
 ## References

@@ -454,14 +454,15 @@ class SimulationRunner:
                 replaced += 1
         if replaced:
             frozen_system.addForce(surrogate)
-        LOGGER.info(
-            "Frozen %d solute heavy atoms for minimization "
-            "(%d frozen-frozen constraints dropped, %d frozen-mobile constraints "
-            "replaced by harmonic surrogates in the copy)",
-            len(frozen),
-            removed,
-            replaced,
-        )
+        LOGGER.info("%d solute heavy atoms are fixed for minimization.", len(frozen))
+        if replaced:
+            LOGGER.info(
+                "%d bonds between those atoms and mobile hydrogen are constrained to be "
+                "stiff springs at the intended bond length.",
+                replaced,
+            )
+        if removed:
+            LOGGER.info("%d constraints between two fixed atoms are removed.", removed)
         return frozen_system
 
     @staticmethod

@@ -6,9 +6,9 @@ esterase active site tends to preserve the geometric arrangement associated
 with catalysis.
 
 It is not direct evidence of catalytic activity. The hydrogen-bond fractions,
-distances and contact fractions are **geometric proxies**. Interpret them
+distances, and contact fractions are **geometric proxies**. Interpret them
 together with the replicate uncertainty, the substrate pose, the hydrogen-bond
-geometry, the protonation state and any experimental activity data.
+geometry, the protonation state, and any experimental activity data.
 
 ```{note}
 PolyzyMD has no separate triad analysis: the triad is a routine on the analysis
@@ -61,7 +61,7 @@ each bond's fraction or each pair's mean distance and fraction below threshold.
 `compare()` compares every condition with the control by Welch's t test on those
 replicate values, with the Benjamini-Hochberg correction over the conditions
 compared. The per-frame series of every replicate are stored with a record of
-the selections, thresholds and input files, so combining them again, or
+the selections, thresholds, and input files, so combining them again, or
 reporting another result, does not read the trajectory again.
 
 ```{tip}

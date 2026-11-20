@@ -75,7 +75,7 @@ metadata:
 
 | Field | Why |
 |---|---|
-| `doi` | The persistent identifier of the study (FAIR F1). Freeze writes it into `CITATION.cff`, `.zenodo.json` and the manifest. Reserve it in Zenodo before you publish |
+| `doi` | The persistent identifier of the study (FAIR F1). Freeze writes it into `CITATION.cff`, `.zenodo.json`, and the manifest. Reserve it in Zenodo before you publish |
 | `title`, `description`, `keywords`, `authors` | Findability (FAIR F2) and citation |
 | `purpose` | The main purpose of the simulations, part of the minimum metadata of Amaro et al. (2025) |
 | `system_type` | The kinds of molecule simulated, as the Communications Biology checklist asks (3a) |
@@ -108,10 +108,10 @@ the freeze. So you can freeze early, and freeze again when you fill the gaps.
    deposits. Freeze deposits only these names:
 
    - `study.yaml` (or `project.yaml`), `data.example.yaml`, `README*`,
-     `LICENSE*` and the files that freeze writes;
+     `LICENSE*`, and the files that freeze writes;
    - the files under the folders that `study init` and `project init`
      make: `conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`,
-     `results/` and `environment/`, and for a project `notebooks/`.
+     `results/`, and `environment/`, and for a project `notebooks/`.
      Reference structures go in `structures/`, and data files that a
      function reads go in `analyses/data/`.
 
@@ -123,7 +123,7 @@ the freeze. So you can freeze early, and freeze again when you fill the gaps.
    yourself, such as scripts and their outputs in `stats/`, are deposited as
    you wrote them, but PolyzyMD does not check them or vouch for them.
 
-4. Commit your inputs: `study.yaml`, `conditions/`, `analyses/` and
+4. Commit your inputs: `study.yaml`, `conditions/`, `analyses/`, and
    `figures/`.
 
    ```bash
@@ -167,7 +167,7 @@ Otherwise, freeze does these steps:
 
 1. It checks whether the stored results of each analysis still match the
    study. It compares the config hashes, the equilibration window, the
-   stride, the code of each function, the settings and the PolyzyMD version.
+   stride, the code of each function, the settings, and the PolyzyMD version.
    A stale run gives a warning that names what changed. Run it again with
    `polyzymd analyze RUN --study lipase_363K`.
 2. It warns in these cases too:
@@ -187,29 +187,29 @@ Otherwise, freeze does these steps:
    computed once per file and cached).
 4. It writes gzipped copies of the engine inputs of each replicate to
    `deposit/`: the OpenMM system XML and topology, or the GROMACS `.tpr`,
-   `.top`, `.itp` and `.mdp`. It also writes the final frame of each
+   `.top`, `.itp`, and `.mdp`. It also writes the final frame of each
    replicate.
 5. It writes these files to the study folder:
 
    | File | Holds |
    |---|---|
-   | `manifest.json` | Each study file, trajectory, engine input and final frame, by size and SHA-256, as deposited; this includes the other files in this table. The package versions (`null` when a package reports none) and the SHA-256 of `environment/pixi.lock`, or, without that file, of the `pixi.lock` of the pixi workspace that runs freeze, which is not deposited; `pixi.lock_file` says which one. The full config of each condition. The production length of each replicate. The parent of the tagged commit (`git.parent_commit`; the tag names the frozen commit). The warnings |
+   | `manifest.json` | Each study file, trajectory, engine input, and final frame, by size and SHA-256, as deposited; this includes the other files in this table. The package versions (`null` when a package reports none) and the SHA-256 of `environment/pixi.lock`, or, without that file, of the `pixi.lock` of the pixi workspace that runs freeze, which is not deposited; `pixi.lock_file` says which one. The full config of each condition. The production length of each replicate. The parent of the tagged commit (`git.parent_commit`; the tag names the frozen commit). The warnings |
    | `CITATION.cff` | Citation File Format 1.2.0: the paper as `preferred-citation`, and PolyzyMD and the trajectory deposits under `references` |
    | `.zenodo.json` | Zenodo deposit metadata: `isSupplementTo` the paper, `requires` PolyzyMD, `references` the trajectories |
    | `md_checklist.yaml` | The reliability and reproducibility checklist of Communications Biology (2023), filled in from the manifest. Review each answer |
-   | `system_summary.csv` | The box, atoms, waters, ions and composition of each replicate (checklist 4a) |
+   | `system_summary.csv` | The box, atoms, waters, ions, and composition of each replicate (checklist 4a) |
 
 6. It commits these files and `results/`, and only those. It tags the commit
    `study-v1`, then `study-v2`, and so on. `--tag NAME` sets another tag.
 7. It lays out `deposit/` and prepares the upload: `deposit/upload/`,
-   `deposit/trajectories.csv` and `deposit/UPLOAD.md`.
+   `deposit/trajectories.csv`, and `deposit/UPLOAD.md`.
 
 More about the manifest and the checklist:
 
-- The manifest records, for each replicate, the PolyzyMD, OpenMM and OpenFF
+- The manifest records, for each replicate, the PolyzyMD, OpenMM, and OpenFF
   versions that built it, the OpenMM or GROMACS version that ran it, and the
   random seeds of each equilibration stage and production segment
-  (`simulated_with`, from `build_provenance.json`, `progress.json` and the
+  (`simulated_with`, from `build_provenance.json`, `progress.json`, and the
   GROMACS log). The deposited `build_provenance.json` of each replicate, in
   `engine_inputs/`, also gives the Packmol seeds and the box the build made.
 - The manifest follows the JSON Schema `manifest-1.schema.json`. The schema
@@ -217,7 +217,7 @@ More about the manifest and the checklist:
   has its own schema, `study-1.schema.json`.
 - Distance restraints in the config of a condition act in every phase. So
   item 3c of `md_checklist.yaml` reports that condition as restrained
-  (biased) sampling. It lists the type, atoms, distance and force constant of
+  (biased) sampling. It lists the type, atoms, distance, and force constant of
   each restraint.
 
 ## 4. Upload and publish with `deposit/UPLOAD.md`
@@ -231,14 +231,14 @@ which git ignores:
 | `UPLOAD.md` | The steps for this study: reserve its DOI, add the files, fill in each Zenodo form field, review, publish, and make new versions |
 | `upload/` | The files to add to the Zenodo upload, no more and no less. See below |
 | `trajectories.csv` | Each trajectory and topology file by size and SHA-256, in batches that each fit one Zenodo record. It also lists the files the analyses read beside them: the build's `solvated_system.pdb`, which gives a GROMACS or `system.prmtop` topology its chain IDs, and the GROMACS `.top` and `.itp` files when MDAnalysis could not read `prod.tpr` |
-| `README.md` | Made from `metadata:`: what the study is and why, its authors, how to cite the paper, the dataset and PolyzyMD, its contents, how to reproduce it, and the verdict of each run. Your own `README.md` of the study stays in `study/` as you wrote it |
+| `README.md` | Made from `metadata:`: what the study is and why, its authors, how to cite the paper, the dataset, and PolyzyMD, its contents, how to reproduce it, and the verdict of each run. Your own `README.md` of the study stays in `study/` as you wrote it |
 | `study/`, `engine_inputs/`, `final_frames/`, and the top-level files | The same content, not zipped, for inspection |
 
 `upload/` holds these files:
 
-- `README.md`, `CITATION.cff` and `manifest.json`, not zipped, so that Zenodo
+- `README.md`, `CITATION.cff`, and `manifest.json`, not zipped, so that Zenodo
   shows a preview;
-- one zip file each for the study, the engine inputs and the final frames. A
+- one zip file each for the study, the engine inputs, and the final frames. A
   record holds at most 100 files, and Zenodo shows what is in a zip file.
 
 No file in the deposit names a path of your machine. Records and reports name
@@ -248,7 +248,7 @@ which is also its name in `engine_inputs.zip` or `final_frames.zip`: for
 example `engine_inputs/water/replicate_1/prod.tpr.gz`. In a project's deposit,
 that path starts with the study's label in `project.yaml`: `engine_inputs/<label>/water/...`. In
 the deposited configs, a `projects_directory` that is absolute, starts with
-`~` or names a `$VARIABLE` becomes `.`, and such a `scratch_directory`
+`~`, or names a `$VARIABLE` becomes `.`, and such a `scratch_directory`
 becomes `data`; relative ones stay. A comment
 tells a reader how to point the study at a copy of the trajectories. The
 config hash leaves out both directories, so stored results still match. The

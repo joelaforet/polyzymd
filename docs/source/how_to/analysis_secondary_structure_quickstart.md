@@ -1,7 +1,7 @@
 # Run secondary structure analysis
 
 Assign a DSSP secondary-structure class to each residue on each production
-frame of each replicate. Then compare how much of the protein is helix, strand
+frame of each replicate. Then compare how much of the protein is helix, strand,
 or coil, for the whole protein or residue by residue, with one value per
 replicate.
 
@@ -27,7 +27,7 @@ On each production frame, `mdtraj.compute_dssp` assigns a DSSP class
 backbone hydrogen bonds and geometry. The `scheme` setting selects the
 classes:
 
-- `simplified` (default): `helix`, `strand` and `coil`.
+- `simplified` (default): `helix`, `strand`, and `coil`.
 - `full`: the eight DSSP classes, such as `alpha_helix` and `3_10_helix`.
 
 MDTraj gives `NA` to a residue that it cannot assign, for example a residue
@@ -48,7 +48,7 @@ Before you run the analysis, check these points:
 ## From the command line
 
 In a {term}`study`, give the study folder. The study names the conditions,
-the control and the equilibration window. The results go to
+the control, and the equilibration window. The results go to
 `<study>/results/secondary_structure/`:
 
 ```bash
@@ -74,7 +74,7 @@ To report a different result, use `--run`:
 
 | `--run` | One value per replicate |
 |---|---|
-| a class of the scheme: `helix`, `strand`, `coil` or `unassigned` for `simplified` (default `helix`), or `alpha_helix` to `unassigned` for `full` (default `alpha_helix`) | Fraction of residue-frames in the class |
+| a class of the scheme: `helix`, `strand`, `coil`, or `unassigned` for `simplified` (default `helix`), or `alpha_helix` to `unassigned` for `full` (default `alpha_helix`) | Fraction of residue-frames in the class |
 | `<class>_residues` | Each residue's fraction of frames in the class, compared residue by residue |
 
 PolyzyMD corrects a per-residue comparison over every residue of every
@@ -87,7 +87,7 @@ Settings, passed with `--set`:
 | Setting | Default | Meaning |
 |---|---|---|
 | `selection` | `protein` | The whole residues to assign |
-| `scheme` | `simplified` | `simplified` for helix, strand and coil. `full` for the eight DSSP classes |
+| `scheme` | `simplified` | `simplified` for helix, strand, and coil. `full` for the eight DSSP classes |
 
 For example, this command compares how much of each protein is 3-10 helix:
 
@@ -151,7 +151,7 @@ print(rows["helix"].compare(control="No polymer").to_agent_text())  # residue by
 ```
 
 `dssp_occupancy(atoms, frames)` returns one row for each class of
-`DSSP_SIMPLIFIED` (helix, strand, coil and unassigned), with one column for
+`DSSP_SIMPLIFIED` (helix, strand, coil, and unassigned), with one column for
 each residue. For the eight classes, give `simplified=False` and
 `parts=list(DSSP_CLASSES)`. `DSSP_GROUPS` lists the full classes that each
 simplified class joins. `parts=` makes each row a separate result.

@@ -43,7 +43,7 @@ def _charges(spec: Any) -> tuple[str, Optional[str]]:
         "components.declared",
         "system",
         "FAIL",
-        "a component, its segment ID, force field or charge source that differs from the config",
+        "a component, its segment ID, force field, or charge source that differs from the config",
     )
 )
 def declared(context: AuditContext) -> list[Finding]:
@@ -487,7 +487,7 @@ def hbonds(context: AuditContext) -> list[Finding]:
         "nonbonded.settings",
         "system",
         "FAIL",
-        "a cutoff, switching distance, PME or dispersion correction other than the force field's",
+        "a cutoff, switching distance, PME, or dispersion correction other than the force field's",
     )
 )
 def nonbonded(context: AuditContext) -> list[Finding]:

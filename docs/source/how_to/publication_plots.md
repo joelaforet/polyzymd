@@ -2,7 +2,7 @@
 
 `polyzymd analyze` draws each analysis's figures with the default plot
 settings, 300 dpi PNG files in the `compact` style. This guide shows you how
-to redraw them with another output format, resolution, PolyzyMD theme preset
+to redraw them with another output format, resolution, PolyzyMD theme preset,
 or condition colors, by passing a `PlotSettings` to the `plot` methods of the
 study API.
 
@@ -63,7 +63,7 @@ rows["mean_hbonds"].plot("figures/hydrogen_bonds", "mean_hbonds", plot_settings=
 ```
 
 `plot` writes `figures/hydrogen_bonds/mean_hbonds.pdf`. `Timeseries.plot`,
-`Timeseries.plot_distribution`, `pz.plot_values` and `pz.plot_distributions`
+`Timeseries.plot_distribution`, `pz.plot_values`, and `pz.plot_distributions`
 take `plot_settings` the same way; {doc}`../reference/analysis_functions`
 lists the figures each analysis draws.
 

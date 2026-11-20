@@ -705,12 +705,22 @@ class SystemBuilder:
             target.potentials = {
                 key: value for key, value in target.potentials.items() if key in used
             }
-            source_name = (
-                f"{self._sm_ff} policy at {self._protein_ff} bond lengths"
-                if name == "Constraints"
-                else self._protein_ff
-            )
-            LOGGER.info(f"  {name}: {len(source.key_map)} protein terms from {source_name}")
+            if name == "Constraints":
+                # The small-molecule force field says which bonds are rigid, the
+                # protein force field how long they are (see the Amber port note above).
+                to_hydrogen = all(
+                    any(protein_topology.atom(i).atomic_number == 1 for i in key.atom_indices)
+                    for key in source.key_map
+                )
+                bonds = "bonds to hydrogen" if to_hydrogen else "bonds"
+                LOGGER.info(
+                    f"  Constraints: {len(source.key_map)} protein {bonds} held at fixed length "
+                    f"(which bonds: {self._sm_ff}; lengths: {self._protein_ff})"
+                )
+            else:
+                LOGGER.info(
+                    f"  {name}: {len(source.key_map)} protein terms from {self._protein_ff}"
+                )
 
         LOGGER.info(f"  Protein force field applied in {time.perf_counter() - t0:.1f}s")
 

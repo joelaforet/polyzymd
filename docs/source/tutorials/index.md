@@ -35,7 +35,7 @@ compute job, then read Run on a SLURM cluster.
 
 Do tutorials 1 to 3, then measure your own quantity
 ({doc}`../how_to/study_api`), build your own polymers and co-solvents
-({doc}`../how_to/dynamic_polymers`, {doc}`../how_to/cosolvents`) or run your
+({doc}`../how_to/dynamic_polymers`, {doc}`../how_to/cosolvents`), or run your
 own protocol ({doc}`../how_to/own_protocol`).
 :::
 
@@ -100,7 +100,7 @@ The GROMACS track continues in {doc}`../how_to/run_gromacs` and
 Tutorials 2 to 4 continue in the project folder of the quickstart.
 
 For one task at a time, such as {doc}`co-solvents <../how_to/cosolvents>`,
-{doc}`restraints <../how_to/restraints>` or
+{doc}`restraints <../how_to/restraints>`, or
 {doc}`polymers from SMILES <../how_to/dynamic_polymers>`, see the
 {doc}`../how_to/index`. For the shipped configs of each kind of system, see
 {ref}`the shipped examples <shipped-examples>`.

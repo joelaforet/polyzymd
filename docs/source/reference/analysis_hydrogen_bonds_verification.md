@@ -20,7 +20,7 @@ values were checked against.
    63,403 bonds and the same charges as the TPR compiled from it by GROMACS
    2025, and `hydrogen_bonds` stored identical values from both.
 2. `functions.hbond_atoms` chooses the donatable hydrogens, those bonded to
-   N, O or S, and the acceptors, every O and every N or S with at most two
+   N, O, or S, and the acceptors, every O and every N or S with at most two
    bonded atoms.
 3. `functions.hydrogen_bonds` gives these atoms to MDAnalysis
    `HydrogenBondAnalysis` as selections, which pairs each hydrogen with its
@@ -39,10 +39,10 @@ the charges of its force field, that guess:
 | | Atoms |
 |---|---|
 | Misses as donors | every backbone amide N-H (charge -0.42), Lys NZ, His ND1-HD1, Trp NE1 |
-| Takes as acceptors | the quaternary ammonium nitrogen of SBMA (-0.60), Arg NE, NH1 and NH2, Asn ND2, some backbone N |
+| Takes as acceptors | the quaternary ammonium nitrogen of SBMA (-0.60), Arg NE, NH1, and NH2, Asn ND2, some backbone N |
 | Misses as acceptors | the ether oxygens of EGMA (-0.42), Met SD |
 
-It found 69 donors, all in Arg, Asn, Gln, Ser, Thr and Tyr side chains. A
+It found 69 donors, all in Arg, Asn, Gln, Ser, Thr, and Tyr side chains. A
 nitrogen with four bonds, or three bonds in an amide or guanidinium group,
 has no lone pair to accept a hydrogen bond, whatever its charge, so
 PolyzyMD chooses by element and valency instead. Its donors are those of
@@ -50,7 +50,7 @@ MDTraj's Baker-Hubbard code, N-H and O-H, with S-H added; its acceptors are
 restricted to atoms that keep a lone pair, where MDTraj takes every N and O. On the lipase system
 the rule gives 318 donatable hydrogens and 1,314 acceptors among the protein
 and polymer atoms, including His NE2 (unprotonated), Met SD, and every
-carbonyl, carboxylate, hydroxyl, ether, ester and sulfonate oxygen. The
+carbonyl, carboxylate, hydroxyl, ether, ester, and sulfonate oxygen. The
 chosen atoms are recorded in every report under `provenance.settings`.
 
 ## Why pairs are named by residue and monomer type
@@ -71,7 +71,7 @@ missing one.
 systems, the distance and angle limits, both directions between two groups,
 bonds within one residue, the element and valency rule, the counts against an
 independent calculation, lifetimes by residue and atom pairs, occupancies,
-pair labels, and the results, settings and refusals of `polyzymd analyze
+pair labels, and the results, settings, and refusals of `polyzymd analyze
 hydrogen_bonds`; `tests/analyses/test_force_field_enrichment.py` checks the
 reading of the system XML.
 

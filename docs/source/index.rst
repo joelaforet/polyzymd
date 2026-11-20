@@ -9,8 +9,8 @@ PolyzyMD
 
    .. container::
 
-      **Build, run and analyze molecular dynamics of proteins** — alone or with
-      polymers, ligands and co-solvents — on OpenMM or GROMACS, with every
+      **Build, run, and analyze molecular dynamics of proteins** — alone or with
+      polymers, ligands, and co-solvents — on OpenMM or GROMACS, with every
       build checked against its config and every analysis compared across
       replicates.
 
@@ -83,7 +83,7 @@ The documentation is organized by what you want to do right now.
       :link: reference/index
       :link-type: doc
 
-      Every command, config key, file, check and analysis function, and the
+      Every command, config key, file, check, and analysis function, and the
       papers behind them.
 
       +++

@@ -53,7 +53,7 @@ For the definitions, and for which quantity answers which question, see
 ## From the command line
 
 In a {term}`study`, give the study folder. The study names the conditions,
-the control and the equilibration window. The results go to
+the control, and the equilibration window. The results go to
 `<study>/results/rmsf/`:
 
 ```bash
@@ -99,7 +99,7 @@ Change what is measured and what it is measured against with `--set`:
 |---|---|---|
 | `selection` | `protein and name CA` | Atoms measured |
 | `alignment_selection` | `protein and name CA` | Atoms superposed on the reference |
-| `reference_mode` | `external` if `reference_file` is set, else `centroid` | `centroid`, `average`, `frame` or `external` |
+| `reference_mode` | `external` if `reference_file` is set, else `centroid` | `centroid`, `average`, `frame`, or `external` |
 | `reference_frame` | `1` | Production frame used by `frame` mode, counted from 1 after the equilibration window |
 | `reference_file` | none | Structure file used by `external` mode |
 | `core` | all selected residues | MDAnalysis selection of the residues combined into the `core_*` values |
@@ -124,7 +124,7 @@ Rules for `core` and `regions`:
 - `core` and `mean` cannot be region names.
 
 The JSON report records the residues of the core and of each region, the
-reference mode used and every setting under `provenance.settings`.
+reference mode used, and every setting under `provenance.settings`.
 
 ```{note}
 PolyzyMD superposes the frames by `alignment_selection`, not by the core. To
@@ -165,7 +165,7 @@ For the line format and the verdict words, see
 | Figure | What it shows |
 |---|---|
 | `rmsf_profile`, `offset_profile`, `rmsd_per_residue_profile` | The value of each replicate at each residue as a thin line, and the mean of each condition with its 95 % interval. The `highlight_residues` are marked |
-| `rms_decomposition` | One panel per condition, with its mean `rmsd_per_residue`, RMSF and offset at every residue |
+| `rms_decomposition` | One panel per condition, with its mean `rmsd_per_residue`, RMSF, and offset at every residue |
 | `rmsf_difference`, `offset_difference`, `rmsd_per_residue_difference` | With several conditions, one panel per condition. Each panel shows the difference from the control at each residue, its 95 % interval, and a point on each significant residue |
 | `rmsf_comparison` | The three core values of every condition, with every replicate value |
 
@@ -174,9 +174,9 @@ For the line format and the verdict words, see
 `rms_decomposition` returns six rows per replicate. `RMS_PARTS` and `MS_PARTS`
 hold the names of the rows:
 
-- `rmsd_per_residue`, `rmsf` and `offset`, in Å;
-- `ms_deviation`, `msf` and `ms_offset`, in Å². Each is the mean over the atoms
-  of the residue of the squared deviation, RMSF or offset.
+- `rmsd_per_residue`, `rmsf`, and `offset`, in Å;
+- `ms_deviation`, `msf`, and `ms_offset`, in Å². Each is the mean over the atoms
+  of the residue of the squared deviation, RMSF, or offset.
 
 `parts=` gives each row its name, so `rows["rmsf"]` is one result.
 

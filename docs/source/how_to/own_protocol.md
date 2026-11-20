@@ -1,7 +1,7 @@
 # Run a PolyzyMD build with your own protocol
 
 PolyzyMD builds a system, audits it, and runs a standard protocol: minimization,
-equilibration stages and production. Some simulations need more: enhanced
+equilibration stages, and production. Some simulations need more: enhanced
 sampling with PLUMED, your own GROMACS `.mdp` files, or an OpenMM script of
 your own. Run those yourself, then bring the trajectories back into the study,
 where `polyzymd analyze` reads them like any other replicate.
@@ -34,7 +34,7 @@ Do not run `polyzymd run` or `polyzymd submit` on this replicate.
 
 Make the folder `protocol/` in the replicate folder for OpenMM, or
 `gromacs/protocol/` for GROMACS, and put the inputs of your run there: your
-scripts, `.mdp` files and PLUMED input. Make it before you run, so PolyzyMD
+scripts, `.mdp` files, and PLUMED input. Make it before you run, so PolyzyMD
 leaves the replicate alone while your run is going. After the run, add any
 output a reader needs to judge it, such as `COLVAR` and `HILLS`.
 
@@ -45,7 +45,7 @@ mkdir gromacs/protocol && cp minim.mdp nvt.mdp md.mdp gromacs/protocol/   # GROM
 
 The folder is how PolyzyMD knows the replicate is run outside it. With it:
 
-- `polyzymd run`, `submit`, `recover` and `build` refuse the replicate, and a
+- `polyzymd run`, `submit`, `recover`, and `build` refuse the replicate, and a
   PolyzyMD job already queued for it stops without running, so your files are
   never overwritten or deleted;
 - `polyzymd status` shows the replicate as run with its own protocol, not as
@@ -121,7 +121,7 @@ gmx mdrun -deffnm own/md
 ```
 
 Use the exported `.top` and `.itp` files as they are. If your protocol
-changes the system itself, such as a bias, an extra restraint or a changed
+changes the system itself, such as a bias, an extra restraint, or a changed
 parameter, that change is part of your protocol: keep its input in
 `protocol/`.
 
@@ -131,7 +131,7 @@ Analysis finds trajectories by name.
 
 **OpenMM.** Copy the trajectory to `production_0/production_0_trajectory.dcd`
 in the replicate folder. A run in several parts goes to `production_1/`,
-`production_2/` and so on, with no gaps; their times must follow on from one
+`production_2/`, and so on, with no gaps; their times must follow on from one
 another. Analysis reads the topology from the built `system.prmtop`.
 
 ```bash
@@ -139,11 +139,11 @@ mkdir production_0
 cp own/traj.dcd production_0/production_0_trajectory.dcd
 ```
 
-**GROMACS.** Copy the production run input, trajectory and log into
-`gromacs/` as `prod.tpr`, `prod.xtc` and `prod.log`. Then make the molecules
+**GROMACS.** Copy the production run input, trajectory, and log into
+`gromacs/` as `prod.tpr`, `prod.xtc`, and `prod.log`. Then make the molecules
 whole and center the protein, as PolyzyMD does after its own runs; otherwise
 a protein split across the periodic boundary gives wrong radii of gyration,
-distances and contacts. Analysis reads `prod_centered.xtc` first, and warns
+distances, and contacts. Analysis reads `prod_centered.xtc` first, and warns
 when it can only read the raw `prod.xtc`.
 
 ```bash
@@ -198,5 +198,5 @@ condition from its own config instead.
 
 - {doc}`../explanation/physics_audit` — what the build audit checks
 - {doc}`run_gromacs` — run GROMACS with PolyzyMD's protocol
-- {doc}`study_folder` — studies, conditions and replicates
+- {doc}`study_folder` — studies, conditions, and replicates
 - {doc}`own_analysis` — analyze the trajectories with your own tools

@@ -29,7 +29,7 @@ nothing.
 |---|---|---|
 | `polyzymd.cli`, `polyzymd.workflow` | Commands and job workflow | Lavender (bright blue) |
 | `polyzymd.builders` | System build | Sage green (bright green) |
-| `polyzymd.simulation.runner`, `.continuation` | OpenMM setup, continuation and recovery | Warm peach (bright magenta) |
+| `polyzymd.simulation.runner`, `.continuation` | OpenMM setup, continuation, and recovery | Warm peach (bright magenta) |
 | `polyzymd.simulation.progress`, `.signals` | Progress and signal handling | Steel blue (bright cyan) |
 | `polyzymd.core` | Shared data structures | Parchment (dark yellow) |
 | `polyzymd.data` | Bundled data | Aqua (dark cyan) |
@@ -92,10 +92,10 @@ polyzymd validate -c <path>
 
 - YAML syntax validity: the file is a mapping and gives each key once
 - Required fields are present, numbers are finite and not `true`/`false`
-- The enzyme PDB has atoms, the substrate SDF holds the conformer, SMILES parse
+- The enzyme PDB has atoms, the substrate SDF holds the conformer, SMILES parse,
   and the charge method can charge each molecule (errors, exit 1)
 - Cached polymer SDFs are reported as warnings when missing; the star-sited SMILES of dynamic polymers are read and checked
-- Settings a new build would not run as written: `NVE`, Nose-Hoover or Andersen
+- Settings a new build would not run as written: `NVE`, Nose-Hoover, or Andersen
   on OpenMM, `samples` above the MD steps, unset `$VAR` in paths (errors)
 - Monomer probabilities sum to 1.0
 - Valid enum values (water model, ensemble, etc.)
@@ -134,7 +134,7 @@ Simulation phases:
   Production: 0.004 ns (NPT)
 ```
 
-With polymers, the summary also lists `Count`, `Length` and one
+With polymers, the summary also lists `Count`, `Length`, and one
 `Monomer <label>: <percent>` line per monomer. When a file that the config
 names is missing, such as the polymer SDF directory, a `Referenced file
 warnings:` block with one `Warning:` line per file prints between
@@ -186,7 +186,7 @@ polyzymd build -c config.yaml -r 1 --format gromacs
 
 The build command creates:
 - `solvated_system.pdb` - Complete system with water and ions, for viewers
-- `system.prmtop` - Analysis topology with every atom, element, charge and
+- `system.prmtop` - Analysis topology with every atom, element, charge, and
   bond; MDAnalysis reads it directly and it has no atom limit. It carries no
   restraint forces, which analyses do not read
 - `system.xml` - OpenMM serialized system with restraints
@@ -227,7 +227,7 @@ PolyzyMD may also generate convenience defaults:
 
 Once production has run, the directory also holds `prod.tpr`, the compiled
 run input. Analyses read it in preference to the PDB or GRO, because it
-carries every atom, bond, mass and charge and has no atom limit.
+carries every atom, bond, mass, and charge and has no atom limit.
 
 The `.mdp` files and run script are not required to continue outside PolyzyMD;
 you may replace them with your own GROMACS workflow. Use
@@ -378,7 +378,7 @@ See {doc}`../how_to/hpc_slurm` for details.
 `submit` does not build. Run `polyzymd build` for each replicate first, in a
 compute job. Before it writes any script, `submit` checks each replicate: an
 OpenMM build must match its `build_provenance.json` and the config, and a
-GROMACS build must have the `.top`, `.gro`, `em.mdp` and `prod.mdp` files. A
+GROMACS build must have the `.top`, `.gro`, `em.mdp`, and `prod.mdp` files. A
 replicate that has not started also needs a current build record whose
 physics audit passed. If a
 replicate fails the check, `submit` stops with an error that gives the
@@ -405,7 +405,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--output-dir` | - | No | auto | Directory for job scripts |
-| `--time-limit` | - | No | from preset | Override SLURM time limit: minutes, M:SS, H:MM:SS or D-H:MM:SS; other values are refused. OpenMM refuses 5 minutes or less: SLURM tells the job to stop 5 minutes before the limit. |
+| `--time-limit` | - | No | from preset | Override SLURM time limit: minutes, M:SS, H:MM:SS, or D-H:MM:SS; other values are refused. OpenMM refuses 5 minutes or less: SLURM tells the job to stop 5 minutes before the limit. |
 | `--memory` | - | No | 3G | Override SLURM memory allocation; `""` writes no `--mem` line |
 | `--account` | - | No | from preset | Override SLURM account / allocation ID; `""` writes no `--account` line |
 | `--partition` | - | No | from preset | Override SLURM partition |
@@ -440,7 +440,7 @@ and the resubmit commands of `polyzymd status --format agent` reuse them.
 
 ### SLURM Presets
 
-A preset sets the partition, QoS, account and time limit of each job. For the
+A preset sets the partition, QoS, account, and time limit of each job. For the
 values of each preset, see the preset table in {doc}`../how_to/hpc_slurm`.
 
 ### Example
@@ -678,7 +678,7 @@ polyzymd status -c config.yaml
 |--------|----------|-------------|
 | `-c, --config PATH` | One of `-c`/`--all` | Path to a YAML configuration file. Repeatable with `--format agent` or `json`. |
 | `--all DIR` | One of `-c`/`--all` | Search `DIR` (up to 3 levels deep, hidden directories skipped) for `config.yaml` files. Repeatable. |
-| `--format table\|agent\|json` | No | `table` (default) prints progress bars for one config. `agent` prints one compact line per replicate with SLURM state, throughput and ETA. `json` emits the same data as JSON. |
+| `--format table\|agent\|json` | No | `table` (default) prints progress bars for one config. `agent` prints one compact line per replicate with SLURM state, throughput, and ETA. `json` emits the same data as JSON. |
 | `--no-slurm` | No | Skip the `squeue` query. Verdicts then rely on `progress.json` alone and cannot separate dead chains from running ones. |
 | `--preset NAME` | No | Preset name for the resubmit commands (`agent` format) of replicates without `submit_settings.json`; a replicate with the record gets the preset and overrides `submit` recorded. |
 | `--unfinished` | No | `agent` and `json` only. Omit completed replicates; a fully completed system collapses to its header line. |
@@ -725,11 +725,11 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | `EXTENDABLE` | Production finished the length it started with, but the config now asks for more (see {doc}`../how_to/run_longer`). `action: continue`; the note gives the new length. |
 | `INTERRUPTED` | A run stopped by a signal outside SLURM after it saved its state (note `stopped by a signal outside SLURM, state saved`, `action: continue`). The footer gives the `polyzymd run` command that continues it on the machine that ran it. |
 | `STOPPED` | `polyzymd cancel` left a `STOP` file and no job is queued or running. The footer gives `polyzymd cancel --resume` and `polyzymd submit` to restart the chain. |
-| `NOT_STARTED` | Directory exists but no minimization, equilibration or production output was written (typically a failed build; the build log is consulted). A replicate whose job died during minimization or equilibration is `DEAD`. |
+| `NOT_STARTED` | Directory exists but no minimization, equilibration, or production output was written (typically a failed build; the build log is consulted). A replicate whose job died during minimization or equilibration is `DEAD`. |
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
-| `CORRUPT` | `progress.json` exists but cannot be read (empty, truncated or of the wrong shape). The `last:` field says why. `status` leaves the file as it is; fix or remove it by hand. |
+| `CORRUPT` | `progress.json` exists but cannot be read (empty, truncated, or of the wrong shape). The `last:` field says why. `status` leaves the file as it is; fix or remove it by hand. |
 
-Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package and anything unrecognized. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A local run that a signal stopped after it saved its state is `INTERRUPTED`, not `DEAD`. A local run that failed records its error in `polyzymd_run_error.txt`, which the `last:` field shows. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list (`<preset nodes>` in the example above stands for that list).
+Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package, and anything unrecognized. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A local run that a signal stopped after it saved its state is `INTERRUPTED`, not `DEAD`. A local run that failed records its error in `polyzymd_run_error.txt`, which the `last:` field shows. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list (`<preset nodes>` in the example above stands for that list).
 
 Throughput (`ns/d`) of OpenMM runs comes from segment file timestamps: the parameters JSON written at segment start and the state-data CSV written on every report. A running segment that has run for at least an hour sets the rate, since it reflects the GPU the chain is on now; otherwise the newest stopped segment does. GROMACS runs, and OpenMM runs without those files, use the times in `progress.json`. The ETA is remaining nanoseconds divided by that rate and is only printed for `RUNNING` and `QUEUED` replicates.
 
@@ -949,13 +949,13 @@ polyzymd analyze NAME -c config.yaml [-c other/config.yaml ...] [OPTIONS]
 polyzymd analyze [RUN] --study study.yaml [OPTIONS]
 ```
 
-With `--study`, the conditions, equilibration window, stride, replicates and
+With `--study`, the conditions, equilibration window, stride, replicates, and
 settings come from the study file, and `RUN` is one of its `analyses:`
 entries, a shipped analysis or the study's own function; with no `RUN`,
 every entry runs in turn. See {doc}`../how_to/study_yaml`.
 
 `NAME` is one of `rg`, `rmsd`, `rmsf`, `rmsd_per_residue`, `sasa`,
-`secondary_structure`, `contacts`, `native_contacts`, `hydrogen_bonds` and
+`secondary_structure`, `contacts`, `native_contacts`, `hydrogen_bonds`, and
 `distances`. `rmsd` is one value per frame, the root mean square over atoms
 of their distance from the reference; `rmsd_per_residue` is one value per residue,
 the root mean square over frames of each atom's distance from the reference,
@@ -968,9 +968,9 @@ as `gmx rmsf -od` reports. An unknown name is refused with the list of all of th
 | `NAME` | Yes, without `--study` | Canonical analysis name, for example `rg`; with `--study`, a run of the study file, and every run when left out. |
 | `-c, --config PATH` | Yes, without `--study` | Simulation `config.yaml`. Repeatable; the first one is the control. Refused with `--study`. |
 | `--data DIR` | No | Directory holding the run directories of every condition, for this command only, in place of each config's `scratch_directory` and of a study's `data.local.yaml`. The config hash is that of the config as written. |
-| `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. A partial report, and no failure, exits 3. Refused with `--study`, `-c` or `--output-dir`. |
-| `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates` and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study, and that report is printed but not saved as the run's `report.json`. |
-| `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
+| `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. A partial report, and no failure, exits 3. Refused with `--study`, `-c`, or `--output-dir`. |
+| `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates`, and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study, and that report is printed but not saved as the run's `report.json`. |
+| `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5`, or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
 | `--list` | No | Print every shipped analysis, what it measures, and its settings with their defaults, then exit. |
@@ -982,11 +982,11 @@ as `gmx rmsf -od` reports. An unknown name is refused with the list of all of th
 | `--until TIME` | No | End of a common analysis window, for example `38ns`: production frames after it are left out for every condition, so conditions simulated for different lengths are compared over the same time. It is recorded with each stored result. A report comparing conditions whose analyzed production ends more than 10% apart warns and suggests it. |
 | `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. The report header then shows `stride N`. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
-| `--no-plots` | No | Do not draw figures. By default rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
-| `--no-eq-check` | No | Skip the pymbar equilibration diagnostic, which rg, rmsd, native_contacts, distances and the totals of sasa report for each replicate's per-frame series. Values and statistics are the same either way. |
+| `--no-plots` | No | Do not draw figures. By default rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts, and hydrogen_bonds draw theirs to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
+| `--no-eq-check` | No | Skip the pymbar equilibration diagnostic, which rg, rmsd, native_contacts, distances, and the totals of sasa report for each replicate's per-frame series. Values and statistics are the same either way. |
 | `--submit` | No | Submit to SLURM instead of running here: one array task per condition and replicate, then a report job; see [SLURM submission](#cli-analyze-submit). |
 | `--dry-run` | No | With `--submit`, or alone, write the SLURM scripts and print the two `sbatch` commands without submitting. |
-| `--preset NAME` | No | SLURM partition, QoS and account of a cluster for `--submit`: `alpine-cpu`, `blanca-shirts`, `blanca-chbe-rdi` or `bridges2-rm`. |
+| `--preset NAME` | No | SLURM partition, QoS, and account of a cluster for `--submit`: `alpine-cpu`, `blanca-shirts`, `blanca-chbe-rdi`, or `bridges2-rm`. |
 | `--partition TEXT` | No | SLURM partition for `--submit`, replacing the preset's. |
 | `--account TEXT` | No | SLURM account for `--submit`, replacing the preset's. |
 | `--qos TEXT` | No | SLURM QoS for `--submit`, replacing the preset's. |
@@ -1006,11 +1006,11 @@ polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --eq 10ns \
 ```
 
 It writes `<output-dir>/slurm/<analysis>_<YYYYmmdd-HHMMSS>/` holding
-`tasks.tsv` (one config, label and replicate per line), `replicates.sbatch`
+`tasks.tsv` (one config, label, and replicate per line), `replicates.sbatch`
 (the array: each task measures one replicate with `--no-plots` and stores it
 under `polyzymd_results/`), `report.sbatch` (the full command, which reads
 every stored result, measures any replicate a task left unmeasured, draws the
-figures and writes the report) and `logs/`. The report goes to `-o PATH`, or
+figures, and writes the report), and `logs/`. The report goes to `-o PATH`, or
 by default to `report.txt` (`report.json` with `--format json`) in that
 folder. The report job is submitted with `--dependency=afterany:<array>`, so it
 starts once every task has ended, whether or not each succeeded.
@@ -1024,7 +1024,7 @@ and prints the two `sbatch` commands without submitting. Every name
 ### Agent format
 
 `--format agent` is the default and is designed for scripts and LLM agents. It
-prints a header, one line per condition, one line per comparison, any warnings
+prints a header, one line per condition, one line per comparison, any warnings,
 and one `verdict:` line per comparison, with no borders and no color.
 
 ```bash
@@ -1153,10 +1153,12 @@ polyzymd project init PATH --study LABEL [--study ...] [--holder NAME] [--no-git
 ```
 
 Writes a project folder at `PATH`: `project.yaml` listing the studies,
-`analyses/`, `stats/` and `figures/`, licenses, a README, and one study folder
+`analyses/`, `stats/`, and `figures/`, licenses, a README, and one study folder
 per `--study` with a `study.yaml` to fill in. Labels are also folder names
 (lower case, digits, `_`). Without `--no-git` the project becomes a git
-repository with one commit. To move existing studies in, see
+repository with one commit. `--holder NAME` sets the copyright holder of the
+licenses; put a name with spaces in quotes, such as
+`--holder "Joseph R. Laforet Jr."`. To move existing studies in, see
 {doc}`../how_to/move_studies_into_project`.
 
 ### polyzymd project add-study
@@ -1179,7 +1181,7 @@ polyzymd project freeze [PATH] [--tag TAG]
 ```
 
 Freezes every study of the project, then writes the project's
-`manifest.json`, `CITATION.cff` and `.zenodo.json`, commits the generated
+`manifest.json`, `CITATION.cff`, and `.zenodo.json`, commits the generated
 files and every study's results, tags the project (`project-v<n>` by
 default), and lays out `deposit/` with `deposit/UPLOAD.md`. Every gap is a
 warning, prefixed with the study's label when it is a study's. Exits 2 only
@@ -1224,7 +1226,7 @@ console; the full log, with library messages, goes to `logs/polyzymd-<command>-<
 (in the study folder, or the output directory), whose path is printed first
 as `log: <path>`. `polyzymd -v` keeps INFO on the console.
 
-It exits 2 when the study file, a condition's config or a listed function
+It exits 2 when the study file, a condition's config, or a listed function
 cannot be read, and 0 otherwise; missing runs are not errors.
 
 ### polyzymd study init
@@ -1236,7 +1238,7 @@ polyzymd study init DIRECTORY [--condition LABEL=CONFIG ...] [--new-condition LA
 
 Creates a study folder: `study.yaml`, `conditions/`, `structures/`,
 `analyses/`, `figures/`, `results/`, `environment/`, `README.md`,
-`LICENSE-data` (CC-BY-4.0), `LICENSE-code` (MIT), `data.example.yaml` and
+`LICENSE-data` (CC-BY-4.0), `LICENSE-code` (MIT), `data.example.yaml`, and
 `.gitignore`, then makes it a git repository with one commit.
 
 | Option | Description |
@@ -1244,7 +1246,7 @@ Creates a study folder: `study.yaml`, `conditions/`, `structures/`,
 | `--condition LABEL=CONFIG` | Copies an existing `config.yaml` to `conditions/<label>/config.yaml`, with every input file it names copied to `conditions/<label>/structures/` and its path made relative. The copy writes new runs into `runs/<label>/` of the study; where the existing runs are goes into `data.local.yaml`. Repeatable; the first is the control |
 | `--new-condition LABEL` | Creates `conditions/<label>/` with a template `config.yaml` and `structures/`. Repeatable |
 | `--equilibration TEXT` | The study's equilibration window; `0ns` with a note when left out |
-| `--holder NAME` | Copyright holder in both LICENSE files. Default: `git config user.name` |
+| `--holder NAME` | Copyright holder in both LICENSE files, in quotes when it has spaces (`--holder "Joseph R. Laforet Jr."`). Default: `git config user.name` |
 | `--no-git` | Do not make a git repository |
 
 It refuses a folder that already holds a `study.yaml`, and exits 2 on an
@@ -1281,7 +1283,7 @@ freeze never publishes it. The command prints this as a warning, because
 trajectories can use a lot of disk space: on a cluster, set
 `scratch_directory` in the config to scratch storage. The condition is added
 as one line under `conditions:` in `study.yaml`, keeping the rest of the
-file. Exits 2 when not exactly one of `--config`, `--from` and `--new` is
+file. Exits 2 when not exactly one of `--config`, `--from`, and `--new` is
 given, `OTHER_LABEL` is not a condition of the study, or the label or its
 folder is taken.
 
@@ -1315,10 +1317,10 @@ missing or different. See
 polyzymd study freeze [PATH] [--tag NAME]
 ```
 
-Prepares the study for publication: checks the metadata, the git state and
+Prepares the study for publication: checks the metadata, the git state, and
 whether each analysis's stored results match the study; hashes the
 trajectories and writes their engine inputs and final frames to `deposit/`;
-writes `manifest.json`, `CITATION.cff`, `.zenodo.json`, `md_checklist.yaml`
+writes `manifest.json`, `CITATION.cff`, `.zenodo.json`, `md_checklist.yaml`,
 and `system_summary.csv`; commits those and `results/`, tags the commit
 (`study-v1`, `study-v2`, ... unless `--tag`), and lays out `deposit/`: the
 files to add to a Zenodo upload in `deposit/upload/`, the trajectory files in

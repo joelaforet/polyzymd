@@ -1,4 +1,4 @@
-# How the reference changes RMSF, offset and deviation
+# How the reference changes RMSF, offset, and deviation
 
 The RMSF analysis superposes every production frame on a reference structure
 and then measures three things for each atom: its RMSF about its mean position,
@@ -63,7 +63,7 @@ all of them.
 
 Deviation from an external structure is not an experimental B-factor.
 Qualitative comparison can be informative, but crystal packing, refinement
-models, temperature, occupancy and unresolved regions all differ between a
+models, temperature, occupancy, and unresolved regions all differ between a
 crystal and a simulation.
 
 ## The fitted atoms are part of the definition
@@ -108,5 +108,5 @@ atoms and add a systematic offset to every value.
 
 When comparing conditions, a common `external` reference makes differences in
 mean structure between conditions visible as offsets. A per-replicate
-reference (`average`, `centroid` or `frame`) measures each ensemble against
+reference (`average`, `centroid`, or `frame`) measures each ensemble against
 itself, which shows fluctuation but hides where the mean structure went.

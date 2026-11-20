@@ -339,9 +339,7 @@ def require_inputs(config: Any) -> None:
     if polymers is not None and polymers.enabled:
         _require_cached_chemistry(config, polymers)
 
-    from openff.toolkit.typing.engines.smirnoff.forcefield import get_available_force_fields
-
-    available = set(get_available_force_fields())
+    available = installed_force_field_names()
     named = [(f"solute {s.name!r}", s.force_field) for s in config.solutes]
     named.append(("solvent", config.solvent.force_field))
     for what, files in named:
@@ -365,6 +363,24 @@ def require_inputs(config: Any) -> None:
             f"fix: in each charges: {{method: nagl, model: ...}}, name one of {installed}, "
             "or give the path of a model file."
         )
+
+
+def installed_force_field_names() -> set[str]:
+    """Return the names of the ``.offxml`` files OpenFF's ``ForceField`` finds by name.
+
+    This is the lookup of ``openff.toolkit``'s ``get_available_force_fields``:
+    every directory that an ``openforcefield.smirnoff_forcefield_directory``
+    entry point returns, searched for ``.offxml`` files. It reads the entry
+    points directly, because importing the toolkit loads PyTorch and makes
+    ``polyzymd validate`` take seconds longer.
+    """
+    from importlib.metadata import entry_points
+
+    names: set[str] = set()
+    for entry_point in entry_points().select(group="openforcefield.smirnoff_forcefield_directory"):
+        for directory in entry_point.load()():
+            names.update(path.name for path in Path(directory).rglob("*.offxml"))
+    return names
 
 
 def _require_cached_chemistry(config: Any, polymers: Any) -> None:
