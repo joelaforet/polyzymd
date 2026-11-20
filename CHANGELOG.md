@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- NAGL charging no longer fails with `No such file or directory: .../OPENFF_NAGL_MODELS` when the user cache folder does not exist yet (a fresh or redirected home on macOS, where it is `~/Library/Caches`, or an `XDG_CACHE_HOME` that was never created on Linux). openff-nagl-models makes its download cache before it looks up even an installed model, and makes only the last folder; PolyzyMD now creates the whole path before a build and before NAGL charges a molecule.
+
 ## [1.4.0b1] - 2026-10-30
 
 The AIChE beta of 1.4: covalent protein modification (mutations, protonation

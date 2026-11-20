@@ -1153,7 +1153,10 @@ class SystemBuilder:
             ValueError: If the config names something the build cannot make
                 correctly (see ``SimulationConfig.require_buildable``).
         """
+        from polyzymd.utils.charging import ensure_nagl_cache_dir
+
         config.require_buildable()
+        ensure_nagl_cache_dir()
         self._working_dir = Path(working_dir) if working_dir else None
         self._solute_handles = {
             solute.type: (solute.name, solute.segid) for solute in getattr(config, "solutes", [])
