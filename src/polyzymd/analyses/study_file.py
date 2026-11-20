@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.utils.paths import names_existing
 
 #: File name that marks a study folder.
 STUDY_FILE = "study.yaml"
@@ -460,9 +461,8 @@ def _resolve_files(value: Any, folder: Path) -> Any:
         isinstance(value, str)
         and value
         and "\n" not in value
-        and len(value) < 1024
         and not Path(value).is_absolute()
-        and (folder / value).exists()
+        and names_existing(folder / value)
     ):
         return str((folder / value).resolve())
     return value
@@ -482,7 +482,7 @@ def missing_files(value: Any) -> list[str]:
     if (
         isinstance(value, str)
         and value.lower().endswith(FILE_SUFFIXES)
-        and not Path(value).exists()
+        and not names_existing(value)
     ):
         return [value]
     return []
