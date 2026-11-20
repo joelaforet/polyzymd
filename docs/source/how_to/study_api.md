@@ -6,8 +6,49 @@ stores each result with a record of its inputs, and compares the conditions
 with one value per replicate.
 
 For the full signatures, see {doc}`../reference/study_api`. For how the
-statistics work and why, see {doc}`../explanation/analysis_api`. To run your
-function from `study.yaml` instead of Python, see {doc}`study_yaml`.
+statistics work and why, see {doc}`../explanation/analysis_api`.
+
+Before you write a function, run `polyzymd analyze --list`. It names each
+shipped analysis, what it measures, and its settings with their defaults. A
+shipped analysis needs no code.
+
+## In a study folder: list the function in `study.yaml`
+
+When your conditions are in a study folder, write the function in a file of
+the study and list it under `analyses:`. Then one command measures every
+replicate of every condition, stores the results in `results/<run>/`, compares
+the conditions, and draws the figures. `study check` and `study freeze` find
+the results there:
+
+```python
+# my_study/analyses/lid.py
+import numpy as np
+
+
+def lid_distance(lid, core):
+    """Distance between the centers of the lid and the core, in Å."""
+    return float(np.linalg.norm(lid.center_of_geometry() - core.center_of_geometry()))
+```
+
+```yaml
+# my_study/study.yaml
+analyses:
+  lid_opening:
+    function: analyses/lid.py:lid_distance
+    kind: timeseries
+    unit: A
+    selections:
+      lid: "protein and resid 140-150 and name CA"
+      core: "protein and resid 4-120 and name CA"
+```
+
+```bash
+polyzymd analyze lid_opening --study my_study
+```
+
+{doc}`study_yaml` lists every key of an entry. Use the Python API on the rest
+of this page to try a function, or for conditions that are not in a study
+folder.
 
 :::{admonition} Environment setup
 :class: tip
@@ -252,7 +293,11 @@ Results with different units are refused.
 
 PolyzyMD stores each replicate in
 `polyzymd_results/<name>/<condition>/replicate_<n>/`, in the current folder
-or in `output_dir=`. The name is the name of the function, unless you give
+or in `output_dir=`. The current folder is the default even for
+`pz.Study("my_study/study.yaml")`, so `study.results()`, `study check`, and
+`study freeze` do not see these results. To keep results with the study, list
+the function in `study.yaml` and run `polyzymd analyze`, as in
+[In a study folder](#in-a-study-folder-list-the-function-in-studyyaml). The name is the name of the function, unless you give
 `name=`. The next call with the same function, arguments, and input files
 reads the stored values and does not read the trajectory. `recompute=True`
 measures every replicate again.
