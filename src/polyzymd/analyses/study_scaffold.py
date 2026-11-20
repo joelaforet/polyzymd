@@ -603,14 +603,17 @@ def create_study(
     equilibration: str | None = None,
     holder: str | None = None,
     git: bool = True,
+    agent_files: bool = True,
 ) -> CreatedStudy:
     """Write a new study folder at ``root``.
 
     ``conditions`` maps labels to existing configs, copied with their input
     files (:func:`copy_condition`); ``new_conditions`` are labels for which a
-    template config is written (:func:`new_condition`). With ``git``, the folder is made a
-    git repository and everything in it is committed; nothing is committed
-    afterwards.
+    template config is written (:func:`new_condition`). With ``agent_files``,
+    the guidance for AI coding agents is written too
+    (:func:`polyzymd.agent_files.sync`); a project writes it once, at its
+    root. With ``git``, the folder is made a git repository and everything in
+    it is committed; nothing is committed afterwards.
 
     Raises
     ------
@@ -668,6 +671,10 @@ def create_study(
         readme = root / folder / "README.md"
         if folder != "environment" and not readme.exists():
             readme.write_text(f"# {folder}/\n\n{what}.\n")
+    if agent_files:
+        from polyzymd.agent_files import sync
+
+        sync(root)
     if git:
         created.commit = init_repository(root, "Create study with polyzymd study init")
     return created

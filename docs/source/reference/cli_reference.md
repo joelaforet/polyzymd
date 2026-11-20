@@ -1154,7 +1154,9 @@ polyzymd project init PATH --study LABEL [--study ...] [--holder NAME] [--no-git
 
 Writes a project folder at `PATH`: `project.yaml` listing the studies,
 `analyses/`, `stats/` and `figures/`, licences, a README, and one study folder
-per `--study` with a `study.yaml` to fill in. Labels are also folder names
+per `--study` with a `study.yaml` to fill in. It also writes the instructions
+for AI coding agents (`AGENTS.md`, `CLAUDE.md`, `.claude/skills/` and
+`.agents/skills/`; see `polyzymd agent sync`). Labels are also folder names
 (lower case, digits, `_`). Without `--no-git` the project becomes a git
 repository with one commit. To move existing studies in, see
 {doc}`../how_to/move_studies_into_project`.
@@ -1236,8 +1238,9 @@ polyzymd study init DIRECTORY [--condition LABEL=CONFIG ...] [--new-condition LA
 
 Creates a study folder: `study.yaml`, `conditions/`, `structures/`,
 `analyses/`, `figures/`, `results/`, `environment/`, `README.md`,
-`LICENSE-data` (CC-BY-4.0), `LICENSE-code` (MIT), `data.example.yaml` and
-`.gitignore`, then makes it a git repository with one commit.
+`LICENSE-data` (CC-BY-4.0), `LICENSE-code` (MIT), `data.example.yaml`,
+`.gitignore` and the instructions for AI coding agents (as `project init`
+does), then makes it a git repository with one commit.
 
 | Option | Description |
 |---|---|
@@ -1326,6 +1329,40 @@ record-sized batches in `deposit/trajectories.csv`, and the steps in
 `deposit/UPLOAD.md`. It uploads and publishes nothing. Every gap is printed as
 `warning:` and none stops it. Exits 2 when the study file or its metadata cannot be read, or
 the tag exists. See {doc}`../how_to/study_freeze`.
+
+---
+
+## polyzymd agent
+
+### polyzymd agent sync
+
+```bash
+polyzymd agent sync [PATH] [--force] [--dry-run] [--format text|agent]
+```
+
+Rewrites the instructions for AI coding agents of a project or study to the
+installed PolyzyMD version: `AGENTS.md`, `CLAUDE.md` (`@AGENTS.md`), and
+`.claude/skills/<name>/SKILL.md` and `.agents/skills/<name>/SKILL.md` for
+each PolyzyMD skill. `PATH` is a folder inside the project or study, by
+default the current directory; the project holding it is used, or else the
+study. Each file holds a marker line with the version that wrote it and the
+SHA-256 of the rest of the file. It prints one line per file:
+
+| Line | Meaning |
+|---|---|
+| `created: FILE` | The file was missing and is written |
+| `updated: FILE` | The file was as PolyzyMD wrote it, and the installed version differs |
+| `unchanged: FILE` | The file already holds the installed version |
+| `skipped: FILE (edited; --force to overwrite)` | The file has no marker, or no longer matches its hash: it was edited and is kept |
+
+| Option | Description |
+|---|---|
+| `--force` | Also overwrite edited files |
+| `--dry-run` | Print the lines; write nothing |
+| `--format agent` | Print only the file lines. `text`, the default, adds what to commit next |
+
+It commits nothing. Exits 2 when `PATH` is in neither a project nor a study.
+See {doc}`../how_to/use_with_ai_agents`.
 
 ---
 

@@ -1,3 +1,8 @@
+> Using PolyzyMD in your own project rather than developing it? `polyzymd
+> project init` writes a user guide for agents into your project; see
+> `docs/source/how_to/use_with_ai_agents.md`. The rest of this file is for
+> PolyzyMD contributors.
+
 # PolyzyMD — Agent Instructions
 
 > Computational toolkit for enzyme-polymer conjugate MD simulations.
@@ -88,7 +93,11 @@ parameterization, force-field or interpretation assumption.
 ## Living Guidance
 
 `AGENTS.md`, `CLAUDE.md`, `.claude/skills/` and the personal PolyzyMD Skills
-are living guidance. When code, scientific contracts, commands, branch names,
+are living guidance. Every skill in `.claude/skills/` except the developer
+ones (`DEVELOPER_SKILLS` in `agent_files.py`) ships in the wheel, and
+`project init`, `study init` and `polyzymd agent sync` write it into users'
+projects with `src/polyzymd/templates/agents/AGENTS.md`; keep those written
+for a user, not a contributor. When code, scientific contracts, commands, branch names,
 tools or recurring workflows change, update the affected guidance in the same
 task. Remove obsolete rules instead of adding contradicting ones. If you cannot
 update it, give Joe the stale file and the replacement text.
