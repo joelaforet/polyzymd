@@ -47,7 +47,10 @@ logs/
 # Job scripts and logs of polyzymd analyze --submit, which name this
 # machine's paths, and SLURM logs of the simulations.
 **/results/*/slurm/
-**/conditions/*/slurm_logs/
+slurm_logs/
+# Stored per-replicate values, which polyzymd analyze rebuilds: reports and
+# figures are committed, and polyzymd project freeze commits these with its tag.
+**/results/*/polyzymd_results/
 # Software environments, which are rebuilt, never committed.
 .pixi/
 .venv/

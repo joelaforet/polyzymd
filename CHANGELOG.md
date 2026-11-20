@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `polyzymd study init`, `project init` and `project add-study` give each new study a `sandbox/` folder with a README, for one-off checks and exploratory scripts. Git tracks it; freeze never deposits it, does not name it as left out, and does not refuse to run when files in it are uncommitted. `sandbox` is now a reserved study and condition label.
+- `polyzymd study check` and `project check` print a one-line hint when the `.gitignore` does not ignore `results/<run>/polyzymd_results/` or `slurm_logs/`.
+
+### Changed
+
+- New study and project `.gitignore` files ignore the stored values in `results/<run>/polyzymd_results/` and every `slurm_logs/` folder, so they no longer show as untracked and slow `git status`. Reports and figures in `results/` are still committed. `study freeze` and `project freeze` commit the ignored stored values with their tag and deposit them, so the frozen version still holds the values its figures and statistics are redrawn from.
+
 ## [1.4.0b1] - 2026-10-30
 
 The AIChE beta of 1.4: covalent protein modification (mutations, protonation

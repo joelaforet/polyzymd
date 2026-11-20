@@ -99,19 +99,41 @@ does not change. Each prints where the new runs go.
 | `structures/` | Reference structures for analyses, such as a crystal structure |
 | `analyses/` | Your measurement functions, listed in `study.yaml` |
 | `figures/` | Notebooks and scripts that make figures from stored results |
-| `results/` | What `polyzymd analyze --study` stores |
+| `results/` | What `polyzymd analyze --study` stores. Git tracks the reports and figures; it ignores the stored values in `results/<run>/polyzymd_results/`, which freeze commits |
 | `environment/` | The PolyzyMD version and how to install it |
+| `sandbox/` | One-off checks and exploratory scripts. Git tracks it; freeze never deposits it |
 | `README.md` | How to reproduce the study and how to cite it |
 | `LICENSE-data`, `LICENSE-code` | CC-BY-4.0 and MIT by default |
 | `data.example.yaml` | How to write `data.local.yaml` |
 | `data.local.yaml` | Where this machine keeps the simulations. Git ignores it |
 | `runs/` | The runs of the condition configs that set no `scratch_directory`. Git ignores it |
-| `.gitignore` | Leaves out `data.local.yaml`, `runs/`, caches and SLURM logs |
+| `.gitignore` | Leaves out `data.local.yaml`, `runs/`, `logs/`, `slurm_logs/`, the stored values in `results/<run>/polyzymd_results/` and caches |
 
 `study init` also makes the folder a git repository with one commit. Use
 `--no-git` to skip git. To use a different license, replace a LICENSE file.
 `--holder NAME` sets the copyright holder. The default is your
 `git config user.name`.
+
+Put one-off checks, such as build forensics, benchmarks and quick plots, in
+`sandbox/` rather than in a folder outside the study. Freeze neither deposits
+`sandbox/` nor waits for its files to be committed. When a script becomes a
+real analysis, move its function to `analyses/` and list it in `study.yaml`
+under `analyses:` with `function: file.py:name`.
+
+The stored values in `results/<run>/polyzymd_results/` are large, and
+`polyzymd analyze` rebuilds them, so git ignores them day to day. Freeze
+commits them with its tag and deposits them, because figures and statistics
+are redrawn from them. A study made before PolyzyMD 1.4 lacks these rules,
+and `polyzymd study check` and `project check` say so. Add these lines to
+its `.gitignore`, and make a `sandbox/` folder if you want one:
+
+```
+results/*/polyzymd_results/
+slurm_logs/
+```
+
+In a project, add them to the project's `.gitignore`, with
+`**/results/*/polyzymd_results/` in place of the first line.
 
 ## Say where the trajectories are
 

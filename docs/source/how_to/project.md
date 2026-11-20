@@ -87,7 +87,8 @@ The command writes these files and folders:
 - `analyses/`, `stats/` and `figures/`, each with a `README.md`;
 - `LICENSE-code` (MIT), `LICENSE-data` (CC-BY-4.0), `README.md` and
   `.gitignore`;
-- one study folder for each `--study`, with a `study.yaml` to fill in.
+- one study folder for each `--study`, with a `study.yaml` to fill in and
+  a `sandbox/` folder for one-off checks, which freeze never deposits.
 
 It then makes the project a git repository and commits these files. Use
 `--no-git` to skip git, and `--holder NAME` to set the copyright holder of

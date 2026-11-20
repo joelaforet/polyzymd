@@ -315,6 +315,7 @@ def check_command(path: Path, production: bool = False) -> None:
     in_project = click.get_current_context().meta.get(PROJECT_CHECK, False)
     if not in_project:
         click.echo(describe(git_state(project.root if project is not None else protocol.root)))
+        _echo_ignore_hint([protocol.root])
     if not (in_project and protocol.metadata == project.metadata):
         # A study's own metadata, differing from its project's, is its study.yaml's.
         own = project is None or protocol.metadata != project.metadata
@@ -337,6 +338,18 @@ def check_command(path: Path, production: bool = False) -> None:
     click.echo(f"cite: {citation_line()}")
     if failed:
         sys.exit(EXIT_STUDY_ERROR)
+
+
+def _echo_ignore_hint(folders: list[Path]) -> None:
+    """Print one line when git does not ignore the stored values or SLURM logs in a study folder."""
+    from polyzymd.analyses.study_git import unignored_paths
+
+    unignored = sorted({path for folder in folders for path in unignored_paths(folder)})
+    if unignored:
+        click.echo(
+            f"gitignore: {' and '.join(unignored)} are not ignored; add "
+            "results/*/polyzymd_results/ and slurm_logs/ to .gitignore (see the study folder guide)"
+        )
 
 
 def find_run_parents(config: Any, root: Path, max_depth: int = 6) -> dict[Path, list[int]]:

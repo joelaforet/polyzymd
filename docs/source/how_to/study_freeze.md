@@ -117,6 +117,8 @@ the freeze. So you can freeze early, and freeze again when you fill the gaps.
 
    Freeze does not deposit other files, such as notes or a copied
    trajectory, and prints one `not deposited:` warning that names them.
+   It never deposits `sandbox/` and does not name it, and uncommitted files
+   there do not stop freeze.
 
    PolyzyMD vouches only for the files it generates: builds, runs, and the
    results of its analyses and of your `function:` analyses. Files you make
@@ -199,7 +201,9 @@ Otherwise, freeze does these steps:
    | `md_checklist.yaml` | The reliability and reproducibility checklist of Communications Biology (2023), filled in from the manifest. Review each answer |
    | `system_summary.csv` | The box, atoms, waters, ions and composition of each replicate (checklist 4a) |
 
-6. It commits these files and `results/`, and only those. It tags the commit
+6. It commits these files and `results/`, and only those. This includes the
+   stored values in `results/<run>/polyzymd_results/`, which `.gitignore`
+   keeps out of everyday commits. It tags the commit
    `study-v1`, then `study-v2`, and so on. `--tag NAME` sets another tag.
 7. It lays out `deposit/` and prepares the upload: `deposit/upload/`,
    `deposit/trajectories.csv` and `deposit/UPLOAD.md`.

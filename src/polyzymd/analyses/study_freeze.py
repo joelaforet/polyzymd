@@ -16,8 +16,9 @@ Freezing never stops for something missing; every gap is a warning. It:
    Communications Biology reliability and reproducibility checklist, filled
    from the manifest), ``CITATION.cff`` and ``.zenodo.json``;
 4. commits those files and the stored results in ``results/`` (outputs of
-   PolyzyMD, needed to redraw the figures), never your own uncommitted
-   inputs, and tags the commit;
+   PolyzyMD, needed to redraw the figures), including the stored values in
+   ``results/<run>/polyzymd_results/`` that ``.gitignore`` keeps out of
+   everyday commits, never your own uncommitted inputs, and tags the commit;
 5. lays out ``deposit/``: the tagged study, the engine inputs and final
    frames, with the manifest, README and ``CITATION.cff`` at the top, and
    prepares the upload (:mod:`~polyzymd.analyses.study_upload_guide`):
@@ -1547,20 +1548,38 @@ def is_deposited_name(root: Path, path: str) -> bool:
 _UNTRACKED = ("results", ".gitignore")
 
 
+def stored_values(results: str) -> str:
+    """Return the pathspec of the stored values under the ``results`` folder, ignored or not.
+
+    ``.gitignore`` keeps ``results/<run>/polyzymd_results/`` out of everyday
+    commits, as caches that ``polyzymd analyze`` rebuilds; freeze commits and
+    deposits them, since figures and statistics are redrawn from them.
+    """
+    return f":(glob){results}/*/polyzymd_results/**"
+
+
 def _candidate_files(root: Path, state: dict[str, Any] | None) -> list[str]:
     """Return the files under ``root`` that freeze may publish, before the name rule.
 
     In a git repository (``state`` given), the tracked files, the untracked
-    files under ``results/`` and an untracked ``.gitignore`` (freeze writes
+    files under ``results/``, the stored values there even when git-ignored
+    (:func:`stored_values`) and an untracked ``.gitignore`` (freeze writes
     one and commits it); otherwise every file. Job, log and hidden files
     (:func:`is_machine_file`), anything under a ``deposit/`` folder and
     ``data.local.yaml`` are left out.
     """
     if state is not None:
         # -z: names separated by NUL and not quoted, as git quotes non-ASCII names.
-        listed = (_git(root, "ls-files", "-z") or "").split("\0") + (
-            _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", *_UNTRACKED) or ""
-        ).split("\0")
+        others = ("ls-files", "-z", "--others", "--exclude-standard")
+        listed = [
+            name
+            for arguments in (
+                ("ls-files", "-z"),
+                (*others, "--", *_UNTRACKED),
+                (*others, "--ignored", "--", stored_values("results")),
+            )
+            for name in (_git(root, *arguments) or "").split("\0")
+        ]
     else:
         listed = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
     return sorted(
@@ -1590,7 +1609,10 @@ def left_out_files(root: Path, state: dict[str, Any] | None) -> str | None:
     """Return a warning that names the files freeze does not deposit, or ``None``.
 
     A folder is named once, with a trailing ``/``, for all the files in it.
+    A study's ``sandbox/`` is never deposited and never named.
     """
+    from polyzymd.analyses.study_scaffold import SANDBOX
+
     entries = []
     for path in _candidate_files(root, state):
         if is_deposited_name(root, path):
@@ -1598,6 +1620,9 @@ def left_out_files(root: Path, state: dict[str, Any] | None) -> str | None:
         parts = Path(path).parts
         study = len(parts) > 1 and (root / parts[0] / "study.yaml").is_file()
         depth = 2 if study else 1
+        if len(parts) > depth and parts[depth - 1] == SANDBOX:
+            # One-off checks, never deposited by design.
+            continue
         entry = "/".join(parts[:depth]) + ("/" if len(parts) > depth else "")
         if entry not in entries:
             entries.append(entry)
@@ -1658,13 +1683,18 @@ def _commit_and_tag(
     """Commit ``paths`` of ``root`` and tag the commit; return it, or ``None`` with a warning.
 
     Job and log files under the paths are never committed
-    (:data:`EXCLUDE_MACHINE_FILES`). ``what`` (``"study"`` or ``"project"``)
+    (:data:`EXCLUDE_MACHINE_FILES`); the stored values under a ``results``
+    path are, even when git-ignored (:func:`stored_values`). ``what`` (``"study"`` or ``"project"``)
     names the folder in the commit and tag messages.
     """
     import polyzymd
 
     paths = [*paths, *EXCLUDE_MACHINE_FILES]
     _git(root, "add", "--", *paths)
+    for path in paths:
+        if Path(path).name == "results" and (root / path).is_dir():
+            # The stored values are git-ignored day to day; the tag holds them.
+            _git(root, "add", "--force", "--", stored_values(path))
     paths = committable(root, paths)
     message = f"Freeze {what} as {tag} with polyzymd {what} freeze"
     if _git(root, "commit", "--quiet", "-m", message, "--", *paths) is None:

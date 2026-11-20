@@ -126,3 +126,27 @@ def test_the_upload_guide_of_a_project_names_the_project_file_and_command(
     text = freeze_project(project).guide.read_text()
     assert "project.yaml" in text and "polyzymd project freeze" in text
     assert "study.yaml" not in text and "study freeze" not in text
+
+
+def test_project_freeze_commits_the_git_ignored_stored_values(project: Path) -> None:  # noqa: F811
+    """A study's ignored results/<run>/polyzymd_results/ goes into the project tag and deposit."""
+    import subprocess
+
+    from polyzymd.analyses.project_freeze import freeze_project
+    from polyzymd.analyses.study_git import init_repository
+
+    (project / ".gitignore").write_text("data.local.yaml\n**/results/*/polyzymd_results/\n")
+    init_repository(project, "start")
+    stored = "lipa/results/rg/polyzymd_results/rg/half/replicate_1/series.npz"
+    (project / stored).parent.mkdir(parents=True)
+    (project / stored).write_bytes(b"values")
+    result = freeze_project(project)
+    tagged = subprocess.run(
+        ["git", "-C", str(project), "ls-tree", "-r", "--name-only", result.tag],
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert stored in tagged
+    manifest = json.loads((project / "lipa" / "manifest.json").read_text())
+    assert stored.removeprefix("lipa/") in manifest["files"]
+    assert (result.deposit / "study" / stored).is_file()
