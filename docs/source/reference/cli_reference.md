@@ -1262,8 +1262,11 @@ Adds a condition to an existing study, in `conditions/<label>/`:
   placeholder files.
 - `--from OTHER_LABEL` copies the config of that condition of the study, with
   the input files it names, to make another condition: the copy gets runs of
-  its own. The copy's `name:` is set to the new condition's folder name, as
-  `--new` sets it, and the command prints it.
+  its own. When that condition sets an absolute `scratch_directory`, the
+  copy's runs go into `<scratch>/<study>/<label>/` there, so the two never
+  share run folders. The copy's `name:` is set to the new condition's folder
+  name, as `--new` sets it, and the condition's `factors` in `study.yaml` are
+  copied too; the command prints both.
 - `--config CONFIG` copies `CONFIG`, with the input files it names, as
   `study init --condition` does. When the config's `scratch_directory` holds
   runs of the config, that folder is written to `data.local.yaml` and printed
@@ -1273,9 +1276,10 @@ Adds a condition to an existing study, in `conditions/<label>/`:
   another study's condition analyzes that condition's runs in this study,
   without running them again (see {doc}`../how_to/reuse_condition`).
   `study check` warns when two conditions read the same runs but their
-  configs differ.
+  configs differ. When the config has no runs yet, an absolute
+  `scratch_directory` is kept as written, and the command prints it.
 
-Otherwise, the new config writes its runs into `runs/<study>/<label>/` of the project,
+Otherwise (a relative or missing `scratch_directory`), the new config writes its runs into `runs/<study>/<label>/` of the project,
 or into `runs/<label>/` of a study in no project. Git ignores `runs/`, and
 freeze never publishes it. The command prints this as a warning, because
 trajectories can use a lot of disk space: on a cluster, set

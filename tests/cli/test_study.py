@@ -295,3 +295,28 @@ def test_a_stored_report_tested_below_three_replicates_is_named() -> None:
     assert not _tested_below_three(new) and not _tested_below_three(three)
     trend = {"conditions": conditions, "trends": [{"p": 0.2, "conditions": ["A", "B"]}]}
     assert _tested_below_three(trend)
+
+
+def test_add_condition_says_where_runs_go_when_scratch_directory_is_kept(tmp_path: Path) -> None:
+    """With an absolute scratch_directory, add-condition names it instead of warning about runs/."""
+    from tests._support.analysis_testkit import write_simulation_config
+
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    config = write_simulation_config(tmp_path / "sims" / "new", scratch=Path("/scratch/me/sims"))
+    (config.parent / "test.pdb").write_text("REMARK input\nEND\n")
+    result = CliRunner().invoke(
+        cli, ["study", "add-condition", "New", "--config", str(config), "--study", str(root)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "runs: new replicates go into /scratch/me/sims, the scratch_directory kept" in (
+        result.output
+    )
+    assert "warning:" not in result.output
+    result = CliRunner().invoke(
+        cli, ["study", "add-condition", "Newer", "--from", "New", "--study", str(root)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "runs: new replicates go into /scratch/me/sims/newer, a folder of their own" in (
+        result.output
+    )
+    assert "never share run folders" in result.output

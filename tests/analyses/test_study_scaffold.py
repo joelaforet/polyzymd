@@ -231,3 +231,57 @@ def test_the_structure_placeholders_name_the_solutes_keys(tmp_path: Path) -> Non
         assert key in ProteinSolute.model_fields
     for key in ("sdf_path", "conformer_index", "name"):
         assert key in SmallMoleculeSolute.model_fields
+
+
+def _config_with_scratch(folder: Path, scratch: str) -> Path:
+    """Write a config with a header comment, an input one folder up, and ``scratch``."""
+    config = write_simulation_config(folder, scratch=Path(scratch))
+    (folder.parent / "test.pdb").write_text("END\n")
+    text = config.read_text().replace("pdb_path: test.pdb", "pdb_path: ../test.pdb")
+    config.write_text("# Protocol rationale: why this run is set up so.\n" + text)
+    return config
+
+
+def test_config_keeps_an_absolute_scratch_directory_and_the_comments(tmp_path: Path) -> None:
+    """--config of a config with no runs yet keeps its absolute scratch_directory and header."""
+    from polyzymd.analyses.study_scaffold import add_condition
+
+    config = _config_with_scratch(tmp_path / "sims" / "water", "/scratch/me/sims")
+    created = create_study(tmp_path / "st", git=False)
+
+    copy = add_condition(created.root, "Water", config=config)
+
+    assert _output(copy)[1] == "/scratch/me/sims"
+    text = copy.read_text()
+    assert "# Protocol rationale: why this run is set up so.\n" in text
+    assert "scratch_directory is kept from config.yaml" in text
+    assert yaml.safe_load(text)["solutes"][0]["pdb_path"] == "structures/test.pdb"
+    assert not (created.root / "data.local.yaml").exists()
+
+
+def test_from_puts_its_runs_in_a_scratch_folder_of_its_own(tmp_path: Path) -> None:
+    """--from keeps the scratch storage but never shares run folders, and copies the factors."""
+    from polyzymd.analyses.project_scaffold import create_project
+    from polyzymd.analyses.study_file import load_study_file
+    from polyzymd.analyses.study_scaffold import add_condition
+
+    project = create_project(tmp_path / "paper", ["lipa"], git=False).root
+    config = _config_with_scratch(tmp_path / "sims" / "water", "$SCRATCH_ROOT/sims/")
+    add_condition(project / "lipa", "Water", config=config)
+    study = project / "lipa" / "study.yaml"
+    study.write_text(
+        study.read_text().replace(
+            '"Water": "conditions/water/config.yaml"',
+            '"Water": {config: conditions/water/config.yaml, factors: {sbma_fraction: 0.0}}',
+        )
+    )
+
+    first = add_condition(project / "lipa", "SBMA 50", source="Water")
+    second = add_condition(project / "lipa", "SBMA 75", source="SBMA 50")
+
+    assert _output(first)[1] == "$SCRATCH_ROOT/sims/lipa/sbma_50"
+    assert _output(second)[1] == "$SCRATCH_ROOT/sims/lipa/sbma_75"  # not nested in sbma_50
+    assert "scratch_directory is a folder of this condition" in first.read_text()
+    assert "# Protocol rationale" in second.read_text()
+    factors = load_study_file(project / "lipa").factors
+    assert factors["SBMA 50"] == factors["SBMA 75"] == {"sbma_fraction": 0.0}
