@@ -111,6 +111,11 @@ def init_command(path: Path, studies: tuple[str, ...], holder: str | None, no_gi
     except ProtocolError as exc:
         _fail(exc)
     click.echo(f"created project {created.root} with studies {', '.join(created.studies)}")
+    from polyzymd.registry import register_quietly
+
+    warning = register_quietly(created.root)
+    if warning:
+        click.echo(f"warning: {warning}")
     click.echo(
         "next: fill description:, structures:, regions: and conditions: in each study.yaml "
         "(polyzymd study add-condition adds a condition), the analyses and metadata: in "
@@ -196,3 +201,92 @@ def freeze_command(path: Path, tag: str | None) -> None:
             "error: git could not commit and tag the project; fix that and freeze again", err=True
         )
         sys.exit(EXIT_PROJECT_ERROR)
+
+
+@project_group.command("register")
+@click.argument("path", type=click.Path(path_type=Path), default=Path("."))
+def register_command(path: Path) -> None:
+    """Add a project or lone study to your list of projects, or refresh its studies.
+
+    PATH is a folder inside it (default: here); the project holding it is
+    used, or else the study. project init and study init register new
+    folders themselves.
+
+    \b
+    Examples:
+        polyzymd project register ~/curc/pl/Paper_1
+    """
+    from polyzymd.agent_files import find_root
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.registry import register
+
+    try:
+        entry, new = register(find_root(path))
+    except (ProtocolError, OSError) as exc:
+        _fail(exc)
+    click.echo(f"{'registered' if new else 'refreshed'} {entry.kind} {entry.name}: {entry.path}")
+
+
+@project_group.command("unregister")
+@click.argument("name")
+def unregister_command(name: str) -> None:
+    """Remove NAME from your list of projects. The folder is not touched."""
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.registry import unregister
+
+    try:
+        entry = unregister(name)
+    except (ProtocolError, OSError) as exc:
+        _fail(exc)
+    click.echo(f"unregistered {entry.name}: {entry.path}")
+
+
+@project_group.command("list")
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "agent", "json"]),
+    default="table",
+    show_default=True,
+    help="agent prints one key=value line per project; json a list of objects.",
+)
+def list_command(output_format: str) -> None:
+    """List your projects and lone studies, and whether each folder is there now.
+
+    Each folder is checked with one stat, so a folder on a mount that is
+    down shows as missing; it stays on the list.
+
+    \b
+    Examples:
+        polyzymd project list --format agent
+    """
+    import json
+
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.registry import load, registry_path
+
+    try:
+        entries = load()
+    except ProtocolError as exc:
+        _fail(exc)
+    rows = [(entry, entry.exists()) for entry in entries]
+    if output_format == "json":
+        click.echo(json.dumps([{**vars(e), "exists": there} for e, there in rows], indent=2))
+        return
+    if not rows:
+        click.echo(f"no projects in {registry_path()}; add one with polyzymd project register PATH")
+        return
+    if output_format == "agent":
+        for entry, there in rows:
+            click.echo(
+                f"{entry.name} kind={entry.kind} exists={'yes' if there else 'no'} "
+                f"studies={','.join(entry.studies) or '-'} path={entry.path}"
+            )
+        return
+    table = [("NAME", "KIND", "EXISTS", "STUDIES", "PATH")] + [
+        (e.name, e.kind, "yes" if there else "no", ", ".join(e.studies) or "-", e.path)
+        for e, there in rows
+    ]
+    widths = [max(len(row[i]) for row in table) for i in range(4)]
+    for row in table:
+        click.echo("  ".join(cell.ljust(width) for cell, width in zip(row, widths)) + "  " + row[4])
