@@ -154,7 +154,8 @@ def create_project(
     Writes ``project.yaml`` listing the studies, ``analyses/``, ``stats/``,
     ``figures/`` and ``notebooks/`` with a README each (``notebooks/`` also
     gets the notebooks PolyzyMD ships, :data:`PROJECT_NOTEBOOKS`), ``.gitignore``, ``LICENSE-code``
-    (MIT), ``LICENSE-data`` (CC-BY-4.0) and ``README.md``, and for each label
+    (MIT), ``LICENSE-data`` (CC-BY-4.0), ``README.md`` and the guidance for AI coding agents
+    (:func:`polyzymd.agent_files.sync`), and for each label
     a study folder made by
     :func:`~polyzymd.analyses.study_scaffold.create_study` with a
     ``study.yaml`` to fill in (description, equilibration, structures,
@@ -227,6 +228,9 @@ def create_project(
         "regions.\n\n```bash\npolyzymd project check .\npolyzymd analyze --project .\n"
         "polyzymd project freeze .\n```\n"
     )
+    from polyzymd.agent_files import sync
+
+    sync(root)
     if git:
         created.commit = init_repository(root, "Create project with polyzymd project init")
     return created
@@ -248,7 +252,7 @@ def _write_study(folder: Path) -> Path:
     """Write an empty study of a project into ``folder``, without licences, and return it."""
     from polyzymd.analyses.study_scaffold import create_study
 
-    create_study(folder, git=False)
+    create_study(folder, git=False, agent_files=False)
     # The project holds the licences, once.
     for name in ("LICENSE-code", "LICENSE-data"):
         (folder / name).unlink(missing_ok=True)

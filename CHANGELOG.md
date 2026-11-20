@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `polyzymd project init` and `study init` write instructions for AI coding agents into the new folder and commit them: an `AGENTS.md` with the project layout, the core commands and the rules (check `polyzymd analyze --list` before writing MDAnalysis code, keep one-off scripts in `sandbox/`, never choose a force field or temperature for the user, commit inputs after each decision), a `CLAUDE.md` that loads it, and the PolyzyMD skills in `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex). The skills now ship in the wheel. Freeze does not deposit these files, and they do not count as analysis inputs.
 - `polyzymd study init`, `project init` and `project add-study` give each new study a `sandbox/` folder with a README, for one-off checks and exploratory scripts. Git tracks it; freeze never deposits it, does not name it as left out, and does not refuse to run when files in it are uncommitted. `sandbox` is now a reserved study and condition label.
 - `polyzymd study check` and `project check` print a one-line hint when the `.gitignore` does not ignore `results/<run>/polyzymd_results/` or `slurm_logs/`.
 

@@ -126,9 +126,16 @@ Issues = "https://github.com/joelaforet/polyzymd/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/polyzymd"]
 
+# The agent skills live once, in .claude/skills/, where Claude Code reads them
+# while PolyzyMD is developed; the wheel carries a copy that project init and
+# polyzymd agent sync write into users' projects (polyzymd/agent_files.py).
+[tool.hatch.build.targets.wheel.force-include]
+".claude/skills" = "polyzymd/templates/agents/skills"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
+    "/.claude/skills",
     "/README.md",
     "/LICENSE",
 ]

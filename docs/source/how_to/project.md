@@ -87,6 +87,9 @@ The command writes these files and folders:
 - `analyses/`, `stats/` and `figures/`, each with a `README.md`;
 - `LICENSE-code` (MIT), `LICENSE-data` (CC-BY-4.0), `README.md` and
   `.gitignore`;
+- `AGENTS.md`, `CLAUDE.md` and the PolyzyMD skills in `.claude/skills/` and
+  `.agents/skills/`, which tell AI coding agents how to work in the project
+  (see {doc}`use_with_ai_agents`);
 - one study folder for each `--study`, with a `study.yaml` to fill in and
   a `sandbox/` folder for one-off checks, which freeze never deposits.
 

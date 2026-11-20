@@ -1154,7 +1154,9 @@ polyzymd project init PATH --study LABEL [--study ...] [--holder NAME] [--no-git
 
 Writes a project folder at `PATH`: `project.yaml` listing the studies,
 `analyses/`, `stats/` and `figures/`, licences, a README, and one study folder
-per `--study` with a `study.yaml` to fill in. Labels are also folder names
+per `--study` with a `study.yaml` to fill in. It also writes the instructions
+for AI coding agents (`AGENTS.md`, `CLAUDE.md`, `.claude/skills/` and
+`.agents/skills/`; see {doc}`../how_to/use_with_ai_agents`). Labels are also folder names
 (lower case, digits, `_`). Without `--no-git` the project becomes a git
 repository with one commit. To move existing studies in, see
 {doc}`../how_to/move_studies_into_project`.
@@ -1236,8 +1238,9 @@ polyzymd study init DIRECTORY [--condition LABEL=CONFIG ...] [--new-condition LA
 
 Creates a study folder: `study.yaml`, `conditions/`, `structures/`,
 `analyses/`, `figures/`, `results/`, `environment/`, `README.md`,
-`LICENSE-data` (CC-BY-4.0), `LICENSE-code` (MIT), `data.example.yaml` and
-`.gitignore`, then makes it a git repository with one commit.
+`LICENSE-data` (CC-BY-4.0), `LICENSE-code` (MIT), `data.example.yaml`,
+`.gitignore` and the instructions for AI coding agents (as `project init`
+does), then makes it a git repository with one commit.
 
 | Option | Description |
 |---|---|

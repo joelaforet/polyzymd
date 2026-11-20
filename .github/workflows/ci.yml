@@ -130,3 +130,21 @@ jobs:
         run: |
           polyzymd --help
           polyzymd --version
+
+      - name: Test the wheel carries the repository's agent skills
+        run: |
+          cd "$RUNNER_TEMP"
+          python - "$GITHUB_WORKSPACE/.claude/skills" <<'EOF'
+          import sys
+          from pathlib import Path
+          from polyzymd.agent_files import DEVELOPER_SKILLS, skills_source, user_skills
+          repo = Path(sys.argv[1])
+          assert "site-packages" in str(skills_source()), skills_source()
+          expected = {
+              d.name: (d / "SKILL.md").read_text()
+              for d in repo.iterdir()
+              if d.name not in DEVELOPER_SKILLS and (d / "SKILL.md").is_file()
+          }
+          assert user_skills() == expected, sorted(user_skills())
+          print("packaged skills:", ", ".join(sorted(expected)))
+          EOF

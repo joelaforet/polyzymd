@@ -98,6 +98,7 @@ project
 reuse_condition
 move_studies_into_project
 study_freeze
+use_with_ai_agents
 ```
 
 ## Analyze trajectories

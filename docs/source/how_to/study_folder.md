@@ -107,6 +107,7 @@ does not change. Each prints where the new runs go.
 | `data.example.yaml` | How to write `data.local.yaml` |
 | `data.local.yaml` | Where this machine keeps the simulations. Git ignores it |
 | `runs/` | The runs of the condition configs that set no `scratch_directory`. Git ignores it |
+| `AGENTS.md`, `CLAUDE.md`, `.claude/`, `.agents/` | Instructions for AI coding agents; see {doc}`use_with_ai_agents` |
 | `.gitignore` | Leaves out `data.local.yaml`, `runs/`, `logs/`, `slurm_logs/`, the stored values in `results/<run>/polyzymd_results/` and caches |
 
 `study init` also makes the folder a git repository with one commit. Use

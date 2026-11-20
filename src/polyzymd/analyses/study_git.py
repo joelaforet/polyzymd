@@ -29,11 +29,16 @@ def is_output(path: str) -> bool:
     So do compiled Python (``__pycache__/``, ``*.pyc``), one machine's job
     and log folders (``slurm/``, ``slurm_logs/``), the simulations in
     ``runs/`` and the polymer fragments in ``.polymer_cache/``, which are never
-    inputs.
+    inputs, and the agent guidance that ``polyzymd agent sync`` rewrites
+    (``AGENTS.md``, ``CLAUDE.md``, ``.claude/``, ``.agents/``).
     """
+    from polyzymd.agent_files import GUIDES, SKILL_FOLDERS
+
     parts = Path(path).parts
     return bool(parts) and (
         parts[-1] == "data.local.yaml"
+        or parts[-1] in GUIDES
+        or any(part in {Path(f).parts[0] for f in SKILL_FOLDERS} for part in parts[:-1])
         or parts[-1].endswith(".pyc")
         or any(f"{part}/" in OUTPUTS for part in parts[:-1])
         or any(

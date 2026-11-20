@@ -1609,13 +1609,15 @@ def left_out_files(root: Path, state: dict[str, Any] | None) -> str | None:
     """Return a warning that names the files freeze does not deposit, or ``None``.
 
     A folder is named once, with a trailing ``/``, for all the files in it.
-    A study's ``sandbox/`` is never deposited and never named.
+    A study's ``sandbox/`` and the agent guides (``AGENTS.md``, ``CLAUDE.md``)
+    are never deposited and never named.
     """
+    from polyzymd.agent_files import GUIDES
     from polyzymd.analyses.study_scaffold import SANDBOX
 
     entries = []
     for path in _candidate_files(root, state):
-        if is_deposited_name(root, path):
+        if is_deposited_name(root, path) or Path(path).name in GUIDES:
             continue
         parts = Path(path).parts
         study = len(parts) > 1 and (root / parts[0] / "study.yaml").is_file()
