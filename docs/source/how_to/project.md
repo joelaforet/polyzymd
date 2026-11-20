@@ -95,7 +95,9 @@ The command writes these files and folders:
 
 It then makes the project a git repository and commits these files. Use
 `--no-git` to skip git, and `--holder NAME` to set the copyright holder of
-the licenses.
+the licenses. It also adds the project to your list of projects, which
+`polyzymd project list` prints, so an AI agent started in another folder can
+find it (see {doc}`use_with_ai_agents`).
 
 To add a study later, give its label:
 
@@ -106,7 +108,8 @@ polyzymd project add-study rml333 --project Paper_1
 `add-study` writes the study folder `Paper_1/rml333/` with a `study.yaml` to
 fill in, and adds one line under `studies:` in `project.yaml`. It commits
 nothing. The label is also the folder name, so use lower case letters,
-digits and `_`.
+digits and `_`. Run `polyzymd project register Paper_1` afterward to update
+the studies in your list of projects.
 
 To bring studies that you already have into a project, see
 {doc}`move_studies_into_project`.

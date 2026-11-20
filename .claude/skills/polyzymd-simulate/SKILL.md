@@ -5,6 +5,14 @@ description: Set up, build and run a molecular dynamics simulation with PolyzyMD
 
 # polyzymd-simulate: from a structure to trajectories
 
+## If you were started outside a PolyzyMD project
+
+Run `polyzymd project list --format agent`, pick the project the user means
+(ask if unclear), read its `AGENTS.md`, and run every command against that
+project. Write scripts only into `<study>/sandbox/` or `analyses/` there,
+never into the current folder. A project with `exists=no` is on a mount that
+is down or was moved; say so instead of guessing another path.
+
 ## 1. Make a project, then add conditions
 
 Work top down: a project (one paper) holds studies (one protein each), and a

@@ -621,6 +621,12 @@ def init_command(
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_STUDY_ERROR)
     click.echo(f"created {created.root}")
+    if not any((folder / "project.yaml").is_file() for folder in created.root.parents):
+        from polyzymd.registry import register_quietly
+
+        warning = register_quietly(created.root)
+        if warning:
+            click.echo(f"warning: {warning}")
     for label, config in created.conditions.items():
         copied = created.copied.get(label, [])
         click.echo(

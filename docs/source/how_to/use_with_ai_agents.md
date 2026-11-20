@@ -42,6 +42,35 @@ If the project lives on a network mount (sshfs), the agent reads and edits
 files through the mount but should run git and `polyzymd` on the machine that
 hosts the files. `AGENTS.md` says so.
 
+## Start the agent anywhere
+
+You do not have to start the agent in the project. `polyzymd project init`
+and `polyzymd study init` add each new project, and each study that is not
+part of a project, to your list of projects in
+`~/.config/polyzymd/projects.yaml` (`$XDG_CONFIG_HOME/polyzymd/` when
+`XDG_CONFIG_HOME` is set, or `$POLYZYMD_CONFIG_DIR`). The PolyzyMD skills tell
+an agent started outside a project to run `polyzymd project list --format
+agent`, pick the project you mean, read its `AGENTS.md`, and work there, with
+scripts only in `<study>/sandbox/` or `analyses/` of that project.
+
+```bash
+polyzymd project list --format agent
+```
+
+```
+Paper_1 kind=project exists=yes studies=lipa363,calb343,rml333 path=/home/me/Paper_1
+pilot kind=study exists=no studies=- path=/home/me/curc/pl/pilot
+```
+
+`exists=no` means the folder is not there now, for example because the
+sshfs mount is down; the entry stays on the list. Each folder is checked with
+one `stat`, so the list is fast on a mount.
+
+Add a project made with an older PolyzyMD, or refresh the studies of a
+project after `polyzymd project add-study`, with
+`polyzymd project register PATH`. `polyzymd project unregister NAME` removes
+an entry and leaves the folder alone.
+
 ## Refresh the files after you update PolyzyMD
 
 Each file holds a marker line with the PolyzyMD version that wrote it and the
@@ -90,4 +119,5 @@ A project or study made with an older PolyzyMD has none of these files. Run
 `polyzymd agent sync` inside it to create them, then commit them.
 
 See also: {doc}`project`, {doc}`study_folder` and the
-{doc}`../reference/cli_reference` entry for `polyzymd agent sync`.
+{doc}`../reference/cli_reference` entries for `polyzymd agent sync` and
+`polyzymd project list`.

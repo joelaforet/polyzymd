@@ -1158,8 +1158,9 @@ per `--study` with a `study.yaml` to fill in. It also writes the instructions
 for AI coding agents (`AGENTS.md`, `CLAUDE.md`, `.claude/skills/` and
 `.agents/skills/`; see `polyzymd agent sync`). Labels are also folder names
 (lower case, digits, `_`). Without `--no-git` the project becomes a git
-repository with one commit. To move existing studies in, see
-{doc}`../how_to/move_studies_into_project`.
+repository with one commit. The project is added to your list of projects
+(see `polyzymd project list`); a failure to write the list is a warning. To
+move existing studies in, see {doc}`../how_to/move_studies_into_project`.
 
 ### polyzymd project add-study
 
@@ -1173,6 +1174,41 @@ Writes the study folder `LABEL` in the project at `PATH` (the
 `studies:` in `project.yaml` and keeps the rest of the file. Commits nothing.
 Exits 2 when the label is not a folder name (lower case, digits, `_`), or the
 project already lists the label or holds its folder.
+
+### polyzymd project list
+
+```bash
+polyzymd project list [--format table|agent|json]
+```
+
+Prints your list of projects and lone studies, kept in
+`~/.config/polyzymd/projects.yaml` (`$XDG_CONFIG_HOME/polyzymd/` when set,
+or `$POLYZYMD_CONFIG_DIR`): name, kind, whether the folder exists now (one
+`stat`; a folder on a mount that is down shows as missing and stays
+listed), studies and path. `--format agent` prints one
+`NAME kind=... exists=yes|no studies=a,b path=PATH` line per entry; `--format
+json` also gives the date each was added.
+
+### polyzymd project register
+
+```bash
+polyzymd project register [PATH]
+```
+
+Adds the project holding `PATH` (default: the current directory), or else the
+study holding it, to your list of projects, named after its folder
+(`<name>-2`, `<name>-3` and so on when the name is taken). An entry already
+listed keeps its name and gets its studies refreshed. Exits 2 when `PATH` is
+in neither a project nor a study.
+
+### polyzymd project unregister
+
+```bash
+polyzymd project unregister NAME
+```
+
+Removes `NAME` from your list of projects. The folder is not touched. Exits 2
+when no entry has that name.
 
 ### polyzymd project freeze
 
@@ -1240,7 +1276,9 @@ Creates a study folder: `study.yaml`, `conditions/`, `structures/`,
 `analyses/`, `figures/`, `results/`, `environment/`, `README.md`,
 `LICENSE-data` (CC-BY-4.0), `LICENSE-code` (MIT), `data.example.yaml`,
 `.gitignore` and the instructions for AI coding agents (as `project init`
-does), then makes it a git repository with one commit.
+does), then makes it a git repository with one commit. A study that is not
+inside a project is added to your list of projects (see
+`polyzymd project list`).
 
 | Option | Description |
 |---|---|
