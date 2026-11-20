@@ -18,7 +18,7 @@ import textwrap
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from polyzymd.analyses.exceptions import ProtocolError
 
@@ -356,6 +356,181 @@ def copy_condition(
             hint="Check that the original config loads with polyzymd validate.",
         ) from exc
     return copied, missing
+
+
+#: The header line of a config that ``--set`` had to write again, without its comments.
+COMMENTS_LOST_NOTE = "--set could not keep the comments of this config"
+
+
+def read_assignments(entries: Sequence[str], option: str) -> list[tuple[str, Any]]:
+    """Parse ``KEY=VALUE`` entries of ``option``, reading each value as YAML.
+
+    Raises
+    ------
+    ProtocolError
+        If an entry has no ``=`` or no key, or its value is not YAML.
+    """
+    import yaml
+
+    pairs: list[tuple[str, Any]] = []
+    for entry in entries:
+        key, separator, value = entry.partition("=")
+        key = key.strip()
+        if not separator or not key:
+            raise ProtocolError(
+                f"Cannot read {option} {entry!r}.",
+                hint=f"Write it as {option} KEY=VALUE, for example "
+                f"{option} thermodynamics.temperature=330.",
+            )
+        try:
+            pairs.append((key, yaml.safe_load(value)))
+        except yaml.YAMLError as exc:
+            raise ProtocolError(
+                f"Cannot read the value of {option} {key!r}: {exc}",
+                hint=f"Quote the value, for example {option} description='SBMA 50%'.",
+            ) from exc
+    return pairs
+
+
+def key_parts(key: str) -> list[str | int]:
+    """Split a dotted config key such as ``solutes[1].monomers[0].probability`` into parts."""
+    parts: list[str | int] = []
+    for segment in key.split("."):
+        match = re.fullmatch(r"([^\[\]\s]+)((?:\[\d+\])*)", segment.strip())
+        if match is None:
+            raise ProtocolError(
+                f"Cannot read the config key {key!r}.",
+                hint="Write a dotted path with list indices, for example "
+                "solutes[1].monomers[0].probability.",
+            )
+        parts.append(match.group(1))
+        parts += [int(index) for index in re.findall(r"\d+", match.group(2))]
+    return parts
+
+
+def _key_text(parts: Sequence[str | int]) -> str:
+    return "".join(f"[{p}]" if isinstance(p, int) else f".{p}" for p in parts).lstrip(".")
+
+
+def _set_value(data: dict, parts: list[str | int], value: Any) -> None:
+    """Set ``parts`` of ``data`` to ``value``, adding missing mappings; never add list items."""
+    from polyzymd.config.loader import _closest_path
+
+    node: Any = data
+    for i, part in enumerate(parts):
+        where, above = _key_text(parts[: i + 1]), _key_text(parts[:i]) or "the config"
+        if isinstance(part, int) and isinstance(node, list) and part >= len(node):
+            raise ProtocolError(
+                f"{where} is out of range: {above} has {len(node)} item(s), counted from 0.",
+                hint="Use the index of an existing item; --set does not add list items.",
+            )
+        if not isinstance(node, list if isinstance(part, int) else dict):
+            keys = tuple(p for p in parts[:i] if isinstance(p, str))
+            path = _closest_path(keys[:-1], keys[-1]) if keys else None
+            raise ProtocolError(
+                f"{above} is not a {'list' if isinstance(part, int) else 'mapping'} in the "
+                f"config, so {where} cannot be set.",
+                hint=f"Did you mean {'.'.join(path)}?" if path else "Check the key.",
+            )
+        if i == len(parts) - 1:
+            node[part] = value
+        else:
+            if isinstance(part, str) and node.get(part) is None and isinstance(parts[i + 1], str):
+                node[part] = {}
+            node = node.get(part) if isinstance(node, dict) else node[part]
+
+
+def flow_yaml(value: Any) -> str:
+    """Return ``value`` as one line of flow-style YAML."""
+    import yaml
+
+    text = yaml.safe_dump(value, default_flow_style=True, width=float("inf"), allow_unicode=True)
+    return text.removesuffix("\n...\n").strip()
+
+
+def _set_in_text(text: str, parts: list[str | int], value: Any) -> str | None:
+    """Return ``text`` with ``parts`` set to ``value`` by one text edit, or ``None``.
+
+    A scalar is replaced where it is written; a missing key goes into its
+    block mapping, as ``key: value`` or ``key: {rest: value}``. Anything
+    else (a whole list or section, a flow mapping) returns ``None``.
+    """
+    import yaml
+
+    node = yaml.compose(text)
+    rest = list(parts)
+    while rest:
+        part = rest[0]
+        if isinstance(part, int) and isinstance(node, yaml.SequenceNode):
+            node = node.value[part]
+        elif isinstance(part, str) and isinstance(node, yaml.MappingNode):
+            found = [v for k, v in node.value if getattr(k, "value", None) == part]
+            if not found:
+                break
+            node = found[0]
+        else:
+            return None
+        rest.pop(0)
+    if not rest:
+        if not isinstance(node, yaml.ScalarNode):
+            return None
+        return text[: node.start_mark.index] + flow_yaml(value) + text[node.end_mark.index :]
+    if not isinstance(node, yaml.MappingNode) or node.flow_style or not node.value:
+        return None
+    if any(isinstance(part, int) for part in rest):
+        return None
+    for part in reversed(rest[1:]):
+        value = {part: value}
+    key, first = node.value[0]
+    start = text.rfind("\n", 0, key.start_mark.index) + 1
+    indent = text[start : key.start_mark.index]
+    line = f"{' ' * key.start_mark.column}{flow_yaml(rest[0])}: {flow_yaml(value)}\n"
+    if not indent.strip():
+        return text[:start] + line + text[start:]
+    if isinstance(first, yaml.ScalarNode) and first.end_mark.line == key.start_mark.line:
+        end = text.find("\n", first.end_mark.index)
+        end = len(text) if end < 0 else end + 1
+        return text[:end] + ("" if text[:end].endswith("\n") else "\n") + line + text[end:]
+    return None
+
+
+def set_config_values(config: Path, settings: Sequence[tuple[str, Any]]) -> None:
+    """Set each dotted key of ``settings`` in ``config``, keeping its comments.
+
+    Each setting is one text edit (:func:`_set_in_text`), checked by reading
+    the file back. When an edit cannot be made that way, the config is
+    written again without its comments, keeping its header and adding
+    :data:`COMMENTS_LOST_NOTE` to it.
+
+    Raises
+    ------
+    ProtocolError
+        If a key cannot be read, indexes past the end of a list, or goes
+        through a value that is not a mapping or list.
+    """
+    import yaml
+
+    text = config.read_text()
+    data = yaml.safe_load(text) or {}
+    kept = True
+    for key, value in settings:
+        parts = key_parts(key)
+        _set_value(data, parts, value)
+        if kept:
+            edited = _set_in_text(text, parts, value)
+            try:
+                kept = edited is not None and yaml.safe_load(edited) == data
+            except yaml.YAMLError:
+                kept = False
+            text = edited if kept else text
+    if not kept:
+        header = re.match(r"(?:#[^\n]*\n)*", text).group(0)
+        text = (
+            header
+            + f"#   {COMMENTS_LOST_NOTE}.\n"
+            + yaml.dump(data, Dumper=_indented_list_dumper(), sort_keys=False)
+        )
+    config.write_text(text)
 
 
 def existing_runs(config: Path) -> Path | None:
@@ -730,6 +905,8 @@ def add_condition(
     config: Path | None = None,
     new: bool = False,
     source: str | None = None,
+    settings: Sequence[tuple[str, Any]] = (),
+    factors: Mapping[str, Any] | None = None,
 ) -> Path:
     """Add a condition to an existing study folder and list it in ``study.yaml``.
 
@@ -739,7 +916,10 @@ def add_condition(
     new condition's folder name, runs of its own and the source's
     ``factors``; with ``new``,
     ``conditions/<name>/`` gets a template config to fill in
-    (:func:`new_condition`). The new config writes its runs into
+    (:func:`new_condition`). ``settings``, pairs of a dotted config key and a
+    value, are then set in a copied config (:func:`set_config_values`), and
+    the result must load; ``factors`` set the condition's factors in
+    ``study.yaml``, over those copied from ``source``. The new config writes its runs into
     :func:`runs_folder`. The condition is added as one line under
     ``conditions:``, so the rest of ``study.yaml``, comments included, is kept
     as written, and ``runs/`` is added to the ``.gitignore`` beside the
@@ -751,7 +931,9 @@ def add_condition(
     ProtocolError
         If not exactly one of ``config``, ``source`` and ``new`` is given,
         the label or its folder is taken or reserved (:func:`check_label`), ``source`` is not a condition of
-        the study, or the config cannot be copied.
+        the study, the config cannot be copied, ``settings`` are given with
+        ``new``, a factor is not a single value, or the edited config does
+        not load.
     """
     from polyzymd.analyses.study_file import _condition, find_study_file
 
@@ -762,6 +944,13 @@ def add_condition(
             "--from OTHER_LABEL, or --new.",
         )
     check_label(label, "condition")
+    if settings and new:
+        raise ProtocolError(
+            "--set edits a copied config, and --new writes a template to fill in.",
+            hint="Fill in the template by hand, or copy a config with --from or --config.",
+        )
+    if any(isinstance(value, (Mapping, list)) for value in (factors or {}).values()):
+        raise ProtocolError("A factor must be a single value.", hint="--factor sbma_fraction=0.5")
     file = find_study_file(study)
     # Only the existing labels are read, so a new study with no condition yet,
     # or one still being filled in, takes its first conditions.
@@ -773,14 +962,16 @@ def add_condition(
             f"{file} already has a condition {label!r} or a folder {folder}.",
             hint="Choose another label.",
         )
-    factors: dict[str, Any] = {}
     if source is not None:
         if source not in conditions:
             raise ProtocolError(
                 f"{file} has no condition {source!r} to copy.",
                 hint=f"Use one of: {', '.join(map(str, conditions)) or 'none yet'}.",
             )
-        config, factors = _condition(source, conditions[source], file)
+        config, copied = _condition(source, conditions[source], file)
+        factors = {**copied, **(factors or {})}
+    else:
+        factors = dict(factors or {})
     # A failure removes the condition folder and restores study.yaml, so the
     # study is left as it was.
     text = file.read_text()
@@ -804,6 +995,8 @@ def add_condition(
                 )
         else:
             new_condition(folder, runs_folder(root, label))
+        if settings:
+            _set_and_check(folder / "config.yaml", settings)
         entry = str((folder / "config.yaml").relative_to(root))
         _list_entry(
             file, "conditions", label, {"config": entry, "factors": factors} if factors else entry
@@ -821,6 +1014,24 @@ def add_condition(
         record_data_location(root, label, Path(config))
     ignore_runs(runs_home(root))
     return folder / "config.yaml"
+
+
+def _set_and_check(target: Path, settings: Sequence[tuple[str, Any]]) -> None:
+    """Set ``settings`` in ``target`` and check that it loads, explaining what does not."""
+    from pydantic import ValidationError
+
+    from polyzymd.config.loader import config_error_lines, load_config
+
+    set_config_values(target, settings)
+    try:
+        load_config(target)
+    except (OSError, ValueError) as exc:
+        lines = config_error_lines(exc, target) if isinstance(exc, ValidationError) else []
+        problems = "; ".join(text for kind, text in lines if kind == "error") or str(exc)
+        raise ProtocolError(
+            f"The config with --set does not load: {problems}",
+            hint="Correct the --set keys or values; the study is left unchanged.",
+        ) from exc
 
 
 def _read_yaml(file: Path) -> dict:

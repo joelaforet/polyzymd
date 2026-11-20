@@ -320,3 +320,121 @@ def test_add_condition_says_where_runs_go_when_scratch_directory_is_kept(tmp_pat
         result.output
     )
     assert "never share run folders" in result.output
+
+
+_POLYMER = """- type: polymer
+  type_prefix: SBMA-EGMA  # the co-polymer
+  monomers:
+  - label: A
+    probability: 1.0  # the SBMA share
+    name: SBMA
+  - label: B
+    probability: 0.0
+    name: EGMA
+  length: 5
+  count: 2
+  sdf_directory: sdfs
+  force_field: [openff-2.3.0.offxml]
+  charges: {method: preset}
+"""
+
+
+def _polymer_study(tmp_path: Path) -> Path:
+    """Write a study with the condition SBMA-EGMA 100:0, whose config has comments."""
+    from polyzymd.analyses.study_scaffold import create_study
+    from tests._support.analysis_testkit import write_simulation_config
+
+    config = write_simulation_config(tmp_path / "sims", scratch=Path("/scratch/me/sims"))
+    (tmp_path / "sims" / "test.pdb").write_text("END\n")
+    (tmp_path / "sims" / "sdfs").mkdir()
+    text = config.read_text().replace("solvent:", _POLYMER + "solvent:", 1)
+    text = text.replace("temperature: 300.0\nsim", "temperature: 300.0  # K\nsim")
+    config.write_text("# Protocol rationale\n" + text)
+    root = create_study(tmp_path / "st", conditions={"SBMA-EGMA 100:0": config}, git=False).root
+    study = root / "study.yaml"
+    text = study.read_text().replace(
+        "conditions/sbma-egma_100_0/config.yaml",
+        "{config: conditions/sbma-egma_100_0/config.yaml, factors: {sbma_fraction: 1.0, n: 2}}",
+    )
+    study.write_text(text)
+    assert load_study_file(root).factors["SBMA-EGMA 100:0"]["n"] == 2
+    return root
+
+
+def _add(root: Path, *args: str):
+    command = ["study", "add-condition", "SBMA-EGMA 50:50", "--from", "SBMA-EGMA 100:0"]
+    return CliRunner().invoke(cli, [*command, *args, "--study", str(root)])
+
+
+def test_add_condition_sets_keys_and_factors_in_one_call(tmp_path: Path) -> None:
+    """--set and --factor make the 50:50 condition, keeping the comments, and say what they set."""
+    from polyzymd.config.schema import SimulationConfig
+
+    root = _polymer_study(tmp_path)
+    result = _add(
+        root,
+        "--set",
+        "solutes[1].monomers[0].probability=0.5",
+        "--set",
+        "solutes[1].monomers[1].probability=0.5",
+        "--set",
+        "thermodynamics.temperature=475",
+        "--factor",
+        "sbma_fraction=0.5",
+    )
+    assert result.exit_code == 0, result.output
+    for line in (
+        "set: solutes[1].monomers[0].probability = 0.5",
+        "set: solutes[1].monomers[1].probability = 0.5",
+        "set: thermodynamics.temperature = 475",
+        "factor: sbma_fraction = 0.5",
+        "factors: copied from SBMA-EGMA 100:0 (n: 2)",
+    ):
+        assert line in result.output
+    assert "warning: --set could not keep" not in result.output
+    path = root / "conditions" / "sbma-egma_50_50" / "config.yaml"
+    text = path.read_text()
+    for comment in ("# Protocol rationale", "probability: 0.5  # the SBMA share", "475  # K"):
+        assert comment in text
+    copy = SimulationConfig.from_yaml(path)
+    assert [m.probability for m in copy.solutes[1].monomers] == [0.5, 0.5]
+    assert copy.thermodynamics.temperature == 475
+    factors = load_study_file(root).factors["SBMA-EGMA 50:50"]
+    assert factors == {"sbma_fraction": 0.5, "n": 2}
+
+
+@pytest.mark.parametrize(
+    ("setting", "message"),
+    [
+        ("thermodynamics.temprature=475", "did you mean thermodynamics.temperature?"),
+        ("solutes[1].monomers[2].probability=0.5", "solutes[1].monomers[2] is out of range"),
+        ("solutes[1].monomrs[0].probability=0.5", "Did you mean solutes.monomers?"),
+    ],
+)
+def test_add_condition_set_refuses_a_bad_key_and_leaves_the_study(
+    tmp_path: Path, setting: str, message: str
+) -> None:
+    """An unknown key or an index past the end fails with a hint, and nothing is added."""
+    root = _polymer_study(tmp_path)
+    before = (root / "study.yaml").read_text()
+    result = _add(root, "--set", setting)
+    assert result.exit_code == 2
+    assert message in " ".join(result.output.split())
+    assert (root / "study.yaml").read_text() == before
+    assert not (root / "conditions" / "sbma-egma_50_50").exists()
+
+
+def test_add_condition_set_says_when_comments_are_lost(tmp_path: Path) -> None:
+    """Replacing a whole list writes the config again, and the command says so."""
+    root = _polymer_study(tmp_path)
+    result = _add(root, "--set", "solutes[0].force_field=[ff14sb_off_impropers_0.0.4.offxml]")
+    assert result.exit_code == 0, result.output
+    assert "warning: --set could not keep the comments of this config" in result.output
+
+
+def test_add_condition_set_refuses_new(tmp_path: Path) -> None:
+    """--set edits a copy, so with --new it is refused."""
+    root = _polymer_study(tmp_path)
+    command = ["study", "add-condition", "X", "--new", "--set", "a=1", "--study", str(root)]
+    result = CliRunner().invoke(cli, command)
+    assert result.exit_code == 2 and not (root / "conditions" / "x").exists()

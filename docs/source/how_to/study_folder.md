@@ -85,6 +85,23 @@ polyzymd study add-condition "SBMA 100%" --from "SBMA 50%" --study lipase_363K  
 polyzymd study add-condition "SBMA 100%" --config sims/SBMA100/config.yaml --study lipase_363K
 ```
 
+To make a condition that differs from another in a few settings, give them
+with `--set` and the factors that differ with `--factor`:
+
+```bash
+polyzymd study add-condition "SBMA 50%" --from "SBMA 100%" --study lipase_363K \
+    --set 'solutes[1].monomers[0].probability=0.5' \
+    --set 'solutes[1].monomers[1].probability=0.5' \
+    --factor sbma_fraction=0.5
+```
+
+`KEY` is a dotted path into the config, with list indices counted from 0, and
+`VALUE` is read as YAML. The edit keeps the config's comments, and the edited
+config must load: a misspelled key fails with the closest valid key, and the
+study is left unchanged. The command prints one line for each setting, such as
+`set: solutes[1].monomers[0].probability = 0.5`. See
+the `study add-condition` section of {doc}`../reference/cli_reference`.
+
 `add-condition --from` copies the config of another condition of the study,
 with the input files it names, and its `factors` in `study.yaml`. It sets
 `name:` in the copy to the new condition's folder name. Then change what

@@ -827,6 +827,21 @@ def freeze_command(path: Path, tag: str | None) -> None:
     "--new", is_flag=True, help="Create conditions/<label>/ with a template config.yaml to fill in."
 )
 @click.option(
+    "--set",
+    "settings",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Set a key of the copied config, a dotted path such as "
+    "solutes[1].monomers[0].probability=0.5 (VALUE is read as YAML). Repeatable.",
+)
+@click.option(
+    "--factor",
+    "factor_args",
+    multiple=True,
+    metavar="NAME=VALUE",
+    help="Set a factor of the new condition in study.yaml. Repeatable.",
+)
+@click.option(
     "--study",
     "study_path",
     type=click.Path(path_type=Path),
@@ -835,7 +850,13 @@ def freeze_command(path: Path, tag: str | None) -> None:
     help="study.yaml, or the folder holding it.",
 )
 def add_condition_command(
-    label: str, config: Path | None, source: str | None, new: bool, study_path: Path
+    label: str,
+    config: Path | None,
+    source: str | None,
+    new: bool,
+    settings: tuple[str, ...],
+    factor_args: tuple[str, ...],
+    study_path: Path,
 ) -> None:
     """Add the condition LABEL to an existing study and list it in study.yaml.
 
@@ -848,13 +869,18 @@ def add_condition_command(
     runs, which are not run again. Otherwise --config keeps an absolute
     scratch_directory as written. --from gets runs of its own, in a folder
     of its own in the other condition's scratch storage when that condition
-    sets an absolute scratch_directory, and copies its factors.
+    sets an absolute scratch_directory, and copies its factors. --set
+    changes keys of the copied config, keeping its comments, and the edited
+    config must load; --factor sets the condition's factors in study.yaml.
 
     \b
     Examples:
         polyzymd study add-condition "No polymer" --new
         polyzymd study add-condition "SBMA 100%" --from "No polymer"
         polyzymd study add-condition "SBMA 100%" --config sims/SBMA100/config.yaml
+        polyzymd study add-condition "SBMA 50%" --from "SBMA 100%" \\
+            --set 'solutes[1].monomers[0].probability=0.5' \\
+            --set 'solutes[1].monomers[1].probability=0.5' --factor sbma_fraction=0.5
     """
     import os
 
@@ -862,27 +888,52 @@ def add_condition_command(
 
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.study_file import DATA_FILE, find_study_file
-    from polyzymd.analyses.study_scaffold import RUNS_WARNING, add_condition, runs_folder
+    from polyzymd.analyses.study_scaffold import (
+        COMMENTS_LOST_NOTE,
+        RUNS_WARNING,
+        add_condition,
+        flow_yaml,
+        read_assignments,
+        runs_folder,
+    )
 
     try:
-        path = add_condition(study_path, label, config=config, new=new, source=source)
+        changes = read_assignments(settings, "--set")
+        factors = dict(read_assignments(factor_args, "--factor"))
+        path = add_condition(
+            study_path,
+            label,
+            config=config,
+            new=new,
+            source=source,
+            settings=changes,
+            factors=factors,
+        )
     except ProtocolError as exc:
         click.echo(f"error: {' '.join(str(exc).split())}", err=True)
         if exc.hint:
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_STUDY_ERROR)
     click.echo(f"condition {label}: {path}, listed in study.yaml")
-    copy = yaml.safe_load(path.read_text()) or {}
+    text = path.read_text()
+    copy = yaml.safe_load(text) or {}
+    for key, value in changes:
+        click.echo(f"set: {key} = {flow_yaml(value)}")
+    if COMMENTS_LOST_NOTE in text:
+        click.echo(f"warning: {COMMENTS_LOST_NOTE}: it was written again without them")
+    for name, value in factors.items():
+        click.echo(f"factor: {name} = {flow_yaml(value)}")
     if source is not None:
         click.echo(
-            f"name: set to {copy.get('name')!r} in the copy; change description: and the "
-            f"settings in which {label} differs from {source}"
+            f"name: set to {copy.get('name')!r} in the copy"
+            + ("" if changes else f"; change the settings in which {label} differs from {source}")
         )
         study = yaml.safe_load(find_study_file(study_path).read_text()) or {}
         entry = (study.get("conditions") or {}).get(label)
-        factors = entry.get("factors") if isinstance(entry, dict) else None
-        if factors:
-            shown = ", ".join(f"{key}: {value}" for key, value in factors.items())
+        copied = entry.get("factors") if isinstance(entry, dict) else None
+        copied = {k: v for k, v in (copied or {}).items() if k not in factors}
+        if copied:
+            shown = ", ".join(f"{key}: {value}" for key, value in copied.items())
             click.echo(f"factors: copied from {source} ({shown}); change the ones that differ")
     scratch = (copy.get("output") or {}).get("scratch_directory")
     root = find_study_file(study_path).parent

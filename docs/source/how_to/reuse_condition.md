@@ -58,14 +58,20 @@ is absolute, the copy's runs go into a folder of their own in it,
 `<scratch>/<study>/<name>/`. The copy also takes the reused condition's
 `factors` in `study.yaml`:
 
+Change the copy's temperatures, `thermodynamics.temperature` and the
+temperature of each equilibration stage, with `--set`, and the copied factor
+that differs with `--factor`. Quote a key with list indices, so the shell
+leaves the brackets alone:
+
 ```bash
-polyzymd study add-condition "Water 330 K" --from "Water 300 K" --study temperatures
+polyzymd study add-condition "Water 330 K" --from "Water 300 K" --study temperatures \
+    --set thermodynamics.temperature=330 \
+    --set 'simulation_phases.equilibration_stages[0].temperature=330' \
+    --factor temperature=330
 ```
 
-Then change the copy's temperatures: `thermodynamics.temperature` and the
-temperatures of the equilibration stages. Give the conditions their factors in
-`study.yaml` if the study compares by them, and change the copied factor that
-differs, here the temperature.
+The command prints one line for each key and factor it set. Give the
+conditions their factors in `study.yaml` if the study compares by them.
 
 ## Step 3: Check the study
 

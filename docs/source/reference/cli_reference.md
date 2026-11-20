@@ -1253,7 +1253,8 @@ unreadable config.
 ### polyzymd study add-condition
 
 ```bash
-polyzymd study add-condition LABEL (--config CONFIG | --from OTHER_LABEL | --new) [--study PATH]
+polyzymd study add-condition LABEL (--config CONFIG | --from OTHER_LABEL | --new)
+    [--set KEY=VALUE ...] [--factor NAME=VALUE ...] [--study PATH]
 ```
 
 Adds a condition to an existing study, in `conditions/<label>/`:
@@ -1278,6 +1279,17 @@ Adds a condition to an existing study, in `conditions/<label>/`:
   `study check` warns when two conditions read the same runs but their
   configs differ. When the config has no runs yet, an absolute
   `scratch_directory` is kept as written, and the command prints it.
+- `--set KEY=VALUE` (repeatable, with `--from` or `--config`) sets a key of
+  the copied config. `KEY` is a dotted path with list indices counted from 0,
+  such as `solutes[1].monomers[0].probability` or
+  `simulation_phases.production.duration`, and `VALUE` is read as YAML. The
+  config's comments are kept; an edit that cannot keep them, such as
+  replacing a whole list, writes the config again without them, and the
+  command prints a warning. `--set` does not add list items. The command
+  prints `set: KEY = VALUE` for each.
+- `--factor NAME=VALUE` (repeatable) sets a factor of the new condition in
+  `study.yaml`, over one copied with `--from`, and prints
+  `factor: NAME = VALUE`.
 
 Otherwise (a relative or missing `scratch_directory`), the new config writes its runs into `runs/<study>/<label>/` of the project,
 or into `runs/<label>/` of a study in no project. Git ignores `runs/`, and
@@ -1286,8 +1298,11 @@ trajectories can use a lot of disk space: on a cluster, set
 `scratch_directory` in the config to scratch storage. The condition is added
 as one line under `conditions:` in `study.yaml`, keeping the rest of the
 file. Exits 2 when not exactly one of `--config`, `--from` and `--new` is
-given, `OTHER_LABEL` is not a condition of the study, or the label or its
-folder is taken.
+given, `OTHER_LABEL` is not a condition of the study, the label or its
+folder is taken, `--set` is given with `--new`, or the config edited by
+`--set` does not load (an unknown key is named with the closest valid one, and
+an index past the end of a list is named). On any failure the condition
+folder is removed and `study.yaml` is left as it was.
 
 ### polyzymd study locate
 
