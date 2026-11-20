@@ -420,7 +420,11 @@ class DaisyChainSubmitter:
         self._openff_logs = openff_logs
         # The simulation environments have no OpenFF, so jobs load the build.
         self._generator = SlurmScriptGenerator(
-            dc_config.slurm_config, pixi_env, openff_logs=openff_logs, skip_build=True
+            dc_config.slurm_config,
+            pixi_env,
+            openff_logs=openff_logs,
+            skip_build=True,
+            preset=settings.preset if settings else None,
         )
 
         # Track submitted jobs per replicate

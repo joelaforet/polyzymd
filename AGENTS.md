@@ -213,6 +213,9 @@ PolyzyMD never uploads or publishes: that is the author's step. The design of st
   presets pin one simulation environment per campaign: Blanca uses
   `sim-cuda-12-4`, and Bridges-2 uses `sim-cuda-12-6`. A node probe can reject
   and exclude a node, but it must not upgrade the environment on a newer driver.
+  `openmm.backend: openmm_cupotential` pins its own environment,
+  `openmm-cupotential` (`envs/openmm-cupotential/pixi.toml`, run in an
+  Apptainer image, `workflow/cupotential.py`); it never falls back to stock.
 - **Factory pattern:** `ClassName.from_config(config)` or `ClassName.from_yaml(path)`
 - **Trajectory loading:** `analyses/shared/loader.py` (`TrajectoryLoader`,
   `open_universe`) finds and opens each replicate's files, and

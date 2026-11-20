@@ -286,6 +286,19 @@ class TestResolveSubmissionPixiEnv:
             == "sim-cuda-12-6"
         )
 
+    def test_cupotential_backend_pins_its_own_environment(self) -> None:
+        """openmm_cupotential runs only in openmm-cupotential, and only it runs there."""
+        from polyzymd.cli.main import _resolve_submission_pixi_env
+
+        cupo = "openmm_cupotential"
+        assert _resolve_submission_pixi_env("blanca-shirts", "openmm", None, cupo) == (
+            "openmm-cupotential"
+        )
+        with pytest.raises(click.UsageError, match="does not match"):
+            _resolve_submission_pixi_env("blanca-shirts", "openmm", "sim-cuda-12-4", cupo)
+        with pytest.raises(click.UsageError, match="does not match"):
+            _resolve_submission_pixi_env("blanca-shirts", "openmm", "openmm-cupotential")
+
     def test_site_override_prints_reproducibility_warning(self, monkeypatch) -> None:
         """An expert override should identify the preset environment policy."""
         from polyzymd.cli.main import _warn_for_site_pixi_override

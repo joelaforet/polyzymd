@@ -19,7 +19,7 @@ import os
 import re as _re
 import shutil
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from importlib import resources
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
@@ -321,6 +321,34 @@ def _discover_manifest_path() -> str:
     )
 
 
+def _cupotential_context(
+    pixi_env: str, preset: str | None, manifest_path: str
+) -> dict[str, object]:
+    """Template variables that make a job a cuPotential job, or a stock OpenMM job.
+
+    Raises ``ValueError`` when the image or the plugin channel is missing.
+    """
+    from polyzymd.workflow.cupotential import (
+        CUPOTENTIAL_PIXI_ENV,
+        link_cupotential_channel,
+        resolve_cupotential_image,
+    )
+
+    if pixi_env != CUPOTENTIAL_PIXI_ENV:
+        return {"cupotential": False}
+    image = _validate_script_value(resolve_cupotential_image(preset), "cupotential image")
+    env_dir = Path(manifest_path).parent / "envs" / CUPOTENTIAL_PIXI_ENV
+    if not (env_dir / "pixi.toml").is_file():
+        raise ValueError(f"{env_dir / 'pixi.toml'} is missing; update the PolyzyMD checkout")
+    link_cupotential_channel(env_dir, preset)
+    return {
+        "cupotential": True,
+        "cupotential_image": image,
+        "cupotential_env_dir": str(env_dir),
+        "cupotential_pixi_env": CUPOTENTIAL_PIXI_ENV,
+    }
+
+
 @dataclass
 class SlurmConfig:
     """Configuration for SLURM job submission.
@@ -583,20 +611,25 @@ class SlurmScriptGenerator:
         pixi_env: str = "sim-cuda-12-4",
         openff_logs: bool = False,
         skip_build: bool = False,
+        preset: str | None = None,
     ) -> None:
         """Initialize the generator.
 
         Args:
             config: SLURM configuration.
             pixi_env: Pixi environment name (e.g. ``"sim-cuda-12-4"``,
-                ``"sim-cuda-12-6"``).
+                ``"sim-cuda-12-6"``). ``"openmm-cupotential"`` runs the job in
+                the cuPotential Apptainer image (``workflow/cupotential.py``).
             openff_logs: Enable verbose OpenFF logs in generated scripts.
             skip_build: Skip system building in generated scripts (use pre-built system).
+            preset: SLURM preset, which gives a cuPotential job its default
+                image, plugin channel and GPU constraint.
         """
         self._config = config
         self._pixi_env = pixi_env
         self._openff_logs = openff_logs
         self._skip_build = skip_build
+        self._preset = preset
 
     @property
     def config(self) -> SlurmConfig:
@@ -663,6 +696,19 @@ class SlurmScriptGenerator:
 
         # Auto-detect the pixi manifest path from the current installation.
         manifest_path = _discover_manifest_path()
+        cupotential = _cupotential_context(self._pixi_env, self._preset, manifest_path)
+        from polyzymd.workflow.cupotential import (
+            CUPOTENTIAL_ROUTING_RETRY_LIMIT,
+            STOCK_ROUTING_RETRY_LIMIT,
+        )
+
+        config = self._config
+        if cupotential["cupotential"] and config.constraint is None:
+            from polyzymd.workflow.cupotential import PRESET_CUPOTENTIAL_CONSTRAINT
+
+            config = replace(
+                config, constraint=PRESET_CUPOTENTIAL_CONSTRAINT.get(self._preset or "")
+            )
 
         # Validate all interpolated string values against shell injection
         _validate_script_value(self._config.partition, "partition")
@@ -700,7 +746,7 @@ class SlurmScriptGenerator:
                 "partition": self._config.partition,
                 "job_name": job_name,
                 "output_file": output_file,
-                **sbatch_lines(self._config),
+                **sbatch_lines(config),
                 "time_limit": self._config.time_limit,
                 "configured_exclude": self._config.exclude or "",
                 "pixi_env": self._pixi_env,
@@ -712,6 +758,13 @@ class SlurmScriptGenerator:
                 "openff_logs_flag": openff_logs_flag,
                 "skip_build_flag": skip_build_flag,
                 "FULL_CREDIT_LINE": FULL_CREDIT_LINE,
+                "run_prefix": '"${CUPO_EXEC[@]}" ' if cupotential["cupotential"] else "",
+                "routing_retry_limit": (
+                    CUPOTENTIAL_ROUTING_RETRY_LIMIT
+                    if cupotential["cupotential"]
+                    else STOCK_ROUTING_RETRY_LIMIT
+                ),
+                **cupotential,
             },
         )
 

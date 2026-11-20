@@ -1,0 +1,42 @@
+# =============================================================================
+# PolyzyMD — openmm-cupotential simulation environment
+# =============================================================================
+#
+# Runtime for `openmm.backend: openmm_cupotential` (NVIDIA's nv_openmm_plugin).
+# It is a separate workspace, not part of the repository's pixi.toml, because
+# the plugin comes from a local conda channel that only some machines have.
+#
+# - The plugin channel is the folder ./nv-channel, a gitignored symlink to the
+#   unpacked NVIDIA release (the folder that holds linux-64/repodata.json).
+#   `polyzymd submit` creates it from $POLYZYMD_CUPOTENTIAL_CHANNEL.
+# - The plugin needs glibc >= 2.38 and a CUDA 13.4 driver API. Lock it
+#   anywhere; install and run it inside the openmm-cupotential Apptainer image.
+# - pixi.lock is not committed (it would record this machine's channel).
+#
+# See docs/source/how_to/run_with_cupotential.md.
+# =============================================================================
+
+[workspace]
+name = "polyzymd-openmm-cupotential"
+channels = ["conda-forge", "./nv-channel"]
+platforms = [{ name = "cupotential-cuda-13-4", platform = "linux-64", glibc = "2.39", cuda = "13.4" }]
+requires-pixi = ">=0.72.2"
+
+[dependencies]
+python             = "3.12.*"
+pydantic           = ">=2.5"
+pyyaml             = ">=6.0"
+click              = ">=8.1"
+click-option-group = ">=0.5"
+jinja2             = ">=3.1"
+packaging          = ">=23.0"
+tqdm               = ">=4.60"
+biopandas          = ">=0.4"
+numpy              = ">=2.0,<3"
+scipy              = ">=1.13"
+openmm             = "8.4.*"
+cuda-version       = "13.4.*"
+nv-openmm-plugin = { version = "==0.3.5", channel = "./nv-channel" }
+
+[pypi-dependencies]
+polyzymd = { path = "../..", editable = true }

@@ -255,8 +255,18 @@ def _resolve_engine_name(sim_config: object, override: str | None = None) -> str
     return str(engine).lower()
 
 
-def _resolve_submission_pixi_env(preset: str, engine_name: str, pixi_env: str | None = None) -> str:
+def _openmm_backend(sim_config: object) -> str:
+    """The config's ``openmm.backend``, ``openmm`` for a config without one."""
+    return getattr(getattr(sim_config, "openmm", None), "backend", "openmm")
+
+
+def _resolve_submission_pixi_env(
+    preset: str, engine_name: str, pixi_env: str | None = None, backend: str = "openmm"
+) -> str:
     """Resolve the pixi environment for submit and recover jobs.
+
+    An ``openmm_cupotential`` backend always runs in ``openmm-cupotential``,
+    never in a ``sim-cuda`` environment, and only that backend runs there.
 
     Parameters
     ----------
@@ -266,14 +276,25 @@ def _resolve_submission_pixi_env(preset: str, engine_name: str, pixi_env: str | 
         Resolved simulation engine name.
     pixi_env : str or None, optional
         Explicit CLI override from ``--pixi-env``.
+    backend : str, optional
+        The config's ``openmm.backend``.
 
     Returns
     -------
     str
         Pixi environment name for generated SLURM jobs.
     """
+    from polyzymd.workflow.cupotential import CUPOTENTIAL_PIXI_ENV
     from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
 
+    if engine_name.lower() == "openmm" and pixi_env not in (None, "auto"):
+        if (pixi_env == CUPOTENTIAL_PIXI_ENV) != (backend == "openmm_cupotential"):
+            raise click.UsageError(
+                f"--pixi-env {pixi_env} does not match openmm.backend {backend}: "
+                f"only openmm_cupotential runs in {CUPOTENTIAL_PIXI_ENV}"
+            )
+    if engine_name.lower() == "openmm" and backend == "openmm_cupotential":
+        return CUPOTENTIAL_PIXI_ENV
     if engine_name.lower() == "gromacs":
         if pixi_env and pixi_env != "auto":
             return pixi_env
@@ -294,7 +315,8 @@ def _warn_for_site_pixi_override(
 
     site_environment = PRESET_DEFAULT_PIXI_ENV.get(preset)
     if (
-        engine_name.lower() != "openmm"
+        resolved_pixi_env == "openmm-cupotential"
+        or engine_name.lower() != "openmm"
         or explicit_pixi_env in (None, "auto")
         or site_environment in (None, "auto")
         or resolved_pixi_env == site_environment
@@ -1258,6 +1280,7 @@ def run(
         warn_if_wrong_pixi_env(
             "run --engine openmm",
             SIM_PIXI_ENVS,
+            accepted=(*SIM_PIXI_ENVS, "openmm-cupotential"),
             detail="OpenMM execution uses the split CUDA simulation environments.",
         )
     else:
@@ -2405,7 +2428,9 @@ def submit(
         sim_config.require_buildable(engine_name, inputs=False)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
-    resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
+    resolved_pixi_env = _resolve_submission_pixi_env(
+        preset, engine_name, pixi_env, _openmm_backend(sim_config)
+    )
     _warn_for_site_pixi_override(preset, engine_name, resolved_pixi_env, pixi_env)
     _warn_for_submission_pixi_env(
         f"submit --engine {engine_name}", engine_name, resolved_pixi_env, pixi_env
@@ -2762,6 +2787,7 @@ def run_segment(
         warn_if_wrong_pixi_env(
             "run-segment",
             SIM_PIXI_ENVS,
+            accepted=(*SIM_PIXI_ENVS, "openmm-cupotential"),
             detail="OpenMM segment execution uses the split CUDA simulation environments.",
         )
 
@@ -4689,7 +4715,9 @@ def recover(
     from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs, create_job_name
     from polyzymd.workflow.slurm import SlurmScriptGenerator
 
-    resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, settings.pixi_env)
+    resolved_pixi_env = _resolve_submission_pixi_env(
+        preset, engine_name, settings.pixi_env, _openmm_backend(sim_config)
+    )
     _warn_for_site_pixi_override(preset, engine_name, resolved_pixi_env, settings.pixi_env)
     _warn_for_submission_pixi_env(
         f"recover --submit --engine {engine_name}",
@@ -4819,20 +4847,26 @@ def recover(
             )
 
         generator = SlurmScriptGenerator(
-            slurm_config, pixi_env=resolved_pixi_env, skip_build=system_already_built
+            slurm_config,
+            pixi_env=resolved_pixi_env,
+            skip_build=system_already_built,
+            preset=preset,
         )
 
         logs_dir = sim_config.output.get_slurm_logs_directory()
         output_file = str(logs_dir / f"{job_name}.%j.out")
 
         config_path_abs = str(Path(config).resolve())
-        script_content = generator.generate_job_script(
-            config_path=config_path_abs,
-            replicate=replicate,
-            working_dir=str(working_dir),
-            job_name=job_name,
-            output_file=output_file,
-        )
+        try:
+            script_content = generator.generate_job_script(
+                config_path=config_path_abs,
+                replicate=replicate,
+                working_dir=str(working_dir),
+                job_name=job_name,
+                output_file=output_file,
+            )
+        except (ValueError, OSError) as exc:
+            raise click.ClickException(str(exc)) from exc
 
         script_dir = working_dir / "recovery_scripts"
         script_path = script_dir / f"recover_rep{replicate}.sh"
