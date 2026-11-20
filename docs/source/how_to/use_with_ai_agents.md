@@ -42,4 +42,52 @@ If the project lives on a network mount (sshfs), the agent reads and edits
 files through the mount but should run git and `polyzymd` on the machine that
 hosts the files. `AGENTS.md` says so.
 
-See also: {doc}`project` and {doc}`study_folder`.
+## Refresh the files after you update PolyzyMD
+
+Each file holds a marker line with the PolyzyMD version that wrote it and the
+SHA-256 of the rest of the file, for example:
+
+```
+<!-- polyzymd-managed: version=1.4.0 sha256=8c3cf6f5... polyzymd agent sync rewrites this file unless you edit it -->
+```
+
+After you update PolyzyMD, rewrite the files to the installed version from
+anywhere inside the project:
+
+```bash
+polyzymd agent sync --dry-run    # say what would change
+polyzymd agent sync
+```
+
+```
+unchanged: AGENTS.md
+unchanged: CLAUDE.md
+updated: .claude/skills/polyzymd-analyze/SKILL.md
+updated: .agents/skills/polyzymd-analyze/SKILL.md
+created: .claude/skills/polyzymd-organize/SKILL.md
+created: .agents/skills/polyzymd-organize/SKILL.md
+next: review and commit them in /home/me/Paper_1: git add ...
+```
+
+Sync commits nothing. Review the changes and commit them.
+
+## Keep your own edits
+
+You can add your own rules to `AGENTS.md`. Sync sees that the file no longer
+matches the hash in its marker and leaves it alone:
+
+```
+skipped: AGENTS.md (edited; --force to overwrite)
+```
+
+`--force` overwrites edited files with the installed version, so your edits
+are lost unless git has them. A file without a marker, such as an `AGENTS.md`
+you wrote yourself, is skipped in the same way.
+
+## Add the files to an existing project
+
+A project or study made with an older PolyzyMD has none of these files. Run
+`polyzymd agent sync` inside it to create them, then commit them.
+
+See also: {doc}`project`, {doc}`study_folder` and the
+{doc}`../reference/cli_reference` entry for `polyzymd agent sync`.

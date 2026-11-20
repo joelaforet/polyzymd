@@ -168,3 +168,29 @@ def sync(root: str | Path, *, force: bool = False, dry_run: bool = False) -> lis
             target.write_text(with_marker(body, __version__))
         actions.append(SyncAction(relative, action))
     return actions
+
+
+def find_root(path: str | Path) -> Path:
+    """Return the project folder holding ``path``, or else the study folder holding it.
+
+    ``path`` and each of its parents are searched for ``project.yaml``
+    first, so a study inside a project gives the project.
+
+    Raises
+    ------
+    ProtocolError
+        If ``path`` is in neither a project nor a study.
+    """
+    from polyzymd.analyses.project_file import PROJECT_FILE
+    from polyzymd.analyses.study_file import STUDY_FILE
+
+    start = Path(path).expanduser().resolve()
+    folders = [start, *start.parents]
+    for name in (PROJECT_FILE, STUDY_FILE):
+        for folder in folders:
+            if (folder / name).is_file():
+                return folder
+    raise ProtocolError(
+        f"{start} is not inside a PolyzyMD project or study.",
+        hint="Run this inside a folder made by polyzymd project init or study init, or give its path.",
+    )

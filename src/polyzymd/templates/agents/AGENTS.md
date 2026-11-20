@@ -37,6 +37,7 @@ polyzymd analyze --study <study> --format agent   # every analysis study.yaml li
 polyzymd analyze --project . --format agent       # every study of the project
 polyzymd analyze <run> --study <study>            # one run that study.yaml lists
 polyzymd project freeze .                         # freeze for publication (study freeze for one)
+polyzymd agent sync                               # refresh these agent files
 ```
 
 ## Rules

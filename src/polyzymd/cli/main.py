@@ -5041,6 +5041,9 @@ def _register_optional_command_groups() -> None:
 
     cli.add_command(hash_trajectories_command)
     cli.add_command(analysis_topology_command)
+    from polyzymd.cli.agent import agent_group
+
+    cli.add_command(agent_group)
 
 
 # =============================================================================

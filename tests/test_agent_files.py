@@ -17,6 +17,7 @@ from polyzymd import agent_files
 from polyzymd.agent_files import (
     DEVELOPER_SKILLS,
     PACKAGED_SKILLS,
+    find_root,
     read_marker,
     sync,
     user_skills,
@@ -139,6 +140,18 @@ def test_sync_updates_an_unedited_file_to_a_new_version(
     assert "A new rule." in (tmp_path / "AGENTS.md").read_text()
 
 
+def test_the_root_is_the_project_before_the_study(tmp_path: Path) -> None:
+    """Inside a study of a project, the project folder gets the files."""
+    study = tmp_path / "paper" / "lipa"
+    (study / "sandbox").mkdir(parents=True)
+    (study / "study.yaml").write_text("{}\n")
+    assert find_root(study / "sandbox") == study
+    (tmp_path / "paper" / "project.yaml").write_text("{}\n")
+    assert find_root(study / "sandbox") == tmp_path / "paper"
+    with pytest.raises(ProtocolError, match="not inside"):
+        find_root(tmp_path)
+
+
 @pytest.mark.usefixtures("git_identity")
 def test_project_init_commits_the_agent_files_once_at_its_root(tmp_path: Path) -> None:
     """project init writes the guidance at the project root, in the first commit."""
@@ -154,6 +167,24 @@ def test_project_init_commits_the_agent_files_once_at_its_root(tmp_path: Path) -
         ).stdout.split()
         assert {"AGENTS.md", "CLAUDE.md"} <= set(tracked)
         assert f".agents/skills/{next(iter(user_skills()))}/SKILL.md" in tracked
+
+
+def test_agent_sync_prints_one_line_per_file(tmp_path: Path) -> None:
+    """polyzymd agent sync --format agent prints only the file lines."""
+    from polyzymd.analyses.study_scaffold import create_study
+    from polyzymd.cli.main import cli
+
+    root = create_study(tmp_path / "st", git=False).root
+    (root / "AGENTS.md").write_text("ours\n")
+    result = CliRunner().invoke(
+        cli, ["agent", "sync", str(root / "sandbox"), "--format", "agent", "--dry-run"]
+    )
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert lines[0] == "skipped: AGENTS.md (edited; --force to overwrite)"
+    assert all(line.split(":")[0] == "unchanged" for line in lines[1:])
+    outside = CliRunner().invoke(cli, ["agent", "sync", str(tmp_path)])
+    assert outside.exit_code == 2
 
 
 def test_agent_files_are_no_analysis_input() -> None:
