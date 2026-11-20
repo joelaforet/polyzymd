@@ -149,6 +149,7 @@ class NAGLCharger(MoleculeCharger):
         # NAGL doesn't strictly require conformers but we generate one anyway
         # for consistency with other methods
         self._ensure_conformer(molecule)
+        ensure_nagl_cache_dir()
 
         try:
             molecule.assign_partial_charges(
@@ -351,6 +352,26 @@ def get_charger(method: str, **kwargs) -> MoleculeCharger:
 
     charger_class = _CHARGER_REGISTRY[method_lower]
     return charger_class(**kwargs)
+
+
+def ensure_nagl_cache_dir() -> None:
+    """Create the openff-nagl-models download cache with its parent folders.
+
+    openff-nagl-models makes its cache folder before it looks for a model, even
+    an installed one, and makes only the last folder: the user cache folder
+    (``~/Library/Caches`` on macOS, ``$XDG_CACHE_HOME`` or ``~/.cache`` on Linux)
+    must already exist, or every NAGL charge assignment fails with
+    FileNotFoundError. A fresh or redirected home, or an ``XDG_CACHE_HOME`` that
+    does not exist yet, lacks it.
+    """
+    try:
+        from openff.nagl_models._dynamic_fetch import CACHE_DIR
+    except ImportError:
+        return
+    try:
+        Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass  # openff-nagl-models then raises its own error
 
 
 def installed_nagl_model(model_name: str) -> Optional[Path]:
