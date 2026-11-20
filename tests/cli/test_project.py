@@ -33,6 +33,7 @@ def test_project_check_prints_the_git_line_once(tmp_path: Path) -> None:
     output = CliRunner().invoke(cli, ["project", "check", str(tmp_path)]).output
     git_lines = [line for line in output.splitlines() if line.startswith("git:")]
     assert len(git_lines) == 1, output
+    assert len([line for line in output.splitlines() if line.startswith("gitignore:")]) == 1
     assert "more" in git_lines[0] and "note_19.txt" not in git_lines[0]
 
 

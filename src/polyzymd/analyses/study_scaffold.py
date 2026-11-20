@@ -50,10 +50,28 @@ logs/
 # Job scripts and logs of polyzymd analyze --submit, which name this
 # machine's paths, and SLURM logs of the simulations.
 results/*/slurm/
-conditions/*/slurm_logs/
+slurm_logs/
+# Stored per-replicate values, which polyzymd analyze rebuilds: reports and
+# figures are committed, and polyzymd study freeze commits these with its tag.
+results/*/polyzymd_results/
 # Software environments, which are rebuilt, never committed.
 .pixi/
 .venv/
+"""
+
+#: The study's folder for one-off checks, kept in git and never deposited.
+SANDBOX = "sandbox"
+
+SANDBOX_README = """\
+# sandbox/
+
+One-off checks and exploratory scripts: build forensics, benchmarks, quick
+plots. Keep them here rather than outside the study, so they stay with it.
+git tracks this folder, but polyzymd study freeze neither deposits it nor
+waits for its files to be committed.
+
+When a script becomes a real analysis, move its function to analyses/ and
+list it in study.yaml under analyses: with function: file.py:name.
 """
 
 DATA_EXAMPLE = """\
@@ -132,7 +150,7 @@ def condition_folder(label: str) -> str:
 #: these names, and leaves job, log and run folders out of git and the deposit.
 RESERVED_FOLDERS = (
     *("runs", "logs", "slurm", "slurm_logs", "deposit", "results"),
-    *("analyses", "stats", "figures", "conditions", "structures", "environment"),
+    *("analyses", "stats", "figures", "conditions", "structures", "environment", SANDBOX),
 )
 
 
@@ -524,6 +542,7 @@ analysis setting. Each condition's simulation is in `conditions/<name>/config.ya
 |---|---|
 | `study.yaml` | The analysis protocol |
 {rows}
+| `sandbox/` | One-off checks and exploratory scripts, kept in git but not deposited |
 | `data.example.yaml` | How to say where this machine keeps the trajectories (`data.local.yaml`) |
 | `LICENSE-data`, `LICENSE-code` | The licences of the data and of the code |
 
@@ -642,6 +661,9 @@ def create_study(
     (root / "LICENSE-code").write_text(MIT.format(year=year, holder=holder))
     (root / "LICENSE-data").write_text(CC_BY.format(year=year, holder=holder))
     (root / "environment" / "README.md").write_text(_environment_readme())
+    (root / SANDBOX).mkdir(exist_ok=True)
+    if not (root / SANDBOX / "README.md").exists():
+        (root / SANDBOX / "README.md").write_text(SANDBOX_README)
     for folder, what in FOLDERS.items():
         readme = root / folder / "README.md"
         if folder != "environment" and not readme.exists():

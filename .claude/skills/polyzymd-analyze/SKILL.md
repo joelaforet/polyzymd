@@ -93,6 +93,10 @@ lists the studies and the analyses each runs).
 - Read stored results without trajectories with
   `pz.Study("STUDY/study.yaml").results(RUN).table` (one row per stored
   value, so one row per frame for a time series).
+- Write one-off checks (build forensics, benchmarks, quick plots) into the
+  study's `sandbox/` folder, never into a folder outside the project. Freeze
+  never deposits it. A check that becomes a real analysis moves to an
+  `analyses:` entry with `function:`.
 - For statistics beyond the report, use `replicate_table(RUN)` (one row per
   replicate) in a script in the `stats/` folder of the project. Freeze
   publishes it with the paper.

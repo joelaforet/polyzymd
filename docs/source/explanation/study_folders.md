@@ -60,8 +60,9 @@ my_study/
 ├── structures/                # analysis references (crystal, catalytically competent frame)
 ├── analyses/                  # measurement functions: Universe -> value
 ├── figures/                   # notebooks and scripts: stored results -> paper figures
-├── results/                   # stored per-replicate values, reports, default figures
+├── results/                   # reports and default figures; stored values (git ignores them until freeze)
 ├── environment/               # how to install the PolyzyMD version; add pixi.toml and pixi.lock
+├── sandbox/                   # one-off checks and exploratory scripts (committed, never deposited)
 ├── runs/                      # new runs of the conditions, in a study with no project (git ignores it)
 └── .gitignore
 ```

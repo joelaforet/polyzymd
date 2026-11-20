@@ -38,7 +38,7 @@ def check_command(ctx: click.Context, path: Path, production: bool = False) -> N
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.project import Project
     from polyzymd.analyses.study_git import describe, git_state
-    from polyzymd.cli.study import PROJECT_CHECK, _echo_metadata, _study_logging
+    from polyzymd.cli.study import PROJECT_CHECK, _echo_ignore_hint, _echo_metadata, _study_logging
     from polyzymd.cli.study import check_command as study_check
 
     _study_logging(path, "project-check")
@@ -63,6 +63,7 @@ def check_command(ctx: click.Context, path: Path, production: bool = False) -> N
                 failed.append(label)
     click.echo("== project")
     click.echo(describe(git_state(project.root)))
+    _echo_ignore_hint([project.root / folder for folder in project.protocol.studies.values()])
     metadata_read = _echo_metadata(project.protocol.metadata, "project.yaml")
     if failed:
         click.echo(f"error: studies {', '.join(failed)} did not check", err=True)

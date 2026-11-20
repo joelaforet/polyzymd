@@ -177,7 +177,9 @@ def test_add_condition_git_ignores_runs_in_a_study_made_before_runs_existed(
     assert gitignore.read_text().splitlines() == ["data.local.yaml", "runs/"]
 
 
-@pytest.mark.parametrize("label", ["runs", "Logs", "slurm_logs", "results", "deposit", "figures"])
+@pytest.mark.parametrize(
+    "label", ["runs", "Logs", "slurm_logs", "results", "deposit", "figures", "sandbox"]
+)
 def test_a_condition_may_not_take_a_folder_name_polyzymd_uses(tmp_path: Path, label: str) -> None:
     """conditions/runs/ would be skipped as machine files; such labels are refused."""
     from polyzymd.analyses.exceptions import ProtocolError
@@ -231,3 +233,24 @@ def test_the_structure_placeholders_name_the_solutes_keys(tmp_path: Path) -> Non
         assert key in ProteinSolute.model_fields
     for key in ("sdf_path", "conformer_index", "name"):
         assert key in SmallMoleculeSolute.model_fields
+
+
+def test_a_new_study_has_a_committed_sandbox_and_ignores_stored_values(tmp_path: Path) -> None:
+    """sandbox/ is tracked; stored values and SLURM logs are git-ignored, reports are not."""
+    import subprocess
+
+    created = create_study(tmp_path / "st")
+    root = created.root
+    assert "function: file.py:name" in (root / "sandbox" / "README.md").read_text()
+
+    def git(*arguments: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(root), *arguments], capture_output=True)
+
+    if created.commit is not None:
+        assert git("ls-files", "--error-unmatch", "sandbox/README.md").returncode == 0
+    else:
+        git("init", "-q")
+    for path in ("results/rg/polyzymd_results/rg/a/record.json", "slurm_logs/job.out"):
+        assert git("check-ignore", "-q", "--no-index", path).returncode == 0, path
+    for path in ("results/rg/report.json", "results/rg/figures/rg.png", "sandbox/check.py"):
+        assert git("check-ignore", "-q", "--no-index", path).returncode == 1, path

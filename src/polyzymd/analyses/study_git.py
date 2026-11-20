@@ -16,14 +16,16 @@ from pathlib import Path
 from typing import Any
 
 #: Folders and files of a study whose changes are outputs, not inputs, of an analysis.
-OUTPUTS = ("results/", "data.local.yaml", "logs/", "deposit/")
+#: ``sandbox/`` holds one-off checks, which are no input either.
+OUTPUTS = ("results/", "data.local.yaml", "logs/", "deposit/", "sandbox/")
 
 
 def is_output(path: str) -> bool:
     """Return whether ``path`` is an analysis output or machine file, at any depth.
 
-    ``results/``, ``logs/`` and ``deposit/`` folders and ``data.local.yaml``
-    count wherever they are, so a project's ``<study>/results/`` is an output too.
+    ``results/``, ``logs/``, ``deposit/`` and ``sandbox/`` folders and
+    ``data.local.yaml`` count wherever they are, so a project's
+    ``<study>/results/`` is an output too.
     So do compiled Python (``__pycache__/``, ``*.pyc``), one machine's job
     and log folders (``slurm/``, ``slurm_logs/``), the simulations in
     ``runs/`` and the polymer fragments in ``.polymer_cache/``, which are never
@@ -53,6 +55,27 @@ def _git(root: Path, *arguments: str) -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return result.stdout if result.returncode == 0 else None
+
+
+#: Paths that a study's ``.gitignore`` should ignore, made before it ignored them.
+IGNORED_EXAMPLES = ("results/RUN/polyzymd_results/", "slurm_logs/")
+
+
+def unignored_paths(root: str | Path) -> list[str]:
+    """Return the paths of :data:`IGNORED_EXAMPLES` that git does not ignore in ``root``.
+
+    Studies made before PolyzyMD 1.4 commit no rule for the stored values in
+    ``results/<run>/polyzymd_results/`` or for ``slurm_logs/``. Outside a git
+    repository, the list is empty.
+    """
+    root = Path(root)
+    if shutil.which("git") is None or _git(root, "rev-parse", "--show-toplevel") is None:
+        return []
+    return [
+        path
+        for path in IGNORED_EXAMPLES
+        if _git(root, "check-ignore", "-q", "--no-index", f"{path}file") is None
+    ]
 
 
 def git_state(root: str | Path) -> dict[str, Any] | None:

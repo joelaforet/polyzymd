@@ -1179,3 +1179,41 @@ def test_every_deposited_file_matches_its_manifest_entry(study: Path, tmp_path: 
     for path, recorded_entry in recorded.items():
         assert entry((result.deposit / path).read_bytes()) == recorded_entry, path
     assert (result.upload / "CITATION.cff").read_bytes() == members["CITATION.cff"]
+
+
+def test_freeze_commits_and_deposits_the_git_ignored_stored_values(study: Path) -> None:
+    """results/<run>/polyzymd_results/ is ignored day to day, but the tag and deposit hold it."""
+    stored = "results/rg/polyzymd_results"
+    assert "results/*/polyzymd_results/" in (study / ".gitignore").read_text()
+    assert stored not in _git(study, "status", "--porcelain", "--untracked-files=all")
+
+    result = freeze(study)
+
+    tagged = _git(study, "ls-tree", "-r", "--name-only", result.tag).splitlines()
+    records = [name for name in tagged if name.startswith(stored) and name.endswith("record.json")]
+    assert len(records) == 4
+    assert all(name in result.manifest["files"] for name in records)
+    assert all((result.deposit / "study" / name).is_file() for name in records)
+    assert "results/rg/report.json" in tagged
+
+
+def test_the_sandbox_neither_blocks_freeze_nor_enters_the_deposit(study: Path) -> None:
+    """sandbox/ is committed when the author likes, never deposited and never named."""
+    (study / "sandbox" / "committed.py").write_text("print(1)\n")
+    _git(study, "add", "sandbox")
+    _git(study, "commit", "-qm", "A one-off check")
+    (study / "sandbox" / "draft.py").write_text("print(2)\n")
+
+    result = freeze(study)
+
+    assert result.tag == "study-v1"
+    assert not (result.deposit / "study" / "sandbox").exists()
+    assert not any(name.startswith("sandbox/") for name in result.manifest["files"])
+    assert not any("sandbox" in warning for warning in result.warnings)
+
+
+def test_study_check_hints_at_the_rules_an_old_gitignore_lacks(study: Path) -> None:
+    hint = "gitignore: results/RUN/polyzymd_results/ and slurm_logs/ are not ignored"
+    assert hint not in CliRunner().invoke(cli, ["study", "check", str(study)]).output
+    (study / ".gitignore").write_text("runs/\n")
+    assert hint in CliRunner().invoke(cli, ["study", "check", str(study)]).output
