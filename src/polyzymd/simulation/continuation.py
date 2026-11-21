@@ -142,6 +142,9 @@ class ContinuationManager:
     >>> manager.run_segment(duration_ns=20.0, num_samples=250)
     """
 
+    #: Force backend of the segment (polyzymd.simulation.backends).
+    _backend: str = "openmm"
+
     def __init__(
         self,
         working_dir: Union[str, Path],
@@ -150,6 +153,7 @@ class ContinuationManager:
         precision: str = "mixed",
         device_index: str | None = None,
         replicate: int | None = None,
+        backend: str = "openmm",
     ) -> None:
         """Initialize the ContinuationManager.
 
@@ -165,6 +169,9 @@ class ContinuationManager:
             noise (:func:`polyzymd.simulation.seeds.dynamics_seed`). A
             segment restored from a checkpoint keeps the checkpoint's
             random state instead.
+        backend : str
+            Force backend of the segment (:mod:`polyzymd.simulation.backends`).
+            It must match the backend that ran the previous segment.
         """
         self._working_dir = Path(working_dir)
         self._segment_index = segment_index
@@ -173,6 +180,7 @@ class ContinuationManager:
         self._platform_precision = precision
         self._platform_device_index = device_index
         self._replicate = replicate
+        self._backend = backend
 
         # State
         self._system: Optional[openmm.System] = None
@@ -561,11 +569,25 @@ class ContinuationManager:
         LOGGER.info(f"Loading parameters from {paths['params']}")
         with open(paths["params"], "r") as f:
             self._param_dict = json.load(f)
+        self._refuse_backend_change()
 
         # Store whether we need checkpoint recovery for run_segment()
         self._use_checkpoint_recovery = use_checkpoint
 
         LOGGER.info("Previous state loaded successfully")
+
+    def _refuse_backend_change(self) -> None:
+        """Raise when the previous segment ran another force backend than this one.
+
+        Every segment of a chain runs one backend, so a trajectory never mixes
+        stock OpenMM and cuPotential forces. A segment without a recorded
+        ``backend`` ran stock OpenMM.
+        """
+        from polyzymd.simulation.backends import refuse_backend_change
+
+        provenance = (self._param_dict or {}).get("provenance")
+        recorded = (provenance if isinstance(provenance, dict) else {}).get("backend")
+        refuse_backend_change(recorded, self._backend, f"Segment {self._prev_segment}")
 
     def _create_integrator(self) -> openmm.Integrator:
         """Create an integrator from the parameter dictionary.
@@ -573,14 +595,12 @@ class ContinuationManager:
         Returns
         -------
         openmm.Integrator
-            The production thermostat: OpenMM LangevinMiddleIntegrator or
-            LangevinIntegrator.
+            The production thermostat: LangevinMiddleIntegrator or
+            LangevinIntegrator, from the backend's integrator factory.
         """
 
         if self._param_dict is None:
             raise RuntimeError("Parameters not loaded. Call load_previous_state first.")
-
-        openmm = _get_openmm_module()
 
         integ_raw = self._param_dict["__values__"]["integ_params"]["__values__"]
         time_step = quantity_from_dict(integ_raw["time_step"])
@@ -592,12 +612,13 @@ class ContinuationManager:
         friction_coeff = quantity_from_dict(thermostat_raw["timescale"])
         # Parameters written before the thermostat was recorded ran LangevinMiddle.
         thermostat = thermostat_raw.get("thermostat", "LangevinMiddle")
-        if thermostat == "Langevin":
-            integrator = openmm.LangevinIntegrator(temperature, friction_coeff, time_step)
-        elif thermostat == "LangevinMiddle":
-            integrator = openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
-        else:
+        if thermostat not in ("Langevin", "LangevinMiddle"):
             raise ValueError(f"OpenMM production cannot continue with thermostat {thermostat!r}")
+        from polyzymd.simulation.backends import make_integrator
+
+        integrator = make_integrator(
+            thermostat, temperature, friction_coeff, time_step, self._backend, self._system
+        )
         if self._replicate is not None:
             from polyzymd.simulation.seeds import dynamics_seed
 
@@ -738,7 +759,7 @@ class ContinuationManager:
         # Save system
         system_path = output_dir / f"production_{self._segment_index}_system.xml"
         with open(system_path, "w") as f:
-            f.write(XmlSerializer.serialize(self._simulation.system))
+            f.write(XmlSerializer.serialize(self._system))  # stock, whatever the backend
 
         LOGGER.info(f"Saved final state to {state_path}")
         LOGGER.info(f"Saved system to {system_path}")
@@ -1158,7 +1179,7 @@ class ContinuationManager:
 
         # Create integrator and simulation
         integrator = self._create_integrator()
-        _, _, _, Simulation, _ = _get_openmm_app_classes()
+        from polyzymd.simulation.backends import create_simulation
         from polyzymd.simulation.platform import resolve_platform
 
         selection = resolve_platform(
@@ -1166,12 +1187,13 @@ class ContinuationManager:
             precision=self._platform_precision,
             device_index=self._platform_device_index,
         )
-        self._simulation = Simulation(
+        self._simulation = create_simulation(
             self._topology,
             self._system,
             integrator,
             selection.platform,
             selection.properties,
+            backend=self._backend,
         )
         raise_if_interrupted()
 

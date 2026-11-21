@@ -953,6 +953,7 @@ The optional `openmm:` block selects the OpenMM platform. It is used when
 | `platform` | `str` | `"CUDA"` | OpenMM platform: `CUDA`, `OpenCL`, `CPU`, `Reference` or `HIP`; `validate` refuses other names. PolyzyMD never falls back to another platform. |
 | `device_index` | `str \| null` | `null` | GPU device index. |
 | `precision` | `str` | `"mixed"` | Floating-point precision on CUDA: `single`, `mixed` or `double`. |
+| `backend` | `str` | `"openmm"` | Dynamics backend: `openmm` (stock) or `openmm_cupotential` (NVIDIA plugin: nonbonded force, LangevinMiddle integrator and Monte Carlo barostat). `openmm_cupotential` needs `platform: CUDA` and `precision` `mixed` or `single`. Runtime only: not in the config hash. See {doc}`../how_to/run_with_cupotential`. |
 
 The replicate number fixes the starting structure and every random seed. On
 the CPU, OpenCL and CUDA platforms, CPU threads, PME and GPUs add up forces in

@@ -214,6 +214,8 @@ def save_interrupted_state(
     """
     from openmm import XmlSerializer
 
+    from polyzymd.simulation.backends import stock_system
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -236,7 +238,7 @@ def save_interrupted_state(
 
     # Save system XML (needed for recovery to rebuild simulation)
     system_xml_path = output_dir / "interrupted_system.xml"
-    write_text_atomic(system_xml_path, XmlSerializer.serialize(simulation.system))
+    write_text_atomic(system_xml_path, XmlSerializer.serialize(stock_system(simulation)))
     LOGGER.info(f"Saved interrupted system to {system_xml_path}")
 
     return write_interrupted_marker(output_dir, segment_index, steps_completed, total_steps)
@@ -318,6 +320,8 @@ def save_restart_checkpoint(
     """
     from openmm import XmlSerializer
 
+    from polyzymd.simulation.backends import stock_system
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -335,7 +339,7 @@ def save_restart_checkpoint(
 
     # Save system XML (for self-containedness — cheap to write)
     system_xml_path = output_dir / "restart_system.xml"
-    write_text_atomic(system_xml_path, XmlSerializer.serialize(simulation.system))
+    write_text_atomic(system_xml_path, XmlSerializer.serialize(stock_system(simulation)))
     LOGGER.info(f"Saved restart system to {system_xml_path}")
 
     return state_xml_path

@@ -216,6 +216,8 @@ class SimulationRunner:
 
     #: Seeds of the running production segment, recorded in ``progress.json``.
     _segment_seeds: Optional[Dict[str, int]] = None
+    #: Force backend of dynamics Contexts (polyzymd.simulation.backends).
+    _backend: str = "openmm"
 
     def __init__(
         self,
@@ -227,6 +229,7 @@ class SimulationRunner:
         precision: str = "mixed",
         device_index: str | None = None,
         replicate: int | None = None,
+        backend: str = "openmm",
     ) -> None:
         """Initialize the SimulationRunner.
 
@@ -240,6 +243,9 @@ class SimulationRunner:
                 velocities and the thermostat noise of every phase
                 (:func:`polyzymd.simulation.seeds.dynamics_seed`). ``None``
                 lets OpenMM choose random seeds.
+            backend: ``"openmm"`` or ``"openmm_cupotential"``
+                (:mod:`polyzymd.simulation.backends`). ``system`` stays stock: dynamics Contexts run a converted copy
+                and minimization runs stock forces.
         """
         _ensure_openmm_loaded()
 
@@ -251,6 +257,7 @@ class SimulationRunner:
         self._platform_precision = precision
         self._platform_device_index = device_index
         self._replicate = replicate
+        self._backend = backend
 
         self._simulation: Optional[Simulation] = None
         self._current_positions = positions
@@ -307,16 +314,44 @@ class SimulationRunner:
             device_index=self._platform_device_index,
         )
 
-    def _create_simulation(self, integrator: openmm.Integrator) -> Simulation:
-        """Create a Simulation using the configured platform and properties."""
+    def _create_simulation(
+        self, integrator: openmm.Integrator, *, dynamics: bool = False
+    ) -> Simulation:
+        """Create a Simulation using the configured platform and properties.
+
+        With ``dynamics``, the Context runs the configured backend's copy of
+        the stock System; otherwise (minimization) it runs stock forces.
+        """
+        from polyzymd.simulation.backends import create_simulation
+
+        if dynamics:
+            self._refuse_backend_change()
         selection = self._get_platform()
-        return Simulation(
+        return create_simulation(
             self._topology,
             self._system,
             integrator,
             selection.platform,
             selection.properties,
+            backend=self._backend if dynamics else "openmm",
         )
+
+    def _refuse_backend_change(self) -> None:
+        """Raise when a dynamics phase already in the run directory ran another backend."""
+        from polyzymd.simulation.backends import refuse_backend_change
+        from polyzymd.simulation.phase_state import load_phase_record
+
+        for path in sorted(self._working_dir.glob("*/phase.json")):
+            record = load_phase_record(path)
+            if record is not None and record.phase != "minimization":
+                refuse_backend_change(record.backend, self._backend, path.parent.name)
+        for path in sorted(self._working_dir.glob("*/*_parameters.json")):
+            try:
+                provenance = json.loads(path.read_text()).get("provenance")
+            except (OSError, ValueError, AttributeError):
+                continue
+            recorded = provenance.get("backend") if isinstance(provenance, dict) else None
+            refuse_backend_change(recorded, self._backend, path.parent.name)
 
     def _create_integrator(
         self,
@@ -344,13 +379,14 @@ class SimulationRunner:
         fric = friction / omm_unit.picosecond
         dt = timestep * omm_unit.femtosecond
 
-        if thermostat == "LangevinMiddle":
-            integrator = openmm.LangevinMiddleIntegrator(temp, fric, dt)
-        elif thermostat == "Langevin":
-            integrator = openmm.LangevinIntegrator(temp, fric, dt)
-        else:
+        from polyzymd.simulation.backends import make_integrator
+
+        if thermostat not in ("LangevinMiddle", "Langevin"):
             LOGGER.warning(f"Unknown thermostat {thermostat}, using LangevinMiddle")
-            integrator = openmm.LangevinMiddleIntegrator(temp, fric, dt)
+            thermostat = "LangevinMiddle"
+        # cuPotential matches the stock System's centre-of-mass removal cadence.
+        stock = self._system if self._backend == "openmm_cupotential" else None
+        integrator = make_integrator(thermostat, temp, fric, dt, self._backend, stock)
         seed = self._seed(phase)
         if seed is not None:
             integrator.setRandomNumberSeed(seed)
@@ -883,7 +919,7 @@ class SimulationRunner:
             phase=f"equilibration:{stage_index}:{resume_from_step}",
         )
         # Create simulation
-        self._simulation = self._create_simulation(integrator)
+        self._simulation = self._create_simulation(integrator, dynamics=True)
         raise_if_interrupted(resume_from_step)
 
         # Set box vectors BEFORE positions - critical for NPT stage transitions
@@ -988,7 +1024,9 @@ class SimulationRunner:
         phase_record_path = phase_dir / "phase.json"
         earlier = load_phase_record(phase_record_path) if resume_from_step > 0 else None
         seeds_by_attempt = [*(earlier.seeds_by_attempt if earlier else []), seeds]
-        write_phase_record = partial(_write_record, seeds_by_attempt=seeds_by_attempt)
+        write_phase_record = partial(
+            _write_record, seeds_by_attempt=seeds_by_attempt, backend=self._backend
+        )
         write_phase_record(
             phase_record_path,
             phase=stage_name,
@@ -1656,7 +1694,7 @@ class SimulationRunner:
             thermostat=thermostat,
             phase=f"production:{segment_index}",
         )
-        self._simulation = self._create_simulation(integrator)
+        self._simulation = self._create_simulation(integrator, dynamics=True)
 
         # Set box vectors BEFORE positions - critical for correct periodic boundary handling
         if self._current_box_vectors is not None:

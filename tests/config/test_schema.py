@@ -1482,3 +1482,25 @@ class TestIonicStrengthConfig:
 
         assert "ionic_strength" not in IonConfig().model_dump(mode="json")
         assert IonConfig(ionic_strength=0.13).model_dump(mode="json")["ionic_strength"] == 0.13
+
+
+class TestOpenMMBackend:
+    """openmm.backend is a runtime choice that never touches the build."""
+
+    def test_default_is_stock_openmm_and_hash_ignores_backend(self, minimal_config_data):
+        import copy
+
+        from polyzymd.simulation.artifact_integrity import config_hash
+
+        stock = SimulationConfig(**copy.deepcopy(minimal_config_data))
+        assert stock.openmm.backend == "openmm"
+        minimal_config_data["openmm"] = {"backend": "openmm_cupotential"}
+        nv = SimulationConfig(**minimal_config_data)
+        assert config_hash(nv) == config_hash(stock)
+        assert "backend" not in nv.model_dump(mode="json")["openmm"]
+
+    @pytest.mark.parametrize("settings", [{"platform": "CPU"}, {"precision": "double"}])
+    def test_cupotential_needs_cuda_mixed_or_single(self, minimal_config_data, settings):
+        minimal_config_data["openmm"] = {"backend": "openmm_cupotential", **settings}
+        with pytest.raises(ValidationError, match="needs platform 'CUDA'"):
+            SimulationConfig(**minimal_config_data)
